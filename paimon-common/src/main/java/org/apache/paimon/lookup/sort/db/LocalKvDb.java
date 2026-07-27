@@ -27,6 +27,7 @@ import org.apache.paimon.lookup.sort.SortLookupStoreWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.BloomFilter;
+import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,11 +40,21 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.LongFunction;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -62,9 +73,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *     └──────────────────────────────────────────────┘
  * </pre>
  *
- * <p>Compaction is triggered when the number of sorted runs exceeds a threshold. Runs are selected
- * for merging based on size ratios between adjacent runs, following RocksDB's Universal Compaction
- * strategy.
+ * <p>Compaction is scheduled on a background thread when the number of sorted runs exceeds a
+ * threshold. Runs are selected for merging based on size ratios between adjacent runs, following
+ * RocksDB's Universal Compaction strategy. MemTable flushes remain synchronous; writes wait for
+ * background compaction only when too many Level-0 files accumulate.
  *
  * <p>Note: No WAL is implemented. Data in the MemTable will be lost on crash.
  *
@@ -106,7 +118,11 @@ public class LocalKvDb implements Closeable {
     private final Comparator<MemorySlice> keyComparator;
     private final long memTableFlushThreshold;
     private final long maxSstFileSize;
+    private final int level0FileNumCompactTrigger;
     private final LsmCompactor compactor;
+    private final ExecutorService compactionExecutor;
+    private final ReentrantReadWriteLock levelsLock;
+    private final ThreadLocal<List<File>> deferredCompactionDeletes;
 
     /** Active MemTable: key -> value bytes (empty byte[] = tombstone). */
     private TreeMap<MemorySlice, byte[]> memTable;
@@ -124,7 +140,8 @@ public class LocalKvDb implements Closeable {
     /** Cached readers for SST files, keyed by file path. Lazily populated on first lookup. */
     private final Map<File, SortLookupStoreReader> readerCache;
 
-    private long fileSequence;
+    private final AtomicLong fileSequence;
+    @Nullable private Future<?> compactionFuture;
     private boolean closed;
 
     private LocalKvDb(
@@ -135,7 +152,8 @@ public class LocalKvDb implements Closeable {
             long memTableFlushThreshold,
             long maxSstFileSize,
             int level0FileNumCompactTrigger,
-            int sizeRatio) {
+            int sizeRatio,
+            ExecutorService compactionExecutor) {
         this.dataDirectory = dataDirectory;
         this.uuid = UUID.randomUUID().toString();
         this.storeFactory = storeFactory;
@@ -143,6 +161,10 @@ public class LocalKvDb implements Closeable {
         this.keyComparator = keyComparator;
         this.memTableFlushThreshold = memTableFlushThreshold;
         this.maxSstFileSize = maxSstFileSize;
+        this.level0FileNumCompactTrigger = level0FileNumCompactTrigger;
+        this.compactionExecutor = compactionExecutor;
+        this.levelsLock = new ReentrantReadWriteLock();
+        this.deferredCompactionDeletes = new ThreadLocal<>();
         this.memTable = new TreeMap<>(keyComparator);
         this.memTableSize = 0;
         this.levels = new ArrayList<>();
@@ -150,7 +172,8 @@ public class LocalKvDb implements Closeable {
             this.levels.add(new ArrayList<>());
         }
         this.readerCache = new HashMap<>();
-        this.fileSequence = 0;
+        this.fileSequence = new AtomicLong();
+        this.compactionFuture = null;
         this.closed = false;
         this.compactor =
                 new LsmCompactor(
@@ -160,14 +183,23 @@ public class LocalKvDb implements Closeable {
                         maxSstFileSize,
                         level0FileNumCompactTrigger,
                         sizeRatio,
-                        this::closeAndDeleteSstFile);
+                        this::deferOrDeleteCompactedFile);
     }
 
     /**
-     * Close the cached reader for the given SST file (if any) and delete the file from disk. This
-     * is invoked by {@link LsmCompactor} via the {@link LsmCompactor.FileDeleter} callback during
-     * compaction.
+     * Defer deletion while a compaction is building its private level snapshot. Files are only
+     * deleted after the compacted snapshot is atomically published.
      */
+    private void deferOrDeleteCompactedFile(File file) {
+        List<File> deferredDeletes = deferredCompactionDeletes.get();
+        if (deferredDeletes != null) {
+            deferredDeletes.add(file);
+            return;
+        }
+        closeAndDeleteSstFile(file);
+    }
+
+    /** Close the cached reader for the given SST file (if any) and delete the file from disk. */
     private void closeAndDeleteSstFile(File file) {
         SortLookupStoreReader reader = readerCache.remove(file);
         if (reader != null) {
@@ -206,6 +238,7 @@ public class LocalKvDb implements Closeable {
      */
     public void put(byte[] key, byte[] value) throws IOException {
         ensureOpen();
+        checkCompactionFailure();
         if (value.length == 0) {
             throw new IllegalArgumentException(
                     "Value must not be an empty byte array, which is reserved as TOMBSTONE marker. "
@@ -230,6 +263,7 @@ public class LocalKvDb implements Closeable {
      */
     public void delete(byte[] key) throws IOException {
         ensureOpen();
+        checkCompactionFailure();
         MemorySlice wrappedKey = MemorySlice.wrap(key);
         byte[] oldValue = memTable.put(wrappedKey, TOMBSTONE);
         long delta = key.length;
@@ -253,6 +287,7 @@ public class LocalKvDb implements Closeable {
     public void bulkLoad(Iterator<Map.Entry<byte[], byte[]>> sortedEntries, long numEntries)
             throws IOException {
         ensureOpen();
+        checkCompactionFailure();
         checkArgument(numEntries >= 0, "numEntries must be non-negative.");
         if (!memTable.isEmpty() || getSstFileCount() > 0) {
             throw new IllegalStateException(
@@ -260,7 +295,6 @@ public class LocalKvDb implements Closeable {
         }
 
         int targetLevel = MAX_LEVELS - 1;
-        List<SstFileMetadata> targetLevelFiles = levels.get(targetLevel);
         List<SstFileMetadata> bulkLoadFiles = new ArrayList<>();
 
         SortLookupStoreWriter currentWriter = null;
@@ -351,7 +385,12 @@ public class LocalKvDb implements Closeable {
             throw e;
         }
 
-        targetLevelFiles.addAll(bulkLoadFiles);
+        levelsLock.writeLock().lock();
+        try {
+            levels.get(targetLevel).addAll(bulkLoadFiles);
+        } finally {
+            levelsLock.writeLock().unlock();
+        }
 
         LOG.info(
                 "Bulk-loaded {} SST files directly to level {}", bulkLoadFiles.size(), targetLevel);
@@ -416,6 +455,7 @@ public class LocalKvDb implements Closeable {
     @Nullable
     public byte[] get(byte[] key) throws IOException {
         ensureOpen();
+        checkCompactionFailure();
 
         // 1. Search MemTable first (newest data)
         MemorySlice wrappedKey = MemorySlice.wrap(key);
@@ -424,34 +464,40 @@ public class LocalKvDb implements Closeable {
             return isTombstone(memValue) ? null : memValue;
         }
 
-        // 2. Search each level from L0 to Lmax
-        for (int level = 0; level < MAX_LEVELS; level++) {
-            List<SstFileMetadata> levelFiles = levels.get(level);
-            if (levelFiles.isEmpty()) {
-                continue;
-            }
+        // 2. Search each level from L0 to Lmax. Hold the read lock until lookups finish so
+        // compaction cannot publish a new snapshot and delete an SST being read.
+        levelsLock.readLock().lock();
+        try {
+            for (int level = 0; level < MAX_LEVELS; level++) {
+                List<SstFileMetadata> levelFiles = levels.get(level);
+                if (levelFiles.isEmpty()) {
+                    continue;
+                }
 
-            if (level == 0) {
-                // L0: files may have overlapping keys, search newest-first
-                for (SstFileMetadata meta : levelFiles) {
-                    if (!meta.mightContainKey(wrappedKey, keyComparator)) {
-                        continue;
+                if (level == 0) {
+                    // L0: files may have overlapping keys, search newest-first
+                    for (SstFileMetadata meta : levelFiles) {
+                        if (!meta.mightContainKey(wrappedKey, keyComparator)) {
+                            continue;
+                        }
+                        byte[] value = lookupInFile(meta.getFile(), key);
+                        if (value != null) {
+                            return isTombstone(value) ? null : value;
+                        }
                     }
-                    byte[] value = lookupInFile(meta.getFile(), key);
-                    if (value != null) {
-                        return isTombstone(value) ? null : value;
-                    }
-                }
-            } else {
-                // L1+: files have non-overlapping key ranges, binary search
-                SstFileMetadata target = findFileForKey(levelFiles, wrappedKey);
-                if (target != null) {
-                    byte[] value = lookupInFile(target.getFile(), key);
-                    if (value != null) {
-                        return isTombstone(value) ? null : value;
+                } else {
+                    // L1+: files have non-overlapping key ranges, binary search
+                    SstFileMetadata target = findFileForKey(levelFiles, wrappedKey);
+                    if (target != null) {
+                        byte[] value = lookupInFile(target.getFile(), key);
+                        if (value != null) {
+                            return isTombstone(value) ? null : value;
+                        }
                     }
                 }
             }
+        } finally {
+            levelsLock.readLock().unlock();
         }
 
         return null;
@@ -461,27 +507,42 @@ public class LocalKvDb implements Closeable {
     //  Flush & Compaction
     // -------------------------------------------------------------------------
 
-    /** Force flush the current MemTable to a Level 0 SST file. */
+    /**
+     * Force flush the current MemTable to a Level-0 SST file and schedule compaction when needed.
+     *
+     * <p>The MemTable write is synchronous. Compaction runs in the background unless the number of
+     * Level-0 files reaches the backpressure threshold.
+     */
     public void flush() throws IOException {
         ensureOpen();
+        checkCompactionFailure();
         if (memTable.isEmpty()) {
             return;
         }
 
+        flushMemTable();
+        scheduleCompactionIfNeeded();
+        applyCompactionBackpressure();
+    }
+
+    private void flushMemTable() throws IOException {
         TreeMap<MemorySlice, byte[]> snapshot = memTable;
         memTable = new TreeMap<>(keyComparator);
         memTableSize = 0;
 
         SstFileMetadata metadata = writeMemTableToSst(snapshot);
 
-        levels.get(0).add(0, metadata);
+        levelsLock.writeLock().lock();
+        try {
+            levels.get(0).add(0, metadata);
+        } finally {
+            levelsLock.writeLock().unlock();
+        }
 
         LOG.info(
                 "Flushed MemTable to L0 SST file: {}, entries: {}",
                 metadata.getFile().getName(),
                 snapshot.size());
-
-        compactor.maybeCompact(levels, MAX_LEVELS, this::newSstFile);
     }
 
     /**
@@ -491,7 +552,9 @@ public class LocalKvDb implements Closeable {
      */
     public void compact() throws IOException {
         ensureOpen();
-        compactor.fullCompact(levels, MAX_LEVELS, this::newSstFile);
+        checkCompactionFailure();
+        awaitScheduledCompaction();
+        compactLevelSnapshot(true);
     }
 
     // -------------------------------------------------------------------------
@@ -505,37 +568,68 @@ public class LocalKvDb implements Closeable {
         }
         closed = true;
 
-        // Flush remaining MemTable data to L0
-        if (!memTable.isEmpty()) {
-            TreeMap<MemorySlice, byte[]> snapshot = memTable;
-            memTable = new TreeMap<>(keyComparator);
-            memTableSize = 0;
-
-            SstFileMetadata metadata = writeMemTableToSst(snapshot);
-            levels.get(0).add(0, metadata);
+        IOException failure = null;
+        try {
+            checkCompactionFailure();
+        } catch (IOException e) {
+            failure = e;
         }
-
-        // Close all cached readers
-        for (SortLookupStoreReader reader : readerCache.values()) {
+        try {
+            if (!memTable.isEmpty()) {
+                flushMemTable();
+            }
+            if (failure == null) {
+                scheduleCompactionIfNeeded();
+                awaitScheduledCompaction();
+            }
+        } catch (IOException e) {
+            failure = addOrSuppress(failure, e);
+        } finally {
+            compactionExecutor.shutdown();
             try {
-                reader.close();
-            } catch (IOException e) {
-                LOG.warn("Failed to close cached reader during shutdown", e);
+                if (!compactionExecutor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)) {
+                    compactionExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                compactionExecutor.shutdownNow();
+                failure = addOrSuppress(failure, new IOException("Interrupted while closing.", e));
+            }
+
+            levelsLock.writeLock().lock();
+            try {
+                for (SortLookupStoreReader reader : readerCache.values()) {
+                    try {
+                        reader.close();
+                    } catch (IOException e) {
+                        LOG.warn("Failed to close cached reader during shutdown", e);
+                    }
+                }
+                readerCache.clear();
+            } finally {
+                levelsLock.writeLock().unlock();
             }
         }
-        readerCache.clear();
 
         LOG.info("LocalKvDb closed. Level stats: {}", getLevelStats());
+        if (failure != null) {
+            throw failure;
+        }
     }
 
     /** Return the total number of SST files across all levels. */
     @VisibleForTesting
     int getSstFileCount() {
-        int count = 0;
-        for (List<SstFileMetadata> levelFiles : levels) {
-            count += levelFiles.size();
+        levelsLock.readLock().lock();
+        try {
+            int count = 0;
+            for (List<SstFileMetadata> levelFiles : levels) {
+                count += levelFiles.size();
+            }
+            return count;
+        } finally {
+            levelsLock.readLock().unlock();
         }
-        return count;
     }
 
     /** Return the number of SST files at a specific level. */
@@ -543,7 +637,12 @@ public class LocalKvDb implements Closeable {
         if (level < 0 || level >= MAX_LEVELS) {
             return 0;
         }
-        return levels.get(level).size();
+        levelsLock.readLock().lock();
+        try {
+            return levels.get(level).size();
+        } finally {
+            levelsLock.readLock().unlock();
+        }
     }
 
     /** Return the estimated MemTable size in bytes. */
@@ -553,22 +652,225 @@ public class LocalKvDb implements Closeable {
 
     /** Return a human-readable summary of file counts per level. */
     public String getLevelStats() {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < MAX_LEVELS; i++) {
-            int count = levels.get(i).size();
-            if (count > 0) {
-                if (sb.length() > 0) {
-                    sb.append(", ");
+        levelsLock.readLock().lock();
+        try {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < MAX_LEVELS; i++) {
+                int count = levels.get(i).size();
+                if (count > 0) {
+                    if (sb.length() > 0) {
+                        sb.append(", ");
+                    }
+                    sb.append("L").append(i).append("=").append(count);
                 }
-                sb.append("L").append(i).append("=").append(count);
             }
+            return sb.length() == 0 ? "empty" : sb.toString();
+        } finally {
+            levelsLock.readLock().unlock();
         }
-        return sb.length() == 0 ? "empty" : sb.toString();
     }
 
     // -------------------------------------------------------------------------
     //  Internal Helpers
     // -------------------------------------------------------------------------
+
+    private void scheduleCompactionIfNeeded() throws IOException {
+        checkCompactionFailure();
+        if (!needsCompaction() || compactionFuture != null) {
+            return;
+        }
+
+        try {
+            compactionFuture =
+                    compactionExecutor.submit(
+                            () -> {
+                                while (needsCompaction()) {
+                                    compactLevelSnapshot(false);
+                                }
+                                return null;
+                            });
+        } catch (RuntimeException e) {
+            throw new IOException("Failed to schedule background compaction.", e);
+        }
+    }
+
+    private void applyCompactionBackpressure() throws IOException {
+        if ((long) getLevelFileCount(0) >= (long) level0FileNumCompactTrigger * 2) {
+            awaitScheduledCompaction();
+        }
+    }
+
+    private boolean needsCompaction() {
+        levelsLock.readLock().lock();
+        try {
+            return levels.get(0).size() >= level0FileNumCompactTrigger;
+        } finally {
+            levelsLock.readLock().unlock();
+        }
+    }
+
+    private void compactLevelSnapshot(boolean fullCompaction) throws IOException {
+        List<List<SstFileMetadata>> originalLevels = copyLevels();
+        if (!fullCompaction && originalLevels.get(0).size() < level0FileNumCompactTrigger) {
+            return;
+        }
+
+        List<List<SstFileMetadata>> compactedLevels = copyLevels(originalLevels);
+        List<File> generatedFiles = new ArrayList<>();
+        List<File> compactedFiles = new ArrayList<>();
+        boolean published = false;
+        deferredCompactionDeletes.set(compactedFiles);
+        try {
+            LsmCompactor.FileSupplier fileSupplier =
+                    () -> {
+                        File file = newSstFile();
+                        generatedFiles.add(file);
+                        return file;
+                    };
+            if (fullCompaction) {
+                compactor.fullCompact(compactedLevels, MAX_LEVELS, fileSupplier);
+            } else {
+                compactor.maybeCompact(compactedLevels, MAX_LEVELS, fileSupplier);
+            }
+            publishCompactedLevels(originalLevels, compactedLevels, compactedFiles);
+            published = true;
+        } finally {
+            deferredCompactionDeletes.remove();
+            if (!published) {
+                for (File generatedFile : generatedFiles) {
+                    deleteFileQuietly(generatedFile);
+                }
+            }
+        }
+    }
+
+    private List<List<SstFileMetadata>> copyLevels() {
+        levelsLock.readLock().lock();
+        try {
+            return copyLevels(levels);
+        } finally {
+            levelsLock.readLock().unlock();
+        }
+    }
+
+    private static List<List<SstFileMetadata>> copyLevels(
+            List<List<SstFileMetadata>> levelsToCopy) {
+        List<List<SstFileMetadata>> copy = new ArrayList<>(levelsToCopy.size());
+        for (List<SstFileMetadata> level : levelsToCopy) {
+            copy.add(new ArrayList<>(level));
+        }
+        return copy;
+    }
+
+    private void publishCompactedLevels(
+            List<List<SstFileMetadata>> originalLevels,
+            List<List<SstFileMetadata>> compactedLevels,
+            List<File> compactedFiles)
+            throws IOException {
+        Set<File> originalFiles = filesInLevels(originalLevels);
+
+        levelsLock.writeLock().lock();
+        try {
+            List<SstFileMetadata> newLevelZeroFiles = new ArrayList<>();
+            for (SstFileMetadata metadata : levels.get(0)) {
+                if (!originalFiles.contains(metadata.getFile())) {
+                    newLevelZeroFiles.add(metadata);
+                }
+            }
+
+            for (int level = 1; level < MAX_LEVELS; level++) {
+                for (SstFileMetadata metadata : levels.get(level)) {
+                    if (!originalFiles.contains(metadata.getFile())) {
+                        throw new IOException(
+                                "Unexpected concurrent update to level " + level + ".");
+                    }
+                }
+            }
+
+            for (int level = 0; level < MAX_LEVELS; level++) {
+                levels.get(level).clear();
+                if (level == 0) {
+                    levels.get(level).addAll(newLevelZeroFiles);
+                }
+                levels.get(level).addAll(compactedLevels.get(level));
+            }
+
+            for (File compactedFile : compactedFiles) {
+                closeAndDeleteSstFile(compactedFile);
+            }
+        } finally {
+            levelsLock.writeLock().unlock();
+        }
+    }
+
+    private static Set<File> filesInLevels(List<List<SstFileMetadata>> levels) {
+        Set<File> files = new HashSet<>();
+        for (List<SstFileMetadata> level : levels) {
+            for (SstFileMetadata metadata : level) {
+                files.add(metadata.getFile());
+            }
+        }
+        return files;
+    }
+
+    private void checkCompactionFailure() throws IOException {
+        Future<?> future = compactionFuture;
+        if (future != null && future.isDone()) {
+            awaitCompactionFuture(future);
+            if (compactionFuture == future) {
+                compactionFuture = null;
+            }
+        }
+    }
+
+    private void awaitScheduledCompaction() throws IOException {
+        Future<?> future = compactionFuture;
+        if (future == null) {
+            return;
+        }
+        awaitCompactionFuture(future);
+        if (compactionFuture == future) {
+            compactionFuture = null;
+        }
+    }
+
+    private static void awaitCompactionFuture(Future<?> future) throws IOException {
+        try {
+            future.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for background compaction.", e);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof IOException) {
+                throw (IOException) cause;
+            }
+            throw new IOException("Background compaction failed.", cause);
+        } catch (CancellationException e) {
+            throw new IOException("Background compaction was cancelled.", e);
+        }
+    }
+
+    @VisibleForTesting
+    void awaitCompaction() throws IOException {
+        ensureOpen();
+        awaitScheduledCompaction();
+    }
+
+    private static IOException addOrSuppress(
+            @Nullable IOException current, IOException additional) {
+        if (current == null) {
+            return additional;
+        }
+        current.addSuppressed(additional);
+        return current;
+    }
+
+    private void deleteFileQuietly(File file) {
+        if (file.exists() && !file.delete()) {
+            LOG.warn("Failed to delete incomplete compaction file: {}", file.getName());
+        }
+    }
 
     private void maybeFlushMemTable() throws IOException {
         if (memTableSize >= memTableFlushThreshold) {
@@ -630,7 +932,7 @@ public class LocalKvDb implements Closeable {
     }
 
     private File newSstFile() {
-        long sequence = fileSequence++;
+        long sequence = fileSequence.getAndIncrement();
         return new File(dataDirectory, String.format("sst-%s-%06d.db", uuid, sequence));
     }
 
@@ -658,6 +960,7 @@ public class LocalKvDb implements Closeable {
         private Comparator<MemorySlice> keyComparator = MemorySlice::compareTo;
         private boolean bloomFilterEnabled = true;
         private double bloomFilterFpp = 0.1;
+        @Nullable private ExecutorService compactionExecutor;
 
         Builder(File dataDirectory) {
             this.dataDirectory = dataDirectory;
@@ -724,6 +1027,12 @@ public class LocalKvDb implements Closeable {
             return this;
         }
 
+        @VisibleForTesting
+        Builder compactionExecutor(ExecutorService compactionExecutor) {
+            this.compactionExecutor = compactionExecutor;
+            return this;
+        }
+
         /**
          * Set a custom key comparator. Default is unsigned lexicographic byte comparison.
          *
@@ -759,6 +1068,11 @@ public class LocalKvDb implements Closeable {
                                                     expectedEntries, bloomFilterFpp)
                                             : BloomFilter.dynamicBuilder(bloomFilterFpp)
                             : expectedEntries -> null;
+            ExecutorService executor =
+                    compactionExecutor == null
+                            ? Executors.newSingleThreadExecutor(
+                                    new ExecutorThreadFactory("local-kv-db-compaction"))
+                            : compactionExecutor;
 
             return new LocalKvDb(
                     dataDirectory,
@@ -768,7 +1082,8 @@ public class LocalKvDb implements Closeable {
                     memTableFlushThreshold,
                     maxSstFileSize,
                     level0FileNumCompactTrigger,
-                    sizeRatio);
+                    sizeRatio,
+                    executor);
         }
     }
 

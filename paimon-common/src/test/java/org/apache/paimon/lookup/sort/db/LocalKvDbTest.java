@@ -472,6 +472,7 @@ public class LocalKvDbTest {
             db.flush();
             // After 3rd flush, universal compaction should have been triggered
             // L0 should be cleared and data moved to a deeper level
+            db.awaitCompaction();
             Assertions.assertEquals(0, db.getLevelFileCount(0));
             Assertions.assertTrue(db.getSstFileCount() > 0);
 
@@ -544,6 +545,7 @@ public class LocalKvDbTest {
             putString(db, "shared-key", "v3");
             putString(db, "c", "3");
             db.flush();
+            db.awaitCompaction();
             int fileCountAfterCompaction = db.getSstFileCount();
             Assertions.assertTrue(
                     fileCountAfterCompaction <= fileCountBeforeCompaction,
