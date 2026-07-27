@@ -66,4 +66,21 @@ public class CacheManagerTest {
             }
         }
     }
+
+    @Test
+    void testOffHeapCache() throws Exception {
+        File file = new File(tempDir.toFile(), "test.off-heap");
+        assertThat(file.createNewFile()).isTrue();
+        CacheKey key = CacheKey.forPageIndex(new RandomAccessFile(file, "r"), 0, 0);
+
+        try (CacheManager cacheManager = CacheManager.createOffHeap(MemorySize.ofBytes(10), 0)) {
+            MemorySegment segment =
+                    cacheManager.getPage(key, ignored -> new byte[] {1, 2, 3}, ignored -> {});
+
+            assertThat(segment.isOffHeap()).isTrue();
+            byte[] bytes = new byte[3];
+            segment.get(0, bytes);
+            assertThat(bytes).containsExactly(1, 2, 3);
+        }
+    }
 }
