@@ -53,6 +53,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongFunction;
+import java.util.function.Predicate;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -118,6 +119,7 @@ public class LocalKvDb implements Closeable {
     private final long maxSstFileSize;
     private final LsmLevels levels;
     private final LsmCompactor compaction;
+    @Nullable private final MergeOperator mergeOperator;
 
     /** Active MemTable: key -> value bytes (empty byte[] = tombstone). */
     private TreeMap<MemorySlice, byte[]> memTable;
@@ -142,6 +144,8 @@ public class LocalKvDb implements Closeable {
             long maxSstFileSize,
             int level0FileNumCompactTrigger,
             int sizeRatio,
+            @Nullable Predicate<byte[]> expiredValuePredicate,
+            @Nullable MergeOperator mergeOperator,
             @Nullable ExecutorService compactionExecutor) {
         this.dataDirectory = dataDirectory;
         this.uuid = UUID.randomUUID().toString();
@@ -158,6 +162,7 @@ public class LocalKvDb implements Closeable {
         this.activeBulkLoadWriter = null;
         this.openRangeIterators = 0;
         this.closed = false;
+        this.mergeOperator = mergeOperator;
         LsmCompactor.CompactorFactory compactorFactory =
                 fileDeleter ->
                         new UniversalCompactor(
@@ -167,6 +172,8 @@ public class LocalKvDb implements Closeable {
                                 maxSstFileSize,
                                 level0FileNumCompactTrigger,
                                 sizeRatio,
+                                expiredValuePredicate,
+                                mergeOperator,
                                 fileDeleter);
         this.compaction =
                 compactionExecutor == null
@@ -807,26 +814,23 @@ public class LocalKvDb implements Closeable {
             throws IOException {
         File sstFile = newSstFile();
         SortLookupStoreWriter writer = null;
-        MemorySlice minKey = null;
-        MemorySlice maxKey = null;
-        long tombstoneCount = 0;
         try {
             writer =
                     storeFactory.createWriter(
-                            sstFile, bloomFilterBuilderFactory.apply(data.size()));
+                            sstFile,
+                            bloomFilterBuilderFactory.apply(
+                                    mergeOperator == null ? data.size() : UNKNOWN_NUM_ENTRIES));
+            SstMetadataWriter output = new SstMetadataWriter(writer);
+            RecordCombiningWriter combiningWriter =
+                    new RecordCombiningWriter(mergeOperator, output);
             for (Map.Entry<MemorySlice, byte[]> entry : data.entrySet()) {
-                writer.put(entry.getKey().copyBytes(), entry.getValue());
-                if (minKey == null) {
-                    minKey = entry.getKey();
-                }
-                maxKey = entry.getKey();
-                if (isTombstone(entry.getValue())) {
-                    tombstoneCount++;
-                }
+                combiningWriter.put(entry.getKey(), entry.getValue());
             }
+            combiningWriter.finish();
             writer.close();
             writer = null;
-            return new SstFileMetadata(sstFile, minKey, maxKey, tombstoneCount, 0);
+            return new SstFileMetadata(
+                    sstFile, output.minKey, output.maxKey, output.tombstoneCount, 0);
         } catch (IOException | RuntimeException e) {
             if (writer != null) {
                 try {
@@ -837,6 +841,31 @@ public class LocalKvDb implements Closeable {
             }
             deleteFileQuietly(sstFile);
             throw e;
+        }
+    }
+
+    private static final class SstMetadataWriter implements RecordCombiningWriter.RecordConsumer {
+
+        private final SortLookupStoreWriter writer;
+
+        @Nullable private MemorySlice minKey;
+        @Nullable private MemorySlice maxKey;
+        private long tombstoneCount;
+
+        private SstMetadataWriter(SortLookupStoreWriter writer) {
+            this.writer = writer;
+        }
+
+        @Override
+        public void accept(MemorySlice key, byte[] value) throws IOException {
+            writer.put(key.copyBytes(), value);
+            if (minKey == null) {
+                minKey = key;
+            }
+            maxKey = key;
+            if (isTombstone(value)) {
+                tombstoneCount++;
+            }
         }
     }
 
@@ -1119,6 +1148,19 @@ public class LocalKvDb implements Closeable {
         void accept(MemorySlice key, MemorySlice value) throws IOException;
     }
 
+    /**
+     * Operator for combining adjacent logical records while flushing and compacting SST files.
+     *
+     * <p>MemTable writes remain independent so merge-heavy workloads do not pay repeated
+     * read-modify-write costs. The first record's key is retained for the combined value.
+     */
+    public interface MergeOperator {
+
+        boolean canMerge(MemorySlice firstKey, MemorySlice nextKey);
+
+        byte[] merge(List<byte[]> values) throws IOException;
+    }
+
     // -------------------------------------------------------------------------
     //  Builder
     // -------------------------------------------------------------------------
@@ -1137,6 +1179,8 @@ public class LocalKvDb implements Closeable {
         private Comparator<MemorySlice> keyComparator = MemorySlice::compareTo;
         private boolean bloomFilterEnabled = true;
         private double bloomFilterFpp = 0.1;
+        @Nullable private Predicate<byte[]> expiredValuePredicate;
+        @Nullable private MergeOperator mergeOperator;
         @Nullable private ExecutorService compactionExecutor;
 
         Builder(File dataDirectory) {
@@ -1206,6 +1250,22 @@ public class LocalKvDb implements Closeable {
         }
 
         /**
+         * Set a predicate which identifies expired stored values during compaction. Partial
+         * compaction converts matching values into tombstones to avoid resurrecting older values;
+         * full compaction drops them.
+         */
+        public Builder expiredValuePredicate(@Nullable Predicate<byte[]> expiredValuePredicate) {
+            this.expiredValuePredicate = expiredValuePredicate;
+            return this;
+        }
+
+        /** Set an operator for combining adjacent logical records in generated SST files. */
+        public Builder mergeOperator(@Nullable MergeOperator mergeOperator) {
+            this.mergeOperator = mergeOperator;
+            return this;
+        }
+
+        /**
          * Set the executor for asynchronous compaction. Compaction runs synchronously when no
          * executor is configured. The executor remains owned by the caller and is not shut down
          * when the database is closed.
@@ -1259,6 +1319,8 @@ public class LocalKvDb implements Closeable {
                     maxSstFileSize,
                     level0FileNumCompactTrigger,
                     sizeRatio,
+                    expiredValuePredicate,
+                    mergeOperator,
                     compactionExecutor);
         }
     }
