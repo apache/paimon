@@ -830,8 +830,9 @@ public class CoreOptions implements Serializable {
                                     + "compaction is size-based and may merge into larger files, and "
                                     + "data-evolution compaction still produces a single file. Bounds "
                                     + "per-file rows for wide columns to avoid data-evolution OOM. "
-                                    + "PyPaimon file-store writers do not support this option and "
-                                    + "fail fast when it is enabled. Disabled by default.");
+                                    + "PyPaimon supports this for data-evolution append tables; its "
+                                    + "primary-key, blob and vector writers still fail fast when it "
+                                    + "is enabled. Disabled by default.");
 
     public static final ConfigOption<Double> COMPACTION_SMALL_FILE_RATIO =
             key("compaction.small-file-ratio")
