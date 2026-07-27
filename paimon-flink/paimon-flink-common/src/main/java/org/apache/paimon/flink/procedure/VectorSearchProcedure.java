@@ -39,6 +39,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.source.VectorScan;
 import org.apache.paimon.table.source.VectorSearchBuilder;
+import org.apache.paimon.table.source.VectorSearchBuilderImpl;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -59,21 +60,14 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.apache.paimon.CoreOptions.SCAN_MODE;
-import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
-import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
-import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP;
-import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
-import static org.apache.paimon.CoreOptions.SCAN_VERSION;
-import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
 import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
+import static org.apache.paimon.utils.ParameterUtils.getPartitions;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Procedure for local or distributed vector search with optional filtering and scores. */
@@ -151,13 +145,14 @@ public class VectorSearchProcedure extends ProcedureBase {
         FilterParts filterParts = FilterParts.from(filter, fileStoreTable);
         validatePrimaryKeyFilter(fileStoreTable, vectorColumn, filterParts);
 
-        fileStoreTable = resolveAndPinSnapshot(fileStoreTable);
-        if (fileStoreTable == null) {
+        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(fileStoreTable);
+        if (snapshot == null) {
             return new String[0];
         }
 
         VectorSearchBuilder builder =
                 newVectorSearchBuilder(procedureContext, fileStoreTable)
+                        .withSnapshot(snapshot)
                         .withVector(queryVector)
                         .withVectorColumn(vectorColumn)
                         .withLimit(topK)
@@ -188,30 +183,12 @@ public class VectorSearchProcedure extends ProcedureBase {
         return readRows(readBuilder, readPlan, parsedProjection);
     }
 
-    private static VectorSearchBuilder newVectorSearchBuilder(
+    private static VectorSearchBuilderImpl newVectorSearchBuilder(
             ProcedureContext context, FileStoreTable table) {
         if (!table.coreOptions().vectorSearchDistributeEnabled()) {
-            return table.newVectorSearchBuilder();
+            return (VectorSearchBuilderImpl) table.newVectorSearchBuilder();
         }
         return new FlinkVectorSearchBuilderImpl(table, context.getExecutionEnvironment());
-    }
-
-    @Nullable
-    static FileStoreTable resolveAndPinSnapshot(FileStoreTable table) {
-        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(table);
-        if (snapshot == null) {
-            return null;
-        }
-
-        Map<String, String> snapshotOptions = new LinkedHashMap<>();
-        snapshotOptions.put(SCAN_VERSION.key(), null);
-        snapshotOptions.put(SCAN_TAG_NAME.key(), null);
-        snapshotOptions.put(SCAN_WATERMARK.key(), null);
-        snapshotOptions.put(SCAN_TIMESTAMP.key(), null);
-        snapshotOptions.put(SCAN_TIMESTAMP_MILLIS.key(), null);
-        snapshotOptions.put(SCAN_MODE.key(), CoreOptions.StartupMode.FROM_SNAPSHOT.toString());
-        snapshotOptions.put(SCAN_SNAPSHOT_ID.key(), String.valueOf(snapshot.id()));
-        return table.copyWithoutTimeTravel(snapshotOptions);
     }
 
     private static void validateSearch(
@@ -265,14 +242,7 @@ public class VectorSearchProcedure extends ProcedureBase {
                 !partitionKeys.isEmpty(),
                 "partitions can only be used with a partitioned table '%s'.",
                 table.name());
-        List<Map<String, String>> specs = new ArrayList<>();
-        for (String rawSpec : partitions.split(";", -1)) {
-            checkArgument(
-                    !StringUtils.isNullOrWhitespaceOnly(rawSpec),
-                    "Partition spec must not be blank in partitions '%s'.",
-                    partitions);
-            specs.add(parsePartitionSpec(rawSpec));
-        }
+        List<Map<String, String>> specs = getPartitions(partitions.split(";"));
         Set<String> expectedKeys = new HashSet<>(partitionKeys);
         for (Map<String, String> spec : specs) {
             checkArgument(
@@ -286,30 +256,6 @@ public class VectorSearchProcedure extends ProcedureBase {
                 table.schema().logicalPartitionType(),
                 specs,
                 table.coreOptions().partitionDefaultName());
-    }
-
-    private static Map<String, String> parsePartitionSpec(String rawSpec) {
-        Map<String, String> spec = new LinkedHashMap<>();
-        for (String rawKeyValue : rawSpec.split(",", -1)) {
-            checkArgument(
-                    !StringUtils.isNullOrWhitespaceOnly(rawKeyValue),
-                    "Partition key-value must not be blank in spec '%s'.",
-                    rawSpec);
-            String[] keyValue = rawKeyValue.split("=", 2);
-            checkArgument(
-                    keyValue.length == 2,
-                    "Invalid partition key-value '%s'. Please use format 'key=value'.",
-                    rawKeyValue);
-            String key = keyValue[0].trim();
-            checkArgument(!key.isEmpty(), "Partition key must not be blank in spec '%s'.", rawSpec);
-            checkArgument(
-                    !spec.containsKey(key),
-                    "Duplicate partition key '%s' in spec '%s'.",
-                    key,
-                    rawSpec);
-            spec.put(key, keyValue[1].trim());
-        }
-        return spec;
     }
 
     private static void validatePrimaryKeyFilter(

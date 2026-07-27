@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
@@ -61,12 +59,6 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
-import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
-import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP;
-import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
-import static org.apache.paimon.CoreOptions.SCAN_VERSION;
-import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -94,6 +86,28 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testPrimaryKeyVectorSearchWithSnapshot() throws Exception {
+        createPrimaryKeyVectorTable("PK_SNAPSHOT_T");
+        sql(
+                "INSERT INTO PK_SNAPSHOT_T VALUES "
+                        + "(1, ARRAY[CAST(1.0 AS FLOAT), CAST(0.0 AS FLOAT)])");
+        long snapshotId = paimonTable("PK_SNAPSHOT_T").latestSnapshot().get().id();
+        sql(
+                "INSERT INTO PK_SNAPSHOT_T VALUES "
+                        + "(2, ARRAY[CAST(0.0 AS FLOAT), CAST(0.0 AS FLOAT)])");
+
+        assertThat(
+                        search(
+                                "PK_SNAPSHOT_T",
+                                "0.0,0.0",
+                                2,
+                                "id",
+                                "scan.snapshot-id=" + snapshotId))
+                .extracting(row -> row.getField(0).toString())
+                .containsExactly("{\"id\":\"1\"}");
+    }
+
+    @Test
     public void testEmptyTableVectorSearch() {
         createVectorTable("EMPTY_T");
         createPrimaryKeyVectorTable("EMPTY_PK_T");
@@ -103,38 +117,7 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testResolveAndPinSnapshotNormalizesTimeTravelOptions() throws Exception {
-        createVectorTable("TIME_TRAVEL_T");
-        FileStoreTable table = paimonTable("TIME_TRAVEL_T");
-        writeVectors(table, new float[][] {{1.0f, 0.0f}});
-        Snapshot snapshot = table.latestSnapshot().get();
-
-        List<Map<String, String>> selectors =
-                Arrays.asList(
-                        Collections.singletonMap(SCAN_VERSION.key(), String.valueOf(snapshot.id())),
-                        Collections.singletonMap(
-                                SCAN_TIMESTAMP_MILLIS.key(),
-                                String.valueOf(snapshot.timeMillis() + 1)));
-        for (Map<String, String> selector : selectors) {
-            FileStoreTable timeTravelTable = table.copy(selector);
-            FileStoreTable pinned = VectorSearchProcedure.resolveAndPinSnapshot(timeTravelTable);
-
-            assertThat(pinned).isNotNull();
-            CoreOptions pinnedOptions = pinned.coreOptions();
-            assertThat(pinnedOptions.scanSnapshotId()).isEqualTo(snapshot.id());
-            assertThat(pinnedOptions.startupMode())
-                    .isEqualTo(CoreOptions.StartupMode.FROM_SNAPSHOT);
-            assertThat(pinnedOptions.toConfiguration().contains(SCAN_VERSION)).isFalse();
-            assertThat(pinnedOptions.toConfiguration().contains(SCAN_TAG_NAME)).isFalse();
-            assertThat(pinnedOptions.toConfiguration().contains(SCAN_WATERMARK)).isFalse();
-            assertThat(pinnedOptions.toConfiguration().contains(SCAN_TIMESTAMP)).isFalse();
-            assertThat(pinnedOptions.toConfiguration().contains(SCAN_TIMESTAMP_MILLIS)).isFalse();
-            assertThat(pinnedOptions.toConfiguration().contains(SCAN_SNAPSHOT_ID)).isTrue();
-        }
-    }
-
-    @Test
-    public void testVectorSearchKeepsResolvedSchemaWhenPinningSnapshot() throws Exception {
+    public void testVectorSearchKeepsResolvedSchema() throws Exception {
         createVectorTable("SCHEMA_EVOLUTION_T", "'global-index.search-mode' = 'full'");
         FileStoreTable table = paimonTable("SCHEMA_EVOLUTION_T");
         float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}};
@@ -145,10 +128,6 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
         FileStoreTable evolvedTable = paimonTable("SCHEMA_EVOLUTION_T");
         assertThat(evolvedTable.schema().id())
                 .isNotEqualTo(evolvedTable.latestSnapshot().get().schemaId());
-
-        FileStoreTable pinnedTable = VectorSearchProcedure.resolveAndPinSnapshot(evolvedTable);
-        assertThat(pinnedTable).isNotNull();
-        assertThat(pinnedTable.schema().id()).isEqualTo(evolvedTable.schema().id());
 
         List<String> defaultProjection =
                 sql(
@@ -758,18 +737,15 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
         assertThat(searchWithFilters("INVALID_PARTITIONS_T", 1, null, "   ")).isEmpty();
         assertThat(searchWithFilters("INVALID_PARTITIONS_T", 1, null, "pt=")).isEmpty();
         String separator = ";";
-        for (String partitions :
-                Arrays.asList(
-                        separator,
-                        separator + separator,
-                        "pt=a" + separator,
-                        separator + "pt=a",
-                        "pt=a" + separator + separator + "pt=b")) {
+        for (String partitions : Arrays.asList(separator + "pt=a", "pt=a;;pt=b")) {
             assertThatThrownBy(() -> searchWithFilters("INVALID_PARTITIONS_T", 1, null, partitions))
-                    .hasStackTraceContaining("Partition spec must not be blank");
+                    .hasStackTraceContaining("must exactly match partition keys");
         }
-        assertThatThrownBy(() -> searchWithFilters("INVALID_PARTITIONS_T", 1, null, "pt=a,pt=b"))
-                .hasStackTraceContaining("Duplicate partition key 'pt'");
+        for (String partitions :
+                Arrays.asList(separator, separator + separator, "pt=a" + separator)) {
+            assertThat(searchWithFilters("INVALID_PARTITIONS_T", 1, null, partitions)).isEmpty();
+        }
+        assertThat(searchWithFilters("INVALID_PARTITIONS_T", 1, null, "pt=a,pt=b")).isEmpty();
     }
 
     @Test
