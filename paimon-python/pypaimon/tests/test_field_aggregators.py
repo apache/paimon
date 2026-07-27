@@ -458,8 +458,6 @@ class FieldProductAggTest(unittest.TestCase):
 
     def test_long_retract_overflow(self):
         agg = _make("product", "BIGINT")
-        result = agg.agg(BigDecimal("1.23"), BigDecimal("4.56"))
-        self.assertEqual(result, BigDecimal("5.79"))
 
         with self.assertRaises(ArithmeticError):
             agg.retract(-9223372036854775808, -1)
@@ -474,6 +472,17 @@ class FieldProductAggTest(unittest.TestCase):
         self.assertEqual(agg.retract(5, None), 5)
         self.assertIsNone(agg.retract(None, 5))
         self.assertIsNone(agg.retract(None, None))
+
+    def test_long_boundary_product(self):
+        agg = _make("product", "BIGINT")
+
+        self.assertEqual(
+            agg.agg(3037000499, 3037000499),
+            9223372030926249001,
+        )
+
+        with self.assertRaises(ArithmeticError):
+            agg.agg(3037000500, 3037000500)
 
     def test_non_numeric_type_rejected_at_construction(self):
         with self.assertRaises(ValueError) as ctx:
@@ -494,203 +503,41 @@ class FieldProductAggTest(unittest.TestCase):
             BigDecimal("1234567890123456790234567890123456789"),
         )
 
-    def test_decimal_divide_requires_exact_result(self):
-        agg = _make("product", "DECIMAL(38,0)")
-
-        with self.assertRaises(ArithmeticError):
-            agg.retract(
-                BigDecimal("1"),
-                BigDecimal("3"),
-            )
-
-    def test_float_divide_by_zero(self):
-        agg = _make("product", "FLOAT")
-
-        self.assertTrue(math.isnan(agg.retract(0.0, 0.0)))
-        self.assertTrue(math.isinf(agg.retract(1.0, 0.0)))
-        self.assertEqual(agg.retract(1.0, 0.0),  float("inf"))
-        self.assertEqual(agg.retract(-1.0, 0.0), float("-inf"))
-
-
-class FieldProductAggTest(unittest.TestCase):
-
-    @staticmethod
-    def to_decimal(value, precision: int = 10, scale: int = 0) -> "BigDecimal":
-        return Decimal.from_big_decimal(BigDecimal(str(value)), precision, scale).to_big_decimal()
-
-    def test_int(self):
-        agg = _make("product", "INT")
-        self.assertIsInstance(agg, FieldProductAgg)
-
-        self.assertEqual(agg.agg(None, 10), 10)
-        self.assertEqual(agg.agg(1, 10), 10)
-        self.assertEqual(agg.retract(10, 5), 2)
-        self.assertIsNone(agg.retract(None, 5))
-
-    def test_byte(self):
-        agg = _make("product", "TINYINT")
-
-        self.assertEqual(agg.agg(None, 10), 10)
-        self.assertEqual(agg.agg(1, 10), 10)
-        self.assertEqual(agg.retract(10, 5), 2)
-        self.assertIsNone(agg.retract(None, 5))
-
-    def test_short(self):
-        agg = _make("product", "SMALLINT")
-
-        self.assertEqual(agg.agg(None, 10), 10)
-        self.assertEqual(agg.agg(1, 10), 10)
-        self.assertEqual(agg.retract(10, 5), 2)
-        self.assertIsNone(agg.retract(None, 5))
-
-    def test_long(self):
-        agg = _make("product", "BIGINT")
-
-        self.assertEqual(agg.agg(None, 10), 10)
-        self.assertEqual(agg.agg(1, 10), 10)
-        self.assertEqual(agg.retract(10, 5), 2)
-        self.assertIsNone(agg.retract(None, 5))
-
-    def test_float(self):
-        agg = _make("product", "FLOAT")
-
-        self.assertEqual(agg.agg(None, 10.0), 10.0)
-        self.assertEqual(agg.agg(1.0, 10.0), 10.0)
-        self.assertEqual(agg.retract(10.0, 5.0), 2.0)
-        self.assertIsNone(agg.retract(None, 5.0))
-
-    def test_double(self):
-        agg = _make("product", "DOUBLE")
-
-        self.assertEqual(agg.agg(None, 10.0), 10.0)
-        self.assertEqual(agg.agg(1.0, 10.0), 10.0)
-        self.assertEqual(agg.retract(10.0, 5.0), 2.0)
-        self.assertIsNone(agg.retract(None, 5.0))
-
-    def test_decimal_no_precision_scale(self):
-        agg = _make("product", "DECIMAL")
-
-        self.assertEqual(agg.agg(None, self.to_decimal(10)), self.to_decimal(10))
-        self.assertEqual(agg.agg(self.to_decimal(1), self.to_decimal(10)), self.to_decimal(10))
-        self.assertEqual(agg.agg(self.to_decimal(1.3), self.to_decimal(10)), self.to_decimal(10))
-        self.assertEqual(agg.agg(self.to_decimal(1.5), self.to_decimal(10)), self.to_decimal(20))
-        self.assertEqual(agg.retract(self.to_decimal(10), self.to_decimal(5)), self.to_decimal(2))
-        self.assertIsNone(agg.retract(None, self.to_decimal(5)))
-
-    def test_decimal(self):
-        agg = _make("product", "DECIMAL(8,2)")
-
-        self.assertEqual(agg.agg(BigDecimal("1.50"), BigDecimal("2.00")), BigDecimal("3.00"))
-        self.assertEqual(agg.agg(BigDecimal("1.50"), BigDecimal("2.01")), BigDecimal("3.02"))
-        self.assertEqual(agg.retract(BigDecimal("3.00"), BigDecimal("2.00")), BigDecimal("1.50"))
-        self.assertEqual(agg.agg(None, self.to_decimal(10.15)), self.to_decimal(10.15))
-        self.assertIsNone(agg.retract(None, self.to_decimal(5.02)))
-
-    def test_numeric(self):
-        agg = _make("product", "NUMERIC(12,2)")
-
-        self.assertEqual(agg.agg(None, self.to_decimal(10, 12, 2)), self.to_decimal(10, 12, 2))
-        self.assertEqual(agg.agg(self.to_decimal(1), self.to_decimal(10, 12, 2)), self.to_decimal(10, 12, 2))
-        self.assertEqual(agg.retract(self.to_decimal(10), self.to_decimal(5, 12, 2)), self.to_decimal(2, 12, 2))
-        self.assertIsNone(agg.retract(None, self.to_decimal(5, 12, 2)))
-
-    def test_dec(self):
-        agg = _make("product", "DEC(12)")
-
-        self.assertEqual(agg.agg(None, self.to_decimal(10, 12)), self.to_decimal(10, 12))
-        self.assertEqual(agg.agg(self.to_decimal(1), self.to_decimal(10, 12)), self.to_decimal(10, 12))
-        self.assertEqual(agg.retract(self.to_decimal(10), self.to_decimal(5, 12)), self.to_decimal(2, 12))
-        self.assertIsNone(agg.retract(None, self.to_decimal(5, 12)))
-
-    def test_byte_overflow(self):
-        agg = _make("product", "TINYINT")
-
-        with self.assertRaises(ArithmeticError):
-            agg.agg(64, 2)
-
-        with self.assertRaises(ArithmeticError):
-            agg.agg(-64, 4)
-
-    def test_short_overflow(self):
-        agg = _make("product", "SMALLINT")
-
-        with self.assertRaises(ArithmeticError):
-            agg.agg(1000, 100)
-
-        with self.assertRaises(ArithmeticError):
-            agg.agg(-32768, 2)
-
-    def test_int_overflow(self):
-        agg = _make("product", "INT")
-
-        with self.assertRaises(ArithmeticError):
-            agg.agg(100000, 100000)
-
-        with self.assertRaises(ArithmeticError):
-            agg.agg(-2147483648, -1)
-
-    def test_long_overflow(self):
-        agg = _make("product", "BIGINT")
-
-        with self.assertRaises(ArithmeticError):
-            agg.agg(9223372036854775807, 2)
-
-        with self.assertRaises(ArithmeticError):
-            agg.agg(-9223372036854775808, -1)
-
-    def test_byte_retract_overflow(self):
-        agg = _make("product", "TINYINT")
-
-        with self.assertRaises(ArithmeticError):
-            agg.retract(-128, -1)
-
-    def test_short_retract_overflow(self):
-        agg = _make("product", "SMALLINT")
-
-        with self.assertRaises(ArithmeticError):
-            agg.retract(-32768, -1)
-
-    def test_int_retract_overflow(self):
-        agg = _make("product", "INT")
-
-        with self.assertRaises(ArithmeticError):
-            agg.retract(-2147483648, -1)
-
-    def test_long_retract_overflow(self):
-        agg = _make("product", "BIGINT")
-
-        with self.assertRaises(ArithmeticError):
-            agg.retract(-9223372036854775808, -1)
-
-    def test_null_inputs(self):
-        agg = _make("product", "INT")
-
-        self.assertEqual(agg.agg(None, 5), 5)
-        self.assertEqual(agg.agg(5, None), 5)
-        self.assertIsNone(agg.agg(None, None))
-
-        self.assertEqual(agg.retract(5, None), 5)
-        self.assertIsNone(agg.retract(None, 5))
-        self.assertIsNone(agg.retract(None, None))
-
-    def test_non_numeric_type_rejected_at_construction(self):
-        with self.assertRaises(ValueError) as ctx:
-            _make("product", "VARCHAR")
-
-        self.assertIn("numeric", str(ctx.exception))
-
-    def test_decimal_high_precision_product(self):
-        agg = _make("product", "DECIMAL(38,0)")
-
-        left = BigDecimal("1234567890123456789")
-        right = BigDecimal("1000000000000000001")
-
-        result = agg.agg(left, right)
+        result = agg.agg(
+            BigDecimal("9999999999999999999"),
+            BigDecimal("9999999999999999999"),
+        )
 
         self.assertEqual(
             result,
-            BigDecimal("1234567890123456790234567890123456789"),
+            BigDecimal("99999999999999999980000000000000000001"),
         )
+
+        # with scale
+        agg = _make("product", "DECIMAL(38,18)")
+
+        result = agg.agg(
+            BigDecimal("1.234567890123456789"),
+            BigDecimal("2.000000000000000001"),
+        )
+        self.assertEqual(
+            result,
+            BigDecimal("2.469135780246913579"),
+        )
+
+    def test_decimal_product_precision_overflow(self):
+        agg = _make("product", "DECIMAL(38,0)")
+
+        # digits > precision, so return None
+        self.assertIsNone(agg.agg(
+            BigDecimal("99999999999999999999999999999999999999"),
+            BigDecimal("10"),
+        ))
+
+        self.assertIsNone(agg.agg(
+            BigDecimal("9999999999999999999"),
+            BigDecimal("99999999999999999991"),
+        ))
 
     def test_decimal_divide_requires_exact_result(self):
         agg = _make("product", "DECIMAL(38,0)")
@@ -700,6 +547,27 @@ class FieldProductAggTest(unittest.TestCase):
                 BigDecimal("1"),
                 BigDecimal("3"),
             )
+
+        agg = _make("product", "DECIMAL(38,18)")
+
+        with self.assertRaises(ArithmeticError):
+            agg.retract(
+                BigDecimal("1.000000000000000000"),
+                BigDecimal("3.000000000000000000"),
+            )
+
+    def test_decimal_divide_high_precision_exact(self):
+        agg = _make("product", "DECIMAL(38,0)")
+
+        result = agg.retract(
+            BigDecimal("99999999999999999999999999999999999998"),
+            BigDecimal("2"),
+        )
+
+        self.assertEqual(
+            result,
+            BigDecimal("49999999999999999999999999999999999999"),
+        )
 
     def test_float_divide_by_zero(self):
         agg = _make("product", "FLOAT")
