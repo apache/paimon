@@ -396,8 +396,8 @@ class CoreOptions:
         .default_value((1 << 63) - 1)
         .with_description(
             "Target number of rows per newly written data file. PyPaimon format-table "
-            "writers split files at this limit; file-store writers fail fast when "
-            "this option is enabled."
+            "and data-evolution append-table writers split files at this limit; "
+            "primary-key, blob and vector writers fail fast when this option is enabled."
         )
     )
 
