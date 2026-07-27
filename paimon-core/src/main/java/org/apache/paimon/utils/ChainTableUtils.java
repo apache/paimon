@@ -35,7 +35,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
-import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -465,7 +464,7 @@ public class ChainTableUtils {
         for (Map.Entry<Integer, List<DataSplit>> entry : bucketSplits.entrySet()) {
             Map<String, String> fileBranchMapping = new HashMap<>();
             Map<String, String> fileBucketPathMapping = new HashMap<>();
-            Map<String, DeletionFile> deletionFileMapping = new HashMap<>();
+            Map<String, DeletionFile> fileDeletionMapping = new HashMap<>();
             List<DataFileMeta> bucketFiles = new ArrayList<>();
             for (DataSplit dataSplit : entry.getValue()) {
                 Optional<List<DeletionFile>> deletionFilesOpt = dataSplit.deletionFiles();
@@ -479,7 +478,7 @@ public class ChainTableUtils {
                                     ? snapshotBranch
                                     : deltaBranch;
                     fileBranchMapping.put(file.fileName(), branch);
-                    deletionFileMapping.put(file.fileName(), deletionFile);
+                    fileDeletionMapping.put(file.fileName(), deletionFile);
                     bucketFiles.add(file);
                 }
             }
@@ -500,7 +499,7 @@ public class ChainTableUtils {
                                 groupFiles,
                                 subMapping(fileBranchMapping, groupFiles),
                                 subMapping(fileBucketPathMapping, groupFiles),
-                                subMapping(deletionFileMapping, groupFiles)));
+                                subDeletionFiles(fileDeletionMapping, groupFiles)));
             }
         }
         return result;
@@ -555,6 +554,20 @@ public class ChainTableUtils {
             sub.put(file.fileName(), mapping.get(file.fileName()));
         }
         return sub;
+    }
+
+    private static List<DeletionFile> subDeletionFiles(
+            Map<String, DeletionFile> mapping, List<DataFileMeta> files) {
+        boolean hasDeletionFile = false;
+        List<DeletionFile> result = new ArrayList<>(files.size());
+        for (DataFileMeta file : files) {
+            DeletionFile deletionFile = mapping.get(file.fileName());
+            if (deletionFile != null) {
+                hasDeletionFile = true;
+            }
+            result.add(deletionFile);
+        }
+        return hasDeletionFile ? result : null;
     }
 
     private static Integer addToBucketMap(

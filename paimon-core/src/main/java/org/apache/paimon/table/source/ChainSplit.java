@@ -123,21 +123,11 @@ public class ChainSplit implements Split {
 
     @Override
     public OptionalLong mergedRowCount() {
-        if (dataDeletionFiles == null || dataDeletionFiles.isEmpty()) {
-            return OptionalLong.empty();
-        }
-        long deletedRows = 0L;
-        for (DeletionFile deletionFile : dataDeletionFiles) {
-            if (deletionFile == null) {
-                continue;
-            }
-            if (deletionFile.cardinality() == null) {
-                return OptionalLong.empty();
-            } else {
-                deletedRows += deletionFile.cardinality();
-            }
-        }
-        return OptionalLong.of(rowCount() - deletedRows);
+        // Chain tables merge and deduplicate rows across snapshot and delta files by primary key,
+        // so the post-merge row count cannot be determined from per-file metadata alone.
+        // Returning empty prevents LIMIT pushdown from discarding splits based on an inaccurate
+        // estimate.
+        return OptionalLong.empty();
     }
 
     @Override
