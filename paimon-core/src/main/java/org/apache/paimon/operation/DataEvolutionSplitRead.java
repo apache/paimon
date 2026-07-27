@@ -105,6 +105,9 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * group only uses the file index to skip the whole group, as dropping rows in one of the merged
  * readers would break the positional alignment between them.
  *
+ * <p>Only a filter whose every field belongs to the read type is pushed down, see {@link
+ * #readTypeFilters}, and only to the files that wrote those fields, see {@link #fileFilters}.
+ *
  * <p>TODO: Optimize implementation of this class.
  */
 public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
@@ -117,9 +120,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     // Kept apart from formatReaderMappings: the single file path pushes per file filters into the
-    // mapping and keys by writeCols, so it must not share entries with the merge path, which keys
-    // by the projected read field names and pushes no filters.
-    private final Map<FormatKey, FormatReaderMapping> singleFileReaderMappings;
+    // mapping, so it must not share entries with the merge path, which pushes none.
+    private final Map<SingleFileKey, FormatReaderMapping> singleFileReaderMappings;
     private final Function<Long, TableSchema> schemaFetcher;
     private final CoreOptions coreOptions;
     private final boolean fileIndexReadEnabled;
@@ -168,6 +170,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     public SplitRead<InternalRow> withFilter(@Nullable Predicate predicate) {
         if (predicate != null) {
             this.filters = pushDownFilters(splitAnd(predicate));
+            // the single file mappings carry the filters they were built with, and a read can be
+            // reconfigured after it created readers, see AppendTableRead#innerWithFilter
+            singleFileReaderMappings.clear();
         }
         return this;
     }
@@ -217,6 +222,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         // the merge path builds its readers with filter push down disabled, so the shared builder
         // carries no filters, the single file path creates its own with per file filters
         Builder formatBuilder = formatBuilder(readRowType, null);
+        // the suppliers below run lazily, so take the filters now, the same way the read type is
+        // already taken by the caller
+        List<Predicate> filters = readTypeFilters(this.filters, readRowType);
 
         List<List<DataFileMeta>> splitByRowId = mergeRangesAndSort(files);
         for (List<DataFileMeta> needMergeFiles : splitByRowId) {
@@ -230,6 +238,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     partition,
                                     dataFilePathFactory,
                                     needMergeFiles.get(0),
+                                    filters,
                                     rowRanges,
                                     readRowType,
                                     deletionVector);
@@ -238,7 +247,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             } else {
                 suppliers.add(
                         () -> {
-                            if (skipByFileIndex(needMergeFiles, dataFilePathFactory)) {
+                            if (skipByFileIndex(filters, needMergeFiles, dataFilePathFactory)) {
                                 return new EmptyFileRecordReader<>();
                             }
                             DeletionVectorWithRange deletionVector =
@@ -492,6 +501,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             BinaryRow partition,
             DataFilePathFactory dataFilePathFactory,
             DataFileMeta file,
+            @Nullable List<Predicate> filters,
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector)
@@ -499,26 +509,26 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         FileReadTarget readTarget = readTarget(file, dataFilePathFactory, rowRanges);
         String formatIdentifier = readTarget.formatIdentifier;
         long schemaId = file.schemaId();
-        // no column merge here, so the filters this file can answer are pushed down
-        Builder formatBuilder = formatBuilder(readRowType, fileFilters(file));
+        TableSchema dataSchema = schemaId == schema.id() ? schema : schemaFetcher.apply(schemaId);
+
+        // no column merge here, so the filters this file can answer reach both the file index and
+        // the format reader
+        List<Predicate> fileFilters = fileFilters(filters, file);
         FormatReaderMapping formatReaderMapping =
                 singleFileReaderMappings.computeIfAbsent(
-                        new FormatKey(file.schemaId(), formatIdentifier, file.writeCols()),
+                        new SingleFileKey(
+                                schemaId, formatIdentifier, file.writeCols(), readRowType),
                         key ->
-                                formatBuilder.build(
-                                        formatIdentifier,
-                                        schema,
-                                        schemaId == schema.id()
-                                                ? schema
-                                                : schemaFetcher.apply(schemaId)));
+                                formatBuilder(readRowType, fileFilters)
+                                        .build(formatIdentifier, schema, dataSchema));
 
         FileIndexResult fileIndexResult = null;
         if (fileIndexReadEnabled) {
             fileIndexResult =
                     FileIndexEvaluator.evaluate(
                             fileIO,
-                            formatReaderMapping.getDataSchema(),
-                            formatReaderMapping.getDataFilters(),
+                            dataSchema,
+                            devolveFilters(fileFilters, dataSchema),
                             null,
                             null,
                             dataFilePathFactory,
@@ -645,7 +655,10 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
      * the newest writer of. A stale value in an older file must not veto a group whose winning file
      * matches, mirroring the winner selection in {@link DataEvolutionFileStoreScan#evolutionStats}.
      */
-    private boolean skipByFileIndex(List<DataFileMeta> files, DataFilePathFactory pathFactory)
+    private boolean skipByFileIndex(
+            @Nullable List<Predicate> filters,
+            List<DataFileMeta> files,
+            DataFilePathFactory pathFactory)
             throws IOException {
         if (!fileIndexReadEnabled || isNullOrEmpty(filters)) {
             return false;
@@ -667,7 +680,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
 
             List<Predicate> dataFilters =
-                    excludePredicateWithFields(devolveFilters(dataSchema), overwrittenCols);
+                    excludePredicateWithFields(
+                            devolveFilters(filters, dataSchema), overwrittenCols);
             if (dataFilters.isEmpty()) {
                 continue;
             }
@@ -700,7 +714,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
      * drop every row.
      */
     @Nullable
-    private List<Predicate> fileFilters(DataFileMeta file) {
+    private List<Predicate> fileFilters(@Nullable List<Predicate> filters, DataFileMeta file) {
         if (isNullOrEmpty(filters)) {
             return null;
         }
@@ -710,13 +724,50 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 schemaFetcher.apply(file.schemaId()).project(file.writeCols()).fields()) {
             fileFieldIds.add(field.id());
         }
-        Set<String> missing = new HashSet<>();
+        Set<String> written = new HashSet<>();
         for (DataField field : schema.fields()) {
-            if (!fileFieldIds.contains(field.id())) {
-                missing.add(field.name());
+            if (fileFieldIds.contains(field.id())) {
+                written.add(field.name());
             }
         }
-        return excludePredicateWithFields(filters, missing);
+        return filtersWithin(filters, written);
+    }
+
+    /**
+     * Filters that may be pushed down at all, those whose every field belongs to the read type.
+     *
+     * <p>A format reader can not evaluate the others: it only reads the columns it was asked for
+     * and treats the rest as absent, parquet for instance evaluates its column index over the
+     * requested columns only and would drop the whole row group instead of nothing.
+     *
+     * <p>The file index can not use them either, for a different reason. {@link
+     * DataEvolutionFileStoreScan#pruneByReadType} drops the files of a row id group that write no
+     * column of the read type, so for a column outside it the file that wins the column merge may
+     * not be part of the split at all. What is left is an older file whose copy of the column is
+     * dead, and its index would veto rows that do match. For a column of the read type every file
+     * writing it is kept, so the winner is always there. This holds as long as the read type is the
+     * one the split was planned with, or a projection of it.
+     */
+    @Nullable
+    private static List<Predicate> readTypeFilters(
+            @Nullable List<Predicate> filters, RowType readRowType) {
+        return filtersWithin(filters, new HashSet<>(readRowType.getFieldNames()));
+    }
+
+    /**
+     * Filters every field of which belongs to {@code fields}. A predicate is kept only when all of
+     * its fields qualify, a leaf can read more than one of them.
+     */
+    @Nullable
+    private static List<Predicate> filtersWithin(
+            @Nullable List<Predicate> filters, Set<String> fields) {
+        if (isNullOrEmpty(filters)) {
+            return filters;
+        }
+
+        return filters.stream()
+                .filter(filter -> fields.containsAll(collectFieldNames(filter)))
+                .collect(Collectors.toList());
     }
 
     /**
@@ -724,7 +775,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
      * projected to the columns the file actually wrote, so it is a subset of the table fields even
      * for the same schema id. Filters on columns the file does not contain are dropped here.
      */
-    private List<Predicate> devolveFilters(TableSchema dataSchema) {
+    private List<Predicate> devolveFilters(
+            @Nullable List<Predicate> filters, TableSchema dataSchema) {
         List<Predicate> dataFilters =
                 SchemaEvolutionUtil.devolveFilters(
                         schema.fields(), dataSchema.fields(), filters, false);
@@ -851,6 +903,52 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             this.formatIdentifier = formatIdentifier;
             this.path = path;
             this.fileSize = fileSize;
+        }
+    }
+
+    /**
+     * Key of a single file reader mapping. Both the fields the mapping reads and the filters it
+     * pushes down depend on the read type, which is not the same for every split: {@link
+     * IndexedSplitRecordReader#readInfo} adds a row id to the read type when the split carries
+     * scores. The columns the file wrote are part of the key as well, they decide which filters the
+     * file can answer.
+     */
+    private static class SingleFileKey {
+
+        private final long schemaId;
+        private final String formatIdentifier;
+        @Nullable private final List<String> writeCols;
+        private final RowType readRowType;
+
+        private SingleFileKey(
+                long schemaId,
+                String formatIdentifier,
+                @Nullable List<String> writeCols,
+                RowType readRowType) {
+            this.schemaId = schemaId;
+            this.formatIdentifier = formatIdentifier;
+            this.writeCols = writeCols;
+            this.readRowType = readRowType;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof SingleFileKey)) {
+                return false;
+            }
+            SingleFileKey that = (SingleFileKey) o;
+            return schemaId == that.schemaId
+                    && Objects.equals(formatIdentifier, that.formatIdentifier)
+                    && Objects.equals(writeCols, that.writeCols)
+                    && Objects.equals(readRowType, that.readRowType);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(schemaId, formatIdentifier, writeCols, readRowType);
         }
     }
 

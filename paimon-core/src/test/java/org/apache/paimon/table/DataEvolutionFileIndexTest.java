@@ -48,6 +48,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
@@ -67,6 +68,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowId;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
@@ -293,6 +295,125 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         assertThat(rows).hasSize(ROW_COUNT);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "orc", "avro"})
+    public void testReadOnlyRowIdWithFilterOnDataColumn(String format) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_FORMAT.key(), format);
+        FileStoreTable table = createTable("row_id_only_" + format, options);
+        writeAllColumns(table, ROW_COUNT);
+
+        // the read type holds no data column at all, so the filter can not be pushed to the
+        // format: a format only evaluates a predicate over the columns it was asked to read and
+        // treats the others as absent, which drops every row instead of none
+        List<InternalRow> rows =
+                readWithFilter(table, equalF1(f1(50)), RowType.of(SpecialFields.ROW_ID));
+        assertThat(rowIds(rows)).containsExactlyInAnyOrderElementsOf(rowIds(0, ROW_COUNT));
+    }
+
+    @Test
+    public void testProjectionWithoutFilterColumn() throws Exception {
+        FileStoreTable table = createTable("projection_without_filter", Collections.emptyMap());
+        writeAllColumns(table, ROW_COUNT);
+
+        // f1 is filtered but not read, nothing proves anything about the rows, all of them stay
+        List<InternalRow> rows = readWithFilter(table, equalF1(f1(50)), rowType().project("f0"));
+        assertThat(rows).hasSize(ROW_COUNT);
+        assertThat(rows).anyMatch(row -> row.getInt(0) == 50);
+    }
+
+    @Test
+    public void testFileIndexIsGivenUpForAColumnOutsideTheReadType() throws Exception {
+        FileStoreTable table = createTable("projection_index", bloomOptions("f1", "1 B"));
+        writeAllColumns(table, ROW_COUNT);
+
+        // the index of this file does prove that no row of it matches, but a file only owns the
+        // columns of the read type: the file that owns f1 can be pruned out of the split, see
+        // testProjectionPruningAwayTheWinnerOfTheFilterColumn, so the push down gives the column
+        // up rather than trust whichever file is left holding it
+        assertThat(readWithFilter(table, equalF1(MISSING_F1), rowType().project("f0")))
+                .hasSize(ROW_COUNT);
+
+        // reading f1 puts it back in reach
+        assertThat(readWithFilter(table, equalF1(MISSING_F1), rowType().project("f0", "f1")))
+                .isEmpty();
+    }
+
+    @Test
+    public void testBitmapSelectionReturnsExactRowId() throws Exception {
+        FileStoreTable table = createTable("bitmap_row_id", bitmapOptions("f1"));
+        writeAllColumns(table, ROW_COUNT);
+        // a second row id range, so a row id can not be confused with a position inside a file
+        writeAllColumns(table, ROW_COUNT);
+
+        // the bitmap is exact, and the row id of what it selects comes from the position the row
+        // has in its file, not from its position in the batch the selection left over
+        RowType readType = rowTypeWithRowId(rowType()).project(SpecialFields.ROW_ID.name(), "f1");
+        List<InternalRow> rows = readWithFilter(table, equalF1(f1(50)), readType);
+        assertThat(rowIds(rows)).containsExactlyInAnyOrder(50L, ROW_COUNT + 50L);
+    }
+
+    @Test
+    public void testProjectionPruningAwayTheWinnerOfTheFilterColumn() throws Exception {
+        FileStoreTable table = createTable("pruned_winner", Collections.emptyMap());
+        writeThenOverwriteF1(table, ROW_COUNT);
+
+        // f1 was rewritten as c* by a second file, and projecting f0 prunes that file out of the
+        // split, see DataEvolutionFileStoreScan#pruneByReadType. The old file is left holding a*
+        // and a bloom index that knows nothing about c*, so nothing about it may be used to prove
+        // that a row does not match: the row does match, through the file that is not there.
+        List<InternalRow> rows = readWithFilter(table, equalF1(c1(50)), rowType().project("f0"));
+        assertThat(rows).anyMatch(row -> row.getInt(0) == 50);
+    }
+
+    @Test
+    public void testEmptyReadTypeWithFilter() throws Exception {
+        FileStoreTable table = createTable("empty_read_type", Collections.emptyMap());
+        writeAllColumns(table, ROW_COUNT);
+
+        // a count(*) read projects nothing, so nothing can be pushed to the format either
+        assertThat(countWithFilter(table, equalF1(f1(50)), RowType.of())).isEqualTo(ROW_COUNT);
+    }
+
+    @Test
+    public void testReaderMappingIsNotSharedBetweenReadTypes() throws Exception {
+        FileStoreTable table = createTable("read_type_reuse", Collections.emptyMap());
+        writeAllColumns(table, ROW_COUNT);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        TableScan.Plan plan = latest.newReadBuilder().newScan().plan();
+        InnerTableRead read = latest.newRead();
+
+        // a read can be reconfigured after it created readers, see AppendTableRead#applyReadType,
+        // so a reader mapping built for one read type must not answer for another
+        RowType first = rowType().project("f1");
+        read.withReadType(first);
+        assertThat(collect(read, plan, first).get(0).getString(0).toString()).isEqualTo(f1(0));
+
+        RowType second = rowType().project("f2");
+        read.withReadType(second);
+        assertThat(collect(read, plan, second).get(0).getString(0).toString()).isEqualTo(f2(0));
+    }
+
+    @Test
+    public void testReaderMappingIsNotSharedBetweenFilters() throws Exception {
+        FileStoreTable table = createTable("filter_reuse", Collections.emptyMap());
+        writeAllColumns(table, ROW_COUNT);
+
+        FileStoreTable latest = getTable(identifier(table.name()));
+        // planned without a filter, so only the readers can drop anything here
+        TableScan.Plan plan = latest.newReadBuilder().newScan().plan();
+        InnerTableRead read = latest.newRead();
+
+        // outside the min/max of f1, the format reader prunes the whole file
+        read.withFilter(equalF1("z999"));
+        assertThat(collect(read, plan, latest.rowType())).isEmpty();
+
+        // the mapping above carries that filter, the second read must not inherit it
+        read.withFilter(equalF1(f1(50)));
+        assertThat(collect(read, plan, latest.rowType())).isNotEmpty();
+    }
+
     @Test
     public void testBitmapSelectionComposesWithDeletionVector() throws Exception {
         Map<String, String> options = bitmapOptions("f1");
@@ -481,7 +602,7 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
                 write.write(GenericRow.of(BinaryString.fromString(f2(i))));
             }
             List<CommitMessage> commitables = write.prepareCommit();
-            setFirstRowId(commitables, firstRowId);
+            setSingleFileFirstRowId(commitables, firstRowId);
             commit.commit(commitables);
         }
     }
@@ -512,9 +633,22 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
                 write.write(GenericRow.of(BinaryString.fromString(c1(i))));
             }
             List<CommitMessage> commitables = write.prepareCommit();
-            setFirstRowId(commitables, firstRowId);
+            setSingleFileFirstRowId(commitables, firstRowId);
             commit.commit(commitables);
         }
+    }
+
+    /**
+     * {@link #setFirstRowId} stamps the same first row id on every file of the commit, which only
+     * describes a valid layout when the write produced a single file.
+     */
+    private void setSingleFileFirstRowId(List<CommitMessage> commitables, long firstRowId) {
+        List<DataFileMeta> files = new ArrayList<>();
+        for (CommitMessage commitable : commitables) {
+            files.addAll(((CommitMessageImpl) commitable).newFilesIncrement().newFiles());
+        }
+        assertThat(files).hasSize(1);
+        setFirstRowId(commitables, firstRowId);
     }
 
     private List<InternalRow> readWithFilter(FileStoreTable table, Predicate predicate)
@@ -540,6 +674,28 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
             }
         }
         return rows;
+    }
+
+    /** Like {@link #readWithFilter}, but only counts, so an empty read type can be used. */
+    private int countWithFilter(FileStoreTable table, Predicate predicate, RowType readType)
+            throws Exception {
+        FileStoreTable latest = getTable(identifier(table.name()));
+        ReadBuilder readBuilder =
+                latest.newReadBuilder().withFilter(predicate).withReadType(readType);
+        TableRead read = readBuilder.newRead();
+        int count = 0;
+        for (Split split : readBuilder.newScan().plan().splits()) {
+            try (RecordReader<InternalRow> reader = read.createReader(split)) {
+                RecordReader.RecordIterator<InternalRow> batch;
+                while ((batch = reader.readBatch()) != null) {
+                    while (batch.next() != null) {
+                        count++;
+                    }
+                    batch.releaseBatch();
+                }
+            }
+        }
+        return count;
     }
 
     /**
@@ -589,6 +745,19 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
         List<Split> splits = latest.newReadBuilder().newScan().plan().splits();
         assertThat(splits).hasSize(1);
         assertThat(((DataSplit) splits.get(0)).dataFiles()).hasSize(2);
+    }
+
+    /** Row ids of rows read with {@code RowType.of(SpecialFields.ROW_ID)}. */
+    private static List<Long> rowIds(List<InternalRow> rows) {
+        return rows.stream().map(row -> row.getLong(0)).collect(Collectors.toList());
+    }
+
+    private static List<Long> rowIds(long from, int count) {
+        List<Long> ids = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            ids.add(from + i);
+        }
+        return ids;
     }
 
     private static InternalRow assertSingleRow(List<InternalRow> rows) {
