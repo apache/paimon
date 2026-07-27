@@ -96,7 +96,7 @@ SELECT sys.descriptor_to_string(content) FROM t WHERE id = '1';
 
 ### descriptor_to_presigned_url
 
-`sys.descriptor_to_presigned_url($source_table, $descriptor, $extension, $validity)`
+`sys.descriptor_to_presigned_url($source_table, $descriptor, $validity)`
 
 Creates a temporary HTTPS GET URL for an OSS-backed blob descriptor. Use
 `sys.try_descriptor_to_presigned_url` to return `NULL` instead of failing on row-level errors.
@@ -105,8 +105,10 @@ Creates a temporary HTTPS GET URL for an OSS-backed blob descriptor. Use
   `catalog.database.table` with the same catalog as the function.
 - `descriptor` is the serialized BINARY descriptor. Set `blob-as-descriptor=true` when reading a
   normal BLOB column.
-- `extension` determines the materialized object's MIME type and must match the content.
 - `validity` is a positive day-time interval containing whole seconds.
+
+The materialized object has no file extension and is served as
+`application/octet-stream`. Its bytes are unchanged.
 
 The catalog's `fs.oss.endpoint` must be a standard public HTTPS endpoint, for example
 `https://oss-cn-hangzhou.aliyuncs.com`.
@@ -117,7 +119,6 @@ ALTER TABLE image_table SET TBLPROPERTIES ('blob-as-descriptor' = 'true');
 SELECT sys.descriptor_to_presigned_url(
     'default.image_table',
     image,
-    'png',
     INTERVAL '5' MINUTE)
 FROM image_table;
 ```

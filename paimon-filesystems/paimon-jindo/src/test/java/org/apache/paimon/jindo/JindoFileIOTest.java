@@ -73,7 +73,7 @@ public class JindoFileIOTest {
         BlobDescriptor descriptor = new BlobDescriptor("oss://bucket/table/data/file", 10, 20);
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(20);
-        metadata.setContentType("image/jpeg");
+        metadata.setContentType("application/octet-stream");
         metadata.addUserMetadata(
                 "paimon-blob-descriptor-sha256", sha256Hex(descriptor.serialize()));
         when(client.headObject(eq("bucket"), contains("_bloburl_"))).thenReturn(metadata);
@@ -86,7 +86,7 @@ public class JindoFileIOTest {
                                                 + invocation.getArgument(1)));
 
         JindoFileIO fileIO = new JindoFileIO(client);
-        assertThat(fileIO.createBlobPresignedUrl(tableRoot, descriptor, "jpg", Duration.ofHours(1)))
+        assertThat(fileIO.createBlobPresignedUrl(tableRoot, descriptor, Duration.ofHours(1)))
                 .startsWith("https://bucket.oss.example.com/table/data/_bloburl_");
 
         fileIO.close();

@@ -54,15 +54,14 @@ public class DescriptorToPresignedUrlFunctionTest {
         assertThat(
                         tableEnvironment.explainSql(
                                 "SELECT descriptor_to_presigned_url("
-                                        + "'default.t', CAST(NULL AS BYTES), 'png', "
-                                        + "INTERVAL '1' HOUR)"))
+                                        + "'default.t', CAST(NULL AS BYTES), INTERVAL '1' HOUR)"))
                 .contains("Calc");
 
         assertThatThrownBy(
                         () ->
                                 tableEnvironment.explainSql(
                                         "SELECT descriptor_to_presigned_url("
-                                                + "source_table, descriptor, 'png', "
+                                                + "source_table, descriptor, "
                                                 + "INTERVAL '1' HOUR) "
                                                 + "FROM (VALUES ('default.t', CAST(NULL AS BYTES))) "
                                                 + "AS T(source_table, descriptor)"))
@@ -80,15 +79,15 @@ public class DescriptorToPresignedUrlFunctionTest {
         when(catalog.getTable(new Identifier("default", "t"))).thenReturn(table);
         when(table.location()).thenReturn(tableRoot);
         when(table.fileIO()).thenReturn(fileIO);
-        when(fileIO.createBlobPresignedUrl(tableRoot, descriptor, "png", Duration.ofHours(1)))
+        when(fileIO.createBlobPresignedUrl(tableRoot, descriptor, Duration.ofHours(1)))
                 .thenReturn("https://example");
 
         DescriptorToPresignedUrlFunction function =
                 new DescriptorToPresignedUrlFunction("paimon", catalog);
 
-        assertThat(function.eval("default.t", descriptor.serialize(), "png", Duration.ofHours(1)))
+        assertThat(function.eval("default.t", descriptor.serialize(), Duration.ofHours(1)))
                 .isEqualTo("https://example");
-        assertThat(function.eval("default.t", descriptor.serialize(), "png", Duration.ofHours(1)))
+        assertThat(function.eval("default.t", descriptor.serialize(), Duration.ofHours(1)))
                 .isEqualTo("https://example");
         verify(catalog, times(1)).getTable(new Identifier("default", "t"));
 
@@ -97,7 +96,6 @@ public class DescriptorToPresignedUrlFunctionTest {
                                 function.eval(
                                         "default.other",
                                         descriptor.serialize(),
-                                        "png",
                                         Duration.ofHours(1)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("one source table");
@@ -113,29 +111,24 @@ public class DescriptorToPresignedUrlFunctionTest {
         when(catalog.getTable(new Identifier("default", "t"))).thenReturn(table);
         when(table.location()).thenReturn(tableRoot);
         when(table.fileIO()).thenReturn(fileIO);
-        when(fileIO.createBlobPresignedUrl(tableRoot, descriptor, "png", Duration.ofSeconds(1)))
+        when(fileIO.createBlobPresignedUrl(tableRoot, descriptor, Duration.ofSeconds(1)))
                 .thenThrow(new IOException("signing failed"));
 
         DescriptorToPresignedUrlFunction strict =
                 new DescriptorToPresignedUrlFunction("paimon", catalog);
-        assertThat(strict.eval("default.t", null, "png", Duration.ofSeconds(1))).isNull();
-        assertThat(strict.eval("default.t", descriptor.serialize(), null, Duration.ofSeconds(1)))
-                .isNull();
-        assertThat(strict.eval("default.t", descriptor.serialize(), "png", null)).isNull();
+        assertThat(strict.eval("default.t", null, Duration.ofSeconds(1))).isNull();
+        assertThat(strict.eval("default.t", descriptor.serialize(), null)).isNull();
         verify(catalog, never()).getTable(new Identifier("default", "t"));
         assertThatThrownBy(
                         () ->
                                 strict.eval(
-                                        "default.t",
-                                        descriptor.serialize(),
-                                        "png",
-                                        Duration.ofSeconds(1)))
+                                        "default.t", descriptor.serialize(), Duration.ofSeconds(1)))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("signing failed");
 
         TryDescriptorToPresignedUrlFunction tolerant =
                 new TryDescriptorToPresignedUrlFunction("paimon", catalog);
-        assertThat(tolerant.eval("default.t", descriptor.serialize(), "png", Duration.ofSeconds(1)))
+        assertThat(tolerant.eval("default.t", descriptor.serialize(), Duration.ofSeconds(1)))
                 .isNull();
     }
 
@@ -162,17 +155,12 @@ public class DescriptorToPresignedUrlFunctionTest {
         when(catalog.getTable(new Identifier("default", "t"))).thenReturn(table);
         when(table.location()).thenReturn(tableRoot);
         when(table.fileIO()).thenReturn(fileIO);
-        when(fileIO.createBlobPresignedUrl(tableRoot, descriptor, "png", Duration.ofSeconds(1)))
+        when(fileIO.createBlobPresignedUrl(tableRoot, descriptor, Duration.ofSeconds(1)))
                 .thenReturn("https://example");
 
         DescriptorToPresignedUrlFunction function =
                 new DescriptorToPresignedUrlFunction("paimon", catalog);
-        assertThat(
-                        function.eval(
-                                "paimon.default.t",
-                                descriptor.serialize(),
-                                "png",
-                                Duration.ofSeconds(1)))
+        assertThat(function.eval("paimon.default.t", descriptor.serialize(), Duration.ofSeconds(1)))
                 .isEqualTo("https://example");
 
         DescriptorToPresignedUrlFunction crossCatalog =
@@ -182,7 +170,6 @@ public class DescriptorToPresignedUrlFunctionTest {
                                 crossCatalog.eval(
                                         "other.default.t",
                                         descriptor.serialize(),
-                                        "png",
                                         Duration.ofSeconds(1)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("paimon.database.table");

@@ -32,10 +32,9 @@ public class TryDescriptorToPresignedUrlFunction extends DescriptorToPresignedUr
     }
 
     @Override
-    public String eval(
-            String tableName, byte[] descriptorBytes, String extension, Duration validity) {
+    public String eval(String tableName, byte[] descriptorBytes, Duration validity) {
         try {
-            return super.eval(tableName, descriptorBytes, extension, validity);
+            return super.eval(tableName, descriptorBytes, validity);
         } catch (Exception e) {
             return null;
         }

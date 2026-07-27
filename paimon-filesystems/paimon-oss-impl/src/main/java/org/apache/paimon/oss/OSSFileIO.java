@@ -259,15 +259,10 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
 
     @Override
     public String createBlobPresignedUrl(
-            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
-            throws IOException {
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
         try {
             return OSSBlobPresigner.create(
-                    ossClient(new Path(descriptor.uri())),
-                    tableRoot,
-                    descriptor,
-                    extension,
-                    validity);
+                    ossClient(new Path(descriptor.uri())), tableRoot, descriptor, validity);
         } catch (IOException e) {
             throw e;
         } catch (Exception e) {

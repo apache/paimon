@@ -38,7 +38,6 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URL;
-import java.net.URLConnection;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -52,6 +51,7 @@ import java.util.Locale;
 public final class OSSBlobPresigner {
 
     private static final String BLOB_FINGERPRINT_METADATA = "paimon-blob-descriptor-sha256";
+    private static final String BLOB_CONTENT_TYPE = "application/octet-stream";
     private static final String OSS_INTERNAL_ENDPOINT_SUFFIX = "-internal.aliyuncs.com";
     private static final long BLOB_COPY_MIN_PART_SIZE = 100L * 1024 * 1024;
     private static final long MAX_MULTIPART_UPLOAD_PARTS = 10_000;
@@ -60,11 +60,7 @@ public final class OSSBlobPresigner {
     private OSSBlobPresigner() {}
 
     public static String create(
-            OSSClient client,
-            Path tableRoot,
-            BlobDescriptor descriptor,
-            String extension,
-            Duration validity)
+            OSSClient client, Path tableRoot, BlobDescriptor descriptor, Duration validity)
             throws IOException {
         BlobDescriptorUtils.validateTableRoot(tableRoot, descriptor);
         if (validity == null
@@ -74,29 +70,21 @@ public final class OSSBlobPresigner {
             throw new IOException("Blob presigned URL validity must be positive whole seconds.");
         }
 
-        String normalizedExtension = normalizeExtension(extension);
-        String contentType = contentType(normalizedExtension);
         try {
             URI source = new Path(descriptor.uri()).toUri();
             String bucket = source.getAuthority();
             String sourceKey = objectKey(source);
             String fingerprint = sha256Hex(descriptor.serialize());
             int parentEnd = sourceKey.lastIndexOf('/') + 1;
-            String targetKey =
-                    sourceKey.substring(0, parentEnd)
-                            + "_bloburl_"
-                            + fingerprint
-                            + "."
-                            + normalizedExtension;
+            String targetKey = sourceKey.substring(0, parentEnd) + "_bloburl_" + fingerprint;
 
             ObjectMetadata target = headObjectIfExists(client, bucket, targetKey);
-            if (!matches(target, descriptor.length(), contentType, fingerprint)) {
+            if (!matches(target, descriptor.length(), fingerprint)) {
                 ObjectMetadata sourceMetadata = client.headObject(bucket, sourceKey);
                 validateRange(descriptor, sourceMetadata.getContentLength());
-                materialize(
-                        client, bucket, sourceKey, targetKey, descriptor, contentType, fingerprint);
+                materialize(client, bucket, sourceKey, targetKey, descriptor, fingerprint);
                 target = client.headObject(bucket, targetKey);
-                if (!matches(target, descriptor.length(), contentType, fingerprint)) {
+                if (!matches(target, descriptor.length(), fingerprint)) {
                     throw new IOException(
                             "Materialized blob object metadata does not match descriptor.");
                 }
@@ -124,11 +112,10 @@ public final class OSSBlobPresigner {
             String sourceKey,
             String targetKey,
             BlobDescriptor descriptor,
-            String contentType,
             String fingerprint)
             throws Exception {
         ObjectMetadata metadata = new ObjectMetadata();
-        metadata.setContentType(contentType);
+        metadata.setContentType(BLOB_CONTENT_TYPE);
         metadata.addUserMetadata(BLOB_FINGERPRINT_METADATA, fingerprint);
         if (descriptor.length() == 0) {
             metadata.setContentLength(0);
@@ -193,11 +180,10 @@ public final class OSSBlobPresigner {
         }
     }
 
-    private static boolean matches(
-            ObjectMetadata metadata, long length, String contentType, String fingerprint) {
+    private static boolean matches(ObjectMetadata metadata, long length, String fingerprint) {
         return metadata != null
                 && metadata.getContentLength() == length
-                && contentType.equals(metadata.getContentType())
+                && BLOB_CONTENT_TYPE.equals(metadata.getContentType())
                 && fingerprint.equals(metadata.getUserMetadata().get(BLOB_FINGERPRINT_METADATA));
     }
 
@@ -209,28 +195,6 @@ public final class OSSBlobPresigner {
                 || descriptor.length() > sourceLength - descriptor.offset()) {
             throw new IOException("Blob descriptor range is outside the source object.");
         }
-    }
-
-    private static String normalizeExtension(String extension) throws IOException {
-        if (extension == null || extension.isEmpty()) {
-            throw new IOException("Blob file extension must contain only ASCII letters or digits.");
-        }
-        for (int i = 0; i < extension.length(); i++) {
-            char c = extension.charAt(i);
-            if (!(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9')) {
-                throw new IOException(
-                        "Blob file extension must contain only ASCII letters or digits.");
-            }
-        }
-        return extension.toLowerCase(Locale.ROOT);
-    }
-
-    private static String contentType(String extension) throws IOException {
-        String contentType = URLConnection.guessContentTypeFromName("file." + extension);
-        if (contentType == null || "application/octet-stream".equals(contentType)) {
-            throw new IOException("Unknown MIME type for blob file extension: " + extension);
-        }
-        return contentType;
     }
 
     private static String objectKey(URI uri) throws IOException {

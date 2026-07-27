@@ -42,7 +42,7 @@ class PluginFileIOTest {
                 new BlobDescriptor("oss://bucket/table/bucket-0/data.blob", 0, 1);
         Duration validity = Duration.ofMinutes(5);
         ClassLoader original = Thread.currentThread().getContextClassLoader();
-        when(delegate.createBlobPresignedUrl(tableRoot, descriptor, "png", validity))
+        when(delegate.createBlobPresignedUrl(tableRoot, descriptor, validity))
                 .thenAnswer(
                         ignored -> {
                             assertThat(Thread.currentThread().getContextClassLoader())
@@ -50,7 +50,7 @@ class PluginFileIOTest {
                             return "https://example";
                         });
 
-        assertThat(fileIO.createBlobPresignedUrl(tableRoot, descriptor, "png", validity))
+        assertThat(fileIO.createBlobPresignedUrl(tableRoot, descriptor, validity))
                 .isEqualTo("https://example");
         assertThat(fileIO.createdFor).isEqualTo(new Path(descriptor.uri()));
         assertThat(Thread.currentThread().getContextClassLoader()).isSameAs(original);

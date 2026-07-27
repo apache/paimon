@@ -154,12 +154,11 @@ public class RESTTokenFileIO implements FileIO {
 
     @Override
     public String createBlobPresignedUrl(
-            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
-            throws IOException {
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
         if (!path.equals(tableRoot)) {
             throw new IOException("Table root does not match RESTTokenFileIO bound table root.");
         }
-        return fileIO().createBlobPresignedUrl(tableRoot, descriptor, extension, validity);
+        return fileIO().createBlobPresignedUrl(tableRoot, descriptor, validity);
     }
 
     @Override

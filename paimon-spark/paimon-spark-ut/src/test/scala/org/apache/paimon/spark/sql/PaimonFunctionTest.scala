@@ -127,47 +127,47 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
       checkAnswer(
         sql(
           s"SELECT sys.try_descriptor_to_presigned_url(" +
-            s"'$dbName0.url_source', CAST(NULL AS BINARY), 'png', INTERVAL '1' SECOND)"),
+            s"'$dbName0.url_source', CAST(NULL AS BINARY), INTERVAL '1' SECOND)"),
         Row(null))
       checkAnswer(
         sql(
           s"SELECT sys.try_descriptor_to_presigned_url(" +
-            s"'paimon.$dbName0.url_source', X'00', 'png', INTERVAL '1' HOUR)"),
+            s"'paimon.$dbName0.url_source', X'00', INTERVAL '1' HOUR)"),
         Row(null))
 
       intercept[Exception] {
         sql(
           s"SELECT sys.descriptor_to_presigned_url(" +
-            s"'$dbName0.url_source', X'00', 'png', INTERVAL '1' SECOND)").collect()
+            s"'$dbName0.url_source', X'00', INTERVAL '1' SECOND)").collect()
       }
       intercept[Exception] {
         sql(
           s"SELECT sys.descriptor_to_presigned_url(" +
-            s"'$dbName0.url_source', X'$descriptorHex', 'png', " +
+            s"'$dbName0.url_source', X'$descriptorHex', " +
             "INTERVAL '1.000001' SECOND)").collect()
       }
       intercept[Exception] {
         sql(
           s"SELECT sys.try_descriptor_to_presigned_url(" +
-            s"source_table, X'00', 'png', INTERVAL '1' SECOND) " +
+            s"source_table, X'00', INTERVAL '1' SECOND) " +
             s"FROM VALUES ('$dbName0.url_source') AS t(source_table)").collect()
       }
       intercept[Exception] {
         sql(
           s"SELECT sys.try_descriptor_to_presigned_url(" +
             s"CASE WHEN id = 1 THEN '$dbName0.url_source' " +
-            s"ELSE '$dbName0.url_other' END, X'00', 'png', INTERVAL '1' SECOND) " +
+            s"ELSE '$dbName0.url_other' END, X'00', INTERVAL '1' SECOND) " +
             "FROM VALUES (1) AS t(id)").collect()
       }
       intercept[Exception] {
         sql(
           "SELECT sys.try_descriptor_to_presigned_url(" +
-            "CAST(NULL AS STRING), X'00', 'png', INTERVAL '1' SECOND)").collect()
+            "CAST(NULL AS STRING), X'00', INTERVAL '1' SECOND)").collect()
       }
       intercept[Exception] {
         sql(
           s"SELECT sys.try_descriptor_to_presigned_url(" +
-            s"'spark_catalog.$dbName0.url_source', X'00', 'png', " +
+            s"'spark_catalog.$dbName0.url_source', X'00', " +
             "INTERVAL '1' SECOND)").collect()
       }
     }

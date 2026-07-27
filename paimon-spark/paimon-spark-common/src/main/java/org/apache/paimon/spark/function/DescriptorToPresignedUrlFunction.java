@@ -52,9 +52,7 @@ public class DescriptorToPresignedUrlFunction implements ScalarFunction<UTF8Stri
 
     @Override
     public DataType[] inputTypes() {
-        return new DataType[] {
-            DataTypes.StringType, DataTypes.BinaryType, DataTypes.StringType, intervalType
-        };
+        return new DataType[] {DataTypes.StringType, DataTypes.BinaryType, intervalType};
     }
 
     @Override
@@ -62,9 +60,8 @@ public class DescriptorToPresignedUrlFunction implements ScalarFunction<UTF8Stri
         return DataTypes.StringType;
     }
 
-    public UTF8String invoke(
-            UTF8String sourceTable, byte[] descriptor, UTF8String extension, long validityMicros) {
-        if (sourceTable == null || descriptor == null || extension == null) {
+    public UTF8String invoke(UTF8String sourceTable, byte[] descriptor, long validityMicros) {
+        if (sourceTable == null || descriptor == null) {
             return null;
         }
         throw new UnsupportedOperationException(
@@ -91,6 +88,6 @@ public class DescriptorToPresignedUrlFunction implements ScalarFunction<UTF8Stri
 
     @Override
     public String canonicalName() {
-        return "paimon." + name() + "(string, binary, string, interval day to second)";
+        return "paimon." + name() + "(string, binary, interval day to second)";
     }
 }

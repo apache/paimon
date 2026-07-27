@@ -46,9 +46,9 @@ public interface Blob {
 
     SeekableInputStream newInputStream() throws IOException;
 
-    default String toPresignedUrl(
-            FileIO fileIO, Path tableRoot, String extension, Duration validity) throws IOException {
-        return fileIO.createBlobPresignedUrl(tableRoot, toDescriptor(), extension, validity);
+    default String toPresignedUrl(FileIO fileIO, Path tableRoot, Duration validity)
+            throws IOException {
+        return fileIO.createBlobPresignedUrl(tableRoot, toDescriptor(), validity);
     }
 
     static Blob fromData(byte[] data) {

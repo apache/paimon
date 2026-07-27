@@ -633,14 +633,14 @@ public class BlobTableITCase extends CatalogITCaseBase {
                         batchSql(
                                 "SELECT sys.descriptor_to_presigned_url("
                                         + "'default.blob_table_descriptor', "
-                                        + "CAST(NULL AS BYTES), 'png', INTERVAL '1' HOUR)"))
+                                        + "CAST(NULL AS BYTES), INTERVAL '1' HOUR)"))
                 .containsExactly(Row.of((Object) null));
         assertThat(
                         batchSql(
                                 "SELECT sys.try_descriptor_to_presigned_url("
                                         + "'default.blob_table_descriptor', "
                                         + "sys.path_to_descriptor('file:///tmp/blob'), "
-                                        + "'png', INTERVAL '1' HOUR)"))
+                                        + "INTERVAL '1' HOUR)"))
                 .containsExactly(Row.of((Object) null));
 
         assertThatThrownBy(
@@ -649,7 +649,7 @@ public class BlobTableITCase extends CatalogITCaseBase {
                                         "SELECT sys.descriptor_to_presigned_url("
                                                 + "'default.blob_table_descriptor', "
                                                 + "sys.path_to_descriptor('file:///tmp/blob'), "
-                                                + "'png', INTERVAL '1' HOUR)"))
+                                                + "INTERVAL '1' HOUR)"))
                 .hasRootCauseInstanceOf(UnsupportedOperationException.class)
                 .hasStackTraceContaining("does not support creating blob presigned URLs");
     }

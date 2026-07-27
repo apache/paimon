@@ -264,8 +264,7 @@ public interface FileIO extends Serializable, Closeable {
     }
 
     default String createBlobPresignedUrl(
-            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
-            throws IOException {
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
         throw new UnsupportedOperationException(
                 getClass().getName() + " does not support creating blob presigned URLs.");
     }

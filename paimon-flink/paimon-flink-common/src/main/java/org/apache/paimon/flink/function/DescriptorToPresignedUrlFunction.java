@@ -86,17 +86,16 @@ public class DescriptorToPresignedUrlFunction extends ScalarFunction
         }
     }
 
-    public String eval(
-            String tableName, byte[] descriptorBytes, String extension, Duration validity)
+    public String eval(String tableName, byte[] descriptorBytes, Duration validity)
             throws Exception {
         bindSourceTable(tableName);
-        if (descriptorBytes == null || extension == null || validity == null) {
+        if (descriptorBytes == null || validity == null) {
             return null;
         }
 
         loadTable();
         return fileIO.createBlobPresignedUrl(
-                tableRoot, BlobDescriptor.deserialize(descriptorBytes), extension, validity);
+                tableRoot, BlobDescriptor.deserialize(descriptorBytes), validity);
     }
 
     @Override
@@ -108,7 +107,6 @@ public class DescriptorToPresignedUrlFunction extends ScalarFunction
                                         InputTypeStrategies.explicit(DataTypes.STRING()),
                                         InputTypeStrategies.LITERAL),
                                 InputTypeStrategies.explicit(DataTypes.BYTES()),
-                                InputTypeStrategies.explicit(DataTypes.STRING()),
                                 InputTypeStrategies.logical(LogicalTypeRoot.INTERVAL_DAY_TIME)))
                 .outputTypeStrategy(TypeStrategies.explicit(DataTypes.STRING()))
                 .build();

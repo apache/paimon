@@ -26,7 +26,6 @@ import org.apache.paimon.utils.BlobDescriptorUtils;
 import org.apache.spark.sql.connector.catalog.functions.BoundFunction;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructType;
-import org.apache.spark.unsafe.types.UTF8String;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -52,7 +51,6 @@ class DescriptorToPresignedUrlFunctionTest {
                 new StructType()
                         .add("source_table", DataTypes.StringType)
                         .add("descriptor", DataTypes.BinaryType)
-                        .add("extension", DataTypes.StringType)
                         .add("validity", DataTypes.createDayTimeIntervalType());
 
         BoundFunction strict = new DescriptorToPresignedUrlUnbound(false).bind(inputType);
@@ -65,7 +63,6 @@ class DescriptorToPresignedUrlFunctionTest {
                 .containsExactly(
                         DataTypes.StringType,
                         DataTypes.BinaryType,
-                        DataTypes.StringType,
                         DataTypes.createDayTimeIntervalType());
         assertThatThrownBy(
                         () ->
@@ -73,8 +70,7 @@ class DescriptorToPresignedUrlFunctionTest {
                                         .bind(
                                                 new StructType()
                                                         .add("source_table", DataTypes.StringType)
-                                                        .add("descriptor", DataTypes.BinaryType)
-                                                        .add("extension", DataTypes.StringType)))
+                                                        .add("descriptor", DataTypes.BinaryType)))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
@@ -84,10 +80,8 @@ class DescriptorToPresignedUrlFunctionTest {
                 new ResolvedDescriptorToPresignedUrlFunction(
                         new TestingFileIO(), TABLE_ROOT, false);
 
-        assertThat(
-                        function.invoke(
-                                DESCRIPTOR.serialize(), UTF8String.fromString("png"), 3_000_000L))
-                .hasToString("https://example.test/data.png?validity=3&offset=10&length=20");
+        assertThat(function.invoke(DESCRIPTOR.serialize(), 3_000_000L))
+                .hasToString("https://example.test/data?validity=3&offset=10&length=20");
         assertThat(function.isDeterministic()).isFalse();
     }
 
@@ -97,8 +91,7 @@ class DescriptorToPresignedUrlFunctionTest {
                 new ResolvedDescriptorToPresignedUrlFunction(
                         new TestingFileIO(), TABLE_ROOT, false);
 
-        assertThat(function.invoke(null, UTF8String.fromString("png"), 1_000_000L)).isNull();
-        assertThat(function.invoke(DESCRIPTOR.serialize(), null, 1_000_000L)).isNull();
+        assertThat(function.invoke(null, 1_000_000L)).isNull();
     }
 
     @Test
@@ -107,18 +100,10 @@ class DescriptorToPresignedUrlFunctionTest {
                 new ResolvedDescriptorToPresignedUrlFunction(
                         new TestingFileIO(), TABLE_ROOT, false);
 
-        assertThatThrownBy(
-                        () ->
-                                function.invoke(
-                                        DESCRIPTOR.serialize(),
-                                        UTF8String.fromString("png"),
-                                        1_000_001L))
+        assertThatThrownBy(() -> function.invoke(DESCRIPTOR.serialize(), 1_000_001L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("whole seconds");
-        assertThatThrownBy(
-                        () ->
-                                function.invoke(
-                                        DESCRIPTOR.serialize(), UTF8String.fromString("png"), 0L))
+        assertThatThrownBy(() -> function.invoke(DESCRIPTOR.serialize(), 0L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("positive");
     }
@@ -128,12 +113,8 @@ class DescriptorToPresignedUrlFunctionTest {
         ResolvedDescriptorToPresignedUrlFunction function =
                 new ResolvedDescriptorToPresignedUrlFunction(new TestingFileIO(), TABLE_ROOT, true);
 
-        assertThat(function.invoke(new byte[] {1}, UTF8String.fromString("png"), 1_000_000L))
-                .isNull();
-        assertThat(
-                        function.invoke(
-                                DESCRIPTOR.serialize(), UTF8String.fromString("png"), 1_000_001L))
-                .isNull();
+        assertThat(function.invoke(new byte[] {1}, 1_000_000L)).isNull();
+        assertThat(function.invoke(DESCRIPTOR.serialize(), 1_000_001L)).isNull();
     }
 
     @Test
@@ -143,12 +124,7 @@ class DescriptorToPresignedUrlFunctionTest {
                         new TestingFileIO(), TABLE_ROOT, false);
         BlobDescriptor other = new BlobDescriptor("oss://bucket/other/bucket-0/data.blob", 0, 1);
 
-        assertThatThrownBy(
-                        () ->
-                                function.invoke(
-                                        other.serialize(),
-                                        UTF8String.fromString("png"),
-                                        1_000_000L))
+        assertThatThrownBy(() -> function.invoke(other.serialize(), 1_000_000L))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("under table root");
     }
@@ -161,10 +137,8 @@ class DescriptorToPresignedUrlFunctionTest {
 
         ResolvedDescriptorToPresignedUrlFunction restored = roundTrip(original);
 
-        assertThat(
-                        restored.invoke(
-                                DESCRIPTOR.serialize(), UTF8String.fromString("jpg"), 2_000_000L))
-                .hasToString("https://example.test/data.jpg?validity=2&offset=10&length=20");
+        assertThat(restored.invoke(DESCRIPTOR.serialize(), 2_000_000L))
+                .hasToString("https://example.test/data?validity=2&offset=10&length=20");
     }
 
     private ResolvedDescriptorToPresignedUrlFunction roundTrip(
@@ -185,12 +159,9 @@ class DescriptorToPresignedUrlFunctionTest {
 
         @Override
         public String createBlobPresignedUrl(
-                Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
-                throws IOException {
+                Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
             BlobDescriptorUtils.validateTableRoot(tableRoot, descriptor);
-            return "https://example.test/data."
-                    + extension
-                    + "?validity="
+            return "https://example.test/data?validity="
                     + validity.getSeconds()
                     + "&offset="
                     + descriptor.offset()

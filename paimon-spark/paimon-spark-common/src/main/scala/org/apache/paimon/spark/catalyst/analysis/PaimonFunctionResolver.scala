@@ -80,10 +80,10 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
 
   private def resolveDescriptorToPresignedUrl(u: UnresolvedFunction): Expression = {
     val functionName = u.nameParts.last
-    if (u.arguments.length != 4) {
+    if (u.arguments.length != 3) {
       throw new UnsupportedOperationException(
-        s"Function '$functionName' requires 4 arguments " +
-          s"(sourceTable STRING, descriptor BINARY, extension STRING, " +
+        s"Function '$functionName' requires 3 arguments " +
+          s"(sourceTable STRING, descriptor BINARY, " +
           s"validity INTERVAL DAY TO SECOND), but found ${u.arguments.length}")
     }
 
@@ -93,11 +93,10 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
     }
 
     val descriptor = castNullable(u.arguments(1), BinaryType, "descriptor")
-    val extension = castNullable(u.arguments(2), StringType, "extension")
     val intervalType = DayTimeIntervalType.DEFAULT
-    val validity = u.arguments(3).dataType match {
-      case _: DayTimeIntervalType => Cast(u.arguments(3), intervalType)
-      case NullType => Cast(u.arguments(3), intervalType)
+    val validity = u.arguments(2).dataType match {
+      case _: DayTimeIntervalType => Cast(u.arguments(2), intervalType)
+      case NullType => Cast(u.arguments(2), intervalType)
       case other =>
         throw new UnsupportedOperationException(
           s"validity must be INTERVAL DAY TO SECOND type, but found ${other.simpleString}")
@@ -110,7 +109,6 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
       functionCatalog(u.nameParts),
       sourceTable,
       descriptor,
-      extension,
       validity,
       ignoreErrors)
   }

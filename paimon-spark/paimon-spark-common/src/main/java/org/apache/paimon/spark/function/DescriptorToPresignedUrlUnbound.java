@@ -47,21 +47,20 @@ public class DescriptorToPresignedUrlUnbound implements UnboundFunction {
     @Override
     public BoundFunction bind(StructType inputType) {
         StructField[] fields = inputType.fields();
-        if (fields.length != 4) {
+        if (fields.length != 3) {
             throw new UnsupportedOperationException(
                     "Function '"
                             + name()
-                            + "' requires 4 arguments "
-                            + "(sourceTable STRING, descriptor BINARY, extension STRING, "
+                            + "' requires 3 arguments "
+                            + "(sourceTable STRING, descriptor BINARY, "
                             + "validity INTERVAL DAY TO SECOND), but found "
                             + fields.length);
         }
         requireType(fields, 0, StringType.class, "first", "STRING");
         requireType(fields, 1, BinaryType.class, "second", "BINARY");
-        requireType(fields, 2, StringType.class, "third", "STRING");
-        requireType(fields, 3, DayTimeIntervalType.class, "fourth", "INTERVAL DAY TO SECOND");
+        requireType(fields, 2, DayTimeIntervalType.class, "third", "INTERVAL DAY TO SECOND");
         return new DescriptorToPresignedUrlFunction(
-                ignoreErrors, catalogName, (DayTimeIntervalType) fields[3].dataType());
+                ignoreErrors, catalogName, (DayTimeIntervalType) fields[2].dataType());
     }
 
     private void requireType(

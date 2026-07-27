@@ -51,7 +51,7 @@ class RESTTokenFileIOTest {
         Duration validity = Duration.ofMinutes(5);
         FileIO delegate = mock(FileIO.class);
         when(delegate.exists(any())).thenReturn(true);
-        when(delegate.createBlobPresignedUrl(tableRoot, descriptor, "png", validity))
+        when(delegate.createBlobPresignedUrl(tableRoot, descriptor, validity))
                 .thenReturn("https://example");
         FileIOLoader loader = mock(FileIOLoader.class);
         when(loader.load(any())).thenReturn(delegate);
@@ -67,17 +67,14 @@ class RESTTokenFileIOTest {
                         identifier,
                         tableRoot);
 
-        assertThat(fileIO.createBlobPresignedUrl(tableRoot, descriptor, "png", validity))
+        assertThat(fileIO.createBlobPresignedUrl(tableRoot, descriptor, validity))
                 .isEqualTo("https://example");
-        verify(delegate).createBlobPresignedUrl(tableRoot, descriptor, "png", validity);
+        verify(delegate).createBlobPresignedUrl(tableRoot, descriptor, validity);
 
         assertThatThrownBy(
                         () ->
                                 fileIO.createBlobPresignedUrl(
-                                        new Path("oss://bucket/other"),
-                                        descriptor,
-                                        "png",
-                                        validity))
+                                        new Path("oss://bucket/other"), descriptor, validity))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("bound table root");
     }

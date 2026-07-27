@@ -155,9 +155,8 @@ public class CachingFileIO implements FileIO {
 
     @Override
     public String createBlobPresignedUrl(
-            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
-            throws IOException {
-        return delegate.createBlobPresignedUrl(tableRoot, descriptor, extension, validity);
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
+        return delegate.createBlobPresignedUrl(tableRoot, descriptor, validity);
     }
 
     @Override

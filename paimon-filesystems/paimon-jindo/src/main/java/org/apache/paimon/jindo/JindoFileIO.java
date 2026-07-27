@@ -213,9 +213,8 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
 
     @Override
     public String createBlobPresignedUrl(
-            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
-            throws IOException {
-        return OSSBlobPresigner.create(blobClient(), tableRoot, descriptor, extension, validity);
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
+        return OSSBlobPresigner.create(blobClient(), tableRoot, descriptor, validity);
     }
 
     private synchronized OSSClient blobClient() {

@@ -46,7 +46,6 @@ object ReplacePaimonFunctions {
       functionCatalog: CatalogPlugin,
       sourceTable: String,
       descriptor: Expression,
-      extension: Expression,
       validity: Expression,
       ignoreErrors: Boolean): Expression = {
     if (!functionCatalog.isInstanceOf[SparkBaseCatalog]) {
@@ -82,7 +81,7 @@ object ReplacePaimonFunctions {
 
     ApplyFunctionExpression(
       new ResolvedDescriptorToPresignedUrlFunction(fileIO, dataTable.location(), ignoreErrors),
-      Seq(descriptor, extension, validity))
+      Seq(descriptor, validity))
   }
 
   def resolveBlobView(
@@ -189,7 +188,7 @@ case class ReplacePaimonFunctions(spark: SparkSession) extends Rule[LogicalPlan]
   private def replaceDescriptorToPresignedUrl(
       arguments: Seq[Expression],
       function: DescriptorToPresignedUrlFunction): Expression = {
-    assert(arguments.size == 4)
+    assert(arguments.size == 3)
     val sourceTable = literalString(arguments(0), "sourceTable")
     if (sourceTable == null) {
       throw new UnsupportedOperationException("sourceTable must not be null")
@@ -199,11 +198,10 @@ case class ReplacePaimonFunctions(spark: SparkSession) extends Rule[LogicalPlan]
     }
 
     val descriptor = castNullable(arguments(1), BinaryType, "descriptor")
-    val extension = castNullable(arguments(2), StringType, "extension")
     val intervalType = DayTimeIntervalType.DEFAULT
-    val validity = arguments(3).dataType match {
-      case _: DayTimeIntervalType => Cast(arguments(3), intervalType)
-      case NullType => Cast(arguments(3), intervalType)
+    val validity = arguments(2).dataType match {
+      case _: DayTimeIntervalType => Cast(arguments(2), intervalType)
+      case NullType => Cast(arguments(2), intervalType)
       case other =>
         throw new UnsupportedOperationException(
           s"validity must be INTERVAL DAY TO SECOND type, but found ${other.simpleString}")
@@ -217,7 +215,6 @@ case class ReplacePaimonFunctions(spark: SparkSession) extends Rule[LogicalPlan]
       functionCatalog,
       sourceTable,
       descriptor,
-      extension,
       validity,
       function.ignoreErrors())
   }

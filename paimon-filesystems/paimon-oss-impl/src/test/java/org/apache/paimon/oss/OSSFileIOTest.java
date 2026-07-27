@@ -79,7 +79,7 @@ public class OSSFileIOTest {
         source.setContentLength(100);
         ObjectMetadata target = new ObjectMetadata();
         target.setContentLength(20);
-        target.setContentType("image/png");
+        target.setContentType("application/octet-stream");
         target.addUserMetadata("paimon-blob-descriptor-sha256", fingerprint);
         when(client.headObject(eq("bucket"), contains("_bloburl_")))
                 .thenThrow(missingObject())
@@ -104,20 +104,17 @@ public class OSSFileIOTest {
         String url =
                 new TestOSSFileIO(client)
                         .createBlobPresignedUrl(
-                                new Path("oss://bucket/table"),
-                                descriptor,
-                                "PNG",
-                                Duration.ofMinutes(5));
+                                new Path("oss://bucket/table"), descriptor, Duration.ofMinutes(5));
 
         assertThat(url)
                 .matches(
                         "https://bucket\\.oss-cn-hangzhou\\.aliyuncs\\.com/"
-                                + "table/bucket-0/_bloburl_[0-9a-f]{64}\\.png\\?Signature=test");
+                                + "table/bucket-0/_bloburl_[0-9a-f]{64}\\?Signature=test");
         ArgumentCaptor<InitiateMultipartUploadRequest> initiateCaptor =
                 ArgumentCaptor.forClass(InitiateMultipartUploadRequest.class);
         verify(client).initiateMultipartUpload(initiateCaptor.capture());
         assertThat(initiateCaptor.getValue().getObjectMetadata().getContentType())
-                .isEqualTo("image/png");
+                .isEqualTo("application/octet-stream");
         assertThat(initiateCaptor.getValue().getObjectMetadata().getUserMetadata())
                 .containsEntry("paimon-blob-descriptor-sha256", fingerprint);
 
@@ -139,16 +136,13 @@ public class OSSFileIOTest {
         BlobDescriptor descriptor =
                 new BlobDescriptor("oss://bucket/table/bucket-0/source.blob", 10, 20);
         when(client.headObject(eq("bucket"), contains("_bloburl_")))
-                .thenReturn(matchingMetadata(descriptor, "image/jpeg"));
+                .thenReturn(matchingMetadata(descriptor));
         stubPresigning(client);
 
         String url =
                 new TestOSSFileIO(client)
                         .createBlobPresignedUrl(
-                                new Path("oss://bucket/table"),
-                                descriptor,
-                                "jpg",
-                                Duration.ofMinutes(5));
+                                new Path("oss://bucket/table"), descriptor, Duration.ofMinutes(5));
 
         assertThat(url).startsWith("https://bucket.oss-cn-hangzhou.aliyuncs.com/");
         verify(client, never()).headObject("bucket", "table/bucket-0/source.blob");
@@ -162,7 +156,7 @@ public class OSSFileIOTest {
         BlobDescriptor descriptor =
                 new BlobDescriptor("oss://bucket/table/-internal.aliyuncs.com/source.blob", 0, 1);
         when(client.headObject(eq("bucket"), contains("_bloburl_")))
-                .thenReturn(matchingMetadata(descriptor, "image/png"));
+                .thenReturn(matchingMetadata(descriptor));
         when(client.getEndpoint())
                 .thenReturn(URI.create("https://oss-cn-hangzhou-internal.aliyuncs.com"));
         when(client.generatePresignedUrl(eq("bucket"), anyString(), any(), eq(HttpMethod.GET)))
@@ -179,15 +173,13 @@ public class OSSFileIOTest {
                                 .createBlobPresignedUrl(
                                         new Path("oss://bucket/table"),
                                         descriptor,
-                                        "png",
                                         Duration.ofMinutes(5)));
 
         assertThat(url.getHost()).isEqualTo("bucket.oss-cn-hangzhou.aliyuncs.com");
         assertThat(url.getPath())
                 .isEqualTo(
                         "/table/-internal.aliyuncs.com/_bloburl_"
-                                + sha256Hex(descriptor.serialize())
-                                + ".png");
+                                + sha256Hex(descriptor.serialize()));
         assertThat(url.getQuery()).isEqualTo("Signature=test");
     }
 
@@ -200,14 +192,14 @@ public class OSSFileIOTest {
         source.setContentLength(Long.MAX_VALUE);
         when(client.headObject(eq("bucket"), contains("_bloburl_")))
                 .thenThrow(missingObject())
-                .thenReturn(matchingMetadata(descriptor, "image/png"));
+                .thenReturn(matchingMetadata(descriptor));
         when(client.headObject("bucket", "table/source.blob")).thenReturn(source);
         stubMultipartUpload(client);
         stubPresigning(client);
 
         new TestOSSFileIO(client)
                 .createBlobPresignedUrl(
-                        new Path("oss://bucket/table"), descriptor, "png", Duration.ofMinutes(5));
+                        new Path("oss://bucket/table"), descriptor, Duration.ofMinutes(5));
 
         ArgumentCaptor<UploadPartCopyRequest> captor =
                 ArgumentCaptor.forClass(UploadPartCopyRequest.class);
@@ -224,13 +216,13 @@ public class OSSFileIOTest {
         source.setContentLength(10);
         when(client.headObject(eq("bucket"), contains("_bloburl_")))
                 .thenThrow(missingObject())
-                .thenReturn(matchingMetadata(descriptor, "image/png"));
+                .thenReturn(matchingMetadata(descriptor));
         when(client.headObject("bucket", "table/source.blob")).thenReturn(source);
         stubPresigning(client);
 
         new TestOSSFileIO(client)
                 .createBlobPresignedUrl(
-                        new Path("oss://bucket/table"), descriptor, "png", Duration.ofMinutes(5));
+                        new Path("oss://bucket/table"), descriptor, Duration.ofMinutes(5));
 
         verify(client)
                 .putObject(
@@ -260,7 +252,6 @@ public class OSSFileIOTest {
                                         .createBlobPresignedUrl(
                                                 new Path("oss://bucket/table"),
                                                 descriptor,
-                                                "png",
                                                 Duration.ofMinutes(5)))
                 .isInstanceOf(java.io.IOException.class);
         ArgumentCaptor<AbortMultipartUploadRequest> captor =
@@ -275,7 +266,7 @@ public class OSSFileIOTest {
         BlobDescriptor descriptor = new BlobDescriptor("oss://bucket/table/source.blob", 0, 20);
         ObjectMetadata source = new ObjectMetadata();
         source.setContentLength(20);
-        ObjectMetadata wrongTarget = matchingMetadata(descriptor, "image/png");
+        ObjectMetadata wrongTarget = matchingMetadata(descriptor);
         wrongTarget.setContentLength(19);
         when(client.headObject(eq("bucket"), contains("_bloburl_")))
                 .thenThrow(missingObject())
@@ -289,7 +280,6 @@ public class OSSFileIOTest {
                                         .createBlobPresignedUrl(
                                                 new Path("oss://bucket/table"),
                                                 descriptor,
-                                                "png",
                                                 Duration.ofMinutes(5)))
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("metadata does not match");
@@ -305,26 +295,13 @@ public class OSSFileIOTest {
         Path root = new Path("oss://bucket/table");
 
         assertThatThrownBy(
-                        () ->
-                                fileIO.createBlobPresignedUrl(
-                                        root, descriptor, ".png", Duration.ofSeconds(1)))
-                .isInstanceOf(java.io.IOException.class);
-        assertThatThrownBy(
-                        () ->
-                                fileIO.createBlobPresignedUrl(
-                                        root, descriptor, "unknown", Duration.ofSeconds(1)))
-                .isInstanceOf(java.io.IOException.class);
-        assertThatThrownBy(
-                        () ->
-                                fileIO.createBlobPresignedUrl(
-                                        root, descriptor, "png", Duration.ofMillis(1)))
+                        () -> fileIO.createBlobPresignedUrl(root, descriptor, Duration.ofMillis(1)))
                 .isInstanceOf(java.io.IOException.class);
         assertThatThrownBy(
                         () ->
                                 fileIO.createBlobPresignedUrl(
                                         new Path("oss://bucket/other"),
                                         descriptor,
-                                        "png",
                                         Duration.ofSeconds(1)))
                 .isInstanceOf(java.io.IOException.class);
     }
@@ -341,23 +318,23 @@ public class OSSFileIOTest {
     public void testCreateBlobPresignedUrlRejectsInvalidTarget() {
         assertInvalidPresignedUrl(
                 "https://oss-cn-hangzhou.aliyuncs.com",
-                "http://bucket.oss-cn-hangzhou.aliyuncs.com/table/_bloburl_hash.png");
+                "http://bucket.oss-cn-hangzhou.aliyuncs.com/table/_bloburl_hash");
         assertInvalidPresignedUrl(
                 "https://oss-cn-hangzhou.aliyuncs.com",
-                "https://other.oss-cn-hangzhou.aliyuncs.com/table/_bloburl_hash.png");
+                "https://other.oss-cn-hangzhou.aliyuncs.com/table/_bloburl_hash");
         assertInvalidPresignedUrl(
                 "https://oss-cn-hangzhou.aliyuncs.com",
                 "https://bucket.oss-cn-hangzhou.aliyuncs.com/table/other.png");
         assertInvalidPresignedUrl(
                 "http://oss-cn-hangzhou.aliyuncs.com",
-                "https://bucket.oss-cn-hangzhou.aliyuncs.com/table/_bloburl_hash.png");
+                "https://bucket.oss-cn-hangzhou.aliyuncs.com/table/_bloburl_hash");
     }
 
     private static void assertInvalidPresignedUrl(String endpoint, String generatedUrl) {
         OSSClient client = mock(OSSClient.class);
         BlobDescriptor descriptor = new BlobDescriptor("oss://bucket/table/source.blob", 0, 1);
         when(client.headObject(eq("bucket"), contains("_bloburl_")))
-                .thenReturn(matchingMetadata(descriptor, "image/png"));
+                .thenReturn(matchingMetadata(descriptor));
         when(client.getEndpoint()).thenReturn(URI.create(endpoint));
         when(client.generatePresignedUrl(eq("bucket"), anyString(), any(), eq(HttpMethod.GET)))
                 .thenReturn(presignedUrl(generatedUrl));
@@ -368,7 +345,6 @@ public class OSSFileIOTest {
                                         .createBlobPresignedUrl(
                                                 new Path("oss://bucket/table"),
                                                 descriptor,
-                                                "png",
                                                 Duration.ofMinutes(5)))
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("invalid target");
@@ -389,18 +365,17 @@ public class OSSFileIOTest {
                                         .createBlobPresignedUrl(
                                                 new Path("oss://bucket/table"),
                                                 descriptor,
-                                                "png",
                                                 Duration.ofMinutes(5)))
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("range");
         verify(client, never()).initiateMultipartUpload(any());
     }
 
-    private static ObjectMetadata matchingMetadata(BlobDescriptor descriptor, String contentType) {
+    private static ObjectMetadata matchingMetadata(BlobDescriptor descriptor) {
         try {
             ObjectMetadata metadata = new ObjectMetadata();
             metadata.setContentLength(descriptor.length());
-            metadata.setContentType(contentType);
+            metadata.setContentType("application/octet-stream");
             metadata.addUserMetadata(
                     "paimon-blob-descriptor-sha256", sha256Hex(descriptor.serialize()));
             return metadata;

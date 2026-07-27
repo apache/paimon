@@ -100,13 +100,11 @@ public abstract class PluginFileIO implements FileIO, HadoopOptionsProvider {
 
     @Override
     public String createBlobPresignedUrl(
-            Path tableRoot, BlobDescriptor descriptor, String extension, Duration validity)
-            throws IOException {
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
         return wrap(
                 () ->
                         fileIO(new Path(descriptor.uri()))
-                                .createBlobPresignedUrl(
-                                        tableRoot, descriptor, extension, validity));
+                                .createBlobPresignedUrl(tableRoot, descriptor, validity));
     }
 
     private FileIO fileIO(Path path) throws IOException {

@@ -100,12 +100,11 @@ public class BlobTest {
         FileIO fileIO = mock(FileIO.class);
         Path tableRoot = new Path("oss://bucket/table");
         Duration validity = Duration.ofHours(1);
-        when(fileIO.createBlobPresignedUrl(tableRoot, descriptor, "jpg", validity))
+        when(fileIO.createBlobPresignedUrl(tableRoot, descriptor, validity))
                 .thenReturn("https://example");
 
-        assertThat(blob.toPresignedUrl(fileIO, tableRoot, "jpg", validity))
-                .isEqualTo("https://example");
-        verify(fileIO).createBlobPresignedUrl(tableRoot, descriptor, "jpg", validity);
+        assertThat(blob.toPresignedUrl(fileIO, tableRoot, validity)).isEqualTo("https://example");
+        verify(fileIO).createBlobPresignedUrl(tableRoot, descriptor, validity);
     }
 
     @Test
@@ -118,7 +117,6 @@ public class BlobTest {
                                         .toPresignedUrl(
                                                 fileIO,
                                                 new Path("oss://bucket/table"),
-                                                "jpg",
                                                 Duration.ofHours(1)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("can not convert to descriptor");

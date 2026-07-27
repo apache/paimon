@@ -53,9 +53,7 @@ public class ResolvedDescriptorToPresignedUrlFunction
 
     @Override
     public DataType[] inputTypes() {
-        return new DataType[] {
-            DataTypes.BinaryType, DataTypes.StringType, DataTypes.createDayTimeIntervalType()
-        };
+        return new DataType[] {DataTypes.BinaryType, DataTypes.createDayTimeIntervalType()};
     }
 
     @Override
@@ -63,9 +61,8 @@ public class ResolvedDescriptorToPresignedUrlFunction
         return DataTypes.StringType;
     }
 
-    public UTF8String invoke(byte[] descriptor, UTF8String extension, long validityMicros)
-            throws IOException {
-        if (descriptor == null || extension == null) {
+    public UTF8String invoke(byte[] descriptor, long validityMicros) throws IOException {
+        if (descriptor == null) {
             return null;
         }
 
@@ -73,8 +70,7 @@ public class ResolvedDescriptorToPresignedUrlFunction
             Duration validity = validity(validityMicros);
             BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(descriptor);
             return UTF8String.fromString(
-                    fileIO.createBlobPresignedUrl(
-                            tableRoot, blobDescriptor, extension.toString(), validity));
+                    fileIO.createBlobPresignedUrl(tableRoot, blobDescriptor, validity));
         } catch (Exception e) {
             if (ignoreErrors) {
                 return null;
@@ -91,11 +87,11 @@ public class ResolvedDescriptorToPresignedUrlFunction
 
     @Override
     public UTF8String produceResult(InternalRow input) {
-        if (input.isNullAt(0) || input.isNullAt(1) || input.isNullAt(2)) {
+        if (input.isNullAt(0) || input.isNullAt(1)) {
             return null;
         }
         try {
-            return invoke(input.getBinary(0), input.getUTF8String(1), input.getLong(2));
+            return invoke(input.getBinary(0), input.getLong(1));
         } catch (IOException e) {
             ExceptionUtils.rethrow(e);
             return null;

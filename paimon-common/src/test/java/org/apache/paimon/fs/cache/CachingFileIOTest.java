@@ -67,12 +67,12 @@ class CachingFileIOTest {
         BlobDescriptor descriptor =
                 new BlobDescriptor("oss://bucket/table/bucket-0/data.blob", 0, 1);
         Duration validity = Duration.ofMinutes(5);
-        when(delegate.createBlobPresignedUrl(tableRoot, descriptor, "png", validity))
+        when(delegate.createBlobPresignedUrl(tableRoot, descriptor, validity))
                 .thenReturn("https://example");
 
-        assertThat(cachingIO.createBlobPresignedUrl(tableRoot, descriptor, "png", validity))
+        assertThat(cachingIO.createBlobPresignedUrl(tableRoot, descriptor, validity))
                 .isEqualTo("https://example");
-        verify(delegate).createBlobPresignedUrl(tableRoot, descriptor, "png", validity);
+        verify(delegate).createBlobPresignedUrl(tableRoot, descriptor, validity);
     }
 
     private CachingFileIO newCachingFileIO(

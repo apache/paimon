@@ -157,12 +157,12 @@ public class ResolvingFileIOTest {
         BlobDescriptor descriptor =
                 new BlobDescriptor("oss://bucket/table/bucket-0/data.blob", 0, 1);
         Duration validity = Duration.ofMinutes(5);
-        when(delegate.createBlobPresignedUrl(tableRoot, descriptor, "png", validity))
+        when(delegate.createBlobPresignedUrl(tableRoot, descriptor, validity))
                 .thenReturn("https://example");
 
         assertEquals(
                 "https://example",
-                resolvingFileIO.createBlobPresignedUrl(tableRoot, descriptor, "png", validity));
-        verify(delegate).createBlobPresignedUrl(tableRoot, descriptor, "png", validity);
+                resolvingFileIO.createBlobPresignedUrl(tableRoot, descriptor, validity));
+        verify(delegate).createBlobPresignedUrl(tableRoot, descriptor, validity);
     }
 }
