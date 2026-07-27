@@ -47,6 +47,24 @@ public class SparkConnectorOptions {
                             "Parallelism used to repartition a single-partition LIMIT input before "
                                     + "executing a lateral vector search.");
 
+    public static final ConfigOption<Boolean> VECTOR_SEARCH_LATERAL_JOIN_DISTRIBUTED_ENABLED =
+            key("vector-search.lateral-join.distributed.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to distribute lateral batch vector search across compatible "
+                                    + "vector index split groups. Unsupported plans fall back to "
+                                    + "the local batch search path.");
+
+    public static final ConfigOption<Integer>
+            VECTOR_SEARCH_LATERAL_JOIN_DISTRIBUTED_MAX_SPLIT_GROUPS =
+                    key("vector-search.lateral-join.distributed.max-split-groups")
+                            .intType()
+                            .defaultValue(16)
+                            .withDescription(
+                                    "Maximum number of independently searched vector index split "
+                                            + "groups for distributed lateral search.");
+
     public static final ConfigOption<Boolean> MERGE_SCHEMA =
             key("write.merge-schema")
                     .booleanType()

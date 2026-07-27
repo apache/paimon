@@ -19,10 +19,14 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.{BinaryString, GenericRow, Timestamp}
+import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory
 import org.apache.paimon.manifest.ManifestCommittable
+import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.spark.catalyst.plans.logical.{LateralVectorSearch, PaimonTableValuedFunctions}
 import org.apache.paimon.spark.execution.LateralVectorSearchExec
+import org.apache.paimon.table.source.IndexVectorSearchSplit
 import org.apache.paimon.utils.DateTimeUtils
 
 import org.apache.spark.sql.{DataFrame, Row}
@@ -34,7 +38,101 @@ import org.apache.spark.sql.execution.joins.BroadcastHashJoinExec
 import java.time.LocalDateTime
 import java.util.Collections
 
+import scala.collection.JavaConverters._
+
 class TableValuedFunctionsTest extends PaimonHiveTestBase with AdaptiveSparkPlanHelper {
+
+  test("distributed lateral vector search matches local results across index splits") {
+    withTable("distributed_vector_search_source") {
+      spark.sql("""
+                  |CREATE TABLE distributed_vector_search_source (
+                  |  id INT,
+                  |  v ARRAY<FLOAT>,
+                  |  pt STRING)
+                  |USING paimon
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '2',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true',
+                  |  'test.vector.dimension' = '2')
+                  |PARTITIONED BY (pt)
+                  |""".stripMargin)
+      spark.sql("""
+                  |INSERT INTO distributed_vector_search_source VALUES
+                  |  (0, array(1.0f, 0.0f), 'p0'),
+                  |  (1, array(0.9f, 0.1f), 'p0'),
+                  |  (2, array(0.0f, 1.0f), 'p0'),
+                  |  (3, array(0.1f, 0.9f), 'p1'),
+                  |  (4, array(0.8f, 0.2f), 'p1'),
+                  |  (5, array(0.2f, 0.8f), 'p1'),
+                  |  (6, array(1.0f, 0.0f), 'p2')
+                  |""".stripMargin)
+      spark
+        .sql(
+          s"CALL sys.create_global_index(" +
+            s"table => '$hiveDbName.distributed_vector_search_source', " +
+            s"index_column => 'v', " +
+            s"index_type => '${TestVectorGlobalIndexerFactory.IDENTIFIER}')")
+        .collect()
+
+      val table = loadTable("distributed_vector_search_source")
+      val partitionType = table.store().partitionType()
+      val predicateBuilder = new PredicateBuilder(partitionType)
+      val partitionFilter = PartitionPredicate.fromPredicate(
+        partitionType,
+        predicateBuilder.in(
+          0,
+          Seq[Object](BinaryString.fromString("p0"), BinaryString.fromString("p2")).asJava))
+      val vectorSplits = table
+        .newBatchVectorSearchBuilder()
+        .withVectorColumn("v")
+        .withLimit(2)
+        .withVectors(Array(Array(1.0f, 0.0f)))
+        .withPartitionFilter(partitionFilter)
+        .newVectorScan()
+        .scan()
+        .splits()
+      assert(vectorSplits.size() >= 2, vectorSplits)
+      assert(vectorSplits.asScala.forall(_.isInstanceOf[IndexVectorSearchSplit]), vectorSplits)
+
+      val query =
+        """
+          |SELECT q.query_id, r.id, r.pt, r.__paimon_search_score
+          |FROM VALUES
+          |  (0, array(1.0f, 0.0f)),
+          |  (1, array(0.0f, 1.0f)),
+          |  (2, array(1.0f, 0.0f)),
+          |  (3, CAST(NULL AS ARRAY<FLOAT>))
+          |AS q(query_id, query_vector),
+          |LATERAL (
+          |  SELECT id, pt, __paimon_search_score
+          |  FROM vector_search(
+          |    'distributed_vector_search_source', 'v', q.query_vector, 2)
+          |  WHERE pt IN ('p0', 'p2')
+          |) r
+          |ORDER BY query_id, __paimon_search_score DESC, id
+          |""".stripMargin
+
+      var local = Seq.empty[Row]
+      withSparkSQLConf("spark.paimon.vector-search.lateral-join.distributed.enabled" -> "false") {
+        local = spark.sql(query).collect().toSeq
+      }
+      var distributed = Seq.empty[Row]
+      withSparkSQLConf(
+        "spark.paimon.vector-search.lateral-join.distributed.enabled" -> "true",
+        "spark.paimon.vector-search.lateral-join.parallelism" -> "2",
+        "spark.paimon.vector-search.lateral-join.distributed.max-split-groups" -> "2",
+        "spark.paimon.vector-search.lateral-join.batch-size" -> "2"
+      ) {
+        distributed = spark.sql(query).collect().toSeq
+      }
+
+      assert(distributed == local)
+      assert(distributed.size == 6)
+      assert(distributed.map(_.getInt(0)).distinct == Seq(0, 1, 2))
+    }
+  }
 
   test("parse positive limit rejects overflowing long") {
     val longValue: Long = 4294967297L

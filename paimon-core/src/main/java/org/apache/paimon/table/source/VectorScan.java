@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import java.util.List;
+import java.util.OptionalLong;
 
 /** Vector scan to pre-filter and scan index files. */
 public interface VectorScan {
@@ -28,5 +29,9 @@ public interface VectorScan {
     /** Plan of vector scan. */
     interface Plan {
         List<VectorSearchSplit> splits();
+
+        default OptionalLong plannedSnapshotId() {
+            return OptionalLong.empty();
+        }
     }
 }

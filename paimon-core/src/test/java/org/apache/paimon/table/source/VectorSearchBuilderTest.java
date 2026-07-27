@@ -465,6 +465,56 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testVectorScanPlanCarriesLatestSnapshot() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {{1.0f, 0.0f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        VectorScan.Plan plan =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(plan.plannedSnapshotId()).hasValue(latestSnapshotId);
+    }
+
+    @Test
+    public void testVectorScanPlanCarriesTimeTravelSnapshot() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {{1.0f, 0.0f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+        long historicalSnapshotId = table.snapshotManager().latestSnapshotId();
+        writeVectors(table, new float[][] {{0.5f, 0.5f}});
+        assertThat(table.snapshotManager().latestSnapshotId()).isGreaterThan(historicalSnapshotId);
+
+        FileStoreTable timeTravelTable =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                                String.valueOf(historicalSnapshotId)));
+        VectorScan.Plan plan =
+                timeTravelTable
+                        .newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(plan.plannedSnapshotId()).hasValue(historicalSnapshotId);
+    }
+
+    @Test
     public void testVectorSearchFullModeScansFilteredUnindexedData() throws Exception {
         catalog.createTable(
                 identifier("full_search_filtered_table"),

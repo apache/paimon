@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -185,6 +186,11 @@ public class DataEvolutionVectorScan implements VectorScan {
             @Override
             public List<VectorSearchSplit> splits() {
                 return splits;
+            }
+
+            @Override
+            public OptionalLong plannedSnapshotId() {
+                return snapshot == null ? OptionalLong.empty() : OptionalLong.of(snapshot.id());
             }
         };
     }
