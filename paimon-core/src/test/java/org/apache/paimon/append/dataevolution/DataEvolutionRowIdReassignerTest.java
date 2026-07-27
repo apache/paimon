@@ -29,6 +29,7 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.sorted.SortedIndexBuildTestUtils;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -1925,7 +1926,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                                                 "Expected scan result when building index."));
         List<CommitMessage> commitMessages = new ArrayList<>();
         for (DataSplit dataSplit : SortedGlobalIndexBuilder.splitByContiguousRowRange(dataSplits)) {
-            commitMessages.addAll(builder.build(dataSplit, ioManager));
+            commitMessages.addAll(
+                    SortedIndexBuildTestUtils.sortAndBuild(builder, table, "id", dataSplit));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);

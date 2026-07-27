@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataField;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
 /** Abstract base class for global indexers. */
@@ -36,6 +37,10 @@ public interface GlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             ExecutorService executor);
+
+    default Optional<KeySerializer> sortKeySerializer() {
+        return Optional.empty();
+    }
 
     static GlobalIndexer create(String type, DataField indexField, Options options) {
         GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
