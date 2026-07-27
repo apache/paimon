@@ -20,6 +20,9 @@ package org.apache.paimon.benchmark.lookup;
 
 import org.apache.paimon.benchmark.Benchmark;
 import org.apache.paimon.compression.CompressOptions;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
 import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
@@ -27,6 +30,8 @@ import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
 import org.apache.paimon.lookup.sort.db.LocalKvDb;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 
 import org.junit.jupiter.api.Test;
@@ -36,6 +41,7 @@ import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.WriteOptions;
 
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -46,6 +52,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Benchmark for {@link LocalKvDb}. */
@@ -69,6 +76,9 @@ public class LocalKvDbBenchmark {
                             CompressOptions.defaultOptions().compress());
     private static final double BLOOM_FILTER_FPP =
             doubleProperty("local-kv-db.benchmark.bloom-filter-fpp", -1);
+    private static final RowType CLUSTERING_KEY_TYPE =
+            RowType.of(DataTypes.BIGINT(), DataTypes.BIGINT(), DataTypes.STRING());
+    private static final BinaryString[] REGIONS = createRegions();
 
     private static volatile long checksum;
 
@@ -163,6 +173,85 @@ public class LocalKvDbBenchmark {
         } finally {
             FileIOUtils.deleteDirectoryQuietly(localDirectory);
             FileIOUtils.deleteDirectoryQuietly(rocksDirectory);
+        }
+        assertThat(checksum).isNotZero();
+    }
+
+    @Test
+    public void testClusteringBlockSizeComparison() throws IOException {
+        int cacheSizeMb = intProperty("local-kv-db.benchmark.clustering-cache-size-mb", 32);
+        File warmupDirectory = new File(tempDir.toFile(), "clustering-warmup");
+        File fourKbDirectory = new File(tempDir.toFile(), "clustering-4kb");
+        File eightKbDirectory = new File(tempDir.toFile(), "clustering-8kb");
+        File sixteenKbDirectory = new File(tempDir.toFile(), "clustering-16kb");
+        byte[][] uniformKeys = clusteringQueryKeys(false);
+        byte[][] hotKeys = clusteringQueryKeys(true);
+
+        int warmupRecords = Math.min(RECORD_COUNT, 500_000);
+        try (LocalKvDb warmupDb = createClusteringDb(warmupDirectory, 4, cacheSizeMb)) {
+            warmupDb.bulkLoad(clusteringEntries(warmupRecords), warmupRecords);
+        } finally {
+            FileIOUtils.deleteDirectoryQuietly(warmupDirectory);
+        }
+
+        try (LocalKvDb fourKbDb = createClusteringDb(fourKbDirectory, 4, cacheSizeMb);
+                LocalKvDb eightKbDb = createClusteringDb(eightKbDirectory, 8, cacheSizeMb);
+                LocalKvDb sixteenKbDb = createClusteringDb(sixteenKbDirectory, 16, cacheSizeMb)) {
+            long sixteenKbLoadStart = System.nanoTime();
+            sixteenKbDb.bulkLoad(clusteringEntries(RECORD_COUNT), RECORD_COUNT);
+            long sixteenKbLoadNanos = System.nanoTime() - sixteenKbLoadStart;
+            long eightKbLoadStart = System.nanoTime();
+            eightKbDb.bulkLoad(clusteringEntries(RECORD_COUNT), RECORD_COUNT);
+            long eightKbLoadNanos = System.nanoTime() - eightKbLoadStart;
+            long fourKbLoadStart = System.nanoTime();
+            fourKbDb.bulkLoad(clusteringEntries(RECORD_COUNT), RECORD_COUNT);
+            long fourKbLoadNanos = System.nanoTime() - fourKbLoadStart;
+
+            byte[] sampleKey =
+                    clusteringKey(new RowCompactedSerializer(CLUSTERING_KEY_TYPE), 0, false);
+            long sampleValueBytes = 0;
+            int sampleCount = Math.min(RECORD_COUNT, 10_000);
+            for (int i = 0; i < sampleCount; i++) {
+                sampleValueBytes += clusteringValue(i).length;
+            }
+            System.out.printf(
+                    Locale.ROOT,
+                    "Clustering data: key=%d B, avg-value=%.1f B, cache=%d MB%n",
+                    sampleKey.length,
+                    sampleValueBytes / (double) sampleCount,
+                    cacheSizeMb);
+            System.out.printf(
+                    Locale.ROOT,
+                    "Build: 4KB=%.1f ms / %.2f MB, 8KB=%.1f ms / %.2f MB, 16KB=%.1f ms / %.2f MB%n",
+                    fourKbLoadNanos / 1_000_000.0,
+                    directorySize(fourKbDirectory) / (1024.0 * 1024.0),
+                    eightKbLoadNanos / 1_000_000.0,
+                    directorySize(eightKbDirectory) / (1024.0 * 1024.0),
+                    sixteenKbLoadNanos / 1_000_000.0,
+                    directorySize(sixteenKbDirectory) / (1024.0 * 1024.0));
+
+            Benchmark benchmark =
+                    new Benchmark(
+                                    String.format(
+                                            Locale.ROOT,
+                                            "local-kv-db-clustering-block-size-%d-records-%d-ops-%dMB-cache-zstd-bloom-0.1",
+                                            RECORD_COUNT,
+                                            OPERATION_COUNT,
+                                            cacheSizeMb),
+                                    OPERATION_COUNT)
+                            .setNumWarmupIters(2)
+                            .setOutputPerIteration(true);
+            benchmark.addCase("4KB-uniform-hit", 5, () -> lookup(fourKbDb, uniformKeys, false));
+            benchmark.addCase("8KB-uniform-hit", 5, () -> lookup(eightKbDb, uniformKeys, false));
+            benchmark.addCase("16KB-uniform-hit", 5, () -> lookup(sixteenKbDb, uniformKeys, false));
+            benchmark.addCase("4KB-hot-hit", 5, () -> lookup(fourKbDb, hotKeys, false));
+            benchmark.addCase("8KB-hot-hit", 5, () -> lookup(eightKbDb, hotKeys, false));
+            benchmark.addCase("16KB-hot-hit", 5, () -> lookup(sixteenKbDb, hotKeys, false));
+            benchmark.run();
+        } finally {
+            FileIOUtils.deleteDirectoryQuietly(fourKbDirectory);
+            FileIOUtils.deleteDirectoryQuietly(eightKbDirectory);
+            FileIOUtils.deleteDirectoryQuietly(sixteenKbDirectory);
         }
         assertThat(checksum).isNotZero();
     }
@@ -328,6 +417,20 @@ public class LocalKvDbBenchmark {
         return builder.build();
     }
 
+    private LocalKvDb createClusteringDb(File directory, int blockSizeKb, int cacheSizeMb) {
+        return LocalKvDb.builder(directory)
+                .memTableFlushThreshold(MEMTABLE_SIZE_MB * 1024L * 1024L)
+                .maxSstFileSize(SST_FILE_SIZE_MB * 1024L * 1024L)
+                .blockSize(blockSizeKb * 1024)
+                .cacheManager(new CacheManager(MemorySize.ofMebiBytes(cacheSizeMb), 0))
+                .compressOptions(CompressOptions.defaultOptions())
+                .bloomFilterEnabled(true)
+                .bloomFilterFpp(0.1)
+                .keyComparator(
+                        new RowCompactedSerializer(CLUSTERING_KEY_TYPE).createSliceComparator())
+                .build();
+    }
+
     private RocksDbHandle createRocksDb(File directory) throws IOException {
         Options options = new Options();
         options.set(RocksDBOptions.WRITE_BUFFER_SIZE, MemorySize.ofMebiBytes(MEMTABLE_SIZE_MB));
@@ -370,6 +473,21 @@ public class LocalKvDbBenchmark {
         return keys;
     }
 
+    private byte[][] clusteringQueryKeys(boolean hot) {
+        byte[][] keys = new byte[OPERATION_COUNT][];
+        RowCompactedSerializer serializer = new RowCompactedSerializer(CLUSTERING_KEY_TYPE);
+        int hotRecords = Math.max(1, RECORD_COUNT / 100);
+        long random = hot ? 0x1234abcdL : 0x5deece66dL;
+        for (int i = 0; i < keys.length; i++) {
+            random = nextRandom(random);
+            long positive = random & Long.MAX_VALUE;
+            boolean useHotSet = hot && positive % 10 != 0;
+            int index = (int) (positive % (useHotSet ? hotRecords : RECORD_COUNT));
+            keys[i] = clusteringKey(serializer, index, false);
+        }
+        return keys;
+    }
+
     private Iterator<Map.Entry<byte[], byte[]>> entries(final int count) {
         return new Iterator<Map.Entry<byte[], byte[]>>() {
             private int index;
@@ -385,6 +503,53 @@ public class LocalKvDbBenchmark {
                 return new AbstractMap.SimpleImmutableEntry<>(key(current * 2), value(current));
             }
         };
+    }
+
+    private Iterator<Map.Entry<byte[], byte[]>> clusteringEntries(final int count) {
+        return new Iterator<Map.Entry<byte[], byte[]>>() {
+            private final RowCompactedSerializer serializer =
+                    new RowCompactedSerializer(CLUSTERING_KEY_TYPE);
+            private int index;
+
+            @Override
+            public boolean hasNext() {
+                return index < count;
+            }
+
+            @Override
+            public Map.Entry<byte[], byte[]> next() {
+                int current = index++;
+                return new AbstractMap.SimpleImmutableEntry<>(
+                        clusteringKey(serializer, current, false), clusteringValue(current));
+            }
+        };
+    }
+
+    private static byte[] clusteringKey(
+            RowCompactedSerializer serializer, int index, boolean missing) {
+        long tenantId = index / 100_000;
+        long orderId = ((long) index << 1) + (missing ? 1 : 0);
+        return serializer.serializeToBytes(
+                GenericRow.of(tenantId, orderId, REGIONS[index & (REGIONS.length - 1)]));
+    }
+
+    private static byte[] clusteringValue(int index) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream(8);
+        try {
+            encodeInt(out, index / 100_000);
+            encodeInt(out, index % 100_000);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return out.toByteArray();
+    }
+
+    private static BinaryString[] createRegions() {
+        BinaryString[] regions = new BinaryString[16];
+        for (int i = 0; i < regions.length; i++) {
+            regions[i] = BinaryString.fromString(String.format(Locale.ROOT, "region-%02d", i));
+        }
+        return regions;
     }
 
     private static byte[] key(int value) {
