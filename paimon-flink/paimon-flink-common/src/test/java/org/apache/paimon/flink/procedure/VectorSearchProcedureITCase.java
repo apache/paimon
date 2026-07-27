@@ -55,7 +55,6 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -96,13 +95,7 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
                 "INSERT INTO PK_SNAPSHOT_T VALUES "
                         + "(2, ARRAY[CAST(0.0 AS FLOAT), CAST(0.0 AS FLOAT)])");
 
-        assertThat(
-                        search(
-                                "PK_SNAPSHOT_T",
-                                "0.0,0.0",
-                                2,
-                                "id",
-                                "scan.snapshot-id=" + snapshotId))
+        assertThat(search("PK_SNAPSHOT_T", "0.0,0.0", 2, "id", "scan.snapshot-id=" + snapshotId))
                 .extracting(row -> row.getField(0).toString())
                 .containsExactly("{\"id\":\"1\"}");
     }
