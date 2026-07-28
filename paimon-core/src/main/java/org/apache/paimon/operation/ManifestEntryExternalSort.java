@@ -50,9 +50,6 @@ import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedEx
 /** Spillable external sort utilities for manifest entries. */
 public class ManifestEntryExternalSort {
 
-    private static final InternalRowSerializer MANIFEST_ROW_SERIALIZER =
-            new InternalRowSerializer(VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA));
-
     static Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> sortAndWriteMinorEntries(
             List<ManifestFileMeta> section,
             ManifestFileSorter.ManifestSortKey sortKey,
@@ -146,7 +143,9 @@ public class ManifestEntryExternalSort {
             ManifestFile manifestFile, ManifestFileMeta meta) {
         long entryCount = meta.numAddedFiles() + meta.numDeletedFiles();
         List<BinaryRow> rows = new ArrayList<>((int) Math.min(entryCount, 1 << 20));
-        InternalRowSerializer serializer = MANIFEST_ROW_SERIALIZER.duplicate();
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(
+                        VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA));
         try (CloseableIterator<BinaryManifestEntry> entries =
                 manifestFile.scan(
                         meta.fileName(), meta.fileSize(), BinaryManifestEntry.fullProjection())) {
