@@ -729,7 +729,11 @@ class ShardTableUpdator:
             partition = item[0]
             row_range = item[1]
             writer = AppendOnlyDataWriter(self.table, partition, 0, 0, self.table.options, self.write_cols)
+            # A shard maps to exactly one output file, so disable both size- and
+            # row-count based rolling; otherwise target-file-row-num would split
+            # the shard and SingleWriter.end() fails with "Should have one file."
             writer.target_file_size = MemorySize.of_mebi_bytes(999999999).get_bytes()
+            writer.target_file_row_num = CoreOptions.TARGET_FILE_ROW_NUM.default_value()
             self.writer = SingleWriter(writer, partition, row_range.from_, row_range.to - row_range.from_ + 1)
 
 
