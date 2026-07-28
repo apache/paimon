@@ -27,7 +27,6 @@ import org.apache.paimon.io.BinaryDataFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import org.junit.jupiter.api.Test;
 
@@ -140,7 +139,7 @@ public class BinaryManifestEntryTest {
         BinaryRow partition = BinaryRow.EMPTY_ROW;
         BinaryRow minKey = BinaryRow.EMPTY_ROW;
         BinaryRow maxKey = BinaryRow.EMPTY_ROW.copy();
-        RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
         RowType projectedFileType =
                 DataFileMeta.SCHEMA.project(
                         DataFileMeta.MAX_KEY, DataFileMeta.FILE_NAME, DataFileMeta.MIN_KEY);
@@ -236,7 +235,7 @@ public class BinaryManifestEntryTest {
 
     @Test
     void testProjectionWithoutFile() {
-        RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
         RowType projectedType =
                 new RowType(
                         false,
@@ -253,7 +252,7 @@ public class BinaryManifestEntryTest {
 
     @Test
     void testDoesNotValidateFileKindOnReplace() {
-        RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
         RowType projectedType =
                 new RowType(
                         false,
@@ -270,7 +269,7 @@ public class BinaryManifestEntryTest {
 
     private static BinaryManifestEntry.Projection projection(
             boolean includeBucket, String... projectedFileFields) {
-        RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
         List<DataField> fields = new ArrayList<>();
         fields.add(manifestType.getField(ManifestEntry.KIND));
         fields.add(manifestType.getField(ManifestEntry.PARTITION));

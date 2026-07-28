@@ -22,11 +22,11 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.BinaryDataFileMeta;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
@@ -46,9 +46,9 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  */
 public final class BinaryManifestEntry implements ManifestEntry {
 
-    private static final RowType MANIFEST_TYPE =
-            VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
-    private static final Projection FULL_PROJECTION = Projection.create(MANIFEST_TYPE);
+    private static final Projection FULL_PROJECTION =
+            Projection.create(ManifestEntry.MANIFEST_ROW_TYPE);
+    public static final Projection DELETE_ENTRY_PROJECTION = createDeleteEntryProjection();
 
     private final Projection projection;
     private final @Nullable BinaryDataFileMeta file;
@@ -95,6 +95,26 @@ public final class BinaryManifestEntry implements ManifestEntry {
     /** Returns the reusable projection for the complete versioned manifest schema. */
     public static Projection fullProjection() {
         return FULL_PROJECTION;
+    }
+
+    private static Projection createDeleteEntryProjection() {
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
+        return Projection.create(
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                manifestType.getField(ManifestEntry.KIND),
+                                manifestType.getField(ManifestEntry.PARTITION),
+                                manifestType.getField(ManifestEntry.BUCKET),
+                                manifestType
+                                        .getField(ManifestEntry.FILE)
+                                        .newType(
+                                                DataFileMeta.SCHEMA.project(
+                                                        DataFileMeta.FILE_NAME,
+                                                        DataFileMeta.LEVEL,
+                                                        DataFileMeta.EXTRA_FILES,
+                                                        DataFileMeta.EMBEDDED_FILE_INDEX,
+                                                        DataFileMeta.EXTERNAL_PATH)))));
     }
 
     /** Drops references to the current row before its reader batch is released. */
@@ -450,17 +470,18 @@ public final class BinaryManifestEntry implements ManifestEntry {
                     filePosition,
                     projectedFileFieldCount,
                     fileProjection,
-                    projectedType.equals(MANIFEST_TYPE));
+                    projectedType.equals(ManifestEntry.MANIFEST_ROW_TYPE));
         }
 
         private static void validateProjection(RowType projectedType) {
             for (DataField projectedField : projectedType.getFields()) {
                 checkArgument(
-                        MANIFEST_TYPE.containsField(projectedField.id()),
+                        ManifestEntry.MANIFEST_ROW_TYPE.containsField(projectedField.id()),
                         "Unknown projected manifest field '%s' (id %s).",
                         projectedField.name(),
                         projectedField.id());
-                DataField manifestField = MANIFEST_TYPE.getField(projectedField.id());
+                DataField manifestField =
+                        ManifestEntry.MANIFEST_ROW_TYPE.getField(projectedField.id());
                 checkArgument(
                         projectedField.isPrunedFrom(manifestField),
                         "Projected manifest field '%s' does not match %s.",

@@ -26,7 +26,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import org.junit.jupiter.api.Test;
 
@@ -103,7 +102,7 @@ class BinaryManifestEntryReusableIdentifierTest {
             String[] extraFiles,
             @Nullable byte[] embeddedIndex,
             @Nullable String externalPath) {
-        RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
         RowType fileType =
                 DataFileMeta.SCHEMA.project(
                         DataFileMeta.LEVEL,

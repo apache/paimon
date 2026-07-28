@@ -36,7 +36,6 @@ import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
@@ -141,8 +140,7 @@ public class ManifestEntryExternalSort {
         long entryCount = meta.numAddedFiles() + meta.numDeletedFiles();
         List<BinaryRow> rows = new ArrayList<>((int) Math.min(entryCount, 1 << 20));
         InternalRowSerializer serializer =
-                new InternalRowSerializer(
-                        VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA));
+                new InternalRowSerializer(ManifestEntry.MANIFEST_ROW_TYPE);
         try (CloseableIterator<BinaryManifestEntry> entries =
                 manifestFile.scan(
                         meta.fileName(), meta.fileSize(), BinaryManifestEntry.fullProjection())) {
