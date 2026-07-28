@@ -42,7 +42,6 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
@@ -271,7 +270,11 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
         @Override
         public void write(ManifestEntry entry) throws IOException {
-            super.write(entry);
+            if (entry instanceof BinaryManifestEntry) {
+                writeRow(((BinaryManifestEntry) entry).fullRow());
+            } else {
+                super.write(entry);
+            }
 
             switch (entry.kind()) {
                 case ADD:
@@ -367,7 +370,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         }
 
         public ManifestFile create() {
-            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
+            RowType entryType = ManifestEntry.MANIFEST_ROW_TYPE;
             return new ManifestFile(
                     fileIO,
                     schemaManager,

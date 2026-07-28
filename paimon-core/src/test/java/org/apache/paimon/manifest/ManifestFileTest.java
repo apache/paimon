@@ -34,7 +34,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
@@ -287,7 +286,7 @@ public class ManifestFileTest {
     }
 
     private BinaryManifestEntry.Projection projection(String... projectedFileFields) {
-        RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
         List<DataField> fields =
                 Arrays.asList(
                         manifestType.getField(ManifestEntry.KIND),

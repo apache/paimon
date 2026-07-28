@@ -27,6 +27,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.BinaryManifestEntry;
 import org.apache.paimon.manifest.BinaryManifestEntry.Projection;
 import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
+import org.apache.paimon.manifest.DeletedIdentifierSet;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -38,10 +39,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ByteArrayKey;
 import org.apache.paimon.utils.ByteArrayLookupKey;
 import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.DeletedIdentifierSet;
 import org.apache.paimon.utils.PrimitiveRowRanges;
 import org.apache.paimon.utils.SerializationUtils;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
@@ -72,14 +71,6 @@ final class DataEvolutionRowIdAssignmentPlanner {
             BinaryString.fromString(SpecialFields.ROW_ID.name());
     private static final BinaryString BLOB_FILE_SUFFIX = BinaryString.fromString(".blob");
     private static final BinaryString VECTOR_FILE_MARKER = BinaryString.fromString(".vector.");
-    private static final Projection DELETE_PROJECTION =
-            manifestProjection(
-                    true,
-                    DataFileMeta.FILE_NAME,
-                    DataFileMeta.LEVEL,
-                    DataFileMeta.EXTRA_FILES,
-                    DataFileMeta.EMBEDDED_FILE_INDEX,
-                    DataFileMeta.EXTERNAL_PATH);
     private static final Projection ADD_IDENTIFIER_PROJECTION =
             manifestProjection(
                     true,
@@ -132,15 +123,14 @@ final class DataEvolutionRowIdAssignmentPlanner {
 
     private static Projection manifestProjection(
             boolean includeBucket, String... projectedFileFields) {
-        RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
         List<DataField> fields = new ArrayList<>();
-        fields.add(manifestType.getField(ManifestEntry.KIND));
-        fields.add(manifestType.getField(ManifestEntry.PARTITION));
+        fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.KIND));
+        fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.PARTITION));
         if (includeBucket) {
-            fields.add(manifestType.getField(ManifestEntry.BUCKET));
+            fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.BUCKET));
         }
         fields.add(
-                manifestType
+                ManifestEntry.MANIFEST_ROW_TYPE
                         .getField(ManifestEntry.FILE)
                         .newType(DataFileMeta.SCHEMA.project(projectedFileFields)));
         return Projection.create(new RowType(false, fields));
@@ -191,7 +181,9 @@ final class DataEvolutionRowIdAssignmentPlanner {
             }
             try (CloseableIterator<BinaryManifestEntry> entries =
                     manifestFile.scan(
-                            manifestMeta.fileName(), manifestMeta.fileSize(), DELETE_PROJECTION)) {
+                            manifestMeta.fileName(),
+                            manifestMeta.fileSize(),
+                            BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
                 while (entries.hasNext()) {
                     BinaryManifestEntry entry = entries.next();
                     if (!entry.isDelete()) {
@@ -202,8 +194,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
                         continue;
                     }
                     identifier.replace(entry);
-                    group.deletedIdentifiers.add(
-                            partition.id, identifier.bytes(), identifier.length());
+                    group.deletedIdentifiers.add(partition.id, identifier);
                 }
             } catch (Exception e) {
                 throw scanException(manifestMeta, e);
@@ -240,8 +231,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
                     }
                     if (!group.deletedIdentifiers.isEmpty()) {
                         identifier.replace(entry);
-                        if (group.deletedIdentifiers.contains(
-                                partition.id, identifier.bytes(), identifier.length())) {
+                        if (group.deletedIdentifiers.contains(partition.id, identifier)) {
                             continue;
                         }
                     }

@@ -16,18 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.manifest;
+
+import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
+
+import javax.annotation.Nullable;
 
 import java.util.Arrays;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Compact, collision-safe set backed by primitive arrays and one identifier byte arena. */
+/**
+ * Compact, collision-safe set backed by primitive arrays and one identifier byte arena.
+ *
+ * <p>The reusable identifier is only used as lookup scratch. Added identifier bytes are copied into
+ * the arena.
+ */
 public final class DeletedIdentifierSet {
 
     private static final float LOAD_FACTOR = 0.75f;
 
+    private @Nullable ReusableIdentifier reusableIdentifier;
     private int[] buckets = filledWithMinusOne(16);
     private long[] hashes = new long[16];
     private int[] partitionIds = new int[16];
@@ -50,7 +60,37 @@ public final class DeletedIdentifierSet {
         return arenaSize;
     }
 
+    public void add(BinaryManifestEntry entry) {
+        add(reusableIdentifier().replaceWithPartition(entry));
+    }
+
+    public void add(ReusableIdentifier identifier) {
+        add(0, identifier);
+    }
+
+    public void add(int partitionId, ReusableIdentifier identifier) {
+        checkIdentifier(identifier);
+        add(partitionId, identifier.bytes(), identifier.length());
+    }
+
+    public boolean contains(BinaryManifestEntry entry) {
+        return contains(reusableIdentifier().replaceWithPartition(entry));
+    }
+
+    public boolean contains(ReusableIdentifier identifier) {
+        return contains(0, identifier);
+    }
+
+    public boolean contains(int partitionId, ReusableIdentifier identifier) {
+        checkIdentifier(identifier);
+        return contains(partitionId, identifier.bytes(), identifier.length());
+    }
+
     public void release() {
+        if (reusableIdentifier != null) {
+            reusableIdentifier.release();
+            reusableIdentifier = null;
+        }
         buckets = filledWithMinusOne(16);
         hashes = new long[0];
         partitionIds = new int[0];
@@ -62,7 +102,7 @@ public final class DeletedIdentifierSet {
         size = 0;
     }
 
-    public void add(int partitionId, byte[] identifier, int length) {
+    void add(int partitionId, byte[] identifier, int length) {
         checkIdentifier(identifier, length);
         long hash = hash(partitionId, identifier, length);
         if (contains(partitionId, identifier, length, hash)) {
@@ -87,7 +127,7 @@ public final class DeletedIdentifierSet {
         size++;
     }
 
-    public boolean contains(int partitionId, byte[] identifier, int length) {
+    boolean contains(int partitionId, byte[] identifier, int length) {
         checkIdentifier(identifier, length);
         return contains(partitionId, identifier, length, hash(partitionId, identifier, length));
     }
@@ -172,6 +212,17 @@ public final class DeletedIdentifierSet {
             }
         }
         return true;
+    }
+
+    private static void checkIdentifier(ReusableIdentifier identifier) {
+        checkArgument(identifier != null, "Identifier cannot be null.");
+    }
+
+    private ReusableIdentifier reusableIdentifier() {
+        if (reusableIdentifier == null) {
+            reusableIdentifier = new ReusableIdentifier();
+        }
+        return reusableIdentifier;
     }
 
     private static void checkIdentifier(byte[] identifier, int length) {
