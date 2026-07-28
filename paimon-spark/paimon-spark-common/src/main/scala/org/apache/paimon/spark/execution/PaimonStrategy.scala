@@ -606,27 +606,32 @@ case class LateralVectorSearchExec(
         val materializationContext =
           createMaterializationContext(rightProjection, readerTracker, searchTable)
 
-        merged.flatMap {
-          case (_, partial) =>
-            val queries = ArrayBuffer[LateralVectorSearchQuery]()
-            val results = ArrayBuffer[GlobalIndexResult]()
-            if (partial.outerRowBytes != null) {
-              partial.outerRowBytes.zip(partial.candidates).foreach {
-                case (outerRowBytes, candidates) if !candidates.isEmpty =>
-                  val outerRow = new UnsafeRow(child.output.size)
-                  outerRow.pointTo(outerRowBytes, outerRowBytes.length)
-                  queries += LateralVectorSearchQuery(outerRow, Array.emptyFloatArray)
-                  results += candidates.toResult
-                case _ =>
+        LateralVectorSearchExecution
+          .groupMergedResults(merged.map(_._2), plannedSearch.batchSize)
+          .flatMap {
+            partialResults =>
+              val queries = ArrayBuffer[LateralVectorSearchQuery]()
+              val results = ArrayBuffer[GlobalIndexResult]()
+              partialResults.foreach {
+                partial =>
+                  if (partial.outerRowBytes != null) {
+                    partial.outerRowBytes.zip(partial.candidates).foreach {
+                      case (outerRowBytes, candidates) if !candidates.isEmpty =>
+                        val outerRow = new UnsafeRow(child.output.size)
+                        outerRow.pointTo(outerRowBytes, outerRowBytes.length)
+                        queries += LateralVectorSearchQuery(outerRow, Array.emptyFloatArray)
+                        results += candidates.toResult
+                      case _ =>
+                    }
+                  }
               }
-            }
-            materializeSearchResults(queries.toVector, results.toVector, materializationContext)
-              .map {
-                case (outerRow, rightRow) =>
-                  joinedRow(outerRow, rightRow)
-                  joinedRow.copy()
-              }
-        }
+              materializeSearchResults(queries.toVector, results.toVector, materializationContext)
+                .map {
+                  case (outerRow, rightRow) =>
+                    joinedRow(outerRow, rightRow)
+                    joinedRow.copy()
+                }
+          }
     }
   }
 

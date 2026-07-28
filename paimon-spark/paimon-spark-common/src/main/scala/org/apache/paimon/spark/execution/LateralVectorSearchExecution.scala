@@ -32,6 +32,7 @@ import scala.collection.mutable.LongMap
 private[execution] object LateralVectorSearchExecution {
 
   private val MaxMergeBatchesPerSearch = 16
+  private val MaxMaterializationCandidatesPerBatch = 64L * 1024
 
   case class QueryBatchId(inputPartition: Int, ordinal: Long)
 
@@ -329,6 +330,48 @@ private[execution] object LateralVectorSearchExecution {
     val batchesPerSearch =
       Math.min(Math.max(1, mergeParallelism), MaxMergeBatchesPerSearch)
     Math.max(1, (searchBatchSize + batchesPerSearch - 1) / batchesPerSearch)
+  }
+
+  def groupMergedResults(
+      results: Iterator[PartialBatchResult],
+      maxQueries: Int,
+      maxCandidates: Long = MaxMaterializationCandidatesPerBatch)
+      : Iterator[Seq[PartialBatchResult]] = {
+    require(maxQueries > 0, "maxQueries must be positive")
+    require(maxCandidates > 0, "maxCandidates must be positive")
+    val pendingResults = results.buffered
+    new Iterator[Seq[PartialBatchResult]] {
+
+      override def hasNext: Boolean = pendingResults.hasNext
+
+      override def next(): Seq[PartialBatchResult] = {
+        if (!hasNext) {
+          throw new NoSuchElementException("next on empty merged-result iterator")
+        }
+        val grouped = ArrayBuffer[PartialBatchResult]()
+        var queryCount = 0
+        var candidateCount = 0L
+        var grouping = true
+        while (pendingResults.hasNext && grouping) {
+          val next = pendingResults.head
+          val nextQueryCount = next.candidates.length
+          val nextCandidateCount =
+            next.candidates.iterator.map(_.rowIds.length.toLong).sum
+          if (
+            grouped.nonEmpty &&
+            (queryCount.toLong + nextQueryCount > maxQueries ||
+              candidateCount + nextCandidateCount > maxCandidates)
+          ) {
+            grouping = false
+          } else {
+            grouped += pendingResults.next()
+            queryCount += nextQueryCount
+            candidateCount += nextCandidateCount
+          }
+        }
+        grouped.toSeq
+      }
+    }
   }
 
   private def splitCost(split: VectorSearchSplit): Long = split match {

@@ -157,6 +157,27 @@ class LateralVectorSearchExecutionTest extends AnyFunSuite {
     assert(LateralVectorSearchExecution.queryMergeBatchSize(10, 3) == 4)
   }
 
+  test("regroup merged results before materialization") {
+    def result(candidateCounts: Int*) =
+      LateralVectorSearchExecution.PartialBatchResult(
+        null,
+        candidateCounts.map {
+          count =>
+            LateralVectorSearchExecution.ScoredCandidates(
+              Array.tabulate(count)(_.toLong),
+              Array.fill(count)(0.0f))
+        }.toArray)
+
+    val grouped = LateralVectorSearchExecution
+      .groupMergedResults(
+        Iterator(result(1, 1), result(1, 1, 1), result(2, 2)),
+        maxQueries = 5,
+        maxCandidates = 5)
+      .toSeq
+
+    assert(grouped.map(_.map(_.candidates.length)) == Seq(Seq(2, 3), Seq(2)))
+  }
+
   test("only distribute complete indexed plans without refine") {
     val indexedSplits = Seq(
       new IndexVectorSearchSplit(0L, 9L, Collections.emptyList(), Collections.emptyList()),
