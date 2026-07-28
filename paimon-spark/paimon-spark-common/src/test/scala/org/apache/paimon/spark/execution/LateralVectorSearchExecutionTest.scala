@@ -127,6 +127,28 @@ class LateralVectorSearchExecutionTest extends AnyFunSuite {
     assert(grouped.map(_.map(_.vectors.length)) == Seq(Seq(3), Seq(3, 2)))
   }
 
+  test("distribute query batches evenly across merge partitions") {
+    val partitioner = new LateralVectorSearchExecution.QueryBatchPartitioner(16)
+
+    val firstBatchPartitions = (0 until 16).map {
+      inputPartition =>
+        partitioner.getPartition(LateralVectorSearchExecution.QueryBatchId(inputPartition, 0L))
+    }
+
+    assert(firstBatchPartitions.sorted == (0 until 16))
+
+    val repeatedBatchPartitioner = new LateralVectorSearchExecution.QueryBatchPartitioner(4)
+    val repeatedBatchCounts = (for {
+      inputPartition <- 0 until 4
+      ordinal <- 0L until 12L
+    } yield {
+      repeatedBatchPartitioner
+        .getPartition(LateralVectorSearchExecution.QueryBatchId(inputPartition, ordinal))
+    }).groupBy(identity).map { case (partition, batches) => partition -> batches.size }
+
+    assert(repeatedBatchCounts == (0 until 4).map(_ -> 12).toMap)
+  }
+
   test("only distribute complete indexed plans without refine") {
     val indexedSplits = Seq(
       new IndexVectorSearchSplit(0L, 9L, Collections.emptyList(), Collections.emptyList()),

@@ -590,7 +590,7 @@ case class LateralVectorSearchExec(
       (value: PartialBatchResult) => value,
       (left: PartialBatchResult, right: PartialBatchResult) => left.merge(right, limit),
       (left: PartialBatchResult, right: PartialBatchResult) => left.merge(right, limit),
-      new HashPartitioner(Math.max(1, mergeParallelism))
+      new QueryBatchPartitioner(Math.max(1, mergeParallelism))
     )
 
     mergedResults.mapPartitions {

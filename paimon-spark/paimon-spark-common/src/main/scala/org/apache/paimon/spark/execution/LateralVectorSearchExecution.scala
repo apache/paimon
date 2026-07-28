@@ -23,6 +23,8 @@ import org.apache.paimon.globalindex.ScoreGetter
 import org.apache.paimon.table.source.{IndexVectorSearchSplit, VectorSearchSplit}
 import org.apache.paimon.utils.RoaringNavigableMap64
 
+import org.apache.spark.Partitioner
+
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.LongMap
@@ -30,6 +32,19 @@ import scala.collection.mutable.LongMap
 private[execution] object LateralVectorSearchExecution {
 
   case class QueryBatchId(inputPartition: Int, ordinal: Long)
+
+  final case class QueryBatchPartitioner(override val numPartitions: Int) extends Partitioner {
+
+    require(numPartitions > 0, "numPartitions must be positive")
+
+    override def getPartition(key: Any): Int = key match {
+      case batchId: QueryBatchId =>
+        Math.floorMod(batchId.inputPartition.toLong + batchId.ordinal, numPartitions.toLong).toInt
+      case _ =>
+        throw new IllegalArgumentException(
+          s"Expected ${classOf[QueryBatchId].getName}, but found ${key.getClass.getName}.")
+    }
+  }
 
   case class QueryPayload(vector: Array[Float], outerRowBytes: Array[Byte])
 
