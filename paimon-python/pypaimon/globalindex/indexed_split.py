@@ -30,11 +30,13 @@ class IndexedSplit(Split):
         self,
         data_split: 'Split',
         row_ranges: List['Range'],
-        scores: Optional[List[float]] = None
+        scores: Optional[List[float]] = None,
+        exact_merged_row_count: Optional[int] = None,
     ):
         self._data_split = data_split
         self._row_ranges = row_ranges
         self._scores = scores
+        self._exact_merged_row_count = exact_merged_row_count
 
     def data_split(self) -> 'Split':
         """Return the underlying data split."""
@@ -76,6 +78,8 @@ class IndexedSplit(Split):
         return sum(r.count() for r in self._row_ranges)
 
     def merged_row_count(self):
+        if self._exact_merged_row_count is not None:
+            return self._exact_merged_row_count
         return self.row_count
 
     # Delegate other properties to data_split
@@ -133,14 +137,23 @@ class IndexedSplit(Split):
     def __eq__(self, other):
         if not isinstance(other, IndexedSplit):
             return False
-        return (self._data_split == other._data_split and
-                self._row_ranges == other._row_ranges and
-                self._scores == other._scores)
+        return (
+            self._data_split == other._data_split
+            and self._row_ranges == other._row_ranges
+            and self._scores == other._scores
+            and self._exact_merged_row_count == other._exact_merged_row_count
+        )
 
     def __hash__(self):
         scores_hash = tuple(self._scores) if self._scores else None
-        return hash((id(self._data_split), tuple(self._row_ranges), scores_hash))
+        return hash((
+            id(self._data_split),
+            tuple(self._row_ranges),
+            scores_hash,
+            self._exact_merged_row_count,
+        ))
 
     def __repr__(self):
         return (f"IndexedSplit(data_split={self._data_split}, "
-                f"row_ranges={self._row_ranges}, scores={self._scores})")
+                f"row_ranges={self._row_ranges}, scores={self._scores}, "
+                f"exact_merged_row_count={self._exact_merged_row_count})")

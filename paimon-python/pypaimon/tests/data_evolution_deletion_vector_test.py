@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+from unittest.mock import Mock
 
 import pyarrow as pa
 
@@ -32,7 +33,9 @@ from pypaimon.read.reader.concat_batch_reader import (
     MergeAllBatchReader,
 )
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.read.split import DataSplit
+from pypaimon.read.split_read import RawFileSplitRead
 from pypaimon.table.row.blob import Blob, BlobData
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
@@ -159,6 +162,39 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
         self.assertEqual([0, 4], batch.column(0).to_pylist())
         self.assertTrue(reader.deletion_vector().is_deleted(1))
         self.assertFalse(reader.deletion_vector().is_deleted(2))
+
+    def test_append_sliced_reader_maps_positions_to_original_file_offsets(self):
+        file = _file("slice.parquet", 0, 10, 1)
+        data_split = DataSplit(
+            files=[file],
+            partition=GenericRow([], []),
+            bucket=0,
+            raw_convertible=True,
+            data_deletion_files=None,
+        )
+        sliced_split = SlicedSplit(
+            data_split,
+            {"slice.parquet": (5, 10)},
+        )
+        split_read = RawFileSplitRead.__new__(RawFileSplitRead)
+        split_read.split = sliced_split
+        split_read._get_final_read_data_fields = Mock(return_value=[])
+        split_read.file_reader_supplier = Mock(
+            return_value=_OneBatchReader([5, 6, 7, 8, 9])
+        )
+        deletion_vector = BitmapDeletionVector()
+        deletion_vector.delete(7)
+
+        reader = split_read.raw_reader_supplier(
+            file,
+            dv_factory=lambda: deletion_vector,
+        )
+
+        self.assertEqual(
+            [5, 6, 8, 9],
+            reader.read_arrow_batch().column(0).to_pylist(),
+        )
+        self.assertIsNone(reader.read_arrow_batch())
 
     def test_data_evolution_merge_reader_handles_fully_deleted_file(self):
         deletion_vector = BitmapDeletionVector()
