@@ -32,7 +32,7 @@
     <packaging>jar</packaging>
 
     <properties>
-        <fs.oss.sdk.version>3.13.2</fs.oss.sdk.version>
+        <fs.oss.sdk.version>3.17.4</fs.oss.sdk.version>
         <jindodata.version>6.9.1</jindodata.version>
     </properties>
 

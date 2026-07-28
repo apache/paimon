@@ -48,6 +48,7 @@ public class JindoFileIOTest {
     public void testCreateBlobClientUsesConfiguredSts() {
         Options options = new Options();
         options.set("fs.oss.endpoint", "oss.example.com");
+        options.set("fs.oss.region", "cn-hangzhou");
         options.set("fs.oss.accessKeyId", "access-key");
         options.set("fs.oss.accessKeySecret", "access-secret");
         options.set("fs.oss.securityToken", "security-token");
@@ -55,6 +56,7 @@ public class JindoFileIOTest {
         OSSClient client = JindoFileIO.createBlobClient(options);
         try {
             assertThat(client.getEndpoint()).isEqualTo(URI.create("https://oss.example.com"));
+            assertThat(client.getObjectOperation().getRegion()).isEqualTo("cn-hangzhou");
             assertThat(client.getCredentialsProvider().getCredentials().getAccessKeyId())
                     .isEqualTo("access-key");
             assertThat(client.getCredentialsProvider().getCredentials().getSecretAccessKey())

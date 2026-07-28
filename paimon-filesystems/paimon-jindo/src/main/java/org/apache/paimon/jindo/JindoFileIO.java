@@ -73,6 +73,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private static final String OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
+    private static final String OSS_REGION = "fs.oss.region";
     private static final String OSS_USER_AGENT_EXTENDED = "fs.oss.user.agent.extended";
     private static final String DLF_ACCESS_TRACKING_EXTENDED_INFO =
             "dlf.access-tracking.extended-info";
@@ -231,17 +232,23 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         }
         String securityToken = options.get(OSS_SECURITY_TOKEN);
         OSSClientBuilder builder = new OSSClientBuilder();
-        return (OSSClient)
-                (StringUtils.isNullOrWhitespaceOnly(securityToken)
-                        ? builder.build(
-                                endpoint,
-                                options.get(OSS_ACCESS_KEY_ID),
-                                options.get(OSS_ACCESS_KEY_SECRET))
-                        : builder.build(
-                                endpoint,
-                                options.get(OSS_ACCESS_KEY_ID),
-                                options.get(OSS_ACCESS_KEY_SECRET),
-                                securityToken));
+        OSSClient client =
+                (OSSClient)
+                        (StringUtils.isNullOrWhitespaceOnly(securityToken)
+                                ? builder.build(
+                                        endpoint,
+                                        options.get(OSS_ACCESS_KEY_ID),
+                                        options.get(OSS_ACCESS_KEY_SECRET))
+                                : builder.build(
+                                        endpoint,
+                                        options.get(OSS_ACCESS_KEY_ID),
+                                        options.get(OSS_ACCESS_KEY_SECRET),
+                                        securityToken));
+        String region = options.get(OSS_REGION);
+        if (!StringUtils.isNullOrWhitespaceOnly(region)) {
+            client.setRegion(region);
+        }
+        return client;
     }
 
     @Override
