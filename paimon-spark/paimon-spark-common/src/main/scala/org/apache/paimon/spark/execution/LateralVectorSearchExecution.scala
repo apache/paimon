@@ -31,6 +31,8 @@ import scala.collection.mutable.LongMap
 
 private[execution] object LateralVectorSearchExecution {
 
+  private val MaxMergeBatchesPerSearch = 16
+
   case class QueryBatchId(inputPartition: Int, ordinal: Long)
 
   final case class QueryBatchPartitioner(override val numPartitions: Int) extends Partitioner {
@@ -319,6 +321,14 @@ private[execution] object LateralVectorSearchExecution {
         grouped.toSeq
       }
     }
+  }
+
+  def queryMergeBatchSize(searchBatchSize: Int, mergeParallelism: Int): Int = {
+    // Create enough merge keys to utilize reducers without growing per-batch shuffle metadata
+    // unboundedly. Search batches are regrouped to searchBatchSize before entering native search.
+    val batchesPerSearch =
+      Math.min(Math.max(1, mergeParallelism), MaxMergeBatchesPerSearch)
+    Math.max(1, (searchBatchSize + batchesPerSearch - 1) / batchesPerSearch)
   }
 
   private def splitCost(split: VectorSearchSplit): Long = split match {

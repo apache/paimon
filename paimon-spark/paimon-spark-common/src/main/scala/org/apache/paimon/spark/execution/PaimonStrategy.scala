@@ -489,6 +489,10 @@ case class LateralVectorSearchExec(
 
     val searchTable = plannedSearch.table.get
     val childRDD = child.execute()
+    val mergeParallelism =
+      Math.max(groups.size, Math.min(childRDD.getNumPartitions, lateralJoinParallelism))
+    val mergeBatchSize =
+      LateralVectorSearchExecution.queryMergeBatchSize(plannedSearch.batchSize, mergeParallelism)
     val queryBatches = childRDD
       .mapPartitionsWithIndex {
         case (inputPartition, outerRows) =>
@@ -504,7 +508,7 @@ case class LateralVectorSearchExec(
                       QueryPayload(queryVector, outerRowProjection(outerRow).copy().getBytes)
                   }
             }
-            .grouped(plannedSearch.batchSize)
+            .grouped(mergeBatchSize)
             .map {
               batch =>
                 val batchId = QueryBatchId(inputPartition, batchOrdinal)
@@ -584,8 +588,6 @@ case class LateralVectorSearchExec(
         }
     }
 
-    val mergeParallelism =
-      Math.max(groups.size, Math.min(childRDD.getNumPartitions, lateralJoinParallelism))
     val mergedResults = candidateResults.combineByKey[PartialBatchResult](
       (value: PartialBatchResult) => value,
       (left: PartialBatchResult, right: PartialBatchResult) => left.merge(right, limit),

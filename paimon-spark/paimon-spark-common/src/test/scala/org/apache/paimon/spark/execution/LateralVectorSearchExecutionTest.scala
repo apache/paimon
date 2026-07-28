@@ -149,6 +149,14 @@ class LateralVectorSearchExecutionTest extends AnyFunSuite {
     assert(repeatedBatchCounts == (0 until 4).map(_ -> 12).toMap)
   }
 
+  test("split merge batches independently from vector search batches") {
+    assert(LateralVectorSearchExecution.queryMergeBatchSize(8192, 1) == 8192)
+    assert(LateralVectorSearchExecution.queryMergeBatchSize(8192, 16) == 512)
+    assert(LateralVectorSearchExecution.queryMergeBatchSize(8192, 64) == 512)
+    assert(LateralVectorSearchExecution.queryMergeBatchSize(3, 16) == 1)
+    assert(LateralVectorSearchExecution.queryMergeBatchSize(10, 3) == 4)
+  }
+
   test("only distribute complete indexed plans without refine") {
     val indexedSplits = Seq(
       new IndexVectorSearchSplit(0L, 9L, Collections.emptyList(), Collections.emptyList()),
