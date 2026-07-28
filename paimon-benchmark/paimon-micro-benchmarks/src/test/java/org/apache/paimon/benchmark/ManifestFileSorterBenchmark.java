@@ -45,8 +45,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -55,6 +57,8 @@ import java.util.Set;
  * <p>Run with:
  *
  * <pre>
+ * mvn -pl paimon-benchmark/paimon-micro-benchmarks -am -Pfast-build \
+ *   -DskipTests package
  * mvn -pl paimon-benchmark/paimon-micro-benchmarks -am -Pfast-build \
  *   -DfailIfNoTests=false -Dtest=ManifestFileSorterBenchmark test
  * </pre>
@@ -162,12 +166,12 @@ public class ManifestFileSorterBenchmark {
         long bestAllocatedBytes = Long.MAX_VALUE;
         for (int iteration = -1; iteration < iterations; iteration++) {
             System.gc();
-            long allocatedBefore = allocatedBytes();
+            Map<Long, Long> allocatedBefore = allocatedBytesByThread();
             long start = System.nanoTime();
             List<ManifestFileMeta> output =
                     ManifestFileMerger.merge(input, manifestFile, PARTITION_TYPE, coreOptions);
             long elapsed = System.nanoTime() - start;
-            long allocated = allocatedBytes() - allocatedBefore;
+            long allocated = allocatedBytesSince(allocatedBefore);
 
             long outputEntries = 0;
             for (ManifestFileMeta meta : output) {
@@ -304,23 +308,36 @@ public class ManifestFileSorterBenchmark {
         return Integer.parseInt(System.getProperty(name, Integer.toString(defaultValue)));
     }
 
-    private static long allocatedBytes() {
+    private static Map<Long, Long> allocatedBytesByThread() {
         java.lang.management.ThreadMXBean bean = ManagementFactory.getThreadMXBean();
         if (!(bean instanceof com.sun.management.ThreadMXBean)) {
-            return 0;
+            return Collections.emptyMap();
         }
         com.sun.management.ThreadMXBean allocationBean = (com.sun.management.ThreadMXBean) bean;
         if (!allocationBean.isThreadAllocatedMemorySupported()) {
-            return 0;
+            return Collections.emptyMap();
         }
         if (!allocationBean.isThreadAllocatedMemoryEnabled()) {
             allocationBean.setThreadAllocatedMemoryEnabled(true);
         }
+        long[] threadIds = bean.getAllThreadIds();
+        long[] allocated = allocationBean.getThreadAllocatedBytes(threadIds);
+        Map<Long, Long> result = new HashMap<>();
+        for (int i = 0; i < threadIds.length; i++) {
+            if (allocated[i] >= 0) {
+                result.put(threadIds[i], allocated[i]);
+            }
+        }
+        return result;
+    }
+
+    private static long allocatedBytesSince(Map<Long, Long> allocatedBefore) {
         long total = 0;
-        long[] allocated = allocationBean.getThreadAllocatedBytes(bean.getAllThreadIds());
-        for (long bytes : allocated) {
-            if (bytes > 0) {
-                total += bytes;
+        for (Map.Entry<Long, Long> entry : allocatedBytesByThread().entrySet()) {
+            Long before = allocatedBefore.get(entry.getKey());
+            long delta = entry.getValue() - (before == null ? 0 : before);
+            if (delta > 0) {
+                total += delta;
             }
         }
         return total;

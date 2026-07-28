@@ -164,16 +164,15 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             String fileName, @Nullable Long fileSize, Projection projection) {
         BinaryManifestEntry entry = projection.createEntry();
         try {
-            FormatReaderFactory projectedReaderFactory =
-                    fileFormat.createReaderFactory(
-                            manifestType, projection.projectedType(), Collections.emptyList());
             CloseableIterator<InternalRow> rows =
                     FileUtils.createFormatReader(
                                     fileIO,
-                                    projectedReaderFactory,
+                                    fileFormat.createReaderFactory(
+                                            manifestType,
+                                            projection.projectedType(),
+                                            Collections.emptyList()),
                                     pathFactory.toPath(fileName),
-                                    fileSize,
-                                    true)
+                                    fileSize)
                             .toCloseableIterator();
             return new CloseableIterator<BinaryManifestEntry>() {
 

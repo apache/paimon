@@ -38,6 +38,7 @@ import org.apache.avro.io.DatumReader;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.function.Supplier;
 
 /** Provides a {@link FormatReaderFactory} for Avro records. */
 public class AvroBulkFormat implements FormatReaderFactory {
@@ -51,11 +52,7 @@ public class AvroBulkFormat implements FormatReaderFactory {
     @Override
     public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
-        return new AvroReader(
-                context.fileIO(),
-                context.filePath(),
-                context.fileSize(),
-                context.isRecordReuseAllowed());
+        return new AvroReader(context.fileIO(), context.filePath(), context.fileSize());
     }
 
     private class AvroReader implements FileRecordReader<InternalRow> {
@@ -66,11 +63,9 @@ public class AvroBulkFormat implements FormatReaderFactory {
         private final long end;
         private final Pool<Object> pool;
         private final Path filePath;
-        private final boolean objectReuse;
         private long currentRowPosition;
 
-        private AvroReader(FileIO fileIO, Path path, long fileSize, boolean objectReuse)
-                throws IOException {
+        private AvroReader(FileIO fileIO, Path path, long fileSize) throws IOException {
             this.fileIO = fileIO;
             this.end = fileSize;
             this.reader = createReaderFromPath(path, end);
@@ -78,7 +73,6 @@ public class AvroBulkFormat implements FormatReaderFactory {
             this.pool = new Pool<>(1);
             this.pool.add(new Object());
             this.filePath = path;
-            this.objectReuse = objectReuse;
             this.currentRowPosition = 0;
         }
 
@@ -117,7 +111,7 @@ public class AvroBulkFormat implements FormatReaderFactory {
             long rowPosition = currentRowPosition;
             currentRowPosition += reader.getBlockCount();
             IteratorWithException<InternalRow, IOException> iterator =
-                    new AvroBlockIterator(reader.getBlockCount(), reader, objectReuse);
+                    new AvroBlockIterator(reader.getBlockCount(), reader);
             return new IteratorResultIterator(
                     iterator, () -> pool.recycler().recycle(ticket), filePath, rowPosition);
         }
@@ -139,14 +133,10 @@ public class AvroBulkFormat implements FormatReaderFactory {
 
         private long numRecordsRemaining;
         private final DataFileReader<InternalRow> reader;
-        private final boolean objectReuse;
-        private InternalRow reuse;
 
-        private AvroBlockIterator(
-                long numRecordsRemaining, DataFileReader<InternalRow> reader, boolean objectReuse) {
+        private AvroBlockIterator(long numRecordsRemaining, DataFileReader<InternalRow> reader) {
             this.numRecordsRemaining = numRecordsRemaining;
             this.reader = reader;
-            this.objectReuse = objectReuse;
         }
 
         @Override
@@ -159,15 +149,12 @@ public class AvroBulkFormat implements FormatReaderFactory {
             numRecordsRemaining--;
             // reader.next merely deserialize bytes in memory to java objects
             // and will not read from file
-            if (!objectReuse) {
-                return replaceAvroRuntimeException(reader::next);
-            }
-            reuse = replaceAvroRuntimeException(() -> reader.next(reuse));
-            return reuse;
+            // Do not reuse object, manifest file assumes no object reuse
+            return replaceAvroRuntimeException(reader::next);
         }
     }
 
-    private static <T> T replaceAvroRuntimeException(IOSupplier<T> supplier) throws IOException {
+    private static <T> T replaceAvroRuntimeException(Supplier<T> supplier) throws IOException {
         try {
             return supplier.get();
         } catch (AvroRuntimeException e) {
@@ -176,10 +163,5 @@ public class AvroBulkFormat implements FormatReaderFactory {
             }
             throw e;
         }
-    }
-
-    private interface IOSupplier<T> {
-
-        T get() throws IOException;
     }
 }

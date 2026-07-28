@@ -18,13 +18,11 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderContext;
-import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -33,7 +31,6 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -134,81 +131,6 @@ public class AvroFileFormatTest {
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             reader.forEachRemainingWithPosition(
                     (rowPosition, row) -> assertThat(row.getInt(0) == rowPosition).isTrue());
-        }
-    }
-
-    @Test
-    void testObjectReuseReader() throws IOException {
-        RowType rowType =
-                DataTypes.ROW(
-                        DataTypes.INT().notNull(),
-                        DataTypes.ROW(DataTypes.INT().notNull()).notNull(),
-                        DataTypes.STRING().notNull(),
-                        DataTypes.VARBINARY(20).notNull());
-        LocalFileIO fileIO = LocalFileIO.create();
-        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
-
-        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
-            FormatWriter writer = fileFormat.createWriterFactory(rowType).create(out, "zstd");
-            writer.addElement(
-                    GenericRow.of(
-                            1,
-                            GenericRow.of(11),
-                            BinaryString.fromString("one"),
-                            new byte[] {1, 2}));
-            writer.addElement(
-                    GenericRow.of(
-                            2,
-                            GenericRow.of(22),
-                            BinaryString.fromString("longer"),
-                            new byte[] {3, 4}));
-            writer.addElement(
-                    GenericRow.of(
-                            3,
-                            GenericRow.of(33),
-                            BinaryString.fromString("x"),
-                            new byte[] {5, 6, 7}));
-            writer.close();
-        }
-
-        FormatReaderFactory readerFactory =
-                fileFormat.createReaderFactory(rowType, rowType, new ArrayList<>());
-        try (RecordReader<InternalRow> reader =
-                readerFactory.createReader(
-                        new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
-            RecordIterator<InternalRow> batch = reader.readBatch();
-            assertThat(batch).isNotNull();
-            InternalRow first = batch.next();
-            InternalRow second = batch.next();
-            assertThat(second).isNotSameAs(first);
-            batch.releaseBatch();
-        }
-
-        try (RecordReader<InternalRow> reader =
-                readerFactory.createReader(
-                        new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), true))) {
-            RecordIterator<InternalRow> batch = reader.readBatch();
-            assertThat(batch).isNotNull();
-            InternalRow first = batch.next();
-            assertThat(first.getInt(0)).isEqualTo(1);
-            InternalRow firstNested = first.getRow(1, 1);
-            byte[] firstBinary = first.getBinary(3);
-
-            InternalRow second = batch.next();
-            assertThat(second).isSameAs(first);
-            assertThat(second.getRow(1, 1)).isSameAs(firstNested);
-            assertThat(second.getInt(0)).isEqualTo(2);
-            assertThat(second.getRow(1, 1).getInt(0)).isEqualTo(22);
-            assertThat(second.getString(2).toString()).isEqualTo("longer");
-            assertThat(second.getBinary(3)).isSameAs(firstBinary).containsExactly(3, 4);
-
-            InternalRow third = batch.next();
-            assertThat(third).isSameAs(first);
-            assertThat(third.getInt(0)).isEqualTo(3);
-            assertThat(third.getString(2).toString()).isEqualTo("x");
-            assertThat(third.getBinary(3)).isNotSameAs(firstBinary).containsExactly(5, 6, 7);
-            assertThat(batch.next()).isNull();
-            batch.releaseBatch();
         }
     }
 
