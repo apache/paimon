@@ -366,7 +366,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         catalog.createTable(
                 identifier("full_search_raw_only_cosine_table"),
                 vectorSchemaBuilder(VECTOR_FIELD_NAME)
-                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .option(CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "full")
                         .option("test.vector.metric", "cosine")
                         .build(),
                 false);
@@ -1067,12 +1067,10 @@ public class VectorSearchBuilderTest extends TableTestBase {
     @Test
     public void testPartialScalarPreFilterMustNotDropUnindexedScalarRows() throws Exception {
         catalog.createTable(
-                identifier("full_search_partial_scalar_unindexed_table"),
-                vectorSchemaBuilder(VECTOR_FIELD_NAME)
-                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
-                        .build(),
+                identifier("default_scalar_full_partial_index_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME).build(),
                 false);
-        FileStoreTable table = getTable(identifier("full_search_partial_scalar_unindexed_table"));
+        FileStoreTable table = getTable(identifier("default_scalar_full_partial_index_table"));
 
         float[][] vectors = new float[10][];
         for (int i = 0; i < vectors.length; i++) {
@@ -1102,6 +1100,41 @@ public class VectorSearchBuilderTest extends TableTestBase {
             reader.forEachRemaining(row -> ids.add(row.getInt(0)));
         }
         assertThat(ids).containsExactly(8);
+    }
+
+    @Test
+    public void testFastVectorModeLimitsScalarFallbackToVectorCoverage() throws Exception {
+        catalog.createTable(
+                identifier("fast_vector_partial_coverage_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "fast")
+                        .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("fast_vector_partial_coverage_table"));
+
+        float[][] vectors = new float[10][];
+        for (int i = 0; i < vectors.length; i++) {
+            vectors[i] = new float[] {Math.abs(i - 8), 0.0f};
+        }
+        writeVectors(table, vectors);
+
+        buildAndCommitVectorIndex(table, Arrays.copyOf(vectors, 5), new Range(0, 4));
+        buildAndCommitBTreeIndex(table, new int[] {2, 3, 4}, new Range(2, 4));
+
+        Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 5);
+        VectorScan.Plan plan =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(rawVectorSearchSplits(plan.splits())).hasSize(1);
+        assertThat(rawVectorSearchSplits(plan.splits()).get(0).rowRanges())
+                .containsExactly(new Range(0, 1));
     }
 
     @Test
@@ -1144,9 +1177,14 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testFastModePartialScalarPreFilterOnlyUsesIndexedRows() throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
+    public void testFastScalarModePartialPreFilterOnlyUsesIndexedRows() throws Exception {
+        catalog.createTable(
+                identifier("fast_scalar_partial_index_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "fast")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("fast_scalar_partial_index_table"));
 
         float[][] vectors = new float[10][];
         for (int i = 0; i < vectors.length; i++) {
@@ -1267,7 +1305,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
         buildAndCommitVectorIndexWithFields(
                 table, vectors, new Range(0, 3), Arrays.asList(vectorField, idField));
         // The dedicated scalar index covers only the head. The vector index's scalar extra field
-        // must still serve the tail; otherwise GlobalIndexScanner's primary-field preference drops
+        // must still serve the tail; otherwise DataEvolutionGlobalIndexScanner's primary-field
+        // preference drops
         // rows [2, 3] even though coverage planning treats them as indexed.
         buildAndCommitBTreeIndex(table, new int[] {0, 1}, new Range(0, 1));
 
@@ -1573,7 +1612,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         }
     }
 
-    private static class RecordingBatchVectorRead extends BatchVectorReadImpl {
+    private static class RecordingBatchVectorRead extends DataEvolutionBatchVectorRead {
 
         private int rawReadCount;
         private List<Range> rawReadRanges;

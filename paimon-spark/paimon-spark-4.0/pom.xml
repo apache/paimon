@@ -38,6 +38,10 @@ under the License.
              2.x; otherwise `log4j-slf4j2-impl` + `slf4j-api:1.7.32` mix produces
              `NoClassDefFoundError: org/slf4j/spi/LoggingEventBuilder` at test startup. -->
         <slf4j.version>2.0.16</slf4j.version>
+        <!-- Spark 4 only supports Scala 2.13. Pin it locally so this _2.13 module resolves its
+             dependencies to _2.13 even when the spark4 profile is inactive (see issue #6682);
+             otherwise it inherits scala.binary.version=2.12 from paimon-parent. -->
+        <scala.binary.version>2.13</scala.binary.version>
     </properties>
 
     <dependencies>

@@ -164,17 +164,6 @@ class PrimaryKeySortedIndexValidationTest {
                 .hasMessageContaining("not supported by global index");
     }
 
-    @Test
-    void testRejectsInvalidCompactionLevelFanout() {
-        Map<String, String> options = enabledOptions();
-        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "payload");
-        options.put("fields.payload.pk-index.compaction.level-fanout", "1");
-
-        assertThatThrownBy(() -> validateTableSchema(schema(options)))
-                .hasMessageContaining("fields.payload.pk-index.compaction.level-fanout")
-                .hasMessageContaining("greater than 1");
-    }
-
     private static Map<String, String> enabledOptions() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");

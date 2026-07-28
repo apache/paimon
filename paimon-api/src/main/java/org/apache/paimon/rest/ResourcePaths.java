@@ -213,6 +213,18 @@ public class ResourcePaths {
                 PARTITIONS);
     }
 
+    public String dropPartitions(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                PARTITIONS,
+                "drop");
+    }
+
     public String markDonePartitions(String databaseName, String objectName) {
         return SLASH.join(
                 V1,
@@ -235,6 +247,18 @@ public class ResourcePaths {
                 encodeString(objectName),
                 PARTITIONS,
                 "list-by-names");
+    }
+
+    public String listPartitionsByFilter(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                PARTITIONS,
+                "list-by-filter");
     }
 
     public String branches(String databaseName, String objectName) {

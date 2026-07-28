@@ -20,7 +20,7 @@ package org.apache.paimon.spark.data
 
 import org.apache.paimon.data.{Blob, BlobView, InternalArray}
 import org.apache.paimon.spark.DataConverter
-import org.apache.paimon.types.{ArrayType => PaimonArrayType, BigIntType, BlobType, DataType => PaimonDataType, DataTypeChecks, RowType}
+import org.apache.paimon.types.{ArrayType => PaimonArrayType, BigIntType, BlobType, DataType => PaimonDataType, DataTypeChecks, RowType, VectorType}
 import org.apache.paimon.utils.InternalRowUtils
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -141,10 +141,15 @@ abstract class AbstractSparkArrayData extends SparkArrayData {
   override def getStruct(ordinal: Int, numFields: Int): InternalRow = DataConverter
     .fromPaimon(paimonArray.getRow(ordinal, numFields), elementType.asInstanceOf[RowType])
 
-  override def getArray(ordinal: Int): ArrayData = DataConverter.fromPaimon(
-    paimonArray.getArray(ordinal),
-    elementType.asInstanceOf[PaimonArrayType],
-    blobAsDescriptor)
+  override def getArray(ordinal: Int): ArrayData = elementType match {
+    // A nested VECTOR is exposed as a Spark array; read it as a vector, not an array.
+    case vectorType: VectorType =>
+      DataConverter.fromPaimon(paimonArray.getVector(ordinal), vectorType)
+    case arrayType: PaimonArrayType =>
+      DataConverter.fromPaimon(paimonArray.getArray(ordinal), arrayType, blobAsDescriptor)
+    case other =>
+      throw new UnsupportedOperationException("Not an array type: " + other)
+  }
 
   override def getMap(ordinal: Int): MapData =
     DataConverter.fromPaimon(paimonArray.getMap(ordinal), elementType)

@@ -87,6 +87,9 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private final CoordinatorStateSerializer stateSerializer;
     private CoordinatorExecutorThreadFactory coordinatorThreadFactory;
     private ExecutorService commitExecutor;
+    // Rebuilt per coordinator instance; state is purely in-memory, matching Flink's
+    // StatusWatermarkValve which is also reconstructed per task instance without checkpointing.
+    private WatermarkAligner watermarkAligner;
 
     // Populated by resetToCheckpoint and consumed by start. Plain fields are sufficient: both
     // callbacks run on the same scheduler thread in order.
@@ -136,6 +139,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         // before currentParallelism() is available. start() is the first lifecycle callback where
         // the Context is guaranteed to be initialized.
         subtaskCommittables = new WriterCommittables[context.currentParallelism()];
+        this.watermarkAligner = new WatermarkAligner(context.currentParallelism());
         coordinatorThreadFactory =
                 new CoordinatorExecutorThreadFactory("WriteCommitCoordinator", context);
         commitExecutor = Executors.newSingleThreadExecutor(coordinatorThreadFactory);
@@ -258,7 +262,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                     long targetCheckpointId = finalCommit ? END_INPUT_CHECKPOINT_ID : checkpointId;
                     Map<Long, Long> watermarkPerCheckpoint =
                             alignWatermarkPerCheckpointForCommit(
-                                    targetCheckpointId, subtaskCommittables);
+                                    targetCheckpointId, subtaskCommittables, watermarkAligner);
                     commitUpToCheckpoint(
                             targetCheckpointId,
                             pollManifestCommittablesForCheckpoint(
@@ -433,7 +437,8 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         }
 
         Map<Long, Long> watermarkPerCheckpoint =
-                alignWatermarkPerCheckpointForCommit(END_INPUT_CHECKPOINT_ID, subtaskCommittables);
+                alignWatermarkPerCheckpointForCommit(
+                        END_INPUT_CHECKPOINT_ID, subtaskCommittables, watermarkAligner);
         commitUpToCheckpoint(
                 END_INPUT_CHECKPOINT_ID,
                 pollManifestCommittablesForCheckpoint(
@@ -451,7 +456,8 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         if (failoverAfterRecovery) {
             // recommit the restored committables and trigger a failover to reinitialize all writers
             Map<Long, Long> watermarkPerCheckpoint =
-                    alignWatermarkPerCheckpointForCommit(checkpointId, subtaskCommittables);
+                    alignWatermarkPerCheckpointForCommit(
+                            checkpointId, subtaskCommittables, watermarkAligner);
             commitUpToCheckpoint(
                     checkpointId,
                     pollManifestCommittablesForCheckpoint(
@@ -515,16 +521,15 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     }
 
     /**
-     * Reduce the per-subtask watermark of each checkpoint (up to {@code checkpointId}, inclusive)
-     * into a single watermark to attach to the committed snapshot. Every subtask must have an entry
-     * for {@code checkpointId} by contract (writers emit one event per barrier, even empty), so
-     * this method observes each subtask through {@link WriterCommittables#watermarkAt}, which
-     * returns {@link Long#MIN_VALUE} for missing entries — matching {@code CommitterOperator}'s
-     * initial-watermark semantics and giving idle handling a single hook to grow into later.
+     * Aggregate each pending checkpoint's per-subtask (watermark, idle) pairs into a single
+     * watermark by delegating to {@link WatermarkAligner}. Returns a map from checkpoint id to the
+     * aligned watermark, covering every checkpoint up to {@code checkpointId} inclusive.
      */
     @VisibleForTesting
     static Map<Long, Long> alignWatermarkPerCheckpoint(
-            long checkpointId, WriterCommittables[] subtaskCommittables) {
+            long checkpointId, WriterCommittables[] subtaskCommittables, WatermarkAligner aligner) {
+        // TreeSet keeps checkpoint ids in ascending order, matching the aligner's contract that
+        // successive align() calls advance monotonically.
         Set<Long> checkpoints = new TreeSet<>();
         for (WriterCommittables committables : subtaskCommittables) {
             checkpoints.addAll(
@@ -532,13 +537,22 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         }
         Map<Long, Long> watermarkPerCheckpoint = new HashMap<>();
         for (long cp : checkpoints) {
-            long min = Long.MAX_VALUE;
-            for (WriterCommittables committables : subtaskCommittables) {
-                min = Math.min(min, committables.watermarkAt(cp));
-            }
-            watermarkPerCheckpoint.put(cp, min);
+            watermarkPerCheckpoint.put(
+                    cp, aligner.align(subtaskWatermarksAt(cp, subtaskCommittables)));
         }
         return watermarkPerCheckpoint;
+    }
+
+    private static SubtaskWatermark[] subtaskWatermarksAt(
+            long checkpointId, WriterCommittables[] subtaskCommittables) {
+        SubtaskWatermark[] subtaskWatermarks = new SubtaskWatermark[subtaskCommittables.length];
+        for (int i = 0; i < subtaskCommittables.length; i++) {
+            subtaskWatermarks[i] =
+                    new SubtaskWatermark(
+                            subtaskCommittables[i].watermarkAt(checkpointId),
+                            subtaskCommittables[i].isIdleAt(checkpointId));
+        }
+        return subtaskWatermarks;
     }
 
     /**
@@ -546,9 +560,9 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
      * committable when EndInput is encountered.
      */
     private Map<Long, Long> alignWatermarkPerCheckpointForCommit(
-            long checkpointId, WriterCommittables[] subtaskCommittables) {
+            long checkpointId, WriterCommittables[] subtaskCommittables, WatermarkAligner aligner) {
         Map<Long, Long> watermarkPerCheckpoint =
-                alignWatermarkPerCheckpoint(checkpointId, subtaskCommittables);
+                alignWatermarkPerCheckpoint(checkpointId, subtaskCommittables, aligner);
         if (checkpointId == END_INPUT_CHECKPOINT_ID && endInputWatermark != null) {
             watermarkPerCheckpoint.put(END_INPUT_CHECKPOINT_ID, endInputWatermark);
         }

@@ -270,13 +270,12 @@ class BucketedVectorIndexMaintainerTest {
     }
 
     @Test
-    void testPartialCompactionKeepsOldAnnAndIndexesNewSource() throws Exception {
+    void testPartialCompactionRebuildsCompleteLevel() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         PkVectorAnnSegmentFile annFile = new PkVectorAnnSegmentFile(fileIO, pathFactory());
         DataField vectorField =
                 new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
         Options options = indexOptions();
-        options.setString("fields.embedding.pk-index.compaction.stale-ratio-threshold", "1.0");
         DataFileMeta data1 = dataFile("data-1");
         DataFileMeta data2 = dataFile("data-2");
         DataFileMeta data3 = dataFile("data-3");
@@ -320,14 +319,14 @@ class BucketedVectorIndexMaintainerTest {
 
         BucketedVectorIndexMaintainer.VectorIndexIncrement increment =
                 commit.compactIncrement().get();
-        assertThat(increment.deletedIndexFiles()).isEmpty();
+        assertThat(increment.deletedIndexFiles()).containsExactly(initialAnn);
         assertThat(increment.newIndexFiles()).hasSize(1);
-        IndexFileMeta delta = increment.newIndexFiles().get(0);
-        assertThat(delta.indexType()).isEqualTo("test-vector-ann");
-        assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(delta).sourceFiles())
+        IndexFileMeta replacement = increment.newIndexFiles().get(0);
+        assertThat(replacement.indexType()).isEqualTo("test-vector-ann");
+        assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(replacement).sourceFiles())
                 .extracting(PrimaryKeyIndexSourceFile::fileName)
-                .containsExactly("data-3");
-        assertThat(maintainer.segments()).containsExactly(initialAnn, delta);
+                .containsExactly("data-2", "data-3");
+        assertThat(maintainer.segments()).containsExactly(replacement);
     }
 
     @Test
@@ -467,13 +466,12 @@ class BucketedVectorIndexMaintainerTest {
     }
 
     @Test
-    void testRebuildsDerivedLevelAndAtomicallyReplacesInputs() throws Exception {
+    void testRebuildsDuplicateLevelSegmentsAsCompleteLevel() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         PkVectorAnnSegmentFile annFile = new PkVectorAnnSegmentFile(fileIO, pathFactory());
         DataField vectorField =
                 new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
         Options options = indexOptions();
-        options.setString("fields.embedding.pk-index.compaction.level-fanout", "3");
         DataFileMeta data1 = dataFile("data-1");
         DataFileMeta data2 = dataFile("data-2");
         DataFileMeta data3 = dataFile("data-3");
@@ -546,7 +544,6 @@ class BucketedVectorIndexMaintainerTest {
         DataField vectorField =
                 new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT()));
         Options options = indexOptions();
-        options.setString("fields.embedding.pk-index.compaction.level-fanout", "3");
         List<DataFileMeta> dataFiles = new ArrayList<>();
         List<IndexFileMeta> initialSegments = new ArrayList<>();
         for (int i = 1; i <= 6; i++) {
@@ -593,7 +590,7 @@ class BucketedVectorIndexMaintainerTest {
                                         CompactIncrement.emptyIncrement(),
                                         true))
                 .isInstanceOf(UncheckedIOException.class);
-        assertThat(maintainer.segments()).containsExactlyInAnyOrderElementsOf(initialSegments);
+        assertThat(maintainer.segments()).isEmpty();
         assertThat(fileCount()).isEqualTo(6);
 
         BucketedVectorIndexMaintainer.VectorIndexCommit retry =
@@ -604,7 +601,7 @@ class BucketedVectorIndexMaintainerTest {
                 retry.appendIncrement().get();
         assertThat(increment.deletedIndexFiles())
                 .containsExactlyInAnyOrderElementsOf(initialSegments);
-        assertThat(increment.newIndexFiles()).hasSize(2);
+        assertThat(increment.newIndexFiles()).hasSize(1);
     }
 
     @Test
@@ -847,7 +844,7 @@ class BucketedVectorIndexMaintainerTest {
                         fieldId,
                         null,
                         new byte[] {1},
-                        new PrimaryKeyIndexSourceMeta(sourceFile).serialize()),
+                        new PrimaryKeyIndexSourceMeta(1, sourceFile).serialize()),
                 null);
     }
 

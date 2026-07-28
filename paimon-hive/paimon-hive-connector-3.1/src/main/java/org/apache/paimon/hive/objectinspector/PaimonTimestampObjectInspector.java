@@ -40,7 +40,10 @@ public class PaimonTimestampObjectInspector extends AbstractPrimitiveJavaObjectI
 
         org.apache.paimon.data.Timestamp timestamp = (org.apache.paimon.data.Timestamp) o;
         long millis = timestamp.getMillisecond();
-        int nanos = (int) (millis % 1000 * 1_000_000) + timestamp.getNanoOfMillisecond();
+        // Math.floorMod keeps the sub-second nanos in [0, 999_999_999] for negative (pre-1970)
+        // millis too, so Hive's Timestamp.ofEpochMilli does not reject a negative nano-of-second.
+        int nanos =
+                (int) (Math.floorMod(millis, 1000L) * 1_000_000) + timestamp.getNanoOfMillisecond();
         return Timestamp.ofEpochMilli(millis, nanos);
     }
 

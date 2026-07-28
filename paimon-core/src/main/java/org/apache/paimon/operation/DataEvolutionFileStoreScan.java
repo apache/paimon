@@ -303,6 +303,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         int[] fieldOffsets = new int[fieldsCount];
         Arrays.fill(rowOffsets, -1);
         Arrays.fill(fieldOffsets, -1);
+        Set<Integer> typeMismatchedFieldIds = new HashSet<>();
 
         InternalRow[] min = new InternalRow[metas.size()];
         InternalRow[] max = new InternalRow[metas.size()];
@@ -346,6 +347,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                             if (fieldId == fieldIdsWithStats[k]) {
                                 DataType fileType = dataFileSchemaWithStats.fields().get(k).type();
                                 if (!fileType.equalsIgnoreFieldId(targetType)) {
+                                    typeMismatchedFieldIds.add(targetFieldId);
                                     continue loop1;
                                 }
                                 rowOffsets[j] = i;
@@ -362,7 +364,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
         long groupRowCount = metas.get(0).file().rowCount();
         for (int j = 0; j < fieldsCount; j++) {
-            if (rowOffsets[j] == -1 && excludedFileFieldIds.contains(allFields[j])) {
+            if (rowOffsets[j] == -1
+                    && (excludedFileFieldIds.contains(allFields[j])
+                            || typeMismatchedFieldIds.contains(allFields[j]))) {
                 rowOffsets[j] = -2;
             }
         }

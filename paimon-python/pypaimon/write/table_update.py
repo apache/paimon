@@ -245,7 +245,8 @@ class TableUpdate:
         else:
             read_builder.with_projection([SpecialFields.ROW_ID.name])
 
-        splits = read_builder.new_scan().plan().splits()
+        scan = read_builder.new_scan()
+        splits = scan.plan_for_write().splits()
         matched = read_builder.new_read().to_arrow(splits)
         if matched.num_rows == 0:
             return []
@@ -272,7 +273,7 @@ class TableUpdate:
             return self.table
 
         dynamic_options = {
-            CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key():
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key():
                 GlobalIndexSearchMode.FULL.value,
             CoreOptions.SCAN_MODE.key(): StartupMode.DEFAULT.value,
             CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id),
@@ -486,7 +487,8 @@ class TableUpdate:
         else:
             read_builder.with_projection([SpecialFields.ROW_ID.name])
 
-        splits = read_builder.new_scan().plan().splits()
+        scan = read_builder.new_scan()
+        splits = scan.plan_for_write().splits()
         matched = read_builder.new_read().to_arrow(splits)
         if matched.num_rows == 0:
             return []
@@ -664,7 +666,7 @@ class ShardTableUpdator:
         self.dict = defaultdict(list)
 
         scanner = self.table.new_read_builder().new_scan()
-        plan = scanner.plan()
+        plan = scanner.plan_for_write()
         self.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         splits = plan.splits()
         splits = _filter_by_whole_file_shard(splits, shard_num, total_shard_count)

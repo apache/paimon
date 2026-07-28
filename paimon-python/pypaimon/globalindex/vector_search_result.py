@@ -87,20 +87,21 @@ class ScoredGlobalIndexResult(GlobalIndexResult):
             return self
 
         score_getter_fn = self.score_getter()
-        # Use a min-heap of size k to find top-k scores in O(n log k)
+        # The heap head is the weakest candidate: lowest score, then largest row ID.
         heap = []
         for row_id in row_ids:
             score = score_getter_fn(row_id)
             if score is None:
                 score = 0.0
+            item = (score, -row_id)
             if len(heap) < k:
-                heapq.heappush(heap, (score, row_id))
-            elif score > heap[0][0]:
-                heapq.heapreplace(heap, (score, row_id))
+                heapq.heappush(heap, item)
+            elif item > heap[0]:
+                heapq.heapreplace(heap, item)
 
         top_k_bitmap = RoaringBitmap64()
-        for _, row_id in heap:
-            top_k_bitmap.add(row_id)
+        for _, neg_row_id in heap:
+            top_k_bitmap.add(-neg_row_id)
 
         return SimpleScoredGlobalIndexResult(top_k_bitmap, score_getter_fn)
 

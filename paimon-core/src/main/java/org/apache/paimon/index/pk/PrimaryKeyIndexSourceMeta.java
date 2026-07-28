@@ -35,15 +35,22 @@ public final class PrimaryKeyIndexSourceMeta {
 
     private static final int VERSION = 1;
 
+    private final int dataLevel;
     private final List<PrimaryKeyIndexSourceFile> sourceFiles;
 
-    public PrimaryKeyIndexSourceMeta(List<PrimaryKeyIndexSourceFile> sourceFiles) {
+    public PrimaryKeyIndexSourceMeta(int dataLevel, List<PrimaryKeyIndexSourceFile> sourceFiles) {
+        checkArgument(dataLevel > 0, "Primary-key index data level must be positive.");
+        this.dataLevel = dataLevel;
         this.sourceFiles = Collections.unmodifiableList(new ArrayList<>(sourceFiles));
         checkArgument(!this.sourceFiles.isEmpty(), "An index must reference source files.");
     }
 
-    public PrimaryKeyIndexSourceMeta(PrimaryKeyIndexSourceFile sourceFile) {
-        this(Collections.singletonList(sourceFile));
+    public PrimaryKeyIndexSourceMeta(int dataLevel, PrimaryKeyIndexSourceFile sourceFile) {
+        this(dataLevel, Collections.singletonList(sourceFile));
+    }
+
+    public int dataLevel() {
+        return dataLevel;
     }
 
     public List<PrimaryKeyIndexSourceFile> sourceFiles() {
@@ -71,6 +78,7 @@ public final class PrimaryKeyIndexSourceMeta {
         try {
             DataOutputSerializer output = new DataOutputSerializer(128);
             output.writeInt(VERSION);
+            output.writeInt(dataLevel);
             output.writeInt(sourceFiles.size());
             for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
                 output.writeUTF(sourceFile.fileName());
@@ -87,6 +95,7 @@ public final class PrimaryKeyIndexSourceMeta {
             DataInputDeserializer input = new DataInputDeserializer(bytes);
             int version = input.readInt();
             checkArgument(version == VERSION, "Unsupported index source version: %s.", version);
+            int dataLevel = input.readInt();
             int sourceFileCount = input.readInt();
             checkArgument(sourceFileCount > 0, "An index must reference source files.");
             // Each entry needs at least the two-byte writeUTF length and one long.
@@ -104,7 +113,7 @@ public final class PrimaryKeyIndexSourceMeta {
             }
             checkArgument(
                     input.available() == 0, "Unexpected trailing bytes in index source metadata.");
-            return new PrimaryKeyIndexSourceMeta(sourceFiles);
+            return new PrimaryKeyIndexSourceMeta(dataLevel, sourceFiles);
         } catch (IOException e) {
             throw new IllegalArgumentException("Failed to deserialize index source metadata.", e);
         }

@@ -56,6 +56,14 @@ public class LanceFileFormatTest {
     }
 
     @Test
+    public void testValidateDataFields_UnsupportedMultisetType() {
+        LanceFileFormat format =
+                new LanceFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        RowType rowType = RowType.of(DataTypes.MULTISET(DataTypes.STRING()));
+        assertThrows(UnsupportedOperationException.class, () -> format.validateDataFields(rowType));
+    }
+
+    @Test
     public void testValidateDataFields_SupportedTypes() {
         LanceFileFormat format =
                 new LanceFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));

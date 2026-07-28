@@ -26,8 +26,10 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
+import org.apache.paimon.format.shredding.ShreddingWritePlanFactory;
+import org.apache.paimon.format.shredding.ShreddingWritePlanType;
+import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactories;
 import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactory;
-import org.apache.paimon.format.variant.VariantShreddingWritePlanFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -36,21 +38,29 @@ import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 
 import org.apache.parquet.ParquetReadOptions;
-import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.format.parquet.ParquetFileFormatFactory.IDENTIFIER;
 
 /** Parquet {@link FileFormat}. */
 public class ParquetFileFormat extends FileFormat implements SupportsFieldMetadata {
+
+    private static final Set<ShreddingWritePlanType> SUPPORTED_SHREDDING_WRITE_PLANS =
+            Collections.unmodifiableSet(
+                    EnumSet.of(
+                            ShreddingWritePlanType.VARIANT,
+                            ShreddingWritePlanType.MAP_SHARED_SHREDDING));
 
     private final FormatContext formatContext;
     private final Options options;
@@ -74,8 +84,7 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
-        return new ParquetReaderFactory(
-                options, projectedRowType, readBatchSize, ParquetFilters.convert(filters));
+        return new ParquetReaderFactory(options, projectedRowType, readBatchSize, filters);
     }
 
     @Override
@@ -100,10 +109,14 @@ public class ParquetFileFormat extends FileFormat implements SupportsFieldMetada
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        ParquetWriterFactory baseFactory =
+        FormatWriterFactory rawFactory =
                 new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
-        return new ShreddingWritePlanWriterFactory(
-                baseFactory, new VariantShreddingWritePlanFactory(type, formatContext.options()));
+        ShreddingWritePlanFactory writePlanFactory =
+                ShreddingWritePlanWriterFactories.createWritePlanFactory(
+                        type, formatContext.options(), SUPPORTED_SHREDDING_WRITE_PLANS, IDENTIFIER);
+        return writePlanFactory == null
+                ? rawFactory
+                : new ShreddingWritePlanWriterFactory(rawFactory, writePlanFactory);
     }
 
     @Override

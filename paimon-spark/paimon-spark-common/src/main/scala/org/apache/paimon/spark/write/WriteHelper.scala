@@ -20,13 +20,12 @@ package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.TagCreationMode
-import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.partition.actions.PartitionMarkDoneAction
 import org.apache.paimon.spark.catalyst.Compatibility
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.{BlobDescriptorReaderFactory, FileStoreTable}
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.tag.TagBatchCreation
-import org.apache.paimon.utils.{BlobDescriptorUtils, InternalRowPartitionComputer, PartitionPathUtils, PartitionStatisticsReporter, TypeUtils}
+import org.apache.paimon.utils.{InternalRowPartitionComputer, PartitionPathUtils, PartitionStatisticsReporter, TypeUtils, UriReaderFactory}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.PaimonSparkSession
@@ -42,10 +41,8 @@ trait WriteHelper extends Logging {
 
   lazy val coreOptions: CoreOptions = table.coreOptions()
 
-  lazy val catalogContextForBlobDescriptor: CatalogContext =
-    BlobDescriptorUtils.getCatalogContext(
-      table.catalogEnvironment().catalogContext(),
-      coreOptions.toConfiguration)
+  lazy val uriReaderFactoryForBlobDescriptor: UriReaderFactory =
+    BlobDescriptorReaderFactory.create(table)
 
   // Spark support v2 write driver metrics since 4.0, see https://github.com/apache/spark/pull/48573
   // To ensure compatibility with 3.x, manually post driver metrics here instead of using Spark's API.

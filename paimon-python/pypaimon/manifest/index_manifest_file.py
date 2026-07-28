@@ -52,6 +52,7 @@ _GLOBAL_INDEX_META_SCHEMA = {
         {"name": "_EXTRA_FIELD_IDS",
          "type": ["null", {"type": "array", "items": "int"}], "default": None},
         {"name": "_INDEX_META", "type": ["null", "bytes"], "default": None},
+        {"name": "_SOURCE_META", "type": ["null", "bytes"], "default": None},
     ],
 }
 
@@ -84,6 +85,7 @@ _HASH_INDEX = "HASH"
 class IndexManifestFile:
 
     DELETION_VECTORS_INDEX = "DELETION_VECTORS"
+    HASH_INDEX = _HASH_INDEX
 
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
@@ -185,7 +187,9 @@ class IndexManifestFile:
                         row_range_start=global_index_data.get('row_range_start', 0),
                         row_range_end=global_index_data.get('row_range_end', 0),
                         index_field_id=global_index_data.get('index_field_id', 0),
-                        index_meta=global_index_data.get('index_meta')
+                        extra_field_ids=global_index_data.get('extra_field_ids'),
+                        index_meta=global_index_data.get('index_meta'),
+                        source_meta=global_index_data.get('source_meta'),
                     )
 
                 index_file_meta = IndexFileMeta(
@@ -228,7 +232,8 @@ class IndexManifestFile:
             row_range_end=global_index_record.get('_ROW_RANGE_END', 0),
             index_field_id=global_index_record.get('_INDEX_FIELD_ID', 0),
             extra_field_ids=global_index_record.get('_EXTRA_FIELD_IDS'),
-            index_meta=global_index_record.get('_INDEX_META')
+            index_meta=global_index_record.get('_INDEX_META'),
+            source_meta=global_index_record.get('_SOURCE_META'),
         )
 
     def combine_deletes(
@@ -250,6 +255,7 @@ class IndexManifestFile:
         delete_names = {e.index_file.file_name for e in deletes}
         survivors = [e for e in previous if e.index_file.file_name not in delete_names]
         _validate_retained_global_index_files(survivors, adds)
+        _validate_hash_index_changes(survivors, adds)
         combined = survivors + adds
         if not combined:
             return None
@@ -291,6 +297,7 @@ class IndexManifestFile:
                 "_INDEX_FIELD_ID": gim.index_field_id,
                 "_EXTRA_FIELD_IDS": gim.extra_field_ids,
                 "_INDEX_META": gim.index_meta,
+                "_SOURCE_META": gim.source_meta,
             }
         return {
             "_VERSION": _INDEX_ENTRY_VERSION,
@@ -344,6 +351,35 @@ def _validate_retained_global_index_files(
                     retained_meta.row_range_end,
                 )
             )
+
+
+def _validate_hash_index_changes(
+    retained_entries: List[IndexManifestEntry],
+    added_entries: List[IndexManifestEntry],
+) -> None:
+    """Keep the one-HASH-file-per-bucket manifest invariant."""
+    by_bucket = {
+        (tuple(entry.partition.values), entry.bucket): entry
+        for entry in retained_entries
+        if entry.index_file.index_type == _HASH_INDEX
+    }
+    for added in added_entries:
+        if added.kind != _ADD or added.index_file.index_type != _HASH_INDEX:
+            continue
+        key = (tuple(added.partition.values), added.bucket)
+        previous = by_bucket.get(key)
+        if previous is not None:
+            raise RuntimeError(
+                "Trying to add HASH index file {} for partition {}, bucket {}, "
+                "but HASH index file {} still exists. Remove the previous file "
+                "first.".format(
+                    added.index_file.file_name,
+                    key[0],
+                    key[1],
+                    previous.index_file.file_name,
+                )
+            )
+        by_bucket[key] = added
 
 
 def _is_global_index(index_type: str) -> bool:

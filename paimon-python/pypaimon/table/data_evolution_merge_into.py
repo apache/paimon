@@ -723,7 +723,7 @@ def _read_table(table, projection: Optional[List[str]] = None,
     if projection is not None:
         read_builder.with_projection(projection)
     scan = read_builder.new_scan()
-    return read_builder.new_read().to_arrow(scan.plan().splits())
+    return read_builder.new_read().to_arrow(scan.plan_for_write().splits())
 
 
 def _copy_at_snapshot(table, snapshot_id: Optional[int]):

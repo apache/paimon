@@ -70,8 +70,7 @@ class BucketedSortedIndexMaintainerTest {
     void testRestoreBuildAndSourceRemoval() throws Exception {
         DataFileMeta oldSource = dataFile("data-1", 3);
         DataFileMeta newSource = dataFile("data-2", 3);
-        List<IndexFileMeta> oldPayloads =
-                Arrays.asList(payload("old-1", oldSource, 2), payload("old-2", oldSource, 1));
+        List<IndexFileMeta> oldPayloads = Collections.singletonList(payload("old", oldSource, 3));
         IndexFileMeta newPayload = payload("new", newSource, 3);
         PkSortedIndexFile indexFile = new PkSortedIndexFile(LocalFileIO.create(), pathFactory());
         BucketedSortedIndexMaintainer maintainer =
@@ -83,8 +82,6 @@ class BucketedSortedIndexMaintainerTest {
                             assertThat(sourceFiles).containsExactly(newSource);
                             return newPayload;
                         },
-                        5,
-                        0.2,
                         Collections.singletonList(oldSource),
                         oldPayloads,
                         executor);
@@ -108,7 +105,7 @@ class BucketedSortedIndexMaintainerTest {
     }
 
     @Test
-    void testFanoutCompactionReplacesCompleteGroups() throws Exception {
+    void testRebuildsDuplicateLevelPayloadsAsCompleteLevel() throws Exception {
         DataFileMeta sourceA = dataFile("data-a", 3);
         DataFileMeta sourceB = dataFile("data-b", 3);
         IndexFileMeta payloadA = payload("index-a", sourceA, 3);
@@ -123,8 +120,6 @@ class BucketedSortedIndexMaintainerTest {
                             assertThat(sources).containsExactly(sourceA, sourceB);
                             return merged;
                         },
-                        2,
-                        1.0,
                         Arrays.asList(sourceA, sourceB),
                         Arrays.asList(payloadA, payloadB),
                         executor);
@@ -156,8 +151,6 @@ class BucketedSortedIndexMaintainerTest {
                         sources -> {
                             throw new AssertionError("Pending build must not start.");
                         },
-                        2,
-                        1.0,
                         Arrays.asList(sourceA, sourceB),
                         Arrays.asList(
                                 payload("index-a", sourceA, 3), payload("index-b", sourceB, 3)),
@@ -182,8 +175,6 @@ class BucketedSortedIndexMaintainerTest {
                             assertThat(sourceFiles).containsExactly(activeSource);
                             return rebuiltPayload;
                         },
-                        5,
-                        0.3,
                         Arrays.asList(staleSource, activeSource),
                         Collections.singletonList(oldPayload),
                         executor);
@@ -219,8 +210,6 @@ class BucketedSortedIndexMaintainerTest {
                             builds.incrementAndGet();
                             return oldPayload;
                         },
-                        5,
-                        0.2,
                         Collections.singletonList(source),
                         Collections.singletonList(oldPayload),
                         executor);
@@ -242,7 +231,7 @@ class BucketedSortedIndexMaintainerTest {
     }
 
     @Test
-    void testBlockingFanoutDeletesIntermediateGeneratedGroups() throws Exception {
+    void testBlockingBuildsCompleteLevelWithoutIntermediates() throws Exception {
         List<DataFileMeta> sources =
                 Arrays.asList(
                         dataFile("data-a", 3),
@@ -267,8 +256,6 @@ class BucketedSortedIndexMaintainerTest {
                             generated.add(payload);
                             return payload;
                         },
-                        2,
-                        1.0,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         executor);
@@ -280,13 +267,12 @@ class BucketedSortedIndexMaintainerTest {
                                 Collections.emptyList(), sources, Collections.emptyList()),
                         true);
 
-        assertThat(generated).hasSize(7);
+        assertThat(generated).hasSize(1);
         assertThat(commit.compactIncrement()).isPresent();
         assertThat(commit.compactIncrement().get().newIndexFiles())
-                .containsExactly(generated.get(6));
+                .containsExactly(generated.get(0));
         assertThat(commit.compactIncrement().get().deletedIndexFiles()).isEmpty();
-        assertThat(indexFile.deleted())
-                .containsExactlyInAnyOrderElementsOf(generated.subList(0, 6));
+        assertThat(indexFile.deleted()).isEmpty();
     }
 
     @Test
@@ -302,8 +288,6 @@ class BucketedSortedIndexMaintainerTest {
                         "btree",
                         indexFile,
                         sourceFiles -> replacementPayload,
-                        5,
-                        0.2,
                         Collections.singletonList(source),
                         invalidPayloads,
                         executor);
@@ -326,8 +310,6 @@ class BucketedSortedIndexMaintainerTest {
                         sourceFiles -> {
                             throw new AssertionError("Covered source must not be rebuilt.");
                         },
-                        5,
-                        0.2,
                         Collections.singletonList(source),
                         Collections.singletonList(replacementPayload),
                         executor);
@@ -348,8 +330,7 @@ class BucketedSortedIndexMaintainerTest {
     void testFinalBuildFailureThrowsAndRollsBackSourceTransition() {
         DataFileMeta oldSource = dataFile("data-1", 3);
         DataFileMeta newSource = dataFile("data-2", 3);
-        List<IndexFileMeta> oldPayloads =
-                Arrays.asList(payload("old-1", oldSource, 2), payload("old-2", oldSource, 1));
+        List<IndexFileMeta> oldPayloads = Collections.singletonList(payload("old", oldSource, 3));
         AtomicInteger attempts = new AtomicInteger();
         BucketedSortedIndexMaintainer maintainer =
                 new BucketedSortedIndexMaintainer(
@@ -360,8 +341,6 @@ class BucketedSortedIndexMaintainerTest {
                             attempts.incrementAndGet();
                             throw new IllegalStateException("expected build failure");
                         },
-                        5,
-                        0.2,
                         Collections.singletonList(oldSource),
                         oldPayloads,
                         executor);
@@ -400,8 +379,6 @@ class BucketedSortedIndexMaintainerTest {
                             }
                             return payload;
                         },
-                        5,
-                        0.2,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         executor);
@@ -433,8 +410,6 @@ class BucketedSortedIndexMaintainerTest {
                             release.await();
                             return payload;
                         },
-                        5,
-                        0.2,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         executor);
@@ -455,6 +430,36 @@ class BucketedSortedIndexMaintainerTest {
         assertThat(second.appendIncrement()).isPresent();
         assertThat(second.appendIncrement().get().newIndexFiles()).containsExactly(payload);
         assertThat(maintainer.buildNotCompleted()).isFalse();
+    }
+
+    @Test
+    void testDoesNotPublishPayloadForDifferentDataLevel() throws Exception {
+        DataFileMeta source = dataFile("data-1", 3);
+        IndexFileMeta wrongLevelPayload =
+                payload("wrong-level", Collections.singletonList(source), 3, 2);
+        TrackingPkSortedIndexFile indexFile =
+                new TrackingPkSortedIndexFile(LocalFileIO.create(), pathFactory());
+        BucketedSortedIndexMaintainer maintainer =
+                new BucketedSortedIndexMaintainer(
+                        7,
+                        "btree",
+                        indexFile,
+                        sourceFiles -> wrongLevelPayload,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        executor);
+
+        maintainer.prepareCommit(DataIncrement.emptyIncrement(), compactAfter(source), false, true);
+        executor.submit(() -> {}).get(5, TimeUnit.SECONDS);
+        BucketedSortedIndexMaintainer.SortedIndexCommit commit =
+                maintainer.prepareCommit(
+                        DataIncrement.emptyIncrement(),
+                        CompactIncrement.emptyIncrement(),
+                        false,
+                        false);
+
+        assertThat(commit.appendIncrement()).isEmpty();
+        assertThat(indexFile.deleted()).containsExactly(wrongLevelPayload);
     }
 
     @Test
@@ -484,8 +489,6 @@ class BucketedSortedIndexMaintainerTest {
                             assertThat(sourceFile).isEqualTo(activeSource);
                             return activePayload;
                         },
-                        5,
-                        0.2,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         executor);
@@ -514,11 +517,10 @@ class BucketedSortedIndexMaintainerTest {
     }
 
     @Test
-    void testFanoutCompletionIsDiscardedWhenPlannedSourceRetires() throws Exception {
+    void testLevelCompletionIsDiscardedWhenPlannedSourceRetires() throws Exception {
         DataFileMeta sourceA = dataFile("data-a", 3);
         DataFileMeta sourceB = dataFile("data-b", 3);
         IndexFileMeta payloadA = payload("index-a", sourceA, 3);
-        IndexFileMeta payloadB = payload("index-b", sourceB, 3);
         IndexFileMeta staleMerged = payload("index-ab", Arrays.asList(sourceA, sourceB), 6);
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -534,14 +536,11 @@ class BucketedSortedIndexMaintainerTest {
                             release.await();
                             return staleMerged;
                         },
-                        2,
-                        1.0,
-                        Arrays.asList(sourceA, sourceB),
-                        Arrays.asList(payloadA, payloadB),
+                        Collections.singletonList(sourceA),
+                        Collections.singletonList(payloadA),
                         executor);
 
-        maintainer.prepareCommit(
-                DataIncrement.emptyIncrement(), CompactIncrement.emptyIncrement(), false);
+        maintainer.prepareCommit(DataIncrement.emptyIncrement(), compactAfter(sourceB), false);
         assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
         maintainer.prepareCommit(
                 DataIncrement.emptyIncrement(),
@@ -558,9 +557,7 @@ class BucketedSortedIndexMaintainerTest {
                         DataIncrement.emptyIncrement(), CompactIncrement.emptyIncrement(), true);
 
         assertThat(indexFile.deleted()).contains(staleMerged);
-        assertThat(cleanup.appendIncrement()).isPresent();
-        assertThat(cleanup.appendIncrement().get().newIndexFiles()).isEmpty();
-        assertThat(cleanup.appendIncrement().get().deletedIndexFiles()).containsExactly(payloadB);
+        assertThat(cleanup.appendIncrement()).isEmpty();
         assertThat(maintainer.state().groups()).hasSize(1);
         assertThat(maintainer.state().groups().get(0).payloads()).containsExactly(payloadA);
     }
@@ -576,8 +573,6 @@ class BucketedSortedIndexMaintainerTest {
                         "btree",
                         new PkSortedIndexFile(LocalFileIO.create(), pathFactory()),
                         sourceFiles -> payload("new", source, 3),
-                        5,
-                        0.2,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         rejectedExecutor);
@@ -606,8 +601,6 @@ class BucketedSortedIndexMaintainerTest {
                         "btree",
                         indexFile,
                         sourceFiles -> malformed,
-                        5,
-                        0.2,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         executor);
@@ -650,8 +643,6 @@ class BucketedSortedIndexMaintainerTest {
                             }
                             return generated;
                         },
-                        5,
-                        0.2,
                         Collections.emptyList(),
                         Collections.emptyList(),
                         executor);
@@ -670,8 +661,7 @@ class BucketedSortedIndexMaintainerTest {
     void testInterruptedCommitRollsBackStateAndCancelsBuild() throws Exception {
         DataFileMeta oldSource = dataFile("data-1", 3);
         DataFileMeta newSource = dataFile("data-2", 3);
-        List<IndexFileMeta> oldPayloads =
-                Arrays.asList(payload("old-1", oldSource, 2), payload("old-2", oldSource, 1));
+        List<IndexFileMeta> oldPayloads = Collections.singletonList(payload("old", oldSource, 3));
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch cancelled = new CountDownLatch(1);
         BucketedSortedIndexMaintainer maintainer =
@@ -689,8 +679,6 @@ class BucketedSortedIndexMaintainerTest {
                                 throw e;
                             }
                         },
-                        5,
-                        0.2,
                         Collections.singletonList(oldSource),
                         oldPayloads,
                         executor);
@@ -739,6 +727,11 @@ class BucketedSortedIndexMaintainerTest {
 
     private static IndexFileMeta payload(
             String fileName, List<DataFileMeta> sourceFiles, long payloadRowCount) {
+        return payload(fileName, sourceFiles, payloadRowCount, sourceFiles.get(0).level());
+    }
+
+    private static IndexFileMeta payload(
+            String fileName, List<DataFileMeta> sourceFiles, long payloadRowCount, int dataLevel) {
         List<PrimaryKeyIndexSourceFile> sources = new java.util.ArrayList<>();
         long rowCount = 0;
         for (DataFileMeta sourceFile : sourceFiles) {
@@ -757,7 +750,7 @@ class BucketedSortedIndexMaintainerTest {
                         7,
                         null,
                         new byte[] {1},
-                        new PrimaryKeyIndexSourceMeta(sources).serialize()),
+                        new PrimaryKeyIndexSourceMeta(dataLevel, sources).serialize()),
                 null);
     }
 

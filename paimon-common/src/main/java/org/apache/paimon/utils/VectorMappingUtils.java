@@ -26,6 +26,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.AllNullColumnVector;
 import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.BooleanColumnVector;
 import org.apache.paimon.data.columnar.ByteColumnVector;
@@ -109,7 +110,7 @@ public class VectorMappingUtils {
             if (realIndex >= 0) {
                 newVectors[i] = vectors[indexMapping[i]];
             } else {
-                newVectors[i] = index -> true;
+                newVectors[i] = AllNullColumnVector.INSTANCE;
             }
         }
         return newVectors;

@@ -1106,6 +1106,42 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
+    public void testCreateBranchFromTagAfterSnapshotExpired() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+            write.write(rowData(2, 20, 200L));
+            commit.commit(1, write.prepareCommit(false, 2));
+            write.write(rowData(3, 30, 300L));
+            commit.commit(2, write.prepareCommit(false, 3));
+        }
+
+        table.createTag("test-tag", 2);
+
+        Options expire = new Options();
+        expire.set(SNAPSHOT_NUM_RETAINED_MIN, 1);
+        expire.set(SNAPSHOT_NUM_RETAINED_MAX, 1);
+        table.copy(expire.toMap()).newCommit(commitUser).expireSnapshots();
+
+        SnapshotManager snapshotManager = newSnapshotManager(table.fileIO(), table.location());
+        assertThat(snapshotManager.snapshotExists(2)).isFalse();
+        TagManager tagManager = new TagManager(table.fileIO(), table.location());
+        assertThat(tagManager.tagExists("test-tag")).isTrue();
+
+        table.createBranch("test-branch", "test-tag");
+        assertThat(table.branchManager().branchExists("test-branch")).isTrue();
+
+        Snapshot tagged = tagManager.getOrThrow("test-tag").trimToSnapshot();
+        SnapshotManager branchSnapshotManager =
+                newSnapshotManager(table.fileIO(), table.location(), "test-branch");
+        Snapshot branchSnapshot =
+                SnapshotManager.fromPath(table.fileIO(), branchSnapshotManager.snapshotPath(2));
+        assertThat(branchSnapshot.equals(tagged)).isTrue();
+    }
+
+    @Test
     public void testUnsupportedBranchName() throws Exception {
         FileStoreTable table = createFileStoreTable();
 

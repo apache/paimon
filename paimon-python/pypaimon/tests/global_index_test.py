@@ -39,6 +39,26 @@ from pypaimon.utils.range import Range
 
 class GlobalIndexTest(unittest.TestCase):
 
+    def test_primary_key_sorted_index_columns_preserve_java_split_semantics(self):
+        options = CoreOptions(Options({
+            "pk-btree.index.columns": "name, id",
+            "pk-bitmap.index.columns": "category",
+        }))
+
+        self.assertEqual(["name", "id"], options.primary_key_btree_index_columns())
+        self.assertEqual(["category"], options.primary_key_bitmap_index_columns())
+
+    def test_global_index_meta_preserves_primary_key_source_meta(self):
+        source_meta = b"\x00\x00\x00\x01source-file"
+        meta = GlobalIndexMeta(
+            row_range_start=0,
+            row_range_end=2,
+            index_field_id=1,
+            source_meta=source_meta,
+        )
+
+        self.assertEqual(source_meta, meta.source_meta)
+
     def test_chained_or(self):
         result = GlobalIndexResult.create_empty()
         for i in range(600):
@@ -60,8 +80,8 @@ class _CoverageOptions:
     def __init__(self, mode):
         self.options = Options({"global-index.search-mode": mode})
 
-    def global_index_search_mode(self):
-        return CoreOptions(self.options).global_index_search_mode()
+    def scalar_index_search_mode(self):
+        return CoreOptions(self.options).scalar_index_search_mode()
 
 
 class _CoverageTable:
@@ -73,7 +93,7 @@ class _CoverageTable:
         ]
         self._data_ranges = data_ranges or []
 
-    def data_ranges_for_global_index_coverage(self, snapshot, partition_filter):
+    def data_ranges_for_data_evolution_global_index_coverage(self, snapshot, partition_filter):
         return self._data_ranges
 
 
@@ -98,13 +118,13 @@ def _coverage_index_file(field_id, start, end, extra_field_ids=None):
     )
 
 
-class GlobalIndexCoverageTest(unittest.TestCase):
+class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
 
     def test_fast_mode_does_not_return_unindexed_ranges(self):
-        from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
+        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 
         table = _CoverageTable(GlobalIndexSearchMode.FAST)
-        coverage = GlobalIndexCoverage(
+        coverage = DataEvolutionGlobalIndexCoverage(
             table,
             _CoverageSnapshot(10),
             None,
@@ -114,10 +134,10 @@ class GlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([], coverage.unindexed_ranges(0))
 
     def test_full_mode_uses_snapshot_next_row_id(self):
-        from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
+        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 
         table = _CoverageTable("full")
-        coverage = GlobalIndexCoverage(
+        coverage = DataEvolutionGlobalIndexCoverage(
             table,
             _CoverageSnapshot(10),
             None,
@@ -127,10 +147,10 @@ class GlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([Range(5, 9)], coverage.unindexed_ranges(0))
 
     def test_full_mode_accepts_multiple_field_ids(self):
-        from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
+        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 
         table = _CoverageTable("full")
-        coverage = GlobalIndexCoverage(
+        coverage = DataEvolutionGlobalIndexCoverage(
             table,
             _CoverageSnapshot(10),
             None,
@@ -143,10 +163,10 @@ class GlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([Range(5, 9)], coverage.unindexed_ranges([0, 1]))
 
     def test_full_mode_intersects_coverage_for_all_predicate_fields(self):
-        from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
+        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 
         table = _CoverageTable("full")
-        coverage = GlobalIndexCoverage(
+        coverage = DataEvolutionGlobalIndexCoverage(
             table,
             _CoverageSnapshot(10),
             None,
@@ -168,10 +188,10 @@ class GlobalIndexCoverageTest(unittest.TestCase):
         )
 
     def test_extra_fields_count_as_index_coverage(self):
-        from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
+        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 
         table = _CoverageTable("full")
-        coverage = GlobalIndexCoverage(
+        coverage = DataEvolutionGlobalIndexCoverage(
             table,
             _CoverageSnapshot(10),
             None,
@@ -181,10 +201,10 @@ class GlobalIndexCoverageTest(unittest.TestCase):
         self.assertEqual([], coverage.unindexed_ranges(1))
 
     def test_detail_mode_uses_table_data_ranges(self):
-        from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
+        from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 
         table = _CoverageTable("detail", data_ranges=[Range(0, 2), Range(7, 9)])
-        coverage = GlobalIndexCoverage(
+        coverage = DataEvolutionGlobalIndexCoverage(
             table,
             _CoverageSnapshot(10),
             None,
@@ -202,6 +222,9 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         class _Options:
             def global_index_enabled(self):
                 return True
+
+            def scalar_index_search_mode(self):
+                return GlobalIndexSearchMode.FULL
 
         class _Table:
             options = _Options()
@@ -221,7 +244,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         fake_scanner.__exit__.return_value = None
 
         with unittest.mock.patch(
-                "pypaimon.globalindex.global_index_scanner.GlobalIndexScanner.create",
+                "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
                 return_value=fake_scanner):
             result = scanner._eval_global_index(snapshot=object())
 
@@ -229,6 +252,8 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             [Range(1, 1), Range(5, 6)],
             result.results().to_range_list(),
         )
+        fake_scanner.unindexed_rows.assert_called_once_with(
+            predicate, search_mode=GlobalIndexSearchMode.FULL)
 
     def test_eval_global_index_keeps_none_as_full_scan(self):
         from pypaimon.read.scanner.file_scanner import FileScanner
@@ -252,7 +277,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         fake_scanner.__exit__.return_value = None
 
         with unittest.mock.patch(
-                "pypaimon.globalindex.global_index_scanner.GlobalIndexScanner.create",
+                "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
                 return_value=fake_scanner):
             result = scanner._eval_global_index(snapshot=object())
 
@@ -294,7 +319,7 @@ class PlanSnapshotFetchRegressionTest(
             1, call_count[0],
             msg=f"Plan fetched latest snapshot {call_count[0]} times — "
                 "duplicate from #7513: manifest_scanner + "
-                "GlobalIndexScanner.create both fetch independently.")
+                "DataEvolutionGlobalIndexScanner.create both fetch independently.")
 
     def test_time_travel_plan(self):
         table = self._create_table()
@@ -329,6 +354,6 @@ class PlanSnapshotFetchRegressionTest(
             msg=f"Global index evaluated against snapshot "
                 f"{seen_snapshot_ids[0]}, expected time-travel snapshot "
                 f"{snapshot_1_id}. Before #7513 was fixed, "
-                "GlobalIndexScanner.create self-fetched latest snapshot, "
+                "DataEvolutionGlobalIndexScanner.create self-fetched latest snapshot, "
                 "so global index used latest while manifest used the "
                 "time-travel snapshot — silent correctness bug.")

@@ -146,6 +146,10 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
 
     @Override
     public InternalArray getArray(int pos) {
+        if (data instanceof VecColumnVector) {
+            // A nested VECTOR is exposed as ARRAY; a vector is an array.
+            return ((VecColumnVector) data).getVector(offset + pos);
+        }
         InternalArray array = ((ArrayColumnVector) data).getArray(offset + pos);
         if (array instanceof ColumnarArray) {
             ((ColumnarArray) array).setFileIO(fileIO);
@@ -160,7 +164,11 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
 
     @Override
     public InternalMap getMap(int pos) {
-        return ((MapColumnVector) data).getMap(offset + pos);
+        InternalMap map = ((MapColumnVector) data).getMap(offset + pos);
+        if (map instanceof ColumnarMap) {
+            ((ColumnarMap) map).setFileIO(fileIO);
+        }
+        return map;
     }
 
     @Override

@@ -47,24 +47,40 @@ public class CacheManagerTest {
         assertThat(file2.createNewFile()).isTrue();
         CacheKey key2 = CacheKey.forPageIndex(new RandomAccessFile(file2, "r"), 0, 0);
 
-        for (Cache.CacheType cacheType : Cache.CacheType.values()) {
-            CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofBytes(10), 0.1);
-            byte[] value = new byte[6];
-            Arrays.fill(value, (byte) 1);
-            for (int i = 0; i < 10; i++) {
-                for (int j = 0; j < 10; j++) {
-                    MemorySegment segment =
-                            cacheManager.getPage(
-                                    j < 5 ? key1 : key2,
-                                    key -> {
-                                        byte[] result = new byte[6];
-                                        Arrays.fill(result, (byte) 1);
-                                        return result;
-                                    },
-                                    key -> {});
-                    assertThat(segment.getHeapMemory()).isEqualTo(value);
-                }
+        CacheManager cacheManager = new CacheManager(MemorySize.ofBytes(10), 0.1);
+        assertThat(cacheManager.dataCache()).isInstanceOf(CaffeineCache.class);
+        byte[] value = new byte[6];
+        Arrays.fill(value, (byte) 1);
+        for (int i = 0; i < 10; i++) {
+            for (int j = 0; j < 10; j++) {
+                MemorySegment segment =
+                        cacheManager.getPage(
+                                j < 5 ? key1 : key2,
+                                key -> {
+                                    byte[] result = new byte[6];
+                                    Arrays.fill(result, (byte) 1);
+                                    return result;
+                                },
+                                key -> {});
+                assertThat(segment.getHeapMemory()).isEqualTo(value);
             }
+        }
+    }
+
+    @Test
+    void testOffHeapCache() throws Exception {
+        File file = new File(tempDir.toFile(), "test.off-heap");
+        assertThat(file.createNewFile()).isTrue();
+        CacheKey key = CacheKey.forPageIndex(new RandomAccessFile(file, "r"), 0, 0);
+
+        try (CacheManager cacheManager = CacheManager.createOffHeap(MemorySize.ofBytes(10), 0)) {
+            MemorySegment segment =
+                    cacheManager.getPage(key, ignored -> new byte[] {1, 2, 3}, ignored -> {});
+
+            assertThat(segment.isOffHeap()).isTrue();
+            byte[] bytes = new byte[3];
+            segment.get(0, bytes);
+            assertThat(bytes).containsExactly(1, 2, 3);
         }
     }
 }

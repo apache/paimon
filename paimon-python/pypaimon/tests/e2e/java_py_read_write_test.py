@@ -26,7 +26,7 @@ import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.data.generic_variant import GenericVariant
-from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.schema.data_types import VectorType
 from pypaimon.schema.schema import Schema
 from pypaimon.read.read_builder import ReadBuilder
@@ -39,7 +39,8 @@ else:
 
 
 def get_file_format_params():
-    if sys.version_info[:2] == (3, 6):
+    # lance has no wheel on Python < 3.8.
+    if sys.version_info[:2] < (3, 8):
         return [('parquet',), ('orc',), ('avro',)]
     else:
         return [('parquet',), ('orc',), ('avro',), ('lance',)]
@@ -65,6 +66,79 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'warehouse': cls.warehouse
         })
         cls.catalog.create_database('default', True)
+
+    def test_read_java_dynamic_bucket_hash_index(self):
+        table = self.catalog.get_table(
+            'default.dynamic_hash_java_to_python'
+        )
+        read_builder = table.new_read_builder()
+        initial = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        )
+        self.assertEqual(
+            {
+                'key1': ['hello-java'],
+                'key2': [42],
+                'value': ['java-old'],
+            },
+            initial.to_pydict(),
+        )
+
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(pa.table({
+            'key1': ['python-only', 'hello-java'],
+            'key2': pa.array([7, 42], type=pa.int64()),
+            'value': ['python-only', 'python-new'],
+        }))
+        commit = builder.new_commit()
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        read_builder = table.new_read_builder()
+        result = table_sort_by(read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        ), 'key1')
+        self.assertEqual(
+            {
+                'key1': ['hello-java', 'python-only'],
+                'key2': [42, 7],
+                'value': ['python-new', 'python-only'],
+            },
+            result.to_pydict(),
+        )
+
+    def test_py_write_dynamic_bucket_hash_index(self):
+        table_name = 'default.dynamic_hash_python_to_java'
+        self.catalog.drop_table(table_name, True)
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([
+                pa.field('key1', pa.string()),
+                pa.field('key2', pa.int64()),
+                pa.field('value', pa.string()),
+            ]),
+            primary_keys=['key1', 'key2'],
+            options={
+                'bucket': '-1',
+                'dynamic-bucket.target-row-num': '1',
+                'file.format': 'parquet',
+            },
+        )
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(pa.table({
+            'key1': ['hello-java', 'python-only'],
+            'key2': pa.array([42, 7], type=pa.int64()),
+            'value': ['python-old', 'python-only'],
+        }))
+        commit = builder.new_commit()
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
 
     @parameterized.expand(get_file_format_params())
     def test_py_write_read_append_table(self, file_format):
@@ -462,15 +536,15 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
     def test_read_btree_raw_fallback(self):
         table = self.catalog.get_table('default.test_btree_raw_fallback')
-        fast_builder = table.new_read_builder()
+        fast_table = table.copy({'scalar-index.search-mode': 'fast'})
+        fast_builder = fast_table.new_read_builder()
         fast_predicate = fast_builder.new_predicate_builder().equal('k', 'k4')
         fast_builder.with_filter(fast_predicate)
         fast_result = fast_builder.new_read().to_arrow(
             fast_builder.new_scan().plan().splits())
         self.assertEqual(0, fast_result.num_rows)
 
-        full_table = table.copy({'global-index.search-mode': 'full'})
-        read_builder = full_table.new_read_builder()
+        read_builder = table.new_read_builder()
         read_builder.with_filter(
             read_builder.new_predicate_builder().equal('k', 'k4'))
         actual = read_builder.new_read().to_arrow(
@@ -757,7 +831,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         predicate = predicate_factory(read_builder.new_predicate_builder())
 
-        scanner = GlobalIndexScanner.create(table, predicate=predicate)
+        scanner = DataEvolutionGlobalIndexScanner.create(table, predicate=predicate)
         self.assertIsNotNone(scanner)
         with scanner:
             result = scanner.scan(predicate)
@@ -785,7 +859,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
                      .new_predicate_builder()
                      .greater_or_equal('k', 'key-295'))
 
-        scanner = GlobalIndexScanner.create(table, predicate=predicate)
+        scanner = DataEvolutionGlobalIndexScanner.create(table, predicate=predicate)
         self.assertIsNotNone(scanner)
         with scanner:
             result = scanner.scan(predicate)
@@ -803,7 +877,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(expected, actual)
 
         disabled_table = table.copy({budget_key: '0 b'})
-        disabled_scanner = GlobalIndexScanner.create(disabled_table, predicate=predicate)
+        disabled_scanner = DataEvolutionGlobalIndexScanner.create(disabled_table, predicate=predicate)
         self.assertIsNotNone(disabled_scanner)
         with disabled_scanner:
             disabled_result = disabled_scanner.scan(predicate)
@@ -1455,6 +1529,81 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(
             result.column('payloads').to_pylist(),
             data.column('payloads').to_pylist(),
+        )
+
+    def test_read_map_blob_written_by_java(self):
+        table = self.catalog.get_table('default.map_blob_java_test')
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+
+        self.assertTrue(pa.types.is_map(result.schema.field('payloads').type))
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3, 4])
+        self.assertEqual(
+            [None if value is None else dict(value)
+             for value in result.column('payloads').to_pylist()],
+            [
+                {1: b'java-alpha', 2: None, 3: b''},
+                {},
+                None,
+                {4: b'java-omega'},
+            ],
+        )
+
+    def test_write_map_blob_for_java(self):
+        map_blob_type = pa.map_(pa.int32(), pa.large_binary())
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', map_blob_type),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'bucket': '-1',
+            },
+        )
+        table_name = 'default.map_blob_python_test'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4],
+            'payloads': pa.array(
+                [
+                    [(1, b'python-alpha'), (2, None), (3, b'')],
+                    [],
+                    None,
+                    [(4, b'python-omega')],
+                ],
+                type=map_blob_type,
+            ),
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3, 4])
+        self.assertEqual(
+            [None if value is None else dict(value)
+             for value in result.column('payloads').to_pylist()],
+            [
+                {1: b'python-alpha', 2: None, 3: b''},
+                {},
+                None,
+                {4: b'python-omega'},
+            ],
         )
 
     def test_compact_conflict_shard_update(self):

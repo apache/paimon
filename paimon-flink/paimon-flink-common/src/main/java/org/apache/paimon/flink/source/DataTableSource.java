@@ -150,7 +150,9 @@ public class DataTableSource extends BaseDataTableSource
     @Override
     public List<String> listAcceptedFilterFields() {
         // note that streaming query doesn't support dynamic filtering
-        return unbounded ? Collections.emptyList() : table.partitionKeys();
+        return unbounded || PostponeMergeOnRead.configured(table)
+                ? Collections.emptyList()
+                : table.partitionKeys();
     }
 
     @Override
@@ -158,6 +160,11 @@ public class DataTableSource extends BaseDataTableSource
         checkState(
                 !unbounded,
                 "Cannot apply dynamic filtering to Paimon table '%s' when streaming reading.",
+                table.name());
+
+        checkState(
+                !PostponeMergeOnRead.configured(table),
+                "Cannot apply dynamic filtering to Paimon table '%s' when postpone merge-on-read is enabled.",
                 table.name());
 
         checkState(

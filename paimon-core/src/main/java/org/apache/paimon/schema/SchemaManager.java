@@ -94,6 +94,9 @@ import static org.apache.paimon.CoreOptions.IGNORE_DELETE;
 import static org.apache.paimon.CoreOptions.IGNORE_RETRACT;
 import static org.apache.paimon.CoreOptions.IGNORE_UPDATE_BEFORE;
 import static org.apache.paimon.CoreOptions.LIST_AGG_DELIMITER;
+import static org.apache.paimon.CoreOptions.MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY;
+import static org.apache.paimon.CoreOptions.MAP_SHARED_SHREDDING_MAX_COLUMNS;
+import static org.apache.paimon.CoreOptions.MAP_STORAGE_LAYOUT;
 import static org.apache.paimon.CoreOptions.NESTED_KEY;
 import static org.apache.paimon.CoreOptions.PK_CLUSTERING_OVERRIDE;
 import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
@@ -854,7 +857,20 @@ public class SchemaManager implements Serializable {
                         fieldName -> FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION,
                         fieldName -> FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT,
                         fieldName -> FIELDS_PREFIX + "." + fieldName + "." + DISTINCT,
-                        fieldName -> FIELDS_PREFIX + "." + fieldName + "." + LIST_AGG_DELIMITER);
+                        fieldName -> FIELDS_PREFIX + "." + fieldName + "." + LIST_AGG_DELIMITER,
+                        fieldName -> FIELDS_PREFIX + "." + fieldName + "." + MAP_STORAGE_LAYOUT,
+                        fieldName ->
+                                FIELDS_PREFIX
+                                        + "."
+                                        + fieldName
+                                        + "."
+                                        + MAP_SHARED_SHREDDING_MAX_COLUMNS,
+                        fieldName ->
+                                FIELDS_PREFIX
+                                        + "."
+                                        + fieldName
+                                        + "."
+                                        + MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY);
 
         for (RenameColumn rename : renameColumns) {
             String fieldName = rename.fieldNames()[0];

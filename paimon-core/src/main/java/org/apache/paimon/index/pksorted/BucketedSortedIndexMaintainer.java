@@ -21,6 +21,7 @@ package org.apache.paimon.index.pksorted;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexLevels;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -33,7 +34,6 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,8 +68,6 @@ public class BucketedSortedIndexMaintainer {
             String indexType,
             PkSortedIndexFile indexFile,
             BuildFunction buildFunction,
-            int levelFanout,
-            double staleRatioThreshold,
             List<DataFileMeta> restoredDataFiles,
             List<IndexFileMeta> restoredPayloads,
             ExecutorService executor) {
@@ -79,10 +77,7 @@ public class BucketedSortedIndexMaintainer {
         this.buildFunction = buildFunction;
         this.levels =
                 new PrimaryKeyIndexLevels<>(
-                        levelFanout,
-                        staleRatioThreshold,
-                        PkSortedIndexGroup::identity,
-                        PkSortedIndexGroup::sourceFiles);
+                        PkSortedIndexGroup::dataLevel, PkSortedIndexGroup::sourceFiles);
         this.executor = executor;
         for (DataFileMeta dataFile : restoredDataFiles) {
             if (PrimaryKeyIndexSourcePolicy.shouldRead(dataFile)) {
@@ -99,8 +94,11 @@ public class BucketedSortedIndexMaintainer {
             }
         }
         PkSortedBucketIndexState restoredState =
-                PkSortedBucketIndexState.fromActivePayloads(
-                        fieldId, indexType, sourceFiles(), definitionPayloads);
+                PkSortedBucketIndexState.fromActiveDataFiles(
+                        fieldId,
+                        indexType,
+                        new ArrayList<>(activeSourceFiles.values()),
+                        definitionPayloads);
         groups.addAll(restoredState.groups());
         pendingRestoredDeletions.addAll(restoredState.rejectedPayloads());
     }
@@ -142,23 +140,15 @@ public class BucketedSortedIndexMaintainer {
                 }
 
                 if (pendingBuild == null && allowBuildStart) {
-                    DataFileMeta uncovered = firstUncoveredSource();
-                    if (uncovered != null) {
-                        startBuild(Collections.singletonList(uncovered), Collections.emptyList());
-                    } else {
-                        Optional<PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup>> plan =
-                                levels.pick(groups, activeSourceFiles);
-                        if (plan.isPresent()) {
-                            if (plan.get().sourceFiles().isEmpty()) {
-                                replaceInputGroups(
-                                        plan.get().inputUnits(),
-                                        Optional.empty(),
-                                        created,
-                                        removed);
-                                continue;
-                            }
-                            startBuild(plan.get().sourceFiles(), plan.get().inputUnits());
+                    Optional<PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup>> plan =
+                            levels.pick(groups, activeSourceFiles);
+                    if (plan.isPresent()) {
+                        if (plan.get().sourceFiles().isEmpty()) {
+                            replaceInputGroups(
+                                    plan.get().inputUnits(), Optional.empty(), created, removed);
+                            continue;
                         }
+                        startBuild(plan.get());
                     }
                 }
                 if (!waitCompaction || pendingBuild == null) {
@@ -246,18 +236,6 @@ public class BucketedSortedIndexMaintainer {
         }
     }
 
-    @Nullable
-    private DataFileMeta firstUncoveredSource() {
-        List<DataFileMeta> candidates = new ArrayList<>(activeSourceFiles.values());
-        candidates.sort(Comparator.comparing(DataFileMeta::fileName));
-        for (DataFileMeta candidate : candidates) {
-            if (!isCovered(candidate, Collections.emptyList())) {
-                return candidate;
-            }
-        }
-        return null;
-    }
-
     private boolean isCovered(DataFileMeta candidate, List<PkSortedIndexGroup> excludedGroups) {
         for (PkSortedIndexGroup group : groups) {
             if (excludedGroups.contains(group)) {
@@ -273,8 +251,8 @@ public class BucketedSortedIndexMaintainer {
         return false;
     }
 
-    private void startBuild(List<DataFileMeta> sourceFiles, List<PkSortedIndexGroup> inputGroups) {
-        PendingBuild next = new PendingBuild(sourceFiles, inputGroups);
+    private void startBuild(PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup> plan) {
+        PendingBuild next = new PendingBuild(plan);
         next.start();
         pendingBuild = next;
     }
@@ -287,8 +265,7 @@ public class BucketedSortedIndexMaintainer {
         try {
             IndexFileMeta payload = completed.get();
             pendingBuild = null;
-            return Optional.of(
-                    new CompletedBuild(completed.sourceFiles, completed.inputGroups, payload));
+            return Optional.of(new CompletedBuild(completed.plan, payload));
         } catch (CancellationException e) {
             pendingBuild = null;
             throw e;
@@ -307,6 +284,10 @@ public class BucketedSortedIndexMaintainer {
 
     private void acceptOrDelete(
             CompletedBuild completed, List<IndexFileMeta> created, List<IndexFileMeta> removed) {
+        if (!levels.isCurrent(completed.plan, activeSourceFiles)) {
+            deleteGenerated(completed.payload);
+            return;
+        }
         List<PrimaryKeyIndexSourceFile> sources = new ArrayList<>();
         boolean sourcesStillActive = true;
         for (DataFileMeta sourceFile : completed.sourceFiles) {
@@ -325,7 +306,18 @@ public class BucketedSortedIndexMaintainer {
                 break;
             }
         }
-        if (!sourcesStillActive || !inputsStillPresent || outputOverlapsRetainedGroup) {
+        PrimaryKeyIndexSourceMeta outputSourceMeta;
+        try {
+            outputSourceMeta = PrimaryKeyIndexSourceMeta.fromIndexFile(completed.payload);
+        } catch (RuntimeException e) {
+            deleteGenerated(completed.payload);
+            return;
+        }
+        if (!sourcesStillActive
+                || !inputsStillPresent
+                || outputOverlapsRetainedGroup
+                || outputSourceMeta.dataLevel() != completed.plan.dataLevel()
+                || !outputSourceMeta.sourceFiles().equals(sources)) {
             deleteGenerated(completed.payload);
             return;
         }
@@ -386,7 +378,6 @@ public class BucketedSortedIndexMaintainer {
     public synchronized boolean hasPendingMaintenance() {
         return pendingBuild != null
                 || !pendingRestoredDeletions.isEmpty()
-                || firstUncoveredSource() != null
                 || levels.pick(groups, activeSourceFiles).isPresent();
     }
 
@@ -408,16 +399,8 @@ public class BucketedSortedIndexMaintainer {
     }
 
     public synchronized PkSortedBucketIndexState state() {
-        return PkSortedBucketIndexState.fromActivePayloads(
-                fieldId, indexType, sourceFiles(), activePayloads());
-    }
-
-    private List<PrimaryKeyIndexSourceFile> sourceFiles() {
-        List<PrimaryKeyIndexSourceFile> sources = new ArrayList<>();
-        for (DataFileMeta dataFile : activeSourceFiles.values()) {
-            sources.add(new PrimaryKeyIndexSourceFile(dataFile.fileName(), dataFile.rowCount()));
-        }
-        return sources;
+        return PkSortedBucketIndexState.fromActiveDataFiles(
+                fieldId, indexType, new ArrayList<>(activeSourceFiles.values()), activePayloads());
     }
 
     private List<IndexFileMeta> activePayloads() {
@@ -430,15 +413,17 @@ public class BucketedSortedIndexMaintainer {
 
     private final class PendingBuild {
 
+        private final PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup> plan;
         private final List<DataFileMeta> sourceFiles;
         private final List<PkSortedIndexGroup> inputGroups;
         @Nullable private IndexFileMeta result;
         @Nullable private Future<IndexFileMeta> future;
         private boolean cancelled;
 
-        private PendingBuild(List<DataFileMeta> sourceFiles, List<PkSortedIndexGroup> inputGroups) {
-            this.sourceFiles = Collections.unmodifiableList(new ArrayList<>(sourceFiles));
-            this.inputGroups = Collections.unmodifiableList(new ArrayList<>(inputGroups));
+        private PendingBuild(PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup> plan) {
+            this.plan = plan;
+            this.sourceFiles = plan.sourceFiles();
+            this.inputGroups = plan.inputUnits();
         }
 
         private void start() {
@@ -506,16 +491,16 @@ public class BucketedSortedIndexMaintainer {
 
     private static final class CompletedBuild {
 
+        private final PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup> plan;
         private final List<DataFileMeta> sourceFiles;
         private final List<PkSortedIndexGroup> inputGroups;
         private final IndexFileMeta payload;
 
         private CompletedBuild(
-                List<DataFileMeta> sourceFiles,
-                List<PkSortedIndexGroup> inputGroups,
-                IndexFileMeta payload) {
-            this.sourceFiles = sourceFiles;
-            this.inputGroups = inputGroups;
+                PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup> plan, IndexFileMeta payload) {
+            this.plan = plan;
+            this.sourceFiles = plan.sourceFiles();
+            this.inputGroups = plan.inputUnits();
             this.payload = payload;
         }
     }

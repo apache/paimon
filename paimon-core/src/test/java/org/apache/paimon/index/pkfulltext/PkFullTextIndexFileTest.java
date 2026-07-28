@@ -66,7 +66,7 @@ class PkFullTextIndexFileTest {
     @TempDir java.nio.file.Path tempPath;
 
     @Test
-    void testWritesEveryPhysicalOrdinalAndV1SourceMetadata() throws Exception {
+    void testWritesEveryPhysicalOrdinalAndDataLevelMetadata() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         PkFullTextDataFileReader reader = mock(PkFullTextDataFileReader.class);
         when(reader.rowCount()).thenReturn(3L);
@@ -96,6 +96,7 @@ class PkFullTextIndexFileTest {
                 new DataInputDeserializer(archive.globalIndexMeta().sourceMeta());
         assertThat(sourceInput.readInt()).isEqualTo(1);
         PrimaryKeyIndexSourceMeta sourceMeta = PrimaryKeyIndexSourceMeta.fromIndexFile(archive);
+        assertThat(sourceMeta.dataLevel()).isEqualTo(3);
         assertThat(sourceMeta.sourceFile().fileName()).isEqualTo("data-1");
         assertThat(sourceMeta.sourceFile().rowCount()).isEqualTo(3);
     }
@@ -201,20 +202,21 @@ class PkFullTextIndexFileTest {
 
     private static DataFileMeta dataFile(String fileName, long rowCount) {
         return DataFileMeta.forAppend(
-                fileName,
-                100,
-                rowCount,
-                SimpleStats.EMPTY_STATS,
-                0,
-                1,
-                1,
-                Collections.emptyList(),
-                null,
-                FileSource.COMPACT,
-                null,
-                null,
-                null,
-                null);
+                        fileName,
+                        100,
+                        rowCount,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        1,
+                        1,
+                        Collections.emptyList(),
+                        null,
+                        FileSource.COMPACT,
+                        null,
+                        null,
+                        null,
+                        null)
+                .upgrade(3);
     }
 
     private IndexPathFactory pathFactory() {

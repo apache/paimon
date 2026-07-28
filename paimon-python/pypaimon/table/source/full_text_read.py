@@ -51,7 +51,7 @@ class FullTextRead(ABC):
         pass
 
 
-class FullTextReadImpl(FullTextRead):
+class DataEvolutionFullTextRead(FullTextRead):
     """Implementation for FullTextRead."""
 
     def __init__(
@@ -207,8 +207,8 @@ class FullTextReadImpl(FullTextRead):
         except ImportError as e:
             raise ImportError(
                 "paimon-ftindex is required to search uncovered full-text "
-                "row ranges. Install paimon-full-text's Python package and "
-                "native FFI library."
+                "row ranges. Install paimon-ftindex==0.1.0 or "
+                "pypaimon[full-text]."
             ) from e
 
         from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (

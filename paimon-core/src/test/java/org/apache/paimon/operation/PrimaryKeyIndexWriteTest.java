@@ -75,10 +75,6 @@ class PrimaryKeyIndexWriteTest {
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "itemId");
         options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "comment");
-        options.put("fields.itemId.pk-index.compaction.level-fanout", "7");
-        options.put("fields.itemId.pk-index.compaction.stale-ratio-threshold", "0.4");
-        options.put("fields.comment.pk-index.compaction.level-fanout", "7");
-        options.put("fields.comment.pk-index.compaction.stale-ratio-threshold", "0.4");
         TestFileStore store = createStore(options);
         KeyValueFileStoreWrite write = (KeyValueFileStoreWrite) store.newWrite();
         write.withIOManager(ioManager);
@@ -90,13 +86,6 @@ class PrimaryKeyIndexWriteTest {
 
         assertThat(container.primaryKeyIndexMaintainer).isNotNull();
         assertThat(container.primaryKeyIndexMaintainer.buildNotCompleted()).isFalse();
-        List<?> sortedMaintainers =
-                (List<?>) readField(container.primaryKeyIndexMaintainer, "sortedMaintainers");
-        for (Object sortedMaintainer : sortedMaintainers) {
-            Object levels = readField(sortedMaintainer, "levels");
-            assertThat(readField(levels, "fanout")).isEqualTo(7);
-            assertThat(readField(levels, "staleRatioThreshold")).isEqualTo(0.4);
-        }
         write.close();
     }
 

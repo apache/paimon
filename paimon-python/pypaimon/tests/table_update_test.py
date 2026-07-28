@@ -94,13 +94,14 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         }, schema=self.pa_schema))
         return table
 
-    def _create_global_indexed_table_for_predicate_update(self):
+    def _create_global_indexed_table_for_predicate_update(self, extra_options=None):
         options = dict(self.table_options)
         options.update({
             'global-index.enabled': 'true',
             'bucket': '-1',
             'file.format': 'parquet',
         })
+        options.update(extra_options or {})
         table = self._create_table(options=options)
         self._write_arrow(table, pa.Table.from_pydict({
             'id': [1, 2],
@@ -329,7 +330,9 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         )
 
     def test_update_by_predicate_with_global_index_updates_unindexed_rows(self):
-        table = self._create_global_indexed_table_for_predicate_update()
+        table = self._create_global_indexed_table_for_predicate_update({
+            'scalar-index.search-mode': 'fast',
+        })
 
         pb = table.new_read_builder().new_predicate_builder()
         self._do_update_by_predicate(
@@ -344,6 +347,18 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             result['age'].to_pylist(),
         ))
         self.assertEqual({1: 10, 2: 15, 3: 21, 4: 30}, ages_by_id)
+
+    def test_delete_by_predicate_with_global_index_deletes_unindexed_rows(self):
+        table = self._create_global_indexed_table_for_predicate_update({
+            'deletion-vectors.enabled': 'true',
+            'scalar-index.search-mode': 'fast',
+        })
+
+        pb = table.new_read_builder().new_predicate_builder()
+        self._do_delete_by_predicate(table, pb.equal('name', 'new'))
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 2, 4], result['id'].to_pylist())
 
     def test_update_by_predicate_with_global_index_falls_back_to_full_scan(self):
         table = self._create_global_indexed_table_for_predicate_update()
@@ -945,8 +960,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         )
 
     def test_update_with_large_file(self):
-        """Even with a tiny ``target-file-size`` the update produces one
-        output file per first_row_id group (rolling is disabled internally)."""
+        """Updates disable both size- and row-based rolling."""
         from pypaimon.schema.schema_change import SetOption
 
         N = 5000
@@ -966,7 +980,10 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         }))
 
         self.catalog.alter_table(
-            table_identifier, [SetOption('target-file-size', '10kb')]
+            table_identifier, [
+                SetOption('target-file-size', '10kb'),
+                SetOption('target-file-row-num', '1'),
+            ]
         )
         table = self.catalog.get_table(table_identifier)
 
@@ -1093,9 +1110,12 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         )
 
         def worker(idx, spec):
+            # Tag each thread's commits so the durable winner can be read back from the
+            # latest snapshot's commit_user (the order threads return in is not the commit order).
+            worker_table = table.copy({'commit.user-prefix': 'w%d' % idx})
             for _ in range(max_retries):
                 try:
-                    self._do_update(table, pa.Table.from_pydict({
+                    self._do_update(worker_table, pa.Table.from_pydict({
                         '_ROW_ID': spec['row_ids'],
                         'age': spec['ages'],
                     }), ['age'])
@@ -1142,13 +1162,11 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             {'row_ids': [0, 1, 2], 'ages': [102, 202, 302]},
             {'row_ids': [0, 1, 2], 'ages': [103, 203, 303]},
         ]
-        completion_order = self._run_concurrent_updates(
-            table, specs, max_retries=30
-        )
-        winner = specs[completion_order[-1]]['ages']
+        self._run_concurrent_updates(table, specs, max_retries=30)
         ages = self._read_all(table)['age'].to_pylist()
-        self.assertEqual(winner, ages[:3])
-        # Rows 3 & 4 must remain at seed values
+        # The real winner is the thread whose commit produced the latest snapshot.
+        winner = int(table.snapshot_manager().get_latest_snapshot().commit_user[1:].split('_')[0])
+        self.assertEqual(specs[winner]['ages'], ages[:3])
         self.assertEqual([40, 45], ages[3:])
 
     def test_update_list_and_map_columns(self):

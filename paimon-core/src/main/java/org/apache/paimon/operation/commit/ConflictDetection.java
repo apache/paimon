@@ -228,12 +228,10 @@ public class ConflictDetection {
             return exception;
         }
 
-        if (commitKind != CommitKind.COMPACT) {
-            Long nextRowId = latestSnapshot.nextRowId();
-            exception = checkRowIdExistence(baseEntries, deltaEntries, nextRowId);
-            if (exception.isPresent()) {
-                return exception;
-            }
+        Long nextRowId = latestSnapshot.nextRowId();
+        exception = checkRowIdExistence(baseEntries, deltaEntries, nextRowId, commitKind);
+        if (exception.isPresent()) {
+            return exception;
         }
 
         exception = checkRowIdRangeConflicts(commitKind, mergedEntries);
@@ -690,11 +688,66 @@ public class ConflictDetection {
     Optional<RuntimeException> checkRowIdExistence(
             List<SimpleFileEntry> baseEntries,
             List<SimpleFileEntry> deltaEntries,
-            @Nullable Long nextRowId) {
+            @Nullable Long nextRowId,
+            CommitKind commitKind) {
         if (!dataEvolutionEnabled) {
             return Optional.empty();
         }
 
+        List<SimpleFileEntry> existingDataFiles =
+                baseEntries.stream()
+                        .filter(
+                                base ->
+                                        base.firstRowId() != null
+                                                && !dedicatedStorageFile(base.fileName()))
+                        .collect(Collectors.toList());
+
+        if (commitKind == CommitKind.COMPACT) {
+            return checkCompactRowIdExistence(existingDataFiles, deltaEntries);
+        }
+        return checkNonCompactRowIdExistence(existingDataFiles, deltaEntries, nextRowId);
+    }
+
+    /**
+     * Checks conflicts between compaction and concurrent Row ID reassignment, which may otherwise
+     * cause reassigned Row IDs to fall back. For example, compaction produces a file with Row IDs
+     * [0, 9], then reassignment moves the current range to [10, 19]. Committing the stale
+     * compaction would move the Row IDs back to [0, 9].
+     */
+    private Optional<RuntimeException> checkCompactRowIdExistence(
+            List<SimpleFileEntry> existingDataFiles, List<SimpleFileEntry> deltaEntries) {
+        // A compaction output may cover multiple adjacent normal files, but only within the same
+        // partition and bucket.
+        Map<Pair<BinaryRow, Integer>, List<SimpleFileEntry>> dataFilesByBucket =
+                existingDataFiles.stream()
+                        .collect(
+                                Collectors.groupingBy(
+                                        file -> Pair.of(file.partition(), file.bucket())));
+        Map<Pair<BinaryRow, Integer>, RowRangeIndex> existingIndexes =
+                dataFilesByBucket.entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        Map.Entry::getKey,
+                                        entry -> rowRangeIndex(entry.getValue(), true)));
+
+        for (SimpleFileEntry entry : deltaEntries) {
+            if (entry.kind() != FileKind.ADD || entry.firstRowId() == null) {
+                continue;
+            }
+
+            RowRangeIndex existingIndex =
+                    existingIndexes.get(Pair.of(entry.partition(), entry.bucket()));
+            if (existingIndex == null || !existingIndex.contains(entry.nonNullRowIdRange())) {
+                return Optional.of(rowIdExistenceConflict(entry));
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<RuntimeException> checkNonCompactRowIdExistence(
+            List<SimpleFileEntry> existingDataFiles,
+            List<SimpleFileEntry> deltaEntries,
+            @Nullable Long nextRowId) {
         List<SimpleFileEntry> filesToCheck =
                 deltaEntries.stream()
                         .filter(
@@ -709,13 +762,6 @@ public class ConflictDetection {
             return Optional.empty();
         }
 
-        List<SimpleFileEntry> existingDataFiles =
-                baseEntries.stream()
-                        .filter(
-                                base ->
-                                        base.firstRowId() != null
-                                                && !dedicatedStorageFile(base.fileName()))
-                        .collect(Collectors.toList());
         RowRangeIndex existingIndex = rowRangeIndex(existingDataFiles, false);
 
         for (SimpleFileEntry entry : filesToCheck) {
@@ -725,21 +771,21 @@ public class ConflictDetection {
                             ? existingIndex.contains(rowRange)
                             : existingIndex.containsExactly(rowRange);
             if (!exists) {
-                return Optional.of(
-                        new RuntimeException(
-                                String.format(
-                                        "Row ID existence conflict: file '%s' references "
-                                                + "firstRowId=%d, rowCount=%d in bucket %d, "
-                                                + "but no matching file exists in the current snapshot. "
-                                                + "The referenced file may have been rewritten by a "
-                                                + "concurrent compaction or removed by an overwrite.",
-                                        entry.fileName(),
-                                        entry.firstRowId(),
-                                        entry.rowCount(),
-                                        entry.bucket())));
+                return Optional.of(rowIdExistenceConflict(entry));
             }
         }
         return Optional.empty();
+    }
+
+    private RuntimeException rowIdExistenceConflict(SimpleFileEntry entry) {
+        return new RuntimeException(
+                String.format(
+                        "Row ID existence conflict: file '%s' references "
+                                + "firstRowId=%d, rowCount=%d in bucket %d, "
+                                + "but no matching file exists in the current snapshot. "
+                                + "The referenced file may have been rewritten by a "
+                                + "concurrent compaction or removed by an overwrite.",
+                        entry.fileName(), entry.firstRowId(), entry.rowCount(), entry.bucket()));
     }
 
     private static boolean dedicatedStorageFile(String fileName) {

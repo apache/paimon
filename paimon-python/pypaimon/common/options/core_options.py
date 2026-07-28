@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import sys
 import warnings
 from datetime import timedelta
@@ -89,12 +90,20 @@ class StartupMode(str, Enum):
 class GlobalIndexColumnUpdateAction(str, Enum):
     THROW_ERROR = "THROW_ERROR"
     DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
+    IGNORE = "IGNORE"
 
 
 class GlobalIndexSearchMode(str, Enum):
     FAST = "fast"
     FULL = "full"
     DETAIL = "detail"
+
+
+class NestedKeyNullStrategy(str, Enum):
+    """Strategy for handling rows whose nested-key contains null values."""
+    MERGE = "merge"
+    IGNORE = "ignore"
+    ERROR = "error"
 
 
 class CoreOptions:
@@ -141,6 +150,11 @@ class CoreOptions:
     FIELDS_PREFIX = "fields"
     DISTINCT = "distinct"
     LIST_AGG_DELIMITER = "list-agg-delimiter"
+    NESTED_KEY = "nested-key"
+    NESTED_KEY_NULL_STRATEGY = "nested-key-null-strategy"
+    NESTED_SEQUENCE_FIELD = "nested-sequence-field"
+    COUNT_LIMIT = "count-limit"
+    MERGE_MAP_TS_FIELD = "ts-field"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -376,11 +390,29 @@ class CoreOptions:
         .with_description("The target file size for data files.")
     )
 
+    TARGET_FILE_ROW_NUM: ConfigOption[int] = (
+        ConfigOptions.key("target-file-row-num")
+        .long_type()
+        .default_value((1 << 63) - 1)
+        .with_description(
+            "Target number of rows per newly written data file. PyPaimon format-table "
+            "writers split files at this limit; file-store writers fail fast when "
+            "this option is enabled."
+        )
+    )
+
     BLOB_TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("blob.target-file-size")
         .memory_type()
         .default_value(MemorySize.of_mebi_bytes(256))
         .with_description("The target file size for blob files.")
+    )
+
+    BLOB_COPY_BUFFER_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("blob.copy-buffer-size")
+        .memory_type()
+        .default_value(MemorySize.of_kibi_bytes(4))
+        .with_description("Buffer size used when copying BLOB payloads into BLOB files.")
     )
 
     VECTOR_FILE_FORMAT: ConfigOption[str] = (
@@ -519,6 +551,15 @@ class CoreOptions:
         .boolean_type()
         .default_value(False)
         .with_description("Whether to enable deletion vectors.")
+    )
+
+    SCAN_NATIVE_PLAN_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("scan.native-plan.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Plan splits via the native (pypaimon_rust) planner "
+                          "instead of the Python manifest scanner; the pypaimon "
+                          "reader still reads the files.")
     )
 
     CHANGELOG_PRODUCER: ConfigOption[ChangelogProducer] = (
@@ -690,11 +731,29 @@ class CoreOptions:
     GLOBAL_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
         ConfigOptions.key("global-index.search-mode")
         .enum_type(GlobalIndexSearchMode)
+        .no_default_value()
+        .with_description("Fallback search mode for global index queries.")
+    )
+
+    SCALAR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("scalar-index.search-mode")
+        .enum_type(GlobalIndexSearchMode)
+        .default_value(GlobalIndexSearchMode.FULL)
+        .with_description("Search mode for scalar index queries.")
+    )
+
+    VECTOR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("vector-index.search-mode")
+        .enum_type(GlobalIndexSearchMode)
         .default_value(GlobalIndexSearchMode.FAST)
-        .with_description(
-            "Search mode for global index queries. "
-            "Supported values are 'fast', 'full', and 'detail'."
-        )
+        .with_description("Search mode for vector index queries.")
+    )
+
+    FULL_TEXT_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("full-text-index.search-mode")
+        .enum_type(GlobalIndexSearchMode)
+        .default_value(GlobalIndexSearchMode.FAST)
+        .with_description("Search mode for full-text index queries.")
     )
 
     GLOBAL_INDEX_EXTERNAL_PATH: ConfigOption[str] = (
@@ -724,13 +783,42 @@ class CoreOptions:
         .with_description("Row count per shard for global index.")
     )
 
+    PK_VECTOR_INDEX_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("pk-vector.index.columns")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated VECTOR columns indexed by primary-key vector indexes.")
+    )
+
+    PK_BTREE_INDEX_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("pk-btree.index.columns")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated columns indexed by primary-key BTree indexes.")
+    )
+
+    PK_BITMAP_INDEX_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("pk-bitmap.index.columns")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated columns indexed by primary-key Bitmap indexes.")
+    )
+
+    PK_FULL_TEXT_INDEX_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("pk-full-text.index.columns")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated character columns indexed by primary-key full-text indexes.")
+    )
+
     GLOBAL_INDEX_COLUMN_UPDATE_ACTION: ConfigOption[GlobalIndexColumnUpdateAction] = (
         ConfigOptions.key("global-index.column-update-action")
         .enum_type(GlobalIndexColumnUpdateAction)
         .default_value(GlobalIndexColumnUpdateAction.THROW_ERROR)
         .with_description(
             "Defines the action to take when an update modifies columns that "
-            "are covered by a global index."
+            "are covered by a global index. IGNORE leaves existing index files "
+            "unchanged and may make the index stale."
         )
     )
 
@@ -854,13 +942,14 @@ class CoreOptions:
     READ_PARALLELISM: ConfigOption[int] = (
         ConfigOptions.key("read.parallelism")
         .int_type()
-        .default_value(1)
+        .no_default_value()
         .with_description(
             "Parallelism for reading splits within a single TableRead call. "
-            "The value 1 (default) keeps reads serial. Values >= 2 enable a "
-            "thread pool that reads splits concurrently and assembles the "
-            "result in input order. Has no effect when fewer than 2 splits "
-            "are passed.")
+            "When unset (the default), reads auto-scale to "
+            "min(number of splits, CPU count). Set to 1 to force serial "
+            "reads, or to a specific value >= 1 to cap the thread pool that "
+            "reads splits concurrently and assembles the result in input "
+            "order. Has no effect when fewer than 2 splits are passed.")
     )
 
     ADD_COLUMN_BEFORE_PARTITION: ConfigOption[bool] = (
@@ -898,6 +987,13 @@ class CoreOptions:
             "\"type\":{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"age\","
             "\"type\":\"BIGINT\"}]}}]}'"
         )
+    )
+
+    QUERY_AUTH_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("query-auth.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to enable query auth.")
     )
 
     PARTITION_DEFAULT_NAME: ConfigOption[str] = (
@@ -1050,6 +1146,9 @@ class CoreOptions:
                                     128 if has_primary_key else 256) if default is None else MemorySize.parse(
                                     default)).get_bytes()
 
+    def target_file_row_num(self):
+        return self.options.get(CoreOptions.TARGET_FILE_ROW_NUM)
+
     def blob_target_file_size(self, default=None):
         """
         Args:
@@ -1062,6 +1161,16 @@ class CoreOptions:
             return MemorySize.parse(default).get_bytes()
         else:
             return self.target_file_size(has_primary_key=False)
+
+    def blob_copy_buffer_size(self):
+        size = self.options.get(CoreOptions.BLOB_COPY_BUFFER_SIZE, None).get_bytes()
+        # Java BlobFormatWriter stores the byte-array size in an int.
+        max_size = (1 << 31) - 1
+        if not 1 <= size <= max_size:
+            raise ValueError(
+                f"'{CoreOptions.BLOB_COPY_BUFFER_SIZE.key()}' must be between 1 byte and "
+                f"{max_size} bytes, but was {size} bytes.")
+        return size
 
     def vector_file_format(self, default=None):
         return self.options.get(CoreOptions.VECTOR_FILE_FORMAT, default)
@@ -1177,6 +1286,9 @@ class CoreOptions:
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
 
+    def native_plan_enabled(self, default=None):
+        return self.options.get(CoreOptions.SCAN_NATIVE_PLAN_ENABLED, default)
+
     def changelog_producer(self, default=None):
         return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)
 
@@ -1278,6 +1390,21 @@ class CoreOptions:
     def global_index_search_mode(self):
         return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
 
+    def scalar_index_search_mode(self):
+        return self._family_index_search_mode(CoreOptions.SCALAR_INDEX_SEARCH_MODE)
+
+    def vector_index_search_mode(self):
+        return self._family_index_search_mode(CoreOptions.VECTOR_INDEX_SEARCH_MODE)
+
+    def full_text_index_search_mode(self):
+        return self._family_index_search_mode(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE)
+
+    def _family_index_search_mode(self, option):
+        if self.options.contains(option):
+            return self.options.get(option)
+        global_mode = self.global_index_search_mode()
+        return global_mode if global_mode is not None else self.options.get(option)
+
     def global_index_external_path(self, default=None):
         value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)
         if value is None:
@@ -1294,6 +1421,113 @@ class CoreOptions:
 
     def global_index_row_count_per_shard(self) -> int:
         return self.options.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
+
+    def primary_key_btree_index_columns(self) -> List[str]:
+        return self._primary_key_index_columns(CoreOptions.PK_BTREE_INDEX_COLUMNS)
+
+    def primary_key_bitmap_index_columns(self) -> List[str]:
+        return self._primary_key_index_columns(CoreOptions.PK_BITMAP_INDEX_COLUMNS)
+
+    def primary_key_vector_index_columns(self) -> List[str]:
+        return self._primary_key_index_columns(CoreOptions.PK_VECTOR_INDEX_COLUMNS)
+
+    def primary_key_full_text_index_columns(self) -> List[str]:
+        return self._primary_key_index_columns(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS)
+
+    def primary_key_vector_index_type(self, column: str):
+        return self.options.to_map().get(
+            "fields.%s.pk-vector.index.type" % column)
+
+    def primary_key_vector_index_options(self, column: str) -> Options:
+        index_type = self.primary_key_vector_index_type(column)
+        if index_type is None or not str(index_type).strip():
+            raise ValueError(
+                "fields.%s.pk-vector.index.type must be configured before "
+                "resolving index options." % column)
+        option_key = "fields.%s.pk-vector.index.options" % column
+        field_prefix = "fields.%s." % column
+        resolved = self._primary_key_json_options(
+            option_key,
+            lambda key: (key.startswith(str(index_type) + ".")
+                         or (key.startswith(field_prefix)
+                             and not key.startswith(field_prefix + "pk-vector."))),
+            str(index_type) + ".")
+        values = dict(resolved.to_map())
+        values[str(index_type) + ".metric"] = \
+            self.primary_key_vector_distance_metric(column)
+        return Options(values)
+
+    def primary_key_vector_distance_metric(self, column: str) -> str:
+        value = self.options.to_map().get(
+            "fields.%s.pk-vector.distance.metric" % column,
+            "inner_product")
+        return str(value).lower().replace('-', '_')
+
+    def primary_key_full_text_index_options(self, column: str) -> Options:
+        return self._primary_key_json_options(
+            "fields.%s.pk-full-text.index.options" % column,
+            lambda key: key.startswith("full-text."),
+            "full-text.")
+
+    def primary_key_btree_index_options(self, column: str) -> Options:
+        return self._primary_key_sorted_index_options(column, "pk-btree", "btree-index.")
+
+    def primary_key_bitmap_index_options(self, column: str) -> Options:
+        return self._primary_key_sorted_index_options(column, "pk-bitmap", "bitmap-index.")
+
+    def _primary_key_index_columns(self, option: ConfigOption[str]) -> List[str]:
+        columns = self.options.get(option)
+        if columns is None:
+            return []
+        return [column.strip() for column in columns.split(',')]
+
+    def _primary_key_sorted_index_options(
+            self, column: str, option_family: str, algorithm_prefix: str) -> Options:
+        resolved = dict(self.options.to_map())
+        resolved.pop("sorted-index.records-per-range", None)
+        option_key = "fields.%s.%s.index.options" % (column, option_family)
+        serialized = self.options.to_map().get(option_key)
+        if serialized is None or not str(serialized).strip():
+            return Options(resolved)
+        try:
+            parsed = json.loads(serialized)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key) from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key)
+        for key, value in parsed.items():
+            if not key or value is None:
+                raise ValueError("%s contains an invalid option." % option_key)
+            qualified = key if key.startswith((algorithm_prefix, "fields.")) \
+                else algorithm_prefix + key
+            previous = resolved.get(qualified)
+            if previous is not None and previous != value:
+                raise ValueError("%s defines conflicting values for %s." % (option_key, qualified))
+            resolved[qualified] = value
+        return Options(resolved)
+
+    def _primary_key_json_options(self, option_key, include, prefix):
+        resolved = {key: value for key, value in self.options.to_map().items()
+                    if include(key) and not key.startswith(option_key)}
+        serialized = self.options.to_map().get(option_key)
+        if serialized is None or not str(serialized).strip():
+            return Options(resolved)
+        try:
+            parsed = json.loads(serialized)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key) from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("%s must be a JSON object of option key-value pairs." % option_key)
+        for key, value in parsed.items():
+            if not key or value is None:
+                raise ValueError("%s contains an invalid option." % option_key)
+            qualified = key if (prefix is None
+                                or key.startswith((prefix, "fields."))) else prefix + key
+            previous = resolved.get(qualified)
+            if previous is not None and previous != str(value):
+                raise ValueError("%s defines conflicting values for %s." % (option_key, qualified))
+            resolved[qualified] = str(value)
+        return Options(resolved)
 
     def btree_index_fallback_scan_max_size(self) -> int:
         return self.options.get(
@@ -1342,7 +1576,7 @@ class CoreOptions:
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
 
-    def read_parallelism(self, default=None) -> int:
+    def read_parallelism(self, default=None) -> Optional[int]:
         return self.options.get(CoreOptions.READ_PARALLELISM, default)
 
     def add_column_before_partition(self) -> bool:
@@ -1368,3 +1602,60 @@ class CoreOptions:
             .boolean_type()
             .default_value(False)
         )
+
+    def field_nested_update_agg_nested_key(self, field_name: str) -> List[str]:
+        key_string = self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.NESTED_KEY}'
+            )
+            .string_type()
+            .no_default_value()
+        )
+
+        if not key_string:
+            return []
+        return list(map(str.strip, key_string.split(",")))
+
+    def field_nested_update_agg_nested_sequence_field(self, field_name: str) -> List[str]:
+        key_string = self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.NESTED_SEQUENCE_FIELD}'
+            )
+            .string_type()
+            .no_default_value()
+        )
+
+        if not key_string:
+            return []
+        return list(map(str.strip, key_string.split(",")))
+
+    def field_nested_update_agg_nested_key_null_strategy(self, field_name: str) -> NestedKeyNullStrategy:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.NESTED_KEY_NULL_STRATEGY}'
+            )
+            .enum_type(NestedKeyNullStrategy)
+            .default_value(NestedKeyNullStrategy.MERGE)
+        )
+
+    def field_nested_update_agg_count_limit(self, field_name: str) -> int:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.COUNT_LIMIT}'
+            )
+            .int_type()
+            .default_value(2147483647)  # Integer.MAX_VALUE
+        )
+
+    def field_merge_map_ts_field(self, field_name: str) -> str:
+        return self.options.get(
+            ConfigOptions.key(
+                f'{CoreOptions.FIELDS_PREFIX}.{field_name}.{CoreOptions.MERGE_MAP_TS_FIELD}'
+            )
+            .string_type()
+            .no_default_value()
+        )
+
+    @property
+    def query_auth_enabled(self) -> bool:
+        return self.options.get(CoreOptions.QUERY_AUTH_ENABLED)

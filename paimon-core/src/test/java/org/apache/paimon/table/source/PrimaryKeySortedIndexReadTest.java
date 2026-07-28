@@ -156,7 +156,6 @@ class PrimaryKeySortedIndexReadTest extends TableTestBase {
                         .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
                         .option(CoreOptions.TARGET_FILE_SIZE.key(), "1 b")
                         .option(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "score")
-                        .option(CoreOptions.primaryKeyIndexCompactionLevelFanoutKey("score"), "2")
                         .build();
         catalog.createTable(identifier(), schema, false);
         FileStoreTable table = getTableDefault();

@@ -86,6 +86,15 @@ public class PkSortedIndexBuilder {
         checkArgument(!dataFiles.isEmpty(), "A sorted index build requires source files.");
         List<DataFileMeta> orderedDataFiles = new ArrayList<>(dataFiles);
         orderedDataFiles.sort(Comparator.comparing(DataFileMeta::fileName));
+        int dataLevel = orderedDataFiles.get(0).level();
+        checkArgument(dataLevel > 0, "A sorted index build requires a positive data level.");
+        for (DataFileMeta dataFile : orderedDataFiles) {
+            checkArgument(
+                    dataFile.level() == dataLevel,
+                    "A sorted index build cannot mix data levels %s and %s.",
+                    dataLevel,
+                    dataFile.level());
+        }
 
         IOManager actualIOManager = ioManager;
         boolean ownsIOManager = false;
@@ -163,7 +172,8 @@ public class PkSortedIndexBuilder {
                                     valueGetter.getFieldOrNull(row), row.getLong(1));
                         }
                     };
-            return indexFile.build(sourceFiles, indexField, indexType, options, sortedEntries);
+            return indexFile.build(
+                    dataLevel, sourceFiles, indexField, indexType, options, sortedEntries);
         } finally {
             if (sortBuffer != null) {
                 sortBuffer.clear();

@@ -30,6 +30,7 @@ import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableRunnable;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
@@ -49,6 +50,8 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_F
 public interface StoreSinkWrite {
 
     void setWriteRestore(WriteRestore writeRestore);
+
+    default void setBlobDescriptorReaderFactory(UriReaderFactory uriReaderFactory) {}
 
     @Nullable
     SinkRecord write(InternalRow rowData) throws Exception;
@@ -95,6 +98,21 @@ public interface StoreSinkWrite {
                 IOManager ioManager,
                 MemoryPoolFactory memoryPoolFactory,
                 @Nullable MetricGroup metricGroup);
+    }
+
+    static Provider withBlobDescriptorReaderFactory(
+            Provider provider, @Nullable UriReaderFactory uriReaderFactory) {
+        if (uriReaderFactory == null) {
+            return provider;
+        }
+
+        return (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) -> {
+            StoreSinkWrite write =
+                    provider.provide(
+                            table, commitUser, state, ioManager, memoryPoolFactory, metricGroup);
+            write.setBlobDescriptorReaderFactory(uriReaderFactory);
+            return write;
+        };
     }
 
     static StoreSinkWrite.Provider createWriteProvider(

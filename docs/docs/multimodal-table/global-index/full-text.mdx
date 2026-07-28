@@ -109,8 +109,12 @@ added_files = table.create_global_index(
 print(added_files)
 ```
 
-PyPaimon full-text build and query require the `paimon_ftindex` Python package
-and the native FFI library from `paimon-full-text`.
+Install the PyPaimon full-text extra before building or querying full-text
+indexes:
+
+```shell
+pip install 'pypaimon[full-text]'
+```
 
 </TabItem>
 
@@ -278,8 +282,8 @@ print(pa_table)
 
 </Tabs>
 
-By default, `global-index.search-mode=fast` searches indexed row ranges only.
-When `global-index.search-mode` is `full` or `detail`, Paimon also covers
+By default, `full-text-index.search-mode=fast` searches indexed row ranges only.
+When `full-text-index.search-mode` is `full` or `detail`, Paimon also covers
 unindexed row ranges by reading raw rows and building a temporary native
 full-text index for the searched column.
 

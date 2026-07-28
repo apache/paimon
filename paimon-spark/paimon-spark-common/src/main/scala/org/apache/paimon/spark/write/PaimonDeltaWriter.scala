@@ -19,10 +19,10 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.deletionvectors.{Bitmap64DeletionVector, BitmapDeletionVector, DeletionVector}
 import org.apache.paimon.spark.{PaimonDeletedRecordsTaskMetric, PaimonInsertedRecordsTaskMetric, PaimonUpdatedRecordsTaskMetric}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage}
+import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
@@ -52,7 +52,7 @@ case class PaimonDeltaWriterFactory(
     writeBuilder: BatchWriteBuilder,
     rowSchema: StructType,
     coreOptions: CoreOptions,
-    catalogContext: CatalogContext,
+    uriReaderFactory: UriReaderFactory,
     filePathOrdinal: Int,
     rowIndexOrdinal: Int)
   extends DeltaWriterFactory {
@@ -62,7 +62,7 @@ case class PaimonDeltaWriterFactory(
       writeBuilder,
       rowSchema,
       coreOptions,
-      catalogContext,
+      uriReaderFactory,
       filePathOrdinal,
       rowIndexOrdinal)
 }
@@ -79,7 +79,7 @@ case class PaimonDeltaWriter(
     writeBuilder: BatchWriteBuilder,
     rowSchema: StructType,
     coreOptions: CoreOptions,
-    catalogContext: CatalogContext,
+    uriReaderFactory: UriReaderFactory,
     filePathOrdinal: Int,
     rowIndexOrdinal: Int)
   extends DeltaWriter[InternalRow] {
@@ -96,7 +96,7 @@ case class PaimonDeltaWriter(
   private def getOrCreateAppendWriter: PaimonV2DataWriter = {
     appendWriter.getOrElse {
       val writer =
-        PaimonV2DataWriter(writeBuilder, rowSchema, rowSchema, coreOptions, catalogContext)
+        PaimonV2DataWriter(writeBuilder, rowSchema, rowSchema, coreOptions, uriReaderFactory)
       appendWriter = Some(writer)
       writer
     }

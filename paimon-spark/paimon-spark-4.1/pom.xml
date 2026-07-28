@@ -33,6 +33,10 @@ under the License.
 
     <properties>
         <spark.version>4.1.2</spark.version>
+        <!-- Spark 4 only supports Scala 2.13. Pin it locally so this _2.13 module resolves its
+             dependencies to _2.13 even when the spark4 profile is inactive (see issue #6682);
+             otherwise it inherits scala.binary.version=2.12 from paimon-parent. -->
+        <scala.binary.version>2.13</scala.binary.version>
     </properties>
 
     <dependencies>

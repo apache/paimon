@@ -18,8 +18,9 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.globalindex.GlobalIndexCoverage;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -144,21 +145,33 @@ public class DataEvolutionVectorScan implements VectorScan {
             splits.add(new IndexVectorSearchSplit(range.from, range.to, vectorFiles, scalarFiles));
         }
 
+        GlobalIndexSearchMode vectorSearchMode = table.coreOptions().vectorIndexSearchMode();
         List<Range> rawRowRanges =
-                new GlobalIndexCoverage(table, snapshot, partitionFilter, vectorIndexFiles)
+                new DataEvolutionGlobalIndexCoverage(
+                                table,
+                                snapshot,
+                                partitionFilter,
+                                vectorIndexFiles,
+                                vectorSearchMode)
                         .unindexedRanges(vectorColumn.id());
         if (filter != null) {
+            List<Range> scalarUnindexedRanges =
+                    new DataEvolutionGlobalIndexCoverage(
+                                    table,
+                                    snapshot,
+                                    partitionFilter,
+                                    scalarIndexFiles(allIndexFiles),
+                                    table.coreOptions().scalarIndexSearchMode())
+                            .unindexedRanges(table.rowType(), filter);
+            if (vectorSearchMode == GlobalIndexSearchMode.FAST) {
+                scalarUnindexedRanges =
+                        Range.and(
+                                scalarUnindexedRanges,
+                                Range.sortAndMergeOverlap(
+                                        new ArrayList<>(vectorByRange.keySet()), true));
+            }
             rawRowRanges =
-                    Range.sortAndMergeOverlap(
-                            addAll(
-                                    rawRowRanges,
-                                    new GlobalIndexCoverage(
-                                                    table,
-                                                    snapshot,
-                                                    partitionFilter,
-                                                    scalarIndexFiles(allIndexFiles))
-                                            .unindexedRanges(table.rowType(), filter)),
-                            true);
+                    Range.sortAndMergeOverlap(addAll(rawRowRanges, scalarUnindexedRanges), true);
         }
         if (!rawRowRanges.isEmpty()) {
             splits.add(

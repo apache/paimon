@@ -590,6 +590,57 @@ class TestBlobType:
         with payloads[0][2].open() as stream:
             assert stream.read() == b"world"
 
+    def test_read_map_blob_type(self, local_paimon_catalog):
+        """MAP<STRING, BLOB> values are returned as File objects."""
+        catalog, _ = local_paimon_catalog
+        map_blob_type = pa.map_(pa.string(), pa.large_binary())
+        pa_schema = pa.schema([
+            ("id", pa.int64()),
+            ("payloads", map_blob_type),
+        ])
+        paimon_schema = pypaimon.Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                "bucket": "1",
+                "file.format": "parquet",
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+            },
+        )
+        catalog.create_table(
+            "test_db.map_blob_table",
+            paimon_schema,
+            ignore_if_exists=True,
+        )
+        table = catalog.get_table("test_db.map_blob_table")
+        _write_to_paimon(table, pa.table({
+            "id": [1, 2],
+            "payloads": pa.array(
+                [{"first": b"hello", "null": None, "second": b"world"}, None],
+                type=map_blob_type,
+            ),
+        }, schema=pa_schema))
+
+        result_df = _read_table(table).sort("id")
+        assert str(result_df.schema()["payloads"].dtype) == "Map[String: File[Unknown]]"
+
+        projected = result_df.select(
+            "id",
+            result_df["payloads"].map_get("first").alias("first"),
+            result_df["payloads"].map_get("null").alias("null"),
+            result_df["payloads"].map_get("second").alias("second"),
+        ).to_pydict()
+        assert projected["id"] == [1, 2]
+        assert projected["null"] == [None, None]
+        assert projected["first"][1] is None
+        assert projected["second"][1] is None
+        assert isinstance(projected["first"][0], daft.File)
+        assert isinstance(projected["second"][0], daft.File)
+        with projected["first"][0].open() as stream:
+            assert stream.read() == b"hello"
+        with projected["second"][0].open() as stream:
+            assert stream.read() == b"world"
+
 
 # ---------------------------------------------------------------------------
 # Truncate tests

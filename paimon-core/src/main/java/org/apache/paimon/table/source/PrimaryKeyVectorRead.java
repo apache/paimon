@@ -288,8 +288,8 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                         .filter(PrimaryKeyIndexSourcePolicy::shouldRead)
                         .collect(Collectors.toList());
         PkVectorBucketIndexState state =
-                PkVectorBucketIndexState.fromActivePayloads(
-                        vectorField.id(), indexType, split.payloadFiles());
+                PkVectorBucketIndexState.fromActiveDataFiles(
+                        vectorField.id(), indexType, activeFiles, split.payloadFiles());
         Map<String, DeletionVector> deletionVectors = deletionVectors(dataSplit, context.fileIO);
         PkVectorDataFileReader.Factory readerFactory =
                 new PkVectorDataFileReader.Factory(
@@ -313,7 +313,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                         annSearcher,
                         searchOptions,
                         metric,
-                        table.coreOptions().globalIndexSearchMode());
+                        table.coreOptions().vectorIndexSearchMode());
         return bucketSearch
                 .searchBatchAsync(
                         state,

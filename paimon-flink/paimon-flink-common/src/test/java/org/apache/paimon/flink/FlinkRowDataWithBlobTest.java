@@ -19,20 +19,26 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.utils.UriReader;
 
 import org.apache.flink.table.data.ArrayData;
+import org.apache.flink.table.data.MapData;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FlinkRowDataWithBlob}. */
 public class FlinkRowDataWithBlobTest {
@@ -79,6 +85,48 @@ public class FlinkRowDataWithBlobTest {
 
         assertThat(rowData.getBinary(0)).isEqualTo(rawDescriptor.serialize());
         assertThat(rowData.getArray(1).getBinary(0)).isEqualTo(arrayDescriptor.serialize());
+    }
+
+    @Test
+    public void testMapBlobAsDataAndDescriptor() {
+        byte[] first = new byte[] {1, 2};
+        BlobDescriptor descriptor = new BlobDescriptor("file:///map", 3, 4);
+        Map<Object, Object> map = new LinkedHashMap<>();
+        map.put(BinaryString.fromString("first"), Blob.fromData(first));
+        map.put(BinaryString.fromString("null"), null);
+
+        FlinkRowDataWithBlob dataRow =
+                new FlinkRowDataWithBlob(
+                        GenericRow.of(new GenericMap(map)), new HashSet<>(Arrays.asList(0)), false);
+        MapData dataMap = dataRow.getMap(0);
+        assertThat(dataMap.size()).isEqualTo(2);
+        assertThat(dataMap.keyArray().getString(0).toString()).isEqualTo("first");
+        assertThat(dataMap.valueArray().getBinary(0)).isEqualTo(first);
+        assertThat(dataMap.keyArray().getString(1).toString()).isEqualTo("null");
+        assertThat(dataMap.valueArray().isNullAt(1)).isTrue();
+
+        map.clear();
+        map.put(
+                BinaryString.fromString("descriptor"),
+                Blob.fromDescriptor(UriReader.fromHttp(), descriptor));
+        FlinkRowDataWithBlob descriptorRow =
+                new FlinkRowDataWithBlob(
+                        GenericRow.of(new GenericMap(map)), new HashSet<>(Arrays.asList(0)), true);
+        assertThat(descriptorRow.getMap(0).valueArray().getBinary(0))
+                .isEqualTo(descriptor.serialize());
+    }
+
+    @Test
+    public void testMapBlobRejectsNullKey() {
+        Map<Object, Object> map = new LinkedHashMap<>();
+        map.put(null, Blob.fromData(new byte[] {1}));
+        FlinkRowDataWithBlob rowData =
+                new FlinkRowDataWithBlob(
+                        GenericRow.of(new GenericMap(map)), new HashSet<>(Arrays.asList(0)), false);
+
+        assertThatThrownBy(() -> rowData.getMap(0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Flink MAP<X, BLOB> does not support null keys.");
     }
 
     @Test

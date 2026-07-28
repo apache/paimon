@@ -24,7 +24,7 @@ import javax.annotation.Nullable;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Identifier for objects under a table. */
+/** Identifier for the root of a table. */
 public class VFSTableRootIdentifier extends VFSTableIdentifier {
 
     public VFSTableRootIdentifier(String databaseName, String tableName) {

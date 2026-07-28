@@ -304,11 +304,13 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
             // _ROW_ID is the first field of joined table.
             query =
                     String.format(
-                            "SELECT %s, %s FROM %s INNER JOIN %s AS RT ON %s",
+                            "SELECT %s, %s FROM %s INNER JOIN %s "
+                                    + "/*+ OPTIONS('%s'='full') */ AS RT ON %s",
                             "`RT`.`_ROW_ID` as `_ROW_ID`",
                             String.join(",", project),
                             escapedSourceName(),
                             escapedRowTrackingTargetName(),
+                            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(),
                             rewriteMergeCondition(mergeCondition));
         }
 
@@ -503,7 +505,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                 if (BlobType.isBlobFileField(targetField.type())
                         && !updatableBlobFields.contains(flinkColumn.getName())) {
                     throw new IllegalStateException(
-                            "Should not append/update raw-data BLOB or ARRAY<BLOB> column '"
+                            "Should not append/update raw-data BLOB, ARRAY<BLOB> or MAP<X, BLOB> column '"
                                     + flinkColumn.getName()
                                     + "' through MERGE INTO. "
                                     + "Only descriptor-based BLOB columns (configured via '"

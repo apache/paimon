@@ -21,6 +21,7 @@ package org.apache.paimon.gs;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 
 import com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem;
 import org.apache.hadoop.conf.Configuration;
@@ -70,7 +71,7 @@ public class GSFileIO extends HadoopCompliantFileIO {
                     LOG.warn(
                             "Adding config entry for {} as {} to Hadoop config",
                             key,
-                            hadoopOptions.get(key));
+                            SensitiveConfigUtils.redactValue(key, hadoopOptions.get(key)));
                 }
             }
         }

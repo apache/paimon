@@ -35,6 +35,9 @@ import java.util.Objects;
 @Public
 public class BlobRef implements Blob {
 
+    /** The maximum safe size of a byte array. Some VMs reserve header words in an array. */
+    private static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
+
     private final UriReader uriReader;
     private final BlobDescriptor descriptor;
 
@@ -46,7 +49,21 @@ public class BlobRef implements Blob {
     @Override
     public byte[] toData() {
         try {
-            return IOUtils.readFully(newInputStream(), true);
+            long length = descriptor.length();
+            if (length > MAX_ARRAY_SIZE) {
+                throw new IOException(
+                        String.format(
+                                "Blob is too large to materialize as byte[]: %d, maximum is %d",
+                                length, MAX_ARRAY_SIZE));
+            }
+            try (SeekableInputStream inputStream = newInputStream()) {
+                if (length >= 0) {
+                    byte[] data = new byte[(int) length];
+                    IOUtils.readFully(inputStream, data);
+                    return data;
+                }
+                return IOUtils.readFully(inputStream, false);
+            }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

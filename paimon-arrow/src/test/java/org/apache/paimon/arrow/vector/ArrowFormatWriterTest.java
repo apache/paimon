@@ -29,8 +29,12 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.AllNullColumnVector;
+import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
@@ -72,6 +76,7 @@ import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link org.apache.paimon.arrow.vector.ArrowFormatWriter}. */
 public class ArrowFormatWriterTest {
@@ -145,6 +150,132 @@ public class ArrowFormatWriterTest {
                 }
             }
             vectorSchemaRoot.close();
+        }
+    }
+
+    @Test
+    public void testMissingMapColumnVectorizedRoundTrip() {
+        RowType inputRowType = RowType.builder().field("id", DataTypes.INT()).build();
+        RowType projectedRowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("map", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()))
+                        .build();
+
+        try (ArrowFormatWriter inputWriter = new ArrowFormatWriter(inputRowType, 3, true);
+                ArrowFormatWriter outputWriter = new ArrowFormatWriter(projectedRowType, 3, true)) {
+            inputWriter.write(GenericRow.of(1));
+            inputWriter.write(GenericRow.of(2));
+            inputWriter.write(GenericRow.of(3));
+            inputWriter.flush();
+
+            ArrowBatchReader reader = new ArrowBatchReader(projectedRowType, true);
+            ColumnarRow row =
+                    (ColumnarRow)
+                            reader.readBatch(inputWriter.getVectorSchemaRoot()).iterator().next();
+            assertThat(row.batch().columns[1]).isSameAs(AllNullColumnVector.INSTANCE);
+
+            outputWriter.write(row.batch().columns, null, 0, 3);
+            outputWriter.flush();
+
+            VectorSchemaRoot output = outputWriter.getVectorSchemaRoot();
+            assertThat(output.getRowCount()).isEqualTo(3);
+            IntVector idVector = (IntVector) output.getVector("id");
+            assertThat(idVector.get(0)).isEqualTo(1);
+            assertThat(idVector.get(1)).isEqualTo(2);
+            assertThat(idVector.get(2)).isEqualTo(3);
+
+            MapVector mapVector = (MapVector) output.getVector("map");
+            assertThat(mapVector.isNull(0)).isTrue();
+            assertThat(mapVector.isNull(1)).isTrue();
+            assertThat(mapVector.isNull(2)).isTrue();
+            assertThat(mapVector.getDataVector().getValueCount()).isZero();
+            assertThat(mapVector.getDataVector().getChildrenFromFields())
+                    .allSatisfy(child -> assertThat(child.getValueCount()).isZero());
+            mapVector.getDataVector().validateFull();
+        }
+    }
+
+    @Test
+    public void testWriteNullElementInNotNullArrayColumn() {
+        // the array column is NOT NULL, but its element type is nullable
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.INT()).notNull());
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(GenericRow.of(new GenericArray(new Object[] {1, null, 3})));
+            writer.flush();
+
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, true);
+            InternalRow row = arrowBatchReader.readBatch(vectorSchemaRoot).iterator().next();
+
+            InternalArray array = row.getArray(0);
+            assertThat(array.size()).isEqualTo(3);
+            assertThat(array.isNullAt(0)).isFalse();
+            assertThat(array.getInt(0)).isEqualTo(1);
+            assertThat(array.isNullAt(1)).isTrue();
+            assertThat(array.isNullAt(2)).isFalse();
+            assertThat(array.getInt(2)).isEqualTo(3);
+        }
+    }
+
+    @Test
+    public void testWriteNullElementInNotNullElementArrayColumn() {
+        // the array column is nullable, but its element type is NOT NULL
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.INT().notNull()));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            InternalRow row = GenericRow.of(new GenericArray(new Object[] {1, null}));
+            assertThatThrownBy(() -> writer.write(row))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("expected not null but found null value");
+        }
+    }
+
+    @Test
+    public void testWriteNullValueInNotNullMapColumn() {
+        // the map column is NOT NULL, but its value type is nullable
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()).notNull());
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            Map<Integer, Integer> map = new HashMap<>();
+            map.put(1, null);
+            writer.write(GenericRow.of(new GenericMap(map)));
+            writer.flush();
+
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, true);
+            InternalRow row = arrowBatchReader.readBatch(vectorSchemaRoot).iterator().next();
+
+            InternalMap actualMap = row.getMap(0);
+            assertThat(actualMap.size()).isEqualTo(1);
+            assertThat(actualMap.keyArray().getInt(0)).isEqualTo(1);
+            assertThat(actualMap.valueArray().isNullAt(0)).isTrue();
+        }
+    }
+
+    @Test
+    public void testWriteNullKeyInMapColumnFailsLoud() {
+        // the map key type is nullable, but the Arrow map key is always NOT NULL by spec, so a null
+        // key must fail loud rather than be written into a schema that forbids it
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            Map<Integer, Integer> map = new HashMap<>();
+            map.put(null, 1);
+            InternalRow row = GenericRow.of(new GenericMap(map));
+            assertThatThrownBy(() -> writer.write(row))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("expected not null but found null value");
+        }
+    }
+
+    @Test
+    public void testWriteNullFieldInNotNullNestedRowField() {
+        // the row column is nullable, but its nested field is NOT NULL
+        RowType rowType =
+                RowType.of(DataTypes.ROW(DataTypes.FIELD(0, "a", DataTypes.INT().notNull())));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            InternalRow row = GenericRow.of(GenericRow.of((Object) null));
+            assertThatThrownBy(() -> writer.write(row))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("expected not null but found null value");
         }
     }
 

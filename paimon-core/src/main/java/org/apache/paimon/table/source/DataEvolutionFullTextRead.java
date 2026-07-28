@@ -41,7 +41,6 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,16 +59,6 @@ public class DataEvolutionFullTextRead implements FullTextRead {
     private final int limit;
     private final DataField textColumn;
     private final String query;
-
-    public DataEvolutionFullTextRead(
-            FileStoreTable table, int limit, DataField textColumn, String query) {
-        this(table, null, limit, Collections.singletonList(textColumn), query);
-    }
-
-    public DataEvolutionFullTextRead(
-            FileStoreTable table, int limit, List<DataField> textColumns, String query) {
-        this(table, null, limit, textColumns, query);
-    }
 
     public DataEvolutionFullTextRead(
             FileStoreTable table,
@@ -182,15 +171,15 @@ public class DataEvolutionFullTextRead implements FullTextRead {
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-        ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
+        List<ScoredGlobalIndexResult> results = new ArrayList<>(futures.size());
         for (CompletableFuture<Optional<ScoredGlobalIndexResult>> f : futures) {
             Optional<ScoredGlobalIndexResult> next = f.join();
             if (next.isPresent()) {
-                result = result.or(next.get());
+                results.add(next.get());
             }
         }
 
-        return result;
+        return ScoredGlobalIndexResult.merge(results);
     }
 
     @Nullable

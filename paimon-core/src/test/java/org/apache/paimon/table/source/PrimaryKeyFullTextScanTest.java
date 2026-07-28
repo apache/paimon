@@ -123,6 +123,24 @@ class PrimaryKeyFullTextScanTest {
     }
 
     @Test
+    void testRejectsPartialLevelCoverage() {
+        DataFileMeta first = dataFile("data-1", 1, FileSource.COMPACT);
+        DataFileMeta second = dataFile("data-2", 1, FileSource.COMPACT);
+
+        PrimaryKeyFullTextScan.Plan plan =
+                PrimaryKeyFullTextScan.plan(
+                        11,
+                        Collections.singletonList(dataSplit(Arrays.asList(first, second), null)),
+                        Collections.singletonList(
+                                payloadEntry("data-1", FIELD_ID, "partial-level")),
+                        FIELD_ID);
+
+        PrimaryKeyFullTextSearchSplit split = (PrimaryKeyFullTextSearchSplit) plan.splits().get(0);
+        assertThat(split.payloadFiles()).isEmpty();
+        assertThat(split.uncoveredDataFiles()).containsExactly("data-1", "data-2");
+    }
+
+    @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     void testCapturesOneSnapshotAndPrunesPartitions() {
         FileStoreTable table = mock(FileStoreTable.class);
@@ -216,9 +234,7 @@ class PrimaryKeyFullTextScanTest {
                 FIELD_ID,
                 "full-text",
                 new Options(),
-                PrimaryKeyIndexDefinition.Family.FULL_TEXT,
-                2,
-                0.5);
+                PrimaryKeyIndexDefinition.Family.FULL_TEXT);
     }
 
     private static DataSplit dataSplit(
@@ -248,7 +264,7 @@ class PrimaryKeyFullTextScanTest {
         for (String sourceFile : sourceFiles) {
             sources.add(new PrimaryKeyIndexSourceFile(sourceFile, 2));
         }
-        byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(sources).serialize();
+        byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(1, sources).serialize();
         long rowCount = 2L * sources.size();
         return new IndexManifestEntry(
                 FileKind.ADD,

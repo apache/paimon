@@ -137,8 +137,7 @@ public final class PrimaryKeySortedIndexScan {
             }
         }
 
-        Map<Pair<BinaryRow, Integer>, List<PrimaryKeyIndexSourceFile>> sourcesByBucket =
-                new LinkedHashMap<>();
+        Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> dataFilesByBucket = new LinkedHashMap<>();
         for (DataSplit split : dataSplits) {
             checkArgument(
                     split.snapshotId() == snapshotId,
@@ -151,25 +150,25 @@ public final class PrimaryKeySortedIndexScan {
             checkArgument(
                     deletions == null || deletions.size() == split.dataFiles().size(),
                     "Deletion files must align with data files in a sorted-index split.");
-            List<PrimaryKeyIndexSourceFile> sources =
-                    sourcesByBucket.computeIfAbsent(
+            List<DataFileMeta> dataFiles =
+                    dataFilesByBucket.computeIfAbsent(
                             Pair.of(split.partition(), split.bucket()),
                             ignored -> new ArrayList<>());
-            for (DataFileMeta dataFile : split.dataFiles()) {
-                sources.add(
-                        new PrimaryKeyIndexSourceFile(dataFile.fileName(), dataFile.rowCount()));
-            }
+            dataFiles.addAll(split.dataFiles());
         }
 
         Map<Pair<BinaryRow, Integer>, Map<String, Map<Integer, PkSortedIndexGroup>>>
                 groupsByBucket = new LinkedHashMap<>();
-        for (Map.Entry<Pair<BinaryRow, Integer>, List<PrimaryKeyIndexSourceFile>> bucketEntry :
-                sourcesByBucket.entrySet()) {
+        for (Map.Entry<Pair<BinaryRow, Integer>, List<DataFileMeta>> bucketEntry :
+                dataFilesByBucket.entrySet()) {
             Pair<BinaryRow, Integer> bucket = bucketEntry.getKey();
             List<IndexFileMeta> bucketPayloads =
                     payloadsByBucket.getOrDefault(bucket, Collections.emptyList());
-            Set<PrimaryKeyIndexSourceFile> activeSourceFiles =
-                    new HashSet<>(bucketEntry.getValue());
+            Set<PrimaryKeyIndexSourceFile> activeSourceFiles = new HashSet<>();
+            for (DataFileMeta dataFile : bucketEntry.getValue()) {
+                activeSourceFiles.add(
+                        new PrimaryKeyIndexSourceFile(dataFile.fileName(), dataFile.rowCount()));
+            }
             Map<String, Map<Integer, PkSortedIndexGroup>> groupsBySource = new LinkedHashMap<>();
             for (PrimaryKeyIndexDefinition definition : scalarDefinitions) {
                 List<IndexFileMeta> definitionPayloads = new ArrayList<>();
@@ -183,7 +182,7 @@ public final class PrimaryKeySortedIndexScan {
                 }
                 try {
                     PkSortedBucketIndexState state =
-                            PkSortedBucketIndexState.fromActivePayloads(
+                            PkSortedBucketIndexState.fromActiveDataFiles(
                                     definition.fieldId(),
                                     definition.indexType(),
                                     bucketEntry.getValue(),

@@ -101,7 +101,7 @@ class TableWriteCoordinatorTest extends TableTestBase {
 
         PrimaryKeyIndexSourceMeta sourceMeta =
                 new PrimaryKeyIndexSourceMeta(
-                        Collections.singletonList(new PrimaryKeyIndexSourceFile("data", 1)));
+                        1, Collections.singletonList(new PrimaryKeyIndexSourceFile("data", 1)));
         IndexFileMeta ann =
                 new IndexFileMeta(
                         "test-vector-ann",

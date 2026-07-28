@@ -60,8 +60,8 @@ class FileStoreTable(Table):
         self.is_primary_key_table = bool(self.primary_keys)
         self.total_buckets = self.options.bucket()
 
-        current_branch = self.options.branch()
-        self.schema_manager = SchemaManager(file_io, table_path, branch=current_branch)
+        self.schema_manager = SchemaManager(
+            file_io, table_path, branch=self.current_branch())
 
     @classmethod
     def from_path(cls, table_path: str) -> 'FileStoreTable':
@@ -118,7 +118,8 @@ class FileStoreTable(Table):
         # If catalog environment has a catalog loader, use CatalogBranchManager
         catalog_loader = self.catalog_environment.catalog_loader
         if catalog_loader is not None and self.catalog_environment.supports_version_management:
-            from pypaimon.branch.catalog_branch_manager import CatalogBranchManager
+            from pypaimon.branch.catalog_branch_manager import \
+                CatalogBranchManager
             return CatalogBranchManager(
                 catalog_loader,
                 self.identifier
@@ -453,7 +454,8 @@ class FileStoreTable(Table):
     def create_global_index(self, index_column, index_type: str = "btree",
                             partition_filter=None, partitions=None,
                             options: Optional[dict] = None) -> int:
-        from pypaimon.globalindex.create_global_index import create_global_index
+        from pypaimon.globalindex.create_global_index import \
+            create_global_index
         return create_global_index(
             self,
             index_column,
@@ -476,7 +478,9 @@ class FileStoreTable(Table):
             dry_run=dry_run,
         )
 
-    def create_row_key_extractor(self) -> RowKeyExtractor:
+    def create_row_key_extractor(
+        self, ignore_existing: bool = False
+    ) -> RowKeyExtractor:
         bucket_mode = self.bucket_mode()
         if bucket_mode == BucketMode.HASH_FIXED:
             return FixedBucketRowKeyExtractor(self.table_schema)
@@ -484,8 +488,17 @@ class FileStoreTable(Table):
             return UnawareBucketRowKeyExtractor(self.table_schema)
         elif bucket_mode == BucketMode.POSTPONE_MODE:
             return PostponeBucketRowKeyExtractor(self.table_schema)
-        elif bucket_mode == BucketMode.HASH_DYNAMIC or bucket_mode == BucketMode.CROSS_PARTITION:
-            return DynamicBucketRowKeyExtractor(self.table_schema)
+        elif bucket_mode == BucketMode.HASH_DYNAMIC:
+            return DynamicBucketRowKeyExtractor(
+                self.table_schema,
+                table=self,
+                ignore_existing=ignore_existing,
+            )
+        elif bucket_mode == BucketMode.CROSS_PARTITION:
+            raise ValueError(
+                "CROSS_PARTITION primary-key writes require a persistent "
+                "global primary-key index, which PyPaimon does not yet support"
+            )
         else:
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
 
@@ -520,8 +533,12 @@ class FileStoreTable(Table):
             )
             catalog_env = self.catalog_environment.copy(new_identifier)
 
-        return FileStoreTable(self.file_io, new_identifier, self.table_path, new_table_schema,
-                              catalog_env)
+        new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
+                                   new_table_schema, catalog_env)
+        # Cumulative copy() overrides (removals kept as None) vs the on-disk schema.
+        new_table._applied_dynamic_options = {
+            **getattr(self, '_applied_dynamic_options', {}), **options}
+        return new_table
 
     def _try_time_travel(self, options: Options) -> Optional[TableSchema]:
         """

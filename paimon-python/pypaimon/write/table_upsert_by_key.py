@@ -505,7 +505,7 @@ class TableUpsertByKey:
             read_builder = read_builder.with_filter(partition_predicate)
 
         scan = read_builder.new_scan()
-        splits = scan.plan().splits()
+        splits = scan.plan_for_write().splits()
         if not splits:
             return {}
 

@@ -34,6 +34,7 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
@@ -104,6 +105,8 @@ class PkSortedIndexBuilderTest {
 
             assertQuery(fileIO, pathFactory, indexType, options, payload, false, 20, 0L, 3L);
             assertQuery(fileIO, pathFactory, indexType, options, payload, true, null, 1L);
+            assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(payload).dataLevel())
+                    .isEqualTo(source.level());
         }
     }
 
@@ -117,6 +120,7 @@ class PkSortedIndexBuilderTest {
                 new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath)) {
                     @Override
                     public IndexFileMeta build(
+                            int dataLevel,
                             List<PrimaryKeyIndexSourceFile> sourceFiles,
                             DataField indexField,
                             String indexType,
@@ -172,6 +176,7 @@ class PkSortedIndexBuilderTest {
                 new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath)) {
                     @Override
                     public IndexFileMeta build(
+                            int dataLevel,
                             List<PrimaryKeyIndexSourceFile> sourceFiles,
                             DataField indexField,
                             String indexType,
@@ -263,20 +268,21 @@ class PkSortedIndexBuilderTest {
 
     private static DataFileMeta dataFile(String fileName, long rowCount) {
         return DataFileMeta.forAppend(
-                fileName,
-                100,
-                rowCount,
-                SimpleStats.EMPTY_STATS,
-                0,
-                0,
-                1,
-                Collections.emptyList(),
-                null,
-                FileSource.COMPACT,
-                null,
-                null,
-                null,
-                null);
+                        fileName,
+                        100,
+                        rowCount,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        0,
+                        1,
+                        Collections.emptyList(),
+                        null,
+                        FileSource.COMPACT,
+                        null,
+                        null,
+                        null,
+                        null)
+                .upgrade(3);
     }
 
     private static IndexPathFactory pathFactory(java.nio.file.Path directory) {

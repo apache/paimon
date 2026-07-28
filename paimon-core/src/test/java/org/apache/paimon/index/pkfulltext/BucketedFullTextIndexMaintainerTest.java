@@ -92,7 +92,7 @@ class BucketedFullTextIndexMaintainerTest {
     }
 
     @Test
-    void testMergesArchivesAtConfiguredFanout() throws Exception {
+    void testRebuildsDuplicateLevelArchivesAsCompleteLevel() throws Exception {
         DataFileMeta first = dataFile("data-1");
         DataFileMeta second = dataFile("data-2");
         IndexFileMeta firstPayload = payload("payload-1", first);
@@ -105,8 +105,6 @@ class BucketedFullTextIndexMaintainerTest {
                         7,
                         mock(PkFullTextIndexFile.class),
                         builder,
-                        2,
-                        0.5,
                         Arrays.asList(first, second),
                         Arrays.asList(firstPayload, secondPayload),
                         executor);
@@ -137,8 +135,6 @@ class BucketedFullTextIndexMaintainerTest {
                         7,
                         mock(PkFullTextIndexFile.class),
                         builder,
-                        5,
-                        0.5,
                         Collections.singletonList(active),
                         Collections.singletonList(oldPayload),
                         executor);
@@ -331,7 +327,7 @@ class BucketedFullTextIndexMaintainerTest {
             sourceFiles.add(new PrimaryKeyIndexSourceFile(source.fileName(), source.rowCount()));
             rowCount += source.rowCount();
         }
-        PrimaryKeyIndexSourceMeta sourceMeta = new PrimaryKeyIndexSourceMeta(sourceFiles);
+        PrimaryKeyIndexSourceMeta sourceMeta = new PrimaryKeyIndexSourceMeta(1, sourceFiles);
         return new IndexFileMeta(
                 "full-text",
                 payloadName,

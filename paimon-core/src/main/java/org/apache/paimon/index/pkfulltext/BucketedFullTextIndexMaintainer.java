@@ -31,7 +31,6 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,11 +44,8 @@ import java.util.concurrent.Future;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Maintains bucket-local full-text archives with source-backed LSM consolidation. */
+/** Maintains one full-text archive for each complete bucket-local data level. */
 public class BucketedFullTextIndexMaintainer {
-
-    private static final int DEFAULT_LEVEL_FANOUT = 5;
-    private static final double DEFAULT_STALE_RATIO_THRESHOLD = 0.2;
 
     private final int textFieldId;
     private final PkFullTextIndexFile indexFile;
@@ -68,34 +64,12 @@ public class BucketedFullTextIndexMaintainer {
             List<DataFileMeta> restoredDataFiles,
             List<IndexFileMeta> restoredPayloads,
             ExecutorService executor) {
-        this(
-                textFieldId,
-                indexFile,
-                indexBuilder,
-                DEFAULT_LEVEL_FANOUT,
-                DEFAULT_STALE_RATIO_THRESHOLD,
-                restoredDataFiles,
-                restoredPayloads,
-                executor);
-    }
-
-    public BucketedFullTextIndexMaintainer(
-            int textFieldId,
-            PkFullTextIndexFile indexFile,
-            PkFullTextIndexBuilder indexBuilder,
-            int levelFanout,
-            double staleRatioThreshold,
-            List<DataFileMeta> restoredDataFiles,
-            List<IndexFileMeta> restoredPayloads,
-            ExecutorService executor) {
         this.textFieldId = textFieldId;
         this.indexFile = indexFile;
         this.indexBuilder = indexBuilder;
         this.levels =
                 new PrimaryKeyIndexLevels<>(
-                        levelFanout,
-                        staleRatioThreshold,
-                        IndexFileMeta::fileName,
+                        payload -> sourceMeta(payload).dataLevel(),
                         payload -> sourceMeta(payload).sourceFiles());
         this.executor = executor;
         for (DataFileMeta file : restoredDataFiles) {
@@ -105,7 +79,8 @@ public class BucketedFullTextIndexMaintainer {
         }
 
         PkFullTextBucketIndexState restoredState =
-                PkFullTextBucketIndexState.fromActivePayloads(textFieldId, restoredPayloads);
+                PkFullTextBucketIndexState.fromActiveDataFiles(
+                        textFieldId, new ArrayList<>(activeSourceFiles.values()), restoredPayloads);
         currentPayloads.addAll(restoredState.currentPayloads());
         retiredPayloads.addAll(restoredState.stalePayloads());
         validateActiveSourceRows();
@@ -144,20 +119,14 @@ public class BucketedFullTextIndexMaintainer {
                 }
 
                 if (pendingBuild == null) {
-                    List<DataFileMeta> uncovered = uncoveredFiles();
-                    if (!uncovered.isEmpty()) {
-                        startBuild(uncovered, Collections.emptyList());
-                    } else {
-                        Optional<PrimaryKeyIndexLevels.Plan<IndexFileMeta>> plan =
-                                levels.pick(currentPayloads, activeSourceFiles);
-                        if (plan.isPresent()) {
-                            if (plan.get().sourceFiles().isEmpty()) {
-                                removePayloads(
-                                        plan.get().inputUnits(), created, removed, generated);
-                                continue;
-                            }
-                            startBuild(plan.get().sourceFiles(), plan.get().inputUnits());
+                    Optional<PrimaryKeyIndexLevels.Plan<IndexFileMeta>> plan =
+                            levels.pick(currentPayloads, activeSourceFiles);
+                    if (plan.isPresent()) {
+                        if (plan.get().sourceFiles().isEmpty()) {
+                            removePayloads(plan.get().inputUnits(), created, removed, generated);
+                            continue;
                         }
+                        startBuild(plan.get());
                     }
                 }
                 if (!waitCompaction || pendingBuild == null) {
@@ -212,20 +181,8 @@ public class BucketedFullTextIndexMaintainer {
         }
     }
 
-    private List<DataFileMeta> uncoveredFiles() {
-        Set<String> covered = coveredSources(currentPayloads);
-        List<DataFileMeta> uncovered = new ArrayList<>();
-        for (DataFileMeta source : activeSourceFiles.values()) {
-            if (!covered.contains(source.fileName())) {
-                uncovered.add(source);
-            }
-        }
-        uncovered.sort(Comparator.comparing(DataFileMeta::fileName));
-        return uncovered;
-    }
-
-    private void startBuild(List<DataFileMeta> sourceFiles, List<IndexFileMeta> inputPayloads) {
-        PendingBuild build = new PendingBuild(sourceFiles, inputPayloads);
+    private void startBuild(PrimaryKeyIndexLevels.Plan<IndexFileMeta> plan) {
+        PendingBuild build = new PendingBuild(plan);
         build.start();
         pendingBuild = build;
     }
@@ -238,8 +195,7 @@ public class BucketedFullTextIndexMaintainer {
         try {
             IndexFileMeta payload = completed.get();
             pendingBuild = null;
-            return Optional.of(
-                    new CompletedBuild(completed.sourceFiles, completed.inputPayloads, payload));
+            return Optional.of(new CompletedBuild(completed.plan, payload));
         } catch (CancellationException e) {
             pendingBuild = null;
             return Optional.empty();
@@ -257,16 +213,21 @@ public class BucketedFullTextIndexMaintainer {
     }
 
     private boolean canAccept(CompletedBuild build) {
-        if (!currentPayloads.containsAll(build.inputPayloads)) {
+        if (!levels.isCurrent(build.plan, activeSourceFiles)
+                || !currentPayloads.containsAll(build.inputPayloads)) {
             return false;
         }
         PkFullTextBucketIndexState outputState =
-                PkFullTextBucketIndexState.fromActivePayloads(
-                        textFieldId, Collections.singletonList(build.payload));
+                PkFullTextBucketIndexState.fromActiveDataFiles(
+                        textFieldId, build.sourceFiles, Collections.singletonList(build.payload));
         if (outputState.currentPayloads().size() != 1) {
             return false;
         }
-        List<PrimaryKeyIndexSourceFile> actualSources = sourceMeta(build.payload).sourceFiles();
+        PrimaryKeyIndexSourceMeta actualSourceMeta = sourceMeta(build.payload);
+        if (actualSourceMeta.dataLevel() != build.plan.dataLevel()) {
+            return false;
+        }
+        List<PrimaryKeyIndexSourceFile> actualSources = actualSourceMeta.sourceFiles();
         if (actualSources.size() != build.sourceFiles.size()) {
             return false;
         }
@@ -370,7 +331,8 @@ public class BucketedFullTextIndexMaintainer {
     }
 
     public synchronized PkFullTextBucketIndexState state() {
-        return PkFullTextBucketIndexState.fromActivePayloads(textFieldId, currentPayloads);
+        return PkFullTextBucketIndexState.fromActiveDataFiles(
+                textFieldId, new ArrayList<>(activeSourceFiles.values()), currentPayloads);
     }
 
     public synchronized List<IndexFileMeta> payloads() {
@@ -393,15 +355,17 @@ public class BucketedFullTextIndexMaintainer {
 
     private class PendingBuild {
 
+        private final PrimaryKeyIndexLevels.Plan<IndexFileMeta> plan;
         private final List<DataFileMeta> sourceFiles;
         private final List<IndexFileMeta> inputPayloads;
         @Nullable private IndexFileMeta result;
         @Nullable private Future<IndexFileMeta> future;
         private boolean cancelled;
 
-        private PendingBuild(List<DataFileMeta> sourceFiles, List<IndexFileMeta> inputPayloads) {
-            this.sourceFiles = Collections.unmodifiableList(new ArrayList<>(sourceFiles));
-            this.inputPayloads = Collections.unmodifiableList(new ArrayList<>(inputPayloads));
+        private PendingBuild(PrimaryKeyIndexLevels.Plan<IndexFileMeta> plan) {
+            this.plan = plan;
+            this.sourceFiles = plan.sourceFiles();
+            this.inputPayloads = plan.inputUnits();
         }
 
         private void start() {
@@ -451,16 +415,16 @@ public class BucketedFullTextIndexMaintainer {
 
     private static final class CompletedBuild {
 
+        private final PrimaryKeyIndexLevels.Plan<IndexFileMeta> plan;
         private final List<DataFileMeta> sourceFiles;
         private final List<IndexFileMeta> inputPayloads;
         private final IndexFileMeta payload;
 
         private CompletedBuild(
-                List<DataFileMeta> sourceFiles,
-                List<IndexFileMeta> inputPayloads,
-                IndexFileMeta payload) {
-            this.sourceFiles = sourceFiles;
-            this.inputPayloads = inputPayloads;
+                PrimaryKeyIndexLevels.Plan<IndexFileMeta> plan, IndexFileMeta payload) {
+            this.plan = plan;
+            this.sourceFiles = plan.sourceFiles();
+            this.inputPayloads = plan.inputUnits();
             this.payload = payload;
         }
     }

@@ -34,8 +34,13 @@ class UnionGlobalIndexReader(GlobalIndexReader):
     def __init__(self, readers: List[GlobalIndexReader]):
         self._readers = readers
 
-    def _union_futures(self, visitor: Callable[[GlobalIndexReader], 'Future[Optional[GlobalIndexResult]]']
-                       ) -> 'Future[Optional[GlobalIndexResult]]':
+    def _union_futures(
+            self,
+            visitor: Callable[
+                [GlobalIndexReader], 'Future[Optional[GlobalIndexResult]]'
+            ],
+            propagate_unsupported: bool = False,
+    ) -> 'Future[Optional[GlobalIndexResult]]':
         futures = [visitor(reader) for reader in self._readers]
 
         if not futures:
@@ -51,9 +56,12 @@ class UnionGlobalIndexReader(GlobalIndexReader):
                 if remaining[0] == 0:
                     try:
                         result: Optional[GlobalIndexResult] = None
-                        for f in futures:
-                            current = f.result()
+                        results = [f.result() for f in futures]
+                        for current in results:
                             if current is None:
+                                if propagate_unsupported:
+                                    all_done.set_result(None)
+                                    return
                                 continue
                             if result is None:
                                 result = current
@@ -68,6 +76,11 @@ class UnionGlobalIndexReader(GlobalIndexReader):
 
         return all_done
 
+    def _union_scalar_futures(
+            self, visitor: Callable[[GlobalIndexReader], 'Future[Optional[GlobalIndexResult]]']
+    ) -> 'Future[Optional[GlobalIndexResult]]':
+        return self._union_futures(visitor, propagate_unsupported=True)
+
     # ---- vector / full-text search ----------------------------------------
 
     def visit_vector_search(self, vector_search) -> 'Future[Optional[GlobalIndexResult]]':
@@ -79,56 +92,60 @@ class UnionGlobalIndexReader(GlobalIndexReader):
     # ---- scalar predicates (every reader sees the visit) ------------------
 
     def visit_equal(self, field_ref: FieldRef, literal) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_equal(field_ref, literal))
+        return self._union_scalar_futures(lambda r: r.visit_equal(field_ref, literal))
 
     def visit_not_equal(self, field_ref: FieldRef, literal) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_not_equal(field_ref, literal))
+        return self._union_scalar_futures(lambda r: r.visit_not_equal(field_ref, literal))
 
     def visit_less_than(self, field_ref: FieldRef, literal) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_less_than(field_ref, literal))
+        return self._union_scalar_futures(lambda r: r.visit_less_than(field_ref, literal))
 
     def visit_less_or_equal(self, field_ref: FieldRef, literal) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_less_or_equal(field_ref, literal))
+        return self._union_scalar_futures(lambda r: r.visit_less_or_equal(field_ref, literal))
 
     def visit_greater_than(self, field_ref: FieldRef, literal) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_greater_than(field_ref, literal))
+        return self._union_scalar_futures(lambda r: r.visit_greater_than(field_ref, literal))
 
     def visit_greater_or_equal(self, field_ref: FieldRef, literal) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_greater_or_equal(field_ref, literal))
+        return self._union_scalar_futures(lambda r: r.visit_greater_or_equal(field_ref, literal))
 
     def visit_is_null(self, field_ref: FieldRef) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_is_null(field_ref))
+        return self._union_scalar_futures(lambda r: r.visit_is_null(field_ref))
 
     def visit_is_not_null(self, field_ref: FieldRef) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_is_not_null(field_ref))
+        return self._union_scalar_futures(lambda r: r.visit_is_not_null(field_ref))
 
     def visit_in(self, field_ref: FieldRef, literals) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_in(field_ref, literals))
+        return self._union_scalar_futures(lambda r: r.visit_in(field_ref, literals))
 
     def visit_not_in(self, field_ref: FieldRef, literals) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_not_in(field_ref, literals))
+        return self._union_scalar_futures(lambda r: r.visit_not_in(field_ref, literals))
 
     def visit_starts_with(self, field_ref: FieldRef, literal) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_starts_with(field_ref, literal))
+        return self._union_scalar_futures(lambda r: r.visit_starts_with(field_ref, literal))
 
     def visit_ends_with(self, field_ref: FieldRef, literal) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_ends_with(field_ref, literal))
+        return self._union_scalar_futures(lambda r: r.visit_ends_with(field_ref, literal))
 
     def visit_contains(self, field_ref: FieldRef, literal) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_contains(field_ref, literal))
+        return self._union_scalar_futures(lambda r: r.visit_contains(field_ref, literal))
 
     def visit_like(self, field_ref: FieldRef, literal) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_like(field_ref, literal))
+        return self._union_scalar_futures(lambda r: r.visit_like(field_ref, literal))
 
     def visit_between(self, field_ref: FieldRef, from_v, to_v) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_between(field_ref, from_v, to_v))
+        return self._union_scalar_futures(lambda r: r.visit_between(field_ref, from_v, to_v))
 
     def visit_not_between(self, field_ref: FieldRef, from_v, to_v) -> 'Future[Optional[GlobalIndexResult]]':
-        return self._union_futures(lambda r: r.visit_not_between(field_ref, from_v, to_v))
+        return self._union_scalar_futures(lambda r: r.visit_not_between(field_ref, from_v, to_v))
 
     def close(self) -> None:
+        first_error: Optional[Exception] = None
         for reader in self._readers:
             try:
                 reader.close()
-            except Exception:
-                pass
+            except Exception as e:
+                if first_error is None:
+                    first_error = e
+        if first_error is not None:
+            raise first_error

@@ -41,7 +41,7 @@ import java.util.concurrent.ExecutorService;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 
 /** Data-evolution implementation for {@link VectorRead}. */
-public class DataEvolutionVectorRead extends AbstractVectorRead implements VectorRead {
+public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead implements VectorRead {
 
     private static final long serialVersionUID = 1L;
 
@@ -111,13 +111,14 @@ public class DataEvolutionVectorRead extends AbstractVectorRead implements Vecto
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-        ScoredGlobalIndexResult merged = ScoredGlobalIndexResult.createEmpty();
+        List<ScoredGlobalIndexResult> results = new ArrayList<>(futures.size());
         for (CompletableFuture<Optional<ScoredGlobalIndexResult>> future : futures) {
             Optional<ScoredGlobalIndexResult> splitResult = future.join();
             if (splitResult.isPresent()) {
-                merged = merged.or(splitResult.get());
+                results.add(splitResult.get());
             }
         }
-        return maybeRerankIndexedResult(merged, indexType, globalIndexer, vector);
+        return maybeRerankIndexedResult(
+                ScoredGlobalIndexResult.merge(results), indexType, globalIndexer, vector);
     }
 }

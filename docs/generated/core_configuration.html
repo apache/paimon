@@ -75,6 +75,12 @@ under the License.
             <td>Comma-separated field names to treat as BLOB fields and store as serialized BlobDescriptor bytes inline in data files.</td>
         </tr>
         <tr>
+            <td><h5>blob-descriptor.source-table</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The source table whose FileIO is used to read descriptor-backed BLOB content and copy it into the target table's managed BLOB storage. The table must belong to the current catalog and can include a branch suffix, for example db.table$branch_rt. This option is not supported for target tables without a catalog loader, including external tables in REST catalogs. When set, other blob-descriptor.* FileIO options are ignored.</td>
+        </tr>
+        <tr>
             <td><h5>blob-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -103,6 +109,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to write NULL for a descriptor BLOB value when the referenced file or HTTP resource does not exist during Flink writes. When false, the write fails when the descriptor is read.</td>
+        </tr>
+        <tr>
+            <td><h5>blob.copy-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">4 kb</td>
+            <td>MemorySize</td>
+            <td>Buffer size used when copying BLOB payloads into BLOB files.</td>
         </tr>
         <tr>
             <td><h5>blob.split-by-file-size</h5></td>
@@ -157,6 +169,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether enabled chain table.</td>
+        </tr>
+        <tr>
+            <td><h5>chain-table.streaming.merge-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, the starting phase of chain table streaming read performs anchor-based chain merging: for each group it merges the latest snapshot partition with delta partitions whose chain key is strictly greater than the snapshot chain key. This allows streaming readers to see cross-branch deletions and updates at the cost of a heavier startup scan. When false (default), the starting phase only reads the latest snapshot partition per group and later delta partitions as separate splits, which is lightweight but may not reflect cross-branch deletes.</td>
         </tr>
         <tr>
             <td><h5>changelog-file.compression</h5></td>
@@ -729,10 +747,22 @@ under the License.
             <td>Format table file path only contain partition value.</td>
         </tr>
         <tr>
+            <td><h5>format-table.scan.list-parallelism</h5></td>
+            <td style="word-wrap: break-word;">64</td>
+            <td>Integer</td>
+            <td>The parallelism of listing partition files during split planning for a Format Table with catalog-managed partitions.</td>
+        </tr>
+        <tr>
             <td><h5>full-compaction.delta-commits</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>For streaming write, full compaction will be constantly triggered after delta commits. For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.</td>
+        </tr>
+        <tr>
+            <td><h5>full-text-index.search-mode</h5></td>
+            <td style="word-wrap: break-word;">fast</td>
+            <td><p>Enum</p></td>
+            <td>Search mode for full-text index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
         <tr>
             <td><h5>global-index.build.max-parallelism</h5></td>
@@ -750,7 +780,7 @@ under the License.
             <td><h5>global-index.column-update-action</h5></td>
             <td style="word-wrap: break-word;">THROW_ERROR</td>
             <td><p>Enum</p></td>
-            <td>Defines the action to take when an update modifies columns that are covered by a global index.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li></ul></td>
+            <td>Defines the action to take when an update modifies columns that are covered by a global index. IGNORE leaves existing index files unchanged and may make the index stale.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li><li>"IGNORE"</li></ul></td>
         </tr>
         <tr>
             <td><h5>global-index.enabled</h5></td>
@@ -772,15 +802,15 @@ under the License.
         </tr>
         <tr>
             <td><h5>global-index.search-mode</h5></td>
-            <td style="word-wrap: break-word;">fast</td>
+            <td style="word-wrap: break-word;">(none)</td>
             <td><p>Enum</p></td>
-            <td>Search mode for global index queries. Supported values are 'fast', 'full', and 'detail'.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
+            <td>Fallback search mode for global index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
         <tr>
             <td><h5>global-index.thread-num</h5></td>
             <td style="word-wrap: break-word;">32</td>
             <td>Integer</td>
-            <td>The maximum number of concurrent threads for global index I/O.</td>
+            <td>The maximum number of concurrent threads for global index I/O. Must be greater than 0.</td>
         </tr>
         <tr>
             <td><h5>ignore-delete</h5></td>
@@ -829,6 +859,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether index file in data file directory.</td>
+        </tr>
+        <tr>
+            <td><h5>local-kv-db.block-size</h5></td>
+            <td style="word-wrap: break-word;">4 kb</td>
+            <td>MemorySize</td>
+            <td>Block size of the local key-value database.</td>
         </tr>
         <tr>
             <td><h5>local-merge-buffer-size</h5></td>
@@ -1029,7 +1065,8 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Boolean</td>
             <td>Whether to create this table as a partitioned table in metastore.
 For example, if you want to list all partitions of a Paimon table in Hive, you need to create this table as a partitioned table in Hive metastore.
-This config option does not affect the default filesystem metastore.</td>
+This config option does not affect the default filesystem metastore.
+For an internal format table in a REST catalog, it also makes the catalog own the table's partitions: a scan reads the partitions registered there and a write registers the ones it wrote, instead of listing the table directory.</td>
         </tr>
         <tr>
             <td><h5>metastore.tag-to-partition</h5></td>
@@ -1248,6 +1285,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Bucket number for the partitions compacted for the first time in postpone bucket tables.</td>
         </tr>
         <tr>
+            <td><h5>postpone.merge-on-read</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to merge records in the postpone bucket with records in real buckets during batch reads. This requires an execution engine capable of routing and shuffling postpone records to their target real buckets.</td>
+        </tr>
+        <tr>
             <td><h5>postpone.target-row-num-per-bucket</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
@@ -1302,6 +1345,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The field that generates the row kind for primary key table, the row kind determines which data is '+I', '-U', '+U' or '-D'.</td>
         </tr>
         <tr>
+            <td><h5>scalar-index.search-mode</h5></td>
+            <td style="word-wrap: break-word;">full</td>
+            <td><p>Enum</p></td>
+            <td>Search mode for scalar index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>scan.bounded.watermark</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
@@ -1348,6 +1397,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
             <td>After configuring this time, only the data files created after this time will be read. It is independent of snapshots, but it is imprecise filtering (depending on whether or not compaction occurs).</td>
+        </tr>
+        <tr>
+            <td><h5>chain-table.split.key-range-enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true, a batch chain-table scan splits each bucket's snapshot and delta files into multiple splits by key range to improve read parallelism. Files with intersecting key ranges always stay in the same split so that all versions of a key across the snapshot and delta branches are merged together. Set to false to fall back to one split per bucket.</td>
         </tr>
         <tr>
             <td><h5>scan.ignore-corrupt-files</h5></td>
@@ -1663,6 +1718,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Whether to enable tag expiration by retained time.</td>
         </tr>
         <tr>
+            <td><h5>target-file-row-num</h5></td>
+            <td style="word-wrap: break-word;">9223372036854775807</td>
+            <td>Long</td>
+            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction still produces a single file. Bounds per-file rows for wide columns to avoid data-evolution OOM. PyPaimon file-store writers do not support this option and fail fast when it is enabled. Disabled by default.</td>
+        </tr>
+        <tr>
             <td><h5>target-file-size</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
@@ -1685,6 +1746,24 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to automatically infer the shredding schema when writing Variant columns.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.adaptive.maxInferBufferRow</h5></td>
+            <td style="word-wrap: break-word;">256</td>
+            <td>Integer</td>
+            <td>Maximum number of prefix rows sampled after the first file in an adaptive Variant shredding inference session.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.adaptive.retentionRatio</h5></td>
+            <td style="word-wrap: break-word;">0.05</td>
+            <td>Double</td>
+            <td>Minimum combined presence ratio for retaining a Variant path selected in the previous file. This must not exceed 'variant.shredding.minFieldCardinalityRatio'.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.inferenceMode</h5></td>
+            <td style="word-wrap: break-word;">per-file</td>
+            <td><p>Enum</p></td>
+            <td>The Variant shredding inference mode. PER_FILE infers each file independently. ADAPTIVE reuses bounded evidence within one rolling writer and samples a smaller prefix after the first file.<br /><br />Possible values:<ul><li>"per-file": Infer every file independently from its own prefix rows.</li><li>"adaptive": Reuse bounded inference evidence within one rolling writer and correct it with a smaller prefix from each subsequent file.</li></ul></td>
         </tr>
         <tr>
             <td><h5>variant.shredding.maxInferBufferRow</h5></td>
@@ -1721,6 +1800,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Specifies column names that should be stored as vector type. This is used when you want to treat a ARRAY column as a VECTOR.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-index.search-mode</h5></td>
+            <td style="word-wrap: break-word;">fast</td>
+            <td><p>Enum</p></td>
+            <td>Search mode for vector index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
         <tr>
             <td><h5>vector-search.distribute.enabled</h5></td>

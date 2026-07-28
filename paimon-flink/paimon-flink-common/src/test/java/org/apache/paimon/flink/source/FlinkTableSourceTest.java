@@ -21,6 +21,8 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -40,6 +42,7 @@ import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** Test for {@link FlinkTableSource}. */
@@ -134,6 +137,188 @@ public class FlinkTableSourceTest extends TableTestBase {
         filters = ImmutableList.of(p2Like("a%"), and(col1Equal1(), p1Equal1()));
         Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(ImmutableList.of(filters.get(1)));
+    }
+
+    // ==================== Nested OR Tree Tests ====================
+    //
+    // These tests construct OR trees in various shapes — mimicking what Flink's
+    // SQL Planner may produce when expanding IN(v1,...,vN) — and pass them directly
+    // to applyFilters, bypassing Flink's ExpressionResolver.
+    //
+    // They verify that PredicateConverter flattens any nesting shape into a flat list
+    // of predicates, which PredicateBuilder.or() combines into a binary tree.
+
+    @Test
+    public void testApplyFiltersLargeNestedOr() throws Exception {
+        Table table = createStringTable();
+
+        // 10000 values: the nested OR tree is flattened and combined into a
+        // binary tree (depth ~14), preventing StackOverflowError.
+        int size = 10000;
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null);
+        ResolvedExpression orTree = buildNestedOrTree(size);
+
+        tableSource.applyFilters(ImmutableList.of(orTree));
+
+        Assertions.assertThat(tableSource.predicate).isNotNull();
+        Assertions.assertThat(tableSource.predicate).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate compound = (CompoundPredicate) tableSource.predicate;
+        Assertions.assertThat(compound.function()).isEqualTo(Or.INSTANCE);
+        Assertions.assertThat(compound.children()).hasSize(2);
+    }
+
+    @Test
+    public void testApplyFiltersRightFoldOrTree() throws Exception {
+        Table table = createStringTable();
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null);
+
+        // Right-fold tree: OR(OR(OR(=(f,0), =(f,1)), =(f,2)), ...) with 25 values
+        ResolvedExpression orTree = buildRightFoldOrTree(25);
+
+        tableSource.applyFilters(ImmutableList.of(orTree));
+
+        // Regardless of tree shape → flattened → binary tree
+        Assertions.assertThat(tableSource.predicate).isNotNull();
+        Assertions.assertThat(tableSource.predicate).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate compound = (CompoundPredicate) tableSource.predicate;
+        Assertions.assertThat(compound.function()).isEqualTo(Or.INSTANCE);
+        Assertions.assertThat(compound.children()).hasSize(2);
+    }
+
+    @Test
+    public void testApplyFiltersBalancedOrTree() throws Exception {
+        Table table = createStringTable();
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null);
+
+        // Balanced tree: OR(OR(=(f,0), =(f,1)), OR(=(f,2), =(f,3)), ...) with 25 values
+        ResolvedExpression orTree = buildBalancedOrTree(25);
+
+        tableSource.applyFilters(ImmutableList.of(orTree));
+
+        Assertions.assertThat(tableSource.predicate).isNotNull();
+        Assertions.assertThat(tableSource.predicate).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate compound = (CompoundPredicate) tableSource.predicate;
+        Assertions.assertThat(compound.function()).isEqualTo(Or.INSTANCE);
+        Assertions.assertThat(compound.children()).hasSize(2);
+    }
+
+    @Test
+    public void testApplyFiltersFlatOrWithMultipleChildren() throws Exception {
+        Table table = createStringTable();
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null);
+
+        // Flat OR with >2 children in a single CallExpression
+        ResolvedExpression orExpr = buildFlatOrExpression(25);
+
+        tableSource.applyFilters(ImmutableList.of(orExpr));
+
+        Assertions.assertThat(tableSource.predicate).isNotNull();
+        Assertions.assertThat(tableSource.predicate).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate compound = (CompoundPredicate) tableSource.predicate;
+        Assertions.assertThat(compound.function()).isEqualTo(Or.INSTANCE);
+        Assertions.assertThat(compound.children()).hasSize(2);
+    }
+
+    private Table createStringTable() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
+        Schema schema = Schema.newBuilder().column("contract_address", DataTypes.STRING()).build();
+        TableSchema tableSchema = new SchemaManager(fileIO, tablePath).createTable(schema);
+        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+    }
+
+    /**
+     * Build a nested binary OR tree mimicking Flink's IN-to-OR expansion: OR(=(f, v1), OR(=(f, v2),
+     * OR(..., OR(=(f, vN-1), =(f, vN)))))
+     *
+     * <p>Built iteratively (inside-out) to avoid StackOverflow during construction.
+     */
+    private ResolvedExpression buildNestedOrTree(int count) {
+        FieldReferenceExpression field =
+                new FieldReferenceExpression(
+                        "contract_address", org.apache.flink.table.api.DataTypes.STRING(), 0, 0);
+
+        // Start with innermost: =(contract_address, addr_{count-1})
+        ResolvedExpression result = equalExpr(field, count - 1);
+
+        // Wrap outward: OR(=(field, addr_i), result) for i = count-2 down to 0
+        for (int i = count - 2; i >= 0; i--) {
+            result = or(equalExpr(field, i), result);
+        }
+        return result;
+    }
+
+    /**
+     * Build a right-fold binary OR tree: OR(OR(OR(=(f, v0), =(f, v1)), =(f, v2)), =(f, v3), ...).
+     */
+    private ResolvedExpression buildRightFoldOrTree(int count) {
+        FieldReferenceExpression field =
+                new FieldReferenceExpression(
+                        "contract_address", org.apache.flink.table.api.DataTypes.STRING(), 0, 0);
+        ResolvedExpression result = equalExpr(field, 0);
+        for (int i = 1; i < count; i++) {
+            result = or(result, equalExpr(field, i));
+        }
+        return result;
+    }
+
+    /** Build a balanced binary OR tree: OR(OR(=(f, v0), =(f, v1)), OR(=(f, v2), =(f, v3)), ...). */
+    private ResolvedExpression buildBalancedOrTree(int count) {
+        FieldReferenceExpression field =
+                new FieldReferenceExpression(
+                        "contract_address", org.apache.flink.table.api.DataTypes.STRING(), 0, 0);
+        List<ResolvedExpression> leaves = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            leaves.add(equalExpr(field, i));
+        }
+        while (leaves.size() > 1) {
+            List<ResolvedExpression> next = new ArrayList<>();
+            for (int i = 0; i < leaves.size(); i += 2) {
+                if (i + 1 < leaves.size()) {
+                    next.add(or(leaves.get(i), leaves.get(i + 1)));
+                } else {
+                    next.add(leaves.get(i));
+                }
+            }
+            leaves = next;
+        }
+        return leaves.get(0);
+    }
+
+    /** Build a flat OR CallExpression with more than 2 children. */
+    private ResolvedExpression buildFlatOrExpression(int count) {
+        FieldReferenceExpression field =
+                new FieldReferenceExpression(
+                        "contract_address", org.apache.flink.table.api.DataTypes.STRING(), 0, 0);
+        List<ResolvedExpression> children = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            children.add(equalExpr(field, i));
+        }
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.OR,
+                children,
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression equalExpr(FieldReferenceExpression field, int i) {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.EQUALS,
+                ImmutableList.of(field, addressLiteral(i)),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ValueLiteralExpression addressLiteral(int i) {
+        return new ValueLiteralExpression(
+                String.format("0x%040x", i),
+                org.apache.flink.table.api.DataTypes.STRING().notNull());
     }
 
     private ResolvedExpression col1Equal1() {

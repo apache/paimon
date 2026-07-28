@@ -304,9 +304,7 @@ public class PredicateBuilder {
             return optimized.get(0);
         }
 
-        return optimized.stream()
-                .reduce((a, b) -> new CompoundPredicate(And.INSTANCE, Arrays.asList(a, b)))
-                .get();
+        return buildBinaryTree(And.INSTANCE, optimized);
     }
 
     @Nullable
@@ -359,9 +357,22 @@ public class PredicateBuilder {
             return noFalsePredicates.get(0);
         }
 
-        return noFalsePredicates.stream()
-                .reduce((a, b) -> new CompoundPredicate(Or.INSTANCE, Arrays.asList(a, b)))
-                .get();
+        return buildBinaryTree(Or.INSTANCE, noFalsePredicates);
+    }
+
+    private static Predicate buildBinaryTree(CompoundFunction func, List<Predicate> predicates) {
+        if (predicates.size() == 1) {
+            return predicates.get(0);
+        }
+        if (predicates.size() == 2) {
+            return new CompoundPredicate(func, Arrays.asList(predicates.get(0), predicates.get(1)));
+        }
+        int mid = predicates.size() / 2;
+        return new CompoundPredicate(
+                func,
+                Arrays.asList(
+                        buildBinaryTree(func, predicates.subList(0, mid)),
+                        buildBinaryTree(func, predicates.subList(mid, predicates.size()))));
     }
 
     private static boolean isAlwaysFalse(Predicate predicate) {

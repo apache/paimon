@@ -22,14 +22,18 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
+import org.apache.paimon.io.DataFileMeta;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -41,9 +45,82 @@ public final class PkFullTextBucketIndexState {
     private final List<IndexFileMeta> stalePayloads;
     private final Map<String, IndexFileMeta> payloadBySourceFile;
 
-    public static PkFullTextBucketIndexState fromActivePayloads(
-            int textFieldId, List<IndexFileMeta> activePayloads) {
-        return new PkFullTextBucketIndexState(textFieldId, activePayloads);
+    public static PkFullTextBucketIndexState fromActiveDataFiles(
+            int textFieldId,
+            List<DataFileMeta> activeDataFiles,
+            List<IndexFileMeta> activePayloads) {
+        Map<Integer, List<PrimaryKeyIndexSourceFile>> sourcesByLevel = new TreeMap<>();
+        for (DataFileMeta dataFile : activeDataFiles) {
+            if (PrimaryKeyIndexSourcePolicy.shouldRead(dataFile)) {
+                sourcesByLevel
+                        .computeIfAbsent(dataFile.level(), ignored -> new ArrayList<>())
+                        .add(
+                                new PrimaryKeyIndexSourceFile(
+                                        dataFile.fileName(), dataFile.rowCount()));
+            }
+        }
+        for (List<PrimaryKeyIndexSourceFile> sources : sourcesByLevel.values()) {
+            sources.sort(Comparator.comparing(PrimaryKeyIndexSourceFile::fileName));
+        }
+
+        Map<Integer, List<IndexFileMeta>> payloadsByLevel = new TreeMap<>();
+        List<IndexFileMeta> stale = new ArrayList<>();
+        for (IndexFileMeta payload : activePayloads) {
+            GlobalIndexMeta globalMeta = payload.globalIndexMeta();
+            if (!PkFullTextIndexFile.INDEX_TYPE.equals(payload.indexType()) || globalMeta == null) {
+                continue;
+            }
+            if (globalMeta.indexFieldId() != textFieldId) {
+                if (globalMeta.sourceMeta() != null) {
+                    stale.add(payload);
+                }
+                continue;
+            }
+            try {
+                PrimaryKeyIndexSourceMeta sourceMeta =
+                        PrimaryKeyIndexSourceMeta.fromIndexFile(payload);
+                List<PrimaryKeyIndexSourceFile> desired =
+                        sourcesByLevel.get(sourceMeta.dataLevel());
+                PkFullTextBucketIndexState singleton =
+                        new PkFullTextBucketIndexState(
+                                textFieldId, Collections.singletonList(payload));
+                if (desired == null
+                        || !desired.equals(sourceMeta.sourceFiles())
+                        || singleton.currentPayloads().size() != 1) {
+                    stale.add(payload);
+                } else {
+                    payloadsByLevel
+                            .computeIfAbsent(sourceMeta.dataLevel(), ignored -> new ArrayList<>())
+                            .add(payload);
+                }
+            } catch (RuntimeException ignored) {
+                stale.add(payload);
+            }
+        }
+
+        List<IndexFileMeta> current = new ArrayList<>();
+        for (List<IndexFileMeta> levelPayloads : payloadsByLevel.values()) {
+            if (levelPayloads.size() == 1) {
+                current.add(levelPayloads.get(0));
+            } else {
+                stale.addAll(levelPayloads);
+            }
+        }
+        PkFullTextBucketIndexState state = new PkFullTextBucketIndexState(textFieldId, current);
+        return new PkFullTextBucketIndexState(
+                textFieldId, state.currentPayloads, stale, state.payloadBySourceFile);
+    }
+
+    private PkFullTextBucketIndexState(
+            int textFieldId,
+            List<IndexFileMeta> currentPayloads,
+            List<IndexFileMeta> stalePayloads,
+            Map<String, IndexFileMeta> payloadBySourceFile) {
+        this.textFieldId = textFieldId;
+        this.currentPayloads = Collections.unmodifiableList(new ArrayList<>(currentPayloads));
+        this.stalePayloads = Collections.unmodifiableList(new ArrayList<>(stalePayloads));
+        this.payloadBySourceFile =
+                Collections.unmodifiableMap(new LinkedHashMap<>(payloadBySourceFile));
     }
 
     public PkFullTextBucketIndexState(int textFieldId, List<IndexFileMeta> activePayloads) {

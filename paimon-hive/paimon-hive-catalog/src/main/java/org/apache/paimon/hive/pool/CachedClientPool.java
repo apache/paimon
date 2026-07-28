@@ -176,7 +176,7 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
                         types.add(type);
                         break;
                     default:
-                        throw new RuntimeException("Unknown key element %s" + trimmed);
+                        throw new RuntimeException("Unknown key element " + trimmed);
                 }
             }
         }

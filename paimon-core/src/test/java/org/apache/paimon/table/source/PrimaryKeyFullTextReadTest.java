@@ -100,7 +100,7 @@ class PrimaryKeyFullTextReadTest {
                                 new PrimaryKeyFullTextRead(
                                         mode, 10, split -> Collections.emptyList()))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("only supports the FAST global-index search mode");
+                .hasMessageContaining("only supports the FAST full-text-index search mode");
     }
 
     private static PrimaryKeySearchPosition position(
@@ -150,7 +150,8 @@ class PrimaryKeyFullTextReadTest {
 
     private static IndexFileMeta payload(String source) {
         byte[] sourceMeta =
-                new PrimaryKeyIndexSourceMeta(new PrimaryKeyIndexSourceFile(source, 2)).serialize();
+                new PrimaryKeyIndexSourceMeta(1, new PrimaryKeyIndexSourceFile(source, 2))
+                        .serialize();
         return new IndexFileMeta(
                 "full-text",
                 "index-" + source,

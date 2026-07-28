@@ -33,6 +33,7 @@ import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.rest.HttpClientUtils;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.table.data.DecimalData;
@@ -105,8 +106,36 @@ public class FlinkRowWrapper implements InternalRow {
             boolean checkBlobDescriptorExists,
             boolean writeNullOnFetchFailure,
             Set<Integer> blobFields) {
+        this(
+                row,
+                new UriReaderFactory(catalogContext),
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure,
+                blobFields);
+    }
+
+    public static FlinkRowWrapper fromUriReaderFactory(
+            org.apache.flink.table.data.RowData row,
+            UriReaderFactory uriReaderFactory,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure,
+            Set<Integer> blobFields) {
+        return new FlinkRowWrapper(
+                row,
+                uriReaderFactory,
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure,
+                blobFields);
+    }
+
+    private FlinkRowWrapper(
+            org.apache.flink.table.data.RowData row,
+            UriReaderFactory uriReaderFactory,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure,
+            Set<Integer> blobFields) {
         this.row = row;
-        this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.uriReaderFactory = uriReaderFactory;
         this.checkBlobDescriptorExists = checkBlobDescriptorExists;
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
         this.blobFields = blobFields;
@@ -240,7 +269,7 @@ public class FlinkRowWrapper implements InternalRow {
             }
             LOG.warn(
                     "Failed to check blob descriptor file {} for BLOB field at position {}.",
-                    descriptor.uri(),
+                    SensitiveConfigUtils.sanitizeUri(descriptor.uri()),
                     pos,
                     e);
             throw new RuntimeException(e);
@@ -250,7 +279,7 @@ public class FlinkRowWrapper implements InternalRow {
             }
             LOG.warn(
                     "Failed to check blob descriptor file {} for BLOB field at position {}.",
-                    descriptor.uri(),
+                    SensitiveConfigUtils.sanitizeUri(descriptor.uri()),
                     pos,
                     e);
             throw e;
@@ -261,12 +290,12 @@ public class FlinkRowWrapper implements InternalRow {
         if (isHttpUri(descriptor.uri())) {
             LOG.warn(
                     "Blob descriptor file {} returned HTTP 404, returning NULL for BLOB field at position {}.",
-                    descriptor.uri(),
+                    SensitiveConfigUtils.sanitizeUri(descriptor.uri()),
                     pos);
         } else {
             LOG.warn(
                     "Blob descriptor file {} does not exist, returning NULL for BLOB field at position {}.",
-                    descriptor.uri(),
+                    SensitiveConfigUtils.sanitizeUri(descriptor.uri()),
                     pos);
         }
     }

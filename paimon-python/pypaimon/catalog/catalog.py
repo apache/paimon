@@ -401,3 +401,6 @@ class Catalog(ABC):
         raise NotImplementedError(
             "list_tags_paged is not supported by this catalog."
         )
+
+    def auth_table_query(self, identifier: Identifier, select: Optional[List[str]]) -> 'TableQueryAuthResult':
+        raise NotImplementedError("auth_table_query not supported by this catalog")

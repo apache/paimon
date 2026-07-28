@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data.shredding;
 
+import org.apache.paimon.CoreOptions.MapSharedShreddingColumnPlacementPolicy;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
 
@@ -32,17 +33,16 @@ public class MapSharedShreddingWritePlan implements ShreddingWritePlan {
 
     private final RowType logicalRowType;
     private final MapSharedShreddingRowConverter converter;
-    @Nullable private final MapSharedShreddingContext context;
-
     @Nullable private Map<String, Map<String, String>> fieldMetadata;
 
     public MapSharedShreddingWritePlan(
             RowType logicalRowType,
             Map<String, Integer> fieldToNumColumns,
-            @Nullable MapSharedShreddingContext context) {
+            Map<String, MapSharedShreddingColumnPlacementPolicy> fieldToColumnPlacementPolicy) {
         this.logicalRowType = logicalRowType;
-        this.converter = new MapSharedShreddingRowConverter(logicalRowType, fieldToNumColumns);
-        this.context = context;
+        this.converter =
+                new MapSharedShreddingRowConverter(
+                        logicalRowType, fieldToNumColumns, fieldToColumnPlacementPolicy);
     }
 
     @Override
@@ -75,11 +75,15 @@ public class MapSharedShreddingWritePlan implements ShreddingWritePlan {
             Map<String, String> fieldMetadata = new LinkedHashMap<>();
             MapSharedShreddingUtils.serializeMetadata(fieldMeta, compression, fieldMetadata);
             metadata.put(fieldName, Collections.unmodifiableMap(fieldMetadata));
-
-            if (context != null) {
-                context.reportFileStats(fieldName, fieldMeta.maxRowWidth());
-            }
         }
         return Collections.unmodifiableMap(metadata);
+    }
+
+    Map<String, Integer> fileMaxRowWidths() {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        for (String fieldName : converter.shreddingFieldNames()) {
+            result.put(fieldName, converter.buildFieldMeta(fieldName).maxRowWidth());
+        }
+        return result;
     }
 }

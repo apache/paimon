@@ -117,3 +117,19 @@ class CatalogEnvironment:
             catalog_loader=None,
             supports_version_management=False
         )
+
+    def table_query_auth(self, options, identifier):
+        if not options.query_auth_enabled or self.catalog_loader is None:
+            return None
+        return _TableQueryAuthFn(self.catalog_loader, identifier)
+
+
+class _TableQueryAuthFn:
+
+    def __init__(self, catalog_loader, identifier):
+        self._catalog_loader = catalog_loader
+        self._identifier = identifier
+
+    def __call__(self, select):
+        catalog = self._catalog_loader.load()
+        return catalog.auth_table_query(self._identifier, select)

@@ -80,15 +80,15 @@ class DedicatedFormatWriter(DataWriter):
                 "Fields in 'blob-descriptor-field' must be blob fields in schema. "
                 f"Unknown fields: {sorted(unknown_descriptor_fields)}"
             )
-        inline_array_blob_fields = [
+        inline_nested_blob_fields = [
             field.name
             for field in self.table.table_schema.fields
             if field.name in self.blob_inline_fields and not is_blob_type(field.type)
         ]
-        if inline_array_blob_fields:
+        if inline_nested_blob_fields:
             raise ValueError(
-                "ARRAY<BLOB> is only supported by 'blob-field'. "
-                f"Invalid inline blob fields: {sorted(inline_array_blob_fields)}"
+                "ARRAY<BLOB> and MAP<X, BLOB> are only supported by 'blob-field'. "
+                f"Invalid inline blob fields: {sorted(inline_nested_blob_fields)}"
             )
 
         # Blob fields that should still be written to `.blob` files.

@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -44,6 +45,16 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.table.data.RowData;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Appender;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.Configuration;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.config.Property;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,6 +75,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST;
@@ -367,6 +379,44 @@ public class FileStoreLookupFunctionTest {
         assertThat(resultRow.getInt(1)).isEqualTo(expectedRow.getInt(1));
     }
 
+    @Test
+    public void testDebugLogRowsWithAppendedPrimaryKey() throws Exception {
+        table = createStringFileStoreTable();
+        lookupFunction =
+                new FileStoreLookupFunction(table, new int[] {2, 1}, new int[] {1}, null, null);
+        lookupFunction.open(tempDir.toString());
+
+        StreamTableWrite writer = table.newStreamWriteBuilder().newWrite();
+        writer.write(
+                GenericRow.of(
+                        -1, BinaryString.fromString("key-1"), BinaryString.fromString("value-1")));
+        commit(writer.prepareCommit(true, 1));
+        writer.close();
+
+        Appender appender = addLookupFunctionAppender(Level.INFO);
+        try {
+            lookupFunction.lookup(
+                    new FlinkRowData(GenericRow.of(BinaryString.fromString("key-1"))));
+            assertThat(((CollectingAppender) appender).messages)
+                    .noneMatch(message -> message.contains("matched rows in lookup table"));
+        } finally {
+            removeLookupFunctionAppender(appender);
+        }
+
+        appender = addLookupFunctionAppender(Level.DEBUG);
+        try {
+            lookupFunction.lookup(
+                    new FlinkRowData(GenericRow.of(BinaryString.fromString("key-1"))));
+            assertThat(((CollectingAppender) appender).messages)
+                    .anyMatch(
+                            message ->
+                                    message.contains("matched rows in lookup table")
+                                            && message.contains("[value-1, key-1, -1]"));
+        } finally {
+            removeLookupFunctionAppender(appender);
+        }
+    }
+
     private void commit(List<CommitMessage> messages) throws Exception {
         TableCommitImpl commit = table.newCommit(commitUser);
         commit.commit(messages);
@@ -385,5 +435,62 @@ public class FileStoreLookupFunctionTest {
 
     private InternalRow randomRow() {
         return GenericRow.of(RANDOM.nextInt(100), RANDOM.nextInt(100), RANDOM.nextLong());
+    }
+
+    private FileStoreTable createStringFileStoreTable() throws Exception {
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, 2);
+        conf.set(RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"pt", "k", "v"});
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Arrays.asList("pt", "k"),
+                        conf.toMap(),
+                        "");
+        TableSchema tableSchema = schemaManager.createTable(schema);
+        return FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
+    }
+
+    private Appender addLookupFunctionAppender(Level level) {
+        LoggerContext context = (LoggerContext) LogManager.getContext(false);
+        Configuration configuration = context.getConfiguration();
+        CollectingAppender appender = new CollectingAppender("lookup-function-test-appender");
+        appender.start();
+
+        LoggerConfig loggerConfig =
+                new LoggerConfig(FileStoreLookupFunction.class.getName(), level, false);
+        loggerConfig.addAppender(appender, Level.DEBUG, null);
+        configuration.addLogger(FileStoreLookupFunction.class.getName(), loggerConfig);
+        context.updateLoggers();
+        return appender;
+    }
+
+    private void removeLookupFunctionAppender(Appender appender) {
+        LoggerContext context = (LoggerContext) LogManager.getContext(false);
+        Configuration configuration = context.getConfiguration();
+        configuration.removeLogger(FileStoreLookupFunction.class.getName());
+        appender.stop();
+        context.updateLoggers();
+    }
+
+    private static class CollectingAppender extends AbstractAppender {
+
+        private final List<String> messages = new CopyOnWriteArrayList<>();
+
+        private CollectingAppender(String name) {
+            super(name, null, PatternLayout.createDefaultLayout(), false, Property.EMPTY_ARRAY);
+        }
+
+        @Override
+        public void append(LogEvent event) {
+            messages.add(event.getMessage().getFormattedMessage());
+        }
     }
 }

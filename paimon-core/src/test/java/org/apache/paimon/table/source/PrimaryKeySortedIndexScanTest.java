@@ -84,12 +84,15 @@ class PrimaryKeySortedIndexScanTest {
                                 8,
                                 BitmapGlobalIndexerFactory.IDENTIFIER,
                                 PrimaryKeyIndexDefinition.Family.BITMAP));
-        List<IndexManifestEntry> entries = new java.util.ArrayList<>();
-        for (int i = 1; i <= 3; i++) {
-            String source = "data-" + i;
-            entries.add(payloadEntry(0, payload("btree-" + i, source, 4, "btree", 7, 4)));
-            entries.add(payloadEntry(0, payload("bitmap-" + i, source, 4, "bitmap", 8, 4)));
-        }
+        List<PrimaryKeyIndexSourceFile> sources =
+                Arrays.asList(
+                        new PrimaryKeyIndexSourceFile("data-1", 4),
+                        new PrimaryKeyIndexSourceFile("data-2", 4),
+                        new PrimaryKeyIndexSourceFile("data-3", 4));
+        List<IndexManifestEntry> entries =
+                Arrays.asList(
+                        payloadEntry(0, payload("btree-level", sources, "btree", 7, 12)),
+                        payloadEntry(0, payload("bitmap-level", sources, "bitmap", 8, 12)));
 
         try (MockedStatic<PkSortedBucketIndexState> states =
                 mockStatic(
@@ -108,12 +111,12 @@ class PrimaryKeySortedIndexScanTest {
             states.verify(
                     times(1),
                     () ->
-                            PkSortedBucketIndexState.fromActivePayloads(
+                            PkSortedBucketIndexState.fromActiveDataFiles(
                                     eq(7), eq("btree"), anyList(), anyList()));
             states.verify(
                     times(1),
                     () ->
-                            PkSortedBucketIndexState.fromActivePayloads(
+                            PkSortedBucketIndexState.fromActiveDataFiles(
                                     eq(8), eq("bitmap"), anyList(), anyList()));
         }
     }
@@ -133,8 +136,7 @@ class PrimaryKeySortedIndexScanTest {
                                 PrimaryKeyIndexDefinition.Family.BITMAP));
         List<IndexManifestEntry> entries =
                 Arrays.asList(
-                        payloadEntry(0, payload("btree-0", "data-1", 4, "btree", 7, 2)),
-                        payloadEntry(0, payload("btree-1", "data-1", 4, "btree", 7, 2)),
+                        payloadEntry(0, payload("btree", "data-1", 4, "btree", 7, 4)),
                         payloadEntry(1, payload("wrong-bucket", "data-1", 4, "btree", 7, 4)),
                         payloadEntry(0, payload("wrong-field", "data-1", 4, "btree", 9, 4)),
                         payloadEntry(0, payload("wrong-type", "data-1", 4, "bitmap", 7, 4)),
@@ -152,12 +154,12 @@ class PrimaryKeySortedIndexScanTest {
         assertThat(file.group(7)).isPresent();
         assertThat(file.group(7).get().payloads())
                 .extracting(IndexFileMeta::fileName)
-                .containsExactly("btree-0", "btree-1");
+                .containsExactly("btree");
         assertThat(file.group(8)).isEmpty();
     }
 
     @Test
-    void testRotatedPayloadsAreUnionedBeforeEvaluation() {
+    void testDuplicateLevelPayloadsFallBackWithoutCreatingReader() {
         DataSplit split = dataSplit(11, 0, dataFile("data-1", 4));
         PrimaryKeyIndexDefinition definition =
                 definition(
@@ -191,16 +193,12 @@ class PrimaryKeySortedIndexScanTest {
                         Collections.singletonList(definition),
                         (ignoredFile, ignoredDefinition, payloads) -> {
                             readersCreated.incrementAndGet();
-                            assertThat(payloads)
-                                    .extracting(IndexFileMeta::fileName)
-                                    .containsExactly("btree-0", "btree-1");
                             return reader;
                         });
 
-        assertThat(readersCreated).hasValue(1);
+        assertThat(readersCreated).hasValue(0);
         assertThat(evaluated.files()).hasSize(1);
-        assertThat(evaluated.files().get(0).result()).isPresent();
-        assertThat(evaluated.files().get(0).result().get().results()).containsExactly(3L);
+        assertThat(evaluated.files().get(0).result()).isEmpty();
     }
 
     @Test
@@ -314,27 +312,33 @@ class PrimaryKeySortedIndexScanTest {
     }
 
     @Test
-    void testReaderFailureFallsBackOnlyCurrentFile() {
+    void testReaderFailureFallsBackForCompleteLevel() {
         DataSplit split = dataSplit(11, 0, dataFile("data-1", 4), dataFile("data-2", 4));
         PrimaryKeyIndexDefinition definition =
                 definition(
                         7,
                         BTreeGlobalIndexerFactory.IDENTIFIER,
                         PrimaryKeyIndexDefinition.Family.BTREE);
+        IndexFileMeta mergedPayload =
+                payload(
+                        "btree-level",
+                        Arrays.asList(
+                                new PrimaryKeyIndexSourceFile("data-1", 4),
+                                new PrimaryKeyIndexSourceFile("data-2", 4)),
+                        "btree",
+                        7,
+                        8);
         PrimaryKeySortedIndexScan.Plan plan =
                 PrimaryKeySortedIndexScan.plan(
                         11,
                         Collections.singletonList(split),
                         Collections.singletonList(definition),
-                        Arrays.asList(
-                                payloadEntry(0, payload("btree-1", "data-1", 4, "btree", 7, 4)),
-                                payloadEntry(0, payload("btree-2", "data-2", 4, "btree", 7, 4))));
+                        Collections.singletonList(payloadEntry(0, mergedPayload)));
         RowType rowType = RowType.of(new DataField(7, "f7", DataTypes.INT()));
         Predicate predicate = new PredicateBuilder(rowType).equal(0, 42);
         GlobalIndexReader failedReader = mock(GlobalIndexReader.class);
         when(failedReader.visitEqual(any(), eq(42)))
                 .thenThrow(new RuntimeException("corrupt index"));
-        GlobalIndexReader successfulReader = readerWithPositions(1);
 
         PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
                 PrimaryKeySortedIndexScan.evaluate(
@@ -342,21 +346,17 @@ class PrimaryKeySortedIndexScanTest {
                         rowType,
                         predicate,
                         Collections.singletonList(definition),
-                        (file, ignoredDefinition, ignoredPayloads) ->
-                                file.dataFile().fileName().equals("data-1")
-                                        ? failedReader
-                                        : successfulReader);
+                        (file, ignoredDefinition, ignoredPayloads) -> failedReader);
 
         assertThat(evaluated.files()).hasSize(2);
         assertThat(evaluated.files().get(0).result()).isEmpty();
-        assertThat(evaluated.files().get(1).result()).isPresent();
-        assertThat(evaluated.files().get(1).result().get().results()).containsExactly(1L);
+        assertThat(evaluated.files().get(1).result()).isEmpty();
     }
 
     private static PrimaryKeyIndexDefinition definition(
             int fieldId, String indexType, PrimaryKeyIndexDefinition.Family family) {
         return new PrimaryKeyIndexDefinition(
-                "f" + fieldId, fieldId, indexType, new Options(), family, 5, 0.2);
+                "f" + fieldId, fieldId, indexType, new Options(), family);
     }
 
     private static GlobalIndexReader readerWithPositions(long... rowPositions) {
@@ -425,20 +425,21 @@ class PrimaryKeySortedIndexScanTest {
 
     private static DataFileMeta dataFile(String fileName, long rowCount) {
         return DataFileMeta.forAppend(
-                fileName,
-                100,
-                rowCount,
-                SimpleStats.EMPTY_STATS,
-                0,
-                0,
-                1,
-                Collections.emptyList(),
-                null,
-                FileSource.COMPACT,
-                null,
-                null,
-                null,
-                null);
+                        fileName,
+                        100,
+                        rowCount,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        0,
+                        1,
+                        Collections.emptyList(),
+                        null,
+                        FileSource.COMPACT,
+                        null,
+                        null,
+                        null,
+                        null)
+                .upgrade(1);
     }
 
     private static IndexManifestEntry payloadEntry(int bucket, IndexFileMeta payload) {
@@ -467,7 +468,7 @@ class PrimaryKeySortedIndexScanTest {
             String indexType,
             int fieldId,
             long payloadRowCount) {
-        byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(sourceFiles).serialize();
+        byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(1, sourceFiles).serialize();
         long sourceRowCount = 0;
         for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
             sourceRowCount = Math.addExact(sourceRowCount, sourceFile.rowCount());

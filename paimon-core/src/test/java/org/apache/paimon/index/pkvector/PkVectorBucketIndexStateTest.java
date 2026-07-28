@@ -38,8 +38,7 @@ class PkVectorBucketIndexStateTest {
         IndexFileMeta ann = segment("ann", "data-1", "test-vector-ann");
 
         PkVectorBucketIndexState state =
-                PkVectorBucketIndexState.fromActivePayloads(
-                        7, "test-vector-ann", Collections.singletonList(ann));
+                new PkVectorBucketIndexState(7, "test-vector-ann", Collections.singletonList(ann));
 
         assertThat(state.vectorFieldId()).isEqualTo(7);
         assertThat(state.annSegments()).extracting(IndexFileMeta::fileName).containsExactly("ann");
@@ -50,7 +49,7 @@ class PkVectorBucketIndexStateTest {
     void testRejectsDuplicateAnnSource() {
         assertThatThrownBy(
                         () ->
-                                PkVectorBucketIndexState.fromActivePayloads(
+                                new PkVectorBucketIndexState(
                                         7,
                                         "test-vector-ann",
                                         java.util.Arrays.asList(
@@ -63,7 +62,7 @@ class PkVectorBucketIndexStateTest {
     void testRejectsDifferentIndexType() {
         assertThatThrownBy(
                         () ->
-                                PkVectorBucketIndexState.fromActivePayloads(
+                                new PkVectorBucketIndexState(
                                         7,
                                         "test-vector-ann",
                                         Collections.singletonList(
@@ -74,8 +73,7 @@ class PkVectorBucketIndexStateTest {
     @Test
     void testEmptyPayloadsProduceEmptyState() {
         PkVectorBucketIndexState state =
-                PkVectorBucketIndexState.fromActivePayloads(
-                        7, "test-vector-ann", Collections.emptyList());
+                new PkVectorBucketIndexState(7, "test-vector-ann", Collections.emptyList());
 
         assertThat(state.vectorFieldId()).isEqualTo(7);
         assertThat(state.annSegments()).isEmpty();
@@ -85,7 +83,7 @@ class PkVectorBucketIndexStateTest {
             String segmentFileName, String sourceFileName, String indexType) {
         PrimaryKeyIndexSourceFile sourceFile = new PrimaryKeyIndexSourceFile(sourceFileName, 10);
         byte[] sourceMeta =
-                new PrimaryKeyIndexSourceMeta(Collections.singletonList(sourceFile)).serialize();
+                new PrimaryKeyIndexSourceMeta(1, Collections.singletonList(sourceFile)).serialize();
         return new IndexFileMeta(
                 indexType,
                 segmentFileName,

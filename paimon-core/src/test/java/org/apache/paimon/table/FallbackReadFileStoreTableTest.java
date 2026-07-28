@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
@@ -29,6 +30,8 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -40,11 +43,14 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -53,6 +59,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.AdditionalAnswers;
 import org.mockito.Mockito;
 
 import java.io.IOException;
@@ -89,6 +96,81 @@ public class FallbackReadFileStoreTableTest {
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         commitUser = UUID.randomUUID().toString();
         fileIO = FileIOFinder.find(tablePath);
+    }
+
+    @Test
+    public void testScanForwardsReadType() {
+        FileStoreTable mainTable = Mockito.mock(FileStoreTable.class);
+        FileStoreTable fallbackTable = Mockito.mock(FileStoreTable.class);
+        DataTableScan mainScan = Mockito.mock(DataTableScan.class);
+        DataTableScan fallbackScan = Mockito.mock(DataTableScan.class);
+        RowType readType = ROW_TYPE.project("a");
+
+        FallbackReadFileStoreTable.FallbackReadScan scan =
+                new FallbackReadFileStoreTable.FallbackReadScan(
+                        mainTable,
+                        fallbackTable,
+                        Mockito.mock(TableSchema.class),
+                        table -> table == mainTable ? mainScan : fallbackScan);
+
+        assertThat(scan.withReadType(readType)).isSameAs(scan);
+        Mockito.verify(mainScan).withReadType(readType);
+        Mockito.verify(fallbackScan).withReadType(readType);
+    }
+
+    @Test
+    public void testPlanAndReadWithQueryAuthSplit() throws Exception {
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+
+        mainTable.createBranch("bc");
+        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
+        writeDataIntoTable(branchTable, 0, rowData(2, 20));
+
+        FallbackReadFileStoreTable table =
+                new FallbackReadFileStoreTable(mainTable, branchTable, true);
+        TableQueryAuthResult authResult =
+                new TableQueryAuthResult(
+                        null,
+                        Collections.singletonMap(
+                                "a",
+                                JsonSerdeUtil.toFlatJson(
+                                        new FieldTransform(
+                                                new FieldRef(0, "pt", DataTypes.INT())))));
+        DataTableScan scan =
+                table.newFallbackScan(
+                        fileStoreTable -> queryAuthScan(fileStoreTable.newScan(), authResult));
+
+        List<Split> splits = scan.plan().splits();
+        assertThat(splits).hasSize(2);
+        assertThat(splits)
+                .allSatisfy(
+                        split -> {
+                            assertThat(split)
+                                    .isInstanceOf(FallbackReadFileStoreTable.FallbackSplit.class);
+                            Split wrapped =
+                                    ((FallbackReadFileStoreTable.FallbackSplit) split).wrapped();
+                            assertThat(wrapped).isInstanceOf(QueryAuthSplit.class);
+                        });
+
+        List<Pair<Integer, Integer>> result = new ArrayList<>();
+        for (Split split : splits) {
+            Split deserialized =
+                    InstantiationUtil.deserializeObject(
+                            InstantiationUtil.serializeObject(split), getClass().getClassLoader());
+            RecordReader<InternalRow> reader = table.newRead().createReader(deserialized);
+            reader.forEachRemaining(r -> result.add(Pair.of(r.getInt(0), r.getInt(1))));
+            reader.close();
+        }
+
+        assertThat(result).containsExactlyInAnyOrder(Pair.of(1, 1), Pair.of(2, 2));
+    }
+
+    private DataTableScan queryAuthScan(DataTableScan delegate, TableQueryAuthResult authResult) {
+        DataTableScan scan =
+                Mockito.mock(DataTableScan.class, AdditionalAnswers.delegatesTo(delegate));
+        Mockito.doAnswer(ignored -> authResult.convertPlan(delegate.plan())).when(scan).plan();
+        return scan;
     }
 
     @ParameterizedTest

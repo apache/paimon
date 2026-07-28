@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Any, List
+from typing import Any, List, Tuple
 from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.row_kind import RowKind
 
@@ -84,3 +84,13 @@ class ProjectedRow(InternalRow):
             ProjectedRow instance
         """
         return ProjectedRow(projection)
+
+    def to_tuple(self) -> Tuple[Any, ...]:
+        assert isinstance(self.row, InternalRow), (
+            f"Expected InternalRow, but got {type(self.row).__name__}"
+        )
+        return tuple(
+            self.row.get_field(index)
+            if index >= 0 else None
+            for index in self.index_mapping
+        )

@@ -1035,6 +1035,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
               |CREATE TABLE t (id INT, name STRING, b INT) TBLPROPERTIES (
               |  'row-tracking.enabled' = 'true',
               |  'data-evolution.enabled' = 'true',
+              |  'scalar-index.search-mode' = 'fast',
               |  'btree-index.records-per-range' = '1000')
               |""".stripMargin)
         sql("INSERT INTO t VALUES (1, 'old', 10)")
@@ -1062,6 +1063,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
             |CREATE TABLE t (id INT, name STRING, b INT) TBLPROPERTIES (
             |  'row-tracking.enabled' = 'true',
             |  'data-evolution.enabled' = 'true',
+            |  'scalar-index.search-mode' = 'fast',
             |  'btree-index.records-per-range' = '1000')
             |""".stripMargin)
       sql("INSERT INTO t VALUES (1, 'old', 10)")
@@ -1378,6 +1380,34 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       // all modified partitions' index entries should have been removed
       assert(indexEntries.exists(entry => entry.partition().getString(0).toString.equals("p0")))
       assert(!indexEntries.exists(entry => entry.partition().getString(0).toString.equals("p1")))
+    }
+  }
+
+  test("Data Evolution: test global indexed column update action -- ignore") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, name STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'global-index.column-update-action' = 'IGNORE')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 'name_1')")
+      sql(
+        "CALL sys.create_global_index(table => 'test.T', index_column => 'name', " +
+          "index_type => 'btree')")
+
+      sql("""
+            |MERGE INTO T
+            |USING T AS source
+            |ON T._ROW_ID = source._ROW_ID
+            |WHEN MATCHED THEN UPDATE SET name = 'updated_name'
+            |""".stripMargin)
+
+      checkAnswer(sql("SELECT id, name FROM T"), Seq(Row(1, "updated_name")))
+      val indexEntries = loadTable("T").store().newIndexFileHandler().scan("btree")
+      assert(!indexEntries.isEmpty)
     }
   }
 

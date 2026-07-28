@@ -445,6 +445,75 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
+    public void testDeletionVectorTable() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .primaryKey("a")
+                        .option("bucket", "1")
+                        .option("deletion-vectors.enabled", "true")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        write(table, ioManager, GenericRow.of(1, 1), GenericRow.of(2, 1));
+        write(table, ioManager, GenericRow.of(1, 2), GenericRow.of(3, 1));
+
+        long latest = table.snapshotManager().latestSnapshotId();
+        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "0," + latest)))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1),
+                        GenericRow.of(2, 1),
+                        GenericRow.of(1, 2),
+                        GenericRow.of(3, 1));
+    }
+
+    @Test
+    public void testDeletionVectorTableWithInputChangelog() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .option("bucket", "1")
+                        .option("changelog-producer", "input")
+                        .option("deletion-vectors.enabled", "true")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        Table table = catalog.getTable(identifier);
+
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, 1, 1),
+                GenericRow.of(1, 2, 1),
+                GenericRow.of(1, 3, 1),
+                GenericRow.of(2, 1, 1));
+
+        compact(table, row(1), 0, ioManager, true);
+
+        write(
+                table,
+                ioManager,
+                GenericRow.ofKind(RowKind.DELETE, 1, 1, 1),
+                GenericRow.ofKind(RowKind.DELETE, 1, 2, 1),
+                GenericRow.of(1, 4, 1),
+                GenericRow.of(2, 1, 2));
+
+        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "1,3")))
+                .containsExactlyInAnyOrder(
+                        GenericRow.ofKind(RowKind.DELETE, 1, 1, 1),
+                        GenericRow.ofKind(RowKind.DELETE, 1, 2, 1),
+                        GenericRow.of(1, 4, 1),
+                        GenericRow.of(2, 1, 2));
+    }
+
+    @Test
     public void testIncrementalEmptyResult() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =

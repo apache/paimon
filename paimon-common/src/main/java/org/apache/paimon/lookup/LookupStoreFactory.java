@@ -44,24 +44,24 @@ import java.util.function.Function;
  */
 public interface LookupStoreFactory {
 
-    LookupStoreWriter createWriter(File file, @Nullable BloomFilter.Builder bloomFilter)
+    LookupStoreWriter createWriter(File file, @Nullable BloomFilter.Builder bloomFilterBuilder)
             throws IOException;
 
     LookupStoreReader createReader(File file) throws IOException;
 
-    static Function<Long, BloomFilter.Builder> bfGenerator(Options options) {
-        Function<Long, BloomFilter.Builder> bfGenerator = rowCount -> null;
+    static Function<Long, BloomFilter.Builder> bloomFilterBuilderFactory(Options options) {
+        Function<Long, BloomFilter.Builder> bloomFilterBuilderFactory = rowCount -> null;
         if (options.get(CoreOptions.LOOKUP_CACHE_BLOOM_FILTER_ENABLED)) {
             double bfFpp = options.get(CoreOptions.LOOKUP_CACHE_BLOOM_FILTER_FPP);
-            bfGenerator =
+            bloomFilterBuilderFactory =
                     rowCount -> {
                         if (rowCount > 0) {
-                            return BloomFilter.builder(rowCount, bfFpp);
+                            return BloomFilter.fixedBuilder(rowCount, bfFpp);
                         }
                         return null;
                     };
         }
-        return bfGenerator;
+        return bloomFilterBuilderFactory;
     }
 
     static LookupStoreFactory create(

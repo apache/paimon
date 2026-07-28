@@ -166,16 +166,6 @@ class PrimaryKeyFullTextIndexValidationTest {
     }
 
     @Test
-    void testRejectsInvalidLsmCompactionOptions() {
-        Map<String, String> options = enabledOptions();
-        options.put("fields.content.pk-index.compaction.level-fanout", "1");
-
-        assertThatThrownBy(() -> validateTableSchema(schema(options)))
-                .hasMessageContaining("fields.content.pk-index.compaction.level-fanout")
-                .hasMessageContaining("greater than 1");
-    }
-
-    @Test
     void testRejectsMalformedIndexOptions() {
         Map<String, String> options = enabledOptions();
         options.put("fields.content.pk-full-text.index.options", "{not-json");

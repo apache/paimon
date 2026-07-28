@@ -51,6 +51,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
@@ -60,7 +61,11 @@ import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.tag.Tag;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -77,6 +82,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -547,6 +553,49 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         return result;
     }
 
+    /** VARIANT needs Iceberg row lineage, which Paimon Iceberg compatibility cannot publish. */
+    static void checkVariantNotPublishable(RowType rowType) {
+        Collection<String> variantFields = new LinkedHashSet<>();
+        for (DataField field : rowType.getFields()) {
+            collectVariantFields(field.name(), field.type(), variantFields);
+        }
+        Preconditions.checkArgument(
+                variantFields.isEmpty(),
+                "Columns %s use the VARIANT type, which Paimon Iceberg compatibility cannot "
+                        + "publish: it is an Iceberg format-version-3 type that requires row "
+                        + "lineage.",
+                variantFields);
+    }
+
+    private static void collectVariantFields(
+            String path, DataType type, Collection<String> variantFields) {
+        switch (type.getTypeRoot()) {
+            case VARIANT:
+                variantFields.add(path + ": " + type.asSQLString());
+                break;
+            case ARRAY:
+                collectVariantFields(
+                        path + ".element", ((ArrayType) type).getElementType(), variantFields);
+                break;
+            case MULTISET:
+                collectVariantFields(
+                        path + ".element", ((MultisetType) type).getElementType(), variantFields);
+                break;
+            case MAP:
+                collectVariantFields(path + ".key", ((MapType) type).getKeyType(), variantFields);
+                collectVariantFields(
+                        path + ".value", ((MapType) type).getValueType(), variantFields);
+                break;
+            case ROW:
+                for (DataField field : ((RowType) type).getFields()) {
+                    collectVariantFields(path + "." + field.name(), field.type(), variantFields);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
     // -------------------------------------------------------------------------------------
     // Create metadata based on old ones
     // -------------------------------------------------------------------------------------
@@ -957,12 +1006,15 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     List<IcebergManifestEntry> newEntries = new ArrayList<>();
                     for (IcebergManifestEntry entry : entries) {
                         if (entry.isLive()) {
+                            boolean removed = removedFiles.containsKey(entry.file().filePath());
                             newEntries.add(
                                     new IcebergManifestEntry(
-                                            removedFiles.containsKey(entry.file().filePath())
+                                            removed
                                                     ? IcebergManifestEntry.Status.DELETED
                                                     : IcebergManifestEntry.Status.EXISTING,
-                                            entry.snapshotId(),
+                                            // a deleted entry records the snapshot that
+                                            // deleted the file, not the one that added it
+                                            removed ? currentSnapshotId : entry.snapshotId(),
                                             entry.sequenceNumber(),
                                             entry.fileSequenceNumber(),
                                             entry.file()));
@@ -1018,7 +1070,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     for (IcebergManifestEntry entry :
                             IcebergManifestFile.create(table, pathFactory)
                                     .read(new Path(meta.manifestPath()).getName())) {
+                        // a deletion made by this commit is recorded against the current
+                        // snapshot but keeps the file sequence number of the older snapshot
+                        // that added the file, so it has to be recognised by snapshot id
                         if (entry.fileSequenceNumber() == currentSnapshotId
+                                || entry.snapshotId() == currentSnapshotId
                                 || entry.status() == IcebergManifestEntry.Status.EXISTING) {
                             entries.add(entry);
                         } else {
@@ -1505,7 +1561,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         private IcebergSchema get(long schemaId) {
             return schemas.computeIfAbsent(
-                    schemaId, id -> IcebergSchema.create(schemaManager.schema(id)));
+                    schemaId,
+                    id -> {
+                        TableSchema schema = schemaManager.schema(id);
+                        // backstop: reject variant on each schema as it is emitted
+                        checkVariantNotPublishable(schema.logicalRowType());
+                        return IcebergSchema.create(schema);
+                    });
         }
 
         private long getLatestSchemaId() {
