@@ -29,6 +29,8 @@ import org.apache.paimon.utils.BloomFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -40,6 +42,7 @@ import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.function.LongFunction;
+import java.util.function.Predicate;
 
 import static org.apache.paimon.lookup.sort.db.LocalKvDb.UNKNOWN_NUM_ENTRIES;
 import static org.apache.paimon.lookup.sort.db.LocalKvDb.isTombstone;
@@ -69,6 +72,7 @@ import static org.apache.paimon.lookup.sort.db.LocalKvDb.isTombstone;
 public class UniversalCompactor {
 
     private static final Logger LOG = LoggerFactory.getLogger(UniversalCompactor.class);
+    private static final byte[] TOMBSTONE = new byte[0];
 
     private final Comparator<MemorySlice> keyComparator;
     private final SortLookupStoreFactory storeFactory;
@@ -76,6 +80,8 @@ public class UniversalCompactor {
     private final long maxOutputFileSize;
     private final int level0FileNumCompactTrigger;
     private final int sizeRatioPercent;
+    @Nullable private final Predicate<byte[]> expiredValuePredicate;
+    @Nullable private final LocalKvDb.MergeOperator mergeOperator;
     private final FileDeleter fileDeleter;
 
     public UniversalCompactor(
@@ -85,6 +91,8 @@ public class UniversalCompactor {
             long maxOutputFileSize,
             int level0FileNumCompactTrigger,
             int sizeRatioPercent,
+            @Nullable Predicate<byte[]> expiredValuePredicate,
+            @Nullable LocalKvDb.MergeOperator mergeOperator,
             FileDeleter fileDeleter) {
         this.keyComparator = keyComparator;
         this.storeFactory = storeFactory;
@@ -92,6 +100,8 @@ public class UniversalCompactor {
         this.maxOutputFileSize = maxOutputFileSize;
         this.level0FileNumCompactTrigger = level0FileNumCompactTrigger;
         this.sizeRatioPercent = sizeRatioPercent;
+        this.expiredValuePredicate = expiredValuePredicate;
+        this.mergeOperator = mergeOperator;
         this.fileDeleter = fileDeleter;
     }
 
@@ -178,7 +188,7 @@ public class UniversalCompactor {
             List<List<SstFileMetadata>> levels, int maxLevels, FileSupplier fileSupplier)
             throws IOException {
         List<SortedRun> sortedRuns = collectSortedRuns(levels, maxLevels);
-        if (sortedRuns.size() <= 1) {
+        if (sortedRuns.isEmpty() || (sortedRuns.size() == 1 && expiredValuePredicate == null)) {
             return;
         }
 
@@ -314,24 +324,51 @@ public class UniversalCompactor {
         int skippedGroupCount = 0;
         int mergedGroupCount = 0;
 
-        for (List<SstFileMetadata> group : mergedGroups) {
-            if (group.size() == 1) {
-                SstFileMetadata singleFile = group.get(0);
-                boolean canSkip = !dropTombstones || !singleFile.hasTombstones();
-                if (canSkip) {
-                    SstFileMetadata promoted = singleFile.withLevel(outputLevel);
-                    outputFiles.add(promoted);
-                    skippedFileSet.add(promoted.getFile());
-                    skippedGroupCount++;
-                    continue;
+        if (mergeOperator == null) {
+            for (List<SstFileMetadata> group : mergedGroups) {
+                if (group.size() == 1) {
+                    SstFileMetadata singleFile = group.get(0);
+                    boolean canSkip =
+                            expiredValuePredicate == null
+                                    && (!dropTombstones || !singleFile.hasTombstones());
+                    if (canSkip) {
+                        SstFileMetadata promoted = singleFile.withLevel(outputLevel);
+                        outputFiles.add(promoted);
+                        skippedFileSet.add(promoted.getFile());
+                        skippedGroupCount++;
+                        continue;
+                    }
                 }
-            }
 
-            mergedGroupCount++;
-            List<SstFileMetadata> groupMerged =
+                mergedGroupCount++;
+                outputFiles.addAll(
+                        mergeFileGroup(
+                                group,
+                                dropTombstones,
+                                fileSupplier,
+                                fileToRunSequence,
+                                outputLevel,
+                                null));
+            }
+        } else {
+            CompactionSstOutput output =
+                    new CompactionSstOutput(outputFiles, fileSupplier, outputLevel, dropTombstones);
+            try {
+                for (List<SstFileMetadata> group : mergedGroups) {
+                    mergedGroupCount++;
                     mergeFileGroup(
-                            group, dropTombstones, fileSupplier, fileToRunSequence, outputLevel);
-            outputFiles.addAll(groupMerged);
+                            group,
+                            dropTombstones,
+                            fileSupplier,
+                            fileToRunSequence,
+                            outputLevel,
+                            output);
+                }
+                output.finish();
+            } catch (IOException | RuntimeException | Error e) {
+                output.abort(e);
+                throw e;
+            }
         }
 
         outputFiles.sort((a, b) -> keyComparator.compare(a.getMinKey(), b.getMinKey()));
@@ -452,6 +489,7 @@ public class UniversalCompactor {
      * @param fileSupplier supplier for new SST file paths
      * @param fileToRunSequence maps each file to its run sequence number for dedup ordering
      * @param outputLevel the level to assign to output files
+     * @param sharedOutput optional output shared across file groups to preserve merge state
      * @return the list of merged output files
      */
     private List<SstFileMetadata> mergeFileGroup(
@@ -459,7 +497,8 @@ public class UniversalCompactor {
             boolean dropTombstones,
             FileSupplier fileSupplier,
             Map<File, Integer> fileToRunSequence,
-            int outputLevel)
+            int outputLevel,
+            @Nullable CompactionSstOutput sharedOutput)
             throws IOException {
 
         // Sort files by run sequence (older first) for correct dedup ordering
@@ -483,7 +522,11 @@ public class UniversalCompactor {
                             return Integer.compare(b.sequence, a.sequence);
                         });
 
-        SortLookupStoreWriter currentWriter = null;
+        CompactionSstOutput output =
+                sharedOutput == null
+                        ? new CompactionSstOutput(result, fileSupplier, outputLevel, dropTombstones)
+                        : sharedOutput;
+        Throwable failure = null;
         try {
             for (int seq = 0; seq < orderedFiles.size(); seq++) {
                 SortLookupStoreReader reader =
@@ -495,11 +538,6 @@ public class UniversalCompactor {
                     minHeap.add(source.currentEntry());
                 }
             }
-            File currentSstFile = null;
-            MemorySlice currentFileMinKey = null;
-            MemorySlice currentFileMaxKey = null;
-            long currentBatchSize = 0;
-            long currentTombstoneCount = 0;
             MemorySlice previousKey = null;
 
             while (!minHeap.isEmpty()) {
@@ -518,67 +556,34 @@ public class UniversalCompactor {
                     minHeap.add(entry.source.currentEntry());
                 }
 
-                if (dropTombstones && isTombstone(entry.value)) {
-                    continue;
-                }
-
-                if (currentWriter == null) {
-                    currentSstFile = fileSupplier.newSstFile();
-                    currentWriter =
-                            storeFactory.createWriter(
-                                    currentSstFile,
-                                    bloomFilterBuilderFactory.apply(UNKNOWN_NUM_ENTRIES));
-                    currentFileMinKey = entry.key;
-                    currentBatchSize = 0;
-                    currentTombstoneCount = 0;
-                }
-
-                currentWriter.put(entry.key.copyBytes(), entry.value);
-                currentFileMaxKey = entry.key;
-                currentBatchSize += entry.key.length() + entry.value.length;
-                if (isTombstone(entry.value)) {
-                    currentTombstoneCount++;
-                }
-
-                if (currentBatchSize >= maxOutputFileSize) {
-                    currentWriter.close();
-                    result.add(
-                            new SstFileMetadata(
-                                    currentSstFile,
-                                    currentFileMinKey,
-                                    currentFileMaxKey,
-                                    currentTombstoneCount,
-                                    outputLevel));
-                    currentWriter = null;
-                    currentSstFile = null;
-                    currentFileMinKey = null;
-                    currentFileMaxKey = null;
-                }
+                output.put(entry.key, entry.value);
             }
 
-            if (currentWriter != null) {
-                currentWriter.close();
-                result.add(
-                        new SstFileMetadata(
-                                currentSstFile,
-                                currentFileMinKey,
-                                currentFileMaxKey,
-                                currentTombstoneCount,
-                                outputLevel));
+            if (sharedOutput == null) {
+                output.finish();
             }
-        } catch (IOException | RuntimeException e) {
-            // Close the in-progress writer on failure to avoid resource leak
-            if (currentWriter != null) {
-                try {
-                    currentWriter.close();
-                } catch (IOException suppressed) {
-                    e.addSuppressed(suppressed);
-                }
-            }
+        } catch (IOException | RuntimeException | Error e) {
+            failure = e;
+            output.abort(e);
             throw e;
         } finally {
+            IOException closeFailure = null;
             for (SortLookupStoreReader reader : openReaders) {
-                reader.close();
+                try {
+                    reader.close();
+                } catch (IOException e) {
+                    if (closeFailure == null) {
+                        closeFailure = e;
+                    } else {
+                        closeFailure.addSuppressed(e);
+                    }
+                }
+            }
+            if (closeFailure != null) {
+                if (failure == null) {
+                    throw closeFailure;
+                }
+                failure.addSuppressed(closeFailure);
             }
         }
 
@@ -622,6 +627,109 @@ public class UniversalCompactor {
             if (level >= 0 && level < levels.size()) {
                 levels.get(level).clear();
             }
+        }
+    }
+
+    /** Writes compacted records, combining adjacent values before enforcing output file sizes. */
+    private final class CompactionSstOutput {
+
+        private final List<SstFileMetadata> result;
+        private final FileSupplier fileSupplier;
+        private final int outputLevel;
+        private final boolean dropTombstones;
+        private final RecordCombiningWriter combiningWriter;
+
+        @Nullable private SortLookupStoreWriter currentWriter;
+        @Nullable private File currentSstFile;
+        @Nullable private MemorySlice currentFileMinKey;
+        @Nullable private MemorySlice currentFileMaxKey;
+        private long currentBatchSize;
+        private long currentTombstoneCount;
+
+        private CompactionSstOutput(
+                List<SstFileMetadata> result,
+                FileSupplier fileSupplier,
+                int outputLevel,
+                boolean dropTombstones) {
+            this.result = result;
+            this.fileSupplier = fileSupplier;
+            this.outputLevel = outputLevel;
+            this.dropTombstones = dropTombstones;
+            this.combiningWriter =
+                    new RecordCombiningWriter(mergeOperator, this::writeCombinedRecord);
+        }
+
+        private void put(MemorySlice key, byte[] value) throws IOException {
+            combiningWriter.put(key, value);
+        }
+
+        private void finish() throws IOException {
+            combiningWriter.finish();
+            closeCurrentWriter();
+        }
+
+        private void abort(Throwable failure) {
+            if (currentWriter != null) {
+                try {
+                    currentWriter.close();
+                } catch (IOException suppressed) {
+                    failure.addSuppressed(suppressed);
+                }
+                currentWriter = null;
+            }
+        }
+
+        private void writeCombinedRecord(MemorySlice key, byte[] value) throws IOException {
+            // Evaluate expiration after combining so a TTL-aware merge can refresh the result.
+            boolean tombstone = isTombstone(value);
+            boolean expired =
+                    !tombstone
+                            && expiredValuePredicate != null
+                            && expiredValuePredicate.test(value);
+            if (dropTombstones && (tombstone || expired)) {
+                return;
+            }
+            byte[] outputValue = expired ? TOMBSTONE : value;
+
+            if (currentWriter == null) {
+                currentSstFile = fileSupplier.newSstFile();
+                currentWriter =
+                        storeFactory.createWriter(
+                                currentSstFile,
+                                bloomFilterBuilderFactory.apply(UNKNOWN_NUM_ENTRIES));
+                currentFileMinKey = key;
+                currentBatchSize = 0;
+                currentTombstoneCount = 0;
+            }
+
+            currentWriter.put(key.copyBytes(), outputValue);
+            currentFileMaxKey = key;
+            currentBatchSize += key.length() + outputValue.length;
+            if (isTombstone(outputValue)) {
+                currentTombstoneCount++;
+            }
+
+            if (currentBatchSize >= maxOutputFileSize) {
+                closeCurrentWriter();
+            }
+        }
+
+        private void closeCurrentWriter() throws IOException {
+            if (currentWriter == null) {
+                return;
+            }
+            currentWriter.close();
+            result.add(
+                    new SstFileMetadata(
+                            currentSstFile,
+                            currentFileMinKey,
+                            currentFileMaxKey,
+                            currentTombstoneCount,
+                            outputLevel));
+            currentWriter = null;
+            currentSstFile = null;
+            currentFileMinKey = null;
+            currentFileMaxKey = null;
         }
     }
 

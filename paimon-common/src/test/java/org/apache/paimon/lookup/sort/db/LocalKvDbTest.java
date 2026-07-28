@@ -490,6 +490,175 @@ public class LocalKvDbTest {
     }
 
     @Test
+    public void testPartialCompactionDoesNotResurrectValueFilteredByExpiration()
+            throws IOException {
+        File directory = new File(tempDir.toFile(), "expiration-compaction-db");
+        try (LocalKvDb db =
+                LocalKvDb.builder(directory)
+                        .memTableFlushThreshold(1024)
+                        .maxSstFileSize(1024)
+                        .blockSize(128)
+                        .level0FileNumCompactTrigger(2)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .expiredValuePredicate(value -> "expired".equals(new String(value, UTF_8)))
+                        .build()) {
+            db.bulkLoad(Collections.singletonList(entry("key", "old-value")).iterator(), 1);
+
+            putString(db, "key", "expired");
+            db.flush();
+            putString(db, "other-key", "other-value");
+            db.flush();
+
+            Assertions.assertNull(getString(db, "key"));
+            Assertions.assertEquals("other-value", getString(db, "other-key"));
+            Assertions.assertEquals(1, db.getLevelFileCount(LocalKvDb.MAX_LEVELS - 1));
+
+            db.compact();
+            Assertions.assertNull(getString(db, "key"));
+            Assertions.assertEquals("other-value", getString(db, "other-key"));
+        }
+    }
+
+    @Test
+    public void testCompactionMergesBeforeFilteringExpiredValues() throws IOException {
+        File directory = new File(tempDir.toFile(), "expiration-merge-db");
+        LocalKvDb.MergeOperator mergeOperator =
+                new LocalKvDb.MergeOperator() {
+                    @Override
+                    public boolean canMerge(MemorySlice firstKey, MemorySlice nextKey) {
+                        return firstKey.readByte(0) == nextKey.readByte(0);
+                    }
+
+                    @Override
+                    public byte[] merge(List<byte[]> values) {
+                        StringBuilder merged = new StringBuilder();
+                        for (byte[] value : values) {
+                            if (merged.length() > 0) {
+                                merged.append('+');
+                            }
+                            merged.append(new String(value, UTF_8));
+                        }
+                        return merged.toString().getBytes(UTF_8);
+                    }
+                };
+        try (LocalKvDb db =
+                LocalKvDb.builder(directory)
+                        .memTableFlushThreshold(1024)
+                        .maxSstFileSize(1024)
+                        .blockSize(128)
+                        .level0FileNumCompactTrigger(100)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .expiredValuePredicate(value -> "expired".equals(new String(value, UTF_8)))
+                        .mergeOperator(mergeOperator)
+                        .build()) {
+            putString(db, "a-0", "expired");
+            db.flush();
+            putString(db, "a-1", "live");
+            db.flush();
+
+            db.compact();
+
+            Assertions.assertEquals("expired+live", getString(db, "a-0"));
+            Assertions.assertNull(getString(db, "a-1"));
+        }
+    }
+
+    @Test
+    public void testCompactionMergesAcrossFileGroupsBeforeFilteringExpiration() throws IOException {
+        File directory = new File(tempDir.toFile(), "cross-group-expiration-merge-db");
+        LocalKvDb.MergeOperator mergeOperator =
+                new LocalKvDb.MergeOperator() {
+                    @Override
+                    public boolean canMerge(MemorySlice firstKey, MemorySlice nextKey) {
+                        return firstKey.readByte(0) == nextKey.readByte(0);
+                    }
+
+                    @Override
+                    public byte[] merge(List<byte[]> values) {
+                        return "live".getBytes(UTF_8);
+                    }
+                };
+        try (LocalKvDb db =
+                LocalKvDb.builder(directory)
+                        .maxSstFileSize(1)
+                        .level0FileNumCompactTrigger(100)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .expiredValuePredicate(value -> "expired".equals(new String(value, UTF_8)))
+                        .mergeOperator(mergeOperator)
+                        .build()) {
+            putString(db, "a-0", "expired");
+            db.flush();
+            putString(db, "a-1", "expired");
+            db.flush();
+
+            db.compact();
+
+            Assertions.assertEquals("live", getString(db, "a-0"));
+            Assertions.assertNull(getString(db, "a-1"));
+        }
+    }
+
+    @Test
+    public void testExpirationPredicateDoesNotReceiveTombstones() throws IOException {
+        File directory = new File(tempDir.toFile(), "tombstone-expiration-db");
+        try (LocalKvDb db =
+                LocalKvDb.builder(directory)
+                        .level0FileNumCompactTrigger(100)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .expiredValuePredicate(value -> value[0] == 1)
+                        .build()) {
+            db.put("key".getBytes(UTF_8), new byte[] {2});
+            db.flush();
+            db.delete("key".getBytes(UTF_8));
+            db.flush();
+
+            db.compact();
+
+            Assertions.assertNull(db.get("key".getBytes(UTF_8)));
+        }
+    }
+
+    @Test
+    public void testFlushMergeShadowsConsumedKeysInOlderRuns() throws IOException {
+        File directory = new File(tempDir.toFile(), "flush-merge-shadow-db");
+        LocalKvDb.MergeOperator mergeOperator =
+                new LocalKvDb.MergeOperator() {
+                    @Override
+                    public boolean canMerge(MemorySlice firstKey, MemorySlice nextKey) {
+                        return firstKey.readByte(0) == nextKey.readByte(0);
+                    }
+
+                    @Override
+                    public byte[] merge(List<byte[]> values) {
+                        return (new String(values.get(0), UTF_8)
+                                        + "+"
+                                        + new String(values.get(1), UTF_8))
+                                .getBytes(UTF_8);
+                    }
+                };
+        try (LocalKvDb db =
+                LocalKvDb.builder(directory)
+                        .level0FileNumCompactTrigger(100)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .mergeOperator(mergeOperator)
+                        .build()) {
+            List<Map.Entry<byte[], byte[]>> oldValues = new ArrayList<>();
+            oldValues.add(entry("a-1", "old-1"));
+            oldValues.add(entry("a-2", "old-2"));
+            db.bulkLoad(oldValues.iterator(), oldValues.size());
+
+            putString(db, "a-1", "new-1");
+            putString(db, "a-2", "new-2");
+            Assertions.assertEquals("new-2", getString(db, "a-2"));
+
+            db.flush();
+
+            Assertions.assertEquals("new-1+new-2", getString(db, "a-1"));
+            Assertions.assertNull(getString(db, "a-2"));
+        }
+    }
+
+    @Test
     public void testManualCompaction() throws IOException {
         try (LocalKvDb db = createDb()) {
             // Create multiple SST files in L0
