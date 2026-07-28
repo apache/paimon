@@ -25,6 +25,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -33,6 +35,9 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.CommonTestUtils;
@@ -577,6 +582,48 @@ public class HiveCatalogTest extends CatalogTestBase {
                 .containsExactlyInAnyOrder(
                         Collections.singletonMap("dt", "20250102"),
                         Collections.singletonMap("dt", "20250101"));
+    }
+
+    @Test
+    public void testListPartitionsWithDoneStatus() throws Exception {
+        String databaseName = "testListPartitionsWithDoneStatus";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.PARTITION_MARK_DONE_ACTION.key(), "mark-event")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20250101"),
+                        Collections.singletonMap("dt", "20250102"));
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Map<String, String> partitionSpec : partitionSpecs) {
+                write.write(GenericRow.of(0, BinaryString.fromString(partitionSpec.get("dt"))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        assertThat(catalog.listPartitions(identifier)).allMatch(partition -> !partition.done());
+
+        catalog.markDonePartitions(identifier, Collections.singletonList(partitionSpecs.get(0)));
+
+        Map<Map<String, String>, Boolean> doneByPartition = new HashMap<>();
+        for (Partition partition : catalog.listPartitions(identifier)) {
+            doneByPartition.put(partition.spec(), partition.done());
+        }
+        assertThat(doneByPartition)
+                .containsEntry(partitionSpecs.get(0), true)
+                .containsEntry(partitionSpecs.get(1), false);
     }
 
     @Test
