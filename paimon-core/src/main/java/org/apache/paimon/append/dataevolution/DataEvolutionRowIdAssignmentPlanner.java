@@ -414,7 +414,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
                         ? "Manifest %s contains a file without first row id."
                         : "File '%s' does not have first row id.",
                 fileName == null ? manifestOrdinal : fileName);
-        long firstRowId = file.firstRowIdValue();
+        long firstRowId = file.nonNullFirstRowId();
         long rowCount = file.rowCount();
         checkState(
                 rowCount > 0,

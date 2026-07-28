@@ -37,6 +37,7 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import javax.annotation.Nullable;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -296,7 +297,13 @@ public interface DataFileMeta {
 
     Timestamp creationTime();
 
-    long creationTimeEpochMillis();
+    default long creationTimeEpochMillis() {
+        return creationTime()
+                .toLocalDateTime()
+                .atZone(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli();
+    }
 
     String fileFormat();
 
@@ -351,7 +358,35 @@ public interface DataFileMeta {
 
     DataFileMeta copy(byte[] newEmbeddedIndex);
 
-    RoaringBitmap32 toFileSelection(List<Range> indices);
+    default RoaringBitmap32 toFileSelection(List<Range> rowRanges) {
+        RoaringBitmap32 selection = null;
+        if (rowRanges != null) {
+            if (firstRowId() == null) {
+                throw new IllegalStateException(
+                        "firstRowId is null, can't convert to file selection");
+            }
+            selection = new RoaringBitmap32();
+            Range fileRange = nonNullRowIdRange();
+            List<Range> result = new ArrayList<>();
+            for (Range expected : rowRanges) {
+                Range intersection = Range.intersection(fileRange, expected);
+                if (intersection != null) {
+                    result.add(intersection);
+                }
+            }
+
+            if (result.size() == 1 && result.get(0).equals(fileRange)) {
+                return null;
+            }
+
+            for (Range range : result) {
+                for (long rowId = range.from; rowId <= range.to; rowId++) {
+                    selection.add((int) (rowId - fileRange.from));
+                }
+            }
+        }
+        return selection;
+    }
 
     static long getMaxSequenceNumber(List<DataFileMeta> fileMetas) {
         return fileMetas.stream()

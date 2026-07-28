@@ -28,13 +28,9 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Range;
-import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
-import java.time.ZoneId;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -205,15 +201,6 @@ public final class BinaryDataFileMeta implements DataFileMeta {
     }
 
     @Override
-    public long creationTimeEpochMillis() {
-        return creationTime()
-                .toLocalDateTime()
-                .atZone(ZoneId.systemDefault())
-                .toInstant()
-                .toEpochMilli();
-    }
-
-    @Override
     public String fileFormat() {
         String fileName = fileName();
         String[] split = fileName.split("\\.");
@@ -268,12 +255,6 @@ public final class BinaryDataFileMeta implements DataFileMeta {
         int position = requiredPosition(FIRST_ROW_ID);
         InternalRow row = currentRow();
         return row.isNullAt(position) ? null : row.getLong(position);
-    }
-
-    public long firstRowIdValue() {
-        Long firstRowId = firstRowId();
-        checkState(firstRowId != null, "Data file does not have first row id.");
-        return firstRowId;
     }
 
     @Nullable
@@ -342,34 +323,6 @@ public final class BinaryDataFileMeta implements DataFileMeta {
     @Override
     public DataFileMeta copy(byte[] newEmbeddedIndex) {
         throw unsupportedOperation("copy(byte[])");
-    }
-
-    @Override
-    public RoaringBitmap32 toFileSelection(List<Range> rowRanges) {
-        RoaringBitmap32 selection = null;
-        if (rowRanges != null) {
-            checkState(firstRowId() != null, "firstRowId is null, can't convert to file selection");
-            selection = new RoaringBitmap32();
-            Range fileRange = nonNullRowIdRange();
-            List<Range> intersections = new ArrayList<>();
-            for (Range expected : rowRanges) {
-                Range intersection = Range.intersection(fileRange, expected);
-                if (intersection != null) {
-                    intersections.add(intersection);
-                }
-            }
-
-            if (intersections.size() == 1 && intersections.get(0).equals(fileRange)) {
-                return null;
-            }
-
-            for (Range range : intersections) {
-                for (long rowId = range.from; rowId <= range.to; rowId++) {
-                    selection.add((int) (rowId - fileRange.from));
-                }
-            }
-        }
-        return selection;
     }
 
     private SimpleStats stats(int fieldIndex) {
