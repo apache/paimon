@@ -1158,6 +1158,17 @@ public class LocalKvDb implements Closeable {
 
         boolean canMerge(MemorySlice firstKey, MemorySlice nextKey);
 
+        /**
+         * Return whether a tombstone can be absorbed into the pending merge group.
+         *
+         * <p>Tombstones are merge boundaries by default. Operators which produce tombstones for
+         * consumed physical keys can opt in so later compactions can merge across those synthetic
+         * tombstones.
+         */
+        default boolean canMergeTombstone(MemorySlice firstKey, MemorySlice tombstoneKey) {
+            return false;
+        }
+
         byte[] merge(List<byte[]> values) throws IOException;
     }
 
