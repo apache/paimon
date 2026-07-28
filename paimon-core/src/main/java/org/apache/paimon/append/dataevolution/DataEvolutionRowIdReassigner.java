@@ -194,11 +194,7 @@ public class DataEvolutionRowIdReassigner {
         DataEvolutionRowIdAssignmentPlanner planner =
                 new DataEvolutionRowIdAssignmentPlanner(
                         table, partitionPredicate, new ArrayList<>(manifestMetas));
-        planner.validateGroups(includedGroups);
-        for (List<ManifestFileMeta> manifestGroup : includedGroups) {
-            planner.planGroup(manifestGroup);
-        }
-        DataEvolutionRowIdAssignmentPlanner.Result compactPlan = planner.buildResult();
+        DataEvolutionRowIdAssignmentPlanner.Result compactPlan = planner.plan(includedGroups);
         if (compactPlan.isEmpty()) {
             return Optional.empty();
         }
@@ -209,18 +205,11 @@ public class DataEvolutionRowIdReassigner {
             manifestMetasToRewrite.add(manifestMetas.get(ordinal));
         }
 
-        Map<BinaryRow, RowRangeMappingIndex> mappings = new LinkedHashMap<>();
-        for (DataEvolutionRowIdAssignmentPlanner.PartitionMapping mapping :
-                compactPlan.partitionMappings) {
-            mappings.put(
-                    mapping.partition,
-                    RowRangeMappingIndex.createFromOwnedArrays(
-                            mapping.oldStarts, mapping.oldEnds, mapping.newRelativeStarts));
-        }
         return Optional.of(
                 new AssignmentPlan(
                         manifestMetasToRewrite,
-                        new RelativeRowIdMappings(mappings, compactPlan.totalOffset)));
+                        new RelativeRowIdMappings(
+                                compactPlan.rowIdMappings, compactPlan.totalOffset)));
     }
 
     private List<List<ManifestFileMeta>> manifestGroupsByPartition(
