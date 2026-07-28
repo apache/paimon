@@ -52,11 +52,8 @@ public final class BinaryManifestEntry implements ManifestEntry {
 
     private final Projection projection;
     private final @Nullable BinaryDataFileMeta file;
-    private final MemorySegment[] partitionSegments = new MemorySegment[1];
+    private final ReusablePartition partitionView = new ReusablePartition();
     private @Nullable InternalRow row;
-    private @Nullable byte[] partitionBytes;
-    private @Nullable BinaryRow partition;
-    private boolean partitionInitialized;
 
     private BinaryManifestEntry(Projection projection) {
         this.projection = projection;
@@ -82,9 +79,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
             file.replace(fileRow);
         }
         this.row = row;
-        this.partitionBytes = null;
-        this.partitionSegments[0] = null;
-        this.partitionInitialized = false;
+        this.partitionView.reset();
         return this;
     }
 
@@ -105,9 +100,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
     /** Drops references to the current row before its reader batch is released. */
     public void clear() {
         row = null;
-        partitionBytes = null;
-        partitionSegments[0] = null;
-        partitionInitialized = false;
+        partitionView.reset();
         if (file != null) {
             file.clear();
         }
@@ -130,35 +123,54 @@ public final class BinaryManifestEntry implements ManifestEntry {
     }
 
     public byte[] partitionBytes() {
-        if (partitionBytes == null) {
-            partitionBytes =
-                    row.getBinary(
-                            requiredOuterPosition(
-                                    projection.partitionPosition, ManifestEntry.PARTITION));
-            checkState(partitionBytes != null, "Serialized manifest partition cannot be null.");
-        }
-        return partitionBytes;
+        return partitionView.getBytes(
+                row, requiredOuterPosition(projection.partitionPosition, ManifestEntry.PARTITION));
     }
 
     @Override
     public BinaryRow partition() {
-        if (!partitionInitialized) {
-            byte[] bytes = partitionBytes();
-            checkState(
-                    bytes.length >= Integer.BYTES, "Serialized manifest partition is too short.");
-            int arity =
-                    ((bytes[0] & 0xff) << 24)
-                            | ((bytes[1] & 0xff) << 16)
-                            | ((bytes[2] & 0xff) << 8)
-                            | (bytes[3] & 0xff);
-            if (partition == null || partition.getFieldCount() != arity) {
-                partition = new BinaryRow(arity);
+        return partitionView.getRow(
+                row, requiredOuterPosition(projection.partitionPosition, ManifestEntry.PARTITION));
+    }
+
+    private static final class ReusablePartition {
+
+        private final MemorySegment[] segments = new MemorySegment[1];
+        private @Nullable byte[] bytes;
+        private @Nullable BinaryRow row;
+
+        private byte[] getBytes(InternalRow entryRow, int position) {
+            if (bytes == null) {
+                bytes = entryRow.getBinary(position);
+                checkState(bytes != null, "Serialized manifest partition cannot be null.");
             }
-            partitionSegments[0] = MemorySegment.wrap(bytes);
-            partition.pointTo(partitionSegments, Integer.BYTES, bytes.length - Integer.BYTES);
-            partitionInitialized = true;
+            return bytes;
         }
-        return partition;
+
+        private BinaryRow getRow(InternalRow entryRow, int position) {
+            if (segments[0] == null) {
+                byte[] bytes = getBytes(entryRow, position);
+                checkState(
+                        bytes.length >= Integer.BYTES,
+                        "Serialized manifest partition is too short.");
+                int arity =
+                        ((bytes[0] & 0xff) << 24)
+                                | ((bytes[1] & 0xff) << 16)
+                                | ((bytes[2] & 0xff) << 8)
+                                | (bytes[3] & 0xff);
+                if (row == null || row.getFieldCount() != arity) {
+                    row = new BinaryRow(arity);
+                }
+                segments[0] = MemorySegment.wrap(bytes);
+                row.pointTo(segments, Integer.BYTES, bytes.length - Integer.BYTES);
+            }
+            return row;
+        }
+
+        private void reset() {
+            bytes = null;
+            segments[0] = null;
+        }
     }
 
     @Override
