@@ -27,6 +27,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.BinaryManifestEntry;
 import org.apache.paimon.manifest.BinaryManifestEntry.Projection;
 import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
+import org.apache.paimon.manifest.DeletedIdentifierSet;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -38,7 +39,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ByteArrayKey;
 import org.apache.paimon.utils.ByteArrayLookupKey;
 import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.DeletedIdentifierSet;
 import org.apache.paimon.utils.PrimitiveRowRanges;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.VersionedObjectSerializer;
@@ -200,8 +200,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
                         continue;
                     }
                     identifier.replace(entry);
-                    group.deletedIdentifiers.add(
-                            partition.id, identifier.bytes(), identifier.length());
+                    group.deletedIdentifiers.add(partition.id, identifier);
                 }
             } catch (Exception e) {
                 throw scanException(manifestMeta, e);
@@ -238,8 +237,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
                     }
                     if (!group.deletedIdentifiers.isEmpty()) {
                         identifier.replace(entry);
-                        if (group.deletedIdentifiers.contains(
-                                partition.id, identifier.bytes(), identifier.length())) {
+                        if (group.deletedIdentifiers.contains(partition.id, identifier)) {
                             continue;
                         }
                     }

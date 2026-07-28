@@ -27,13 +27,13 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.BinaryManifestEntry;
 import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
+import org.apache.paimon.manifest.DeletedIdentifierSet;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.DeletedIdentifierSet;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.VersionedObjectSerializer;
@@ -60,7 +60,6 @@ public class ManifestEntryExternalSort {
             throws Exception {
         try (EntrySorter sorter = new EntrySorter(sortKey, config)) {
             DeletedIdentifierSet deleteEntries = new DeletedIdentifierSet();
-            ReusableIdentifier identifier = new ReusableIdentifier();
             try {
                 scanEntries(
                         section,
@@ -68,15 +67,13 @@ public class ManifestEntryExternalSort {
                         manifestReadParallelism,
                         entry -> {
                             if (entry.isDelete()) {
-                                identifier.replaceWithPartition(entry);
-                                deleteEntries.add(0, identifier.bytes(), identifier.length());
+                                deleteEntries.add(entry);
                             }
                             sorter.write(entry);
                         });
 
                 return sorter.writeMinorToManifest(manifestFile, deleteEntries, newFilesForAbort);
             } finally {
-                identifier.release();
                 deleteEntries.release();
             }
         }
@@ -88,7 +85,7 @@ public class ManifestEntryExternalSort {
             ExternalSortConfig config,
             ManifestFile manifestFile,
             List<ManifestFileMeta> newFilesForAbort,
-            ManifestFileSorter.BinaryIdentifierSet deleteEntries,
+            DeletedIdentifierSet deleteEntries,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         try (EntrySorter sorter = new EntrySorter(sortKey, config)) {
@@ -291,15 +288,14 @@ public class ManifestEntryExternalSort {
                     entry.replace(sortKey.binaryManifestRow(row));
                     identifier.replaceWithPartition(entry);
                     if (entry.isAdd()) {
-                        if (deleteEntries.contains(0, identifier.bytes(), identifier.length())) {
-                            matchedEntries.add(0, identifier.bytes(), identifier.length());
+                        if (deleteEntries.contains(identifier)) {
+                            matchedEntries.add(identifier);
                         } else {
                             addWriter.write(entry);
                         }
-                    } else if (!matchedEntries.contains(0, identifier.bytes(), identifier.length())
-                            && !emittedDeletes.contains(
-                                    0, identifier.bytes(), identifier.length())) {
-                        emittedDeletes.add(0, identifier.bytes(), identifier.length());
+                    } else if (!matchedEntries.contains(identifier)
+                            && !emittedDeletes.contains(identifier)) {
+                        emittedDeletes.add(identifier);
                         deleteWriter.write(entry);
                     }
                 }

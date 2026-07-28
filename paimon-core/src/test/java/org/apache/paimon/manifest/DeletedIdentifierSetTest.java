@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.manifest;
 
 import org.junit.jupiter.api.Test;
 
@@ -83,11 +83,13 @@ class DeletedIdentifierSetTest {
     void testRejectsInvalidIdentifier() {
         DeletedIdentifierSet identifiers = new DeletedIdentifierSet();
 
-        assertThatThrownBy(() -> identifiers.add(0, null, 0))
+        assertThatThrownBy(() -> identifiers.add(0, (byte[]) null, 0))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> identifiers.add(0, new byte[1], -1))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> identifiers.contains(0, new byte[1], 2))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> identifiers.add(0, (BinaryManifestEntry.ReusableIdentifier) null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

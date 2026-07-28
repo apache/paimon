@@ -29,7 +29,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.BinaryManifestEntry;
 import org.apache.paimon.manifest.BinaryManifestEntry.Projection;
-import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
+import org.apache.paimon.manifest.DeletedIdentifierSet;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -39,7 +39,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.DeletedIdentifierSet;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
@@ -76,32 +75,12 @@ public class ManifestFileSorter {
             VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
     private static final Projection DELETE_ENTRY_PROJECTION = createDeleteEntryProjection();
 
-    /** Compact set for allocation-free binary manifest identifier lookups. */
-    static class BinaryIdentifierSet {
-        private final DeletedIdentifierSet identifiers = new DeletedIdentifierSet();
-        private final ReusableIdentifier lookup = new ReusableIdentifier();
-
-        void add(BinaryManifestEntry entry) {
-            lookup.replaceWithPartition(entry);
-            identifiers.add(0, lookup.bytes(), lookup.length());
-        }
-
-        boolean contains(BinaryManifestEntry entry) {
-            lookup.replaceWithPartition(entry);
-            return identifiers.contains(0, lookup.bytes(), lookup.length());
-        }
-
-        boolean isEmpty() {
-            return identifiers.isEmpty();
-        }
-    }
-
     /** Context object that carries shared state across compaction methods. */
     static class CompactionContext {
         final boolean fullCompaction;
         final ManifestSortKey sortKey;
         final ManifestEntryExternalSort.ExternalSortConfig externalSortConfig;
-        final BinaryIdentifierSet deleteEntries;
+        final DeletedIdentifierSet deleteEntries;
         /**
          * Manifest files that need unsorted compaction.
          *
@@ -119,7 +98,7 @@ public class ManifestFileSorter {
                 boolean fullCompaction,
                 ManifestSortKey sortKey,
                 ManifestEntryExternalSort.ExternalSortConfig externalSortConfig,
-                BinaryIdentifierSet deleteEntries,
+                DeletedIdentifierSet deleteEntries,
                 Map<ManifestFileMeta, Boolean> compactWithoutSort,
                 List<ManifestAdjacentSortedRun> levelRuns,
                 List<ManifestAdjacentSortedRun> pickedRuns) {
@@ -141,7 +120,7 @@ public class ManifestFileSorter {
     /** Result of classifying manifest files. */
     private static class ClassifyResult {
         final List<ManifestFileMeta> lsmFiles;
-        final BinaryIdentifierSet deleteEntries;
+        final DeletedIdentifierSet deleteEntries;
         /**
          * Manifest files that need unsorted compaction.
          *
@@ -154,7 +133,7 @@ public class ManifestFileSorter {
 
         ClassifyResult(
                 List<ManifestFileMeta> lsmFiles,
-                BinaryIdentifierSet deleteEntries,
+                DeletedIdentifierSet deleteEntries,
                 Map<ManifestFileMeta, Boolean> compactWithoutSort) {
             this.lsmFiles = lsmFiles;
             this.deleteEntries = deleteEntries;
@@ -164,10 +143,10 @@ public class ManifestFileSorter {
 
     /** Binary identifiers and partition values collected from DELETE entries. */
     private static class DeletedEntryInfo {
-        final BinaryIdentifierSet identifiers;
+        final DeletedIdentifierSet identifiers;
         final Set<BinaryRow> partitions;
 
-        private DeletedEntryInfo(BinaryIdentifierSet identifiers, Set<BinaryRow> partitions) {
+        private DeletedEntryInfo(DeletedIdentifierSet identifiers, Set<BinaryRow> partitions) {
             this.identifiers = identifiers;
             this.partitions = partitions;
         }
@@ -540,7 +519,7 @@ public class ManifestFileSorter {
         // Initialize classification containers and read delete entries
         Map<ManifestFileMeta, Boolean> compactWithoutSort = new LinkedHashMap<>();
         List<ManifestFileMeta> lsmFiles = new LinkedList<>(input);
-        BinaryIdentifierSet classifiedDeleteEntries = new BinaryIdentifierSet();
+        DeletedIdentifierSet classifiedDeleteEntries = new DeletedIdentifierSet();
         Set<BinaryRow> deletePartitions = Collections.emptySet();
         PartitionPredicate predicate = null;
         if (fullCompaction) {
@@ -586,7 +565,7 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifestFiles,
             @Nullable Integer manifestReadParallelism) {
-        BinaryIdentifierSet identifiers = new BinaryIdentifierSet();
+        DeletedIdentifierSet identifiers = new DeletedIdentifierSet();
         Set<BinaryRow> partitions = new HashSet<>();
         List<ManifestFileMeta> filesWithDeletes = new ArrayList<>();
         for (ManifestFileMeta meta : manifestFiles) {
@@ -617,7 +596,7 @@ public class ManifestFileSorter {
     private static void collectDeletedEntries(
             ManifestFileMeta meta,
             ManifestFile manifestFile,
-            BinaryIdentifierSet identifiers,
+            DeletedIdentifierSet identifiers,
             Set<BinaryRow> partitions,
             boolean synchronize) {
         try (CloseableIterator<BinaryManifestEntry> entries =

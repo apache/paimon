@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -34,6 +35,7 @@ import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.List;
 
+import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -78,6 +80,22 @@ class BinaryManifestEntryReusableIdentifierTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void testDeletedIdentifierSetReusesIdentifierForEntryLookup() {
+        DeletedIdentifierSet identifiers = new DeletedIdentifierSet();
+        BinaryManifestEntry first = entry(1, 0, "first", new String[0], null, null);
+        BinaryManifestEntry second = entry(2, 0, "second", new String[0], null, null);
+
+        identifiers.add(first);
+        assertThat(identifiers.contains(first)).isTrue();
+        assertThat(identifiers.contains(second)).isFalse();
+        assertThat(identifiers.contains(first)).isTrue();
+
+        identifiers.add(second);
+        assertThat(identifiers.contains(first)).isTrue();
+        assertThat(identifiers.contains(second)).isTrue();
+    }
+
     private static BinaryManifestEntry entry(
             int bucket,
             int level,
@@ -95,6 +113,7 @@ class BinaryManifestEntryReusableIdentifierTest {
                         DataFileMeta.EXTERNAL_PATH);
         List<DataField> fields =
                 Arrays.asList(
+                        manifestType.getField(ManifestEntry.PARTITION),
                         manifestType.getField(ManifestEntry.BUCKET),
                         manifestType.getField(ManifestEntry.FILE).newType(fileType));
         Object[] extraFileValues = new Object[extraFiles.length];
@@ -105,6 +124,7 @@ class BinaryManifestEntryReusableIdentifierTest {
                 .createEntry()
                 .replace(
                         GenericRow.of(
+                                serializeBinaryRow(BinaryRow.EMPTY_ROW),
                                 bucket,
                                 GenericRow.of(
                                         level,
