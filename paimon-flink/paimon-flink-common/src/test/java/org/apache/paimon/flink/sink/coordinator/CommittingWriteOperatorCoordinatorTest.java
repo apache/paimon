@@ -403,6 +403,62 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
+    public void testPartialFailoverWhileAllSubtasksEndInputWaitForCheckpointComplete()
+            throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 2);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        // Subtask 0 reaches EndInput before checkpoint 1. Subtask 1 is still running, so completing
+        // checkpoint 1 commits only its ordinary entry and keeps subtask 0's MAX entry pending.
+        Committable earlyEndInput = committable(table, Long.MAX_VALUE, 1);
+        coordinator.handleEventFromOperator(0, 0, event(earlyEndInput));
+        coordinator.handleEventFromOperator(1, 0, event(committable(table, 1L, 2)));
+        coordinator.notifyCheckpointComplete(1L);
+        coordinator.waitProcessAllActions();
+        assertResults(table, "2, 2");
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+
+        // The last running subtask now reaches EndInput. All subtasks are at EndInput, but
+        // streaming mode must wait for the next completed checkpoint before the final commit.
+        coordinator.handleEventFromOperator(1, 0, event(committable(table, Long.MAX_VALUE, 3)));
+        coordinator.waitProcessAllActions();
+        assertResults(table, "2, 2");
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+
+        // While waiting for checkpoint completion, subtask 0 fails and restores its MAX entry from
+        // checkpoint 1. Rebuilding allSubtasksEndInput must not commit eagerly in streaming mode.
+        coordinator.executionAttemptFailed(0, 0, new Exception("Fail subtask 0 as expected"));
+        coordinator.executionAttemptReady(0, 1, new MockSubtaskGateway());
+        coordinator.subtaskReset(0, 1L);
+        coordinator.waitProcessAllActions();
+        coordinator.handleEventFromOperator(
+                0,
+                1,
+                restoreEventOfEntries(
+                        1L,
+                        new CheckpointCommittables(
+                                Long.MAX_VALUE,
+                                Collections.singletonList(earlyEndInput),
+                                Long.MIN_VALUE)));
+        coordinator.waitProcessAllActions();
+
+        assertThat(failureCause).isNull();
+        assertResults(table, "2, 2");
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+
+        coordinator.notifyCheckpointComplete(2L);
+        coordinator.waitProcessAllActions();
+        assertThat(failureCause).isNull();
+        assertResults(table, "1, 1", "2, 2", "3, 3");
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(2);
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
     public void testCheckpointAbortPreservesEarlyEndInput() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         TestingContext context = new TestingContext(new OperatorID(), 2);
@@ -469,6 +525,166 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
         // abandon path: restoring committables are dropped, not recommitted
         assertResults(table, "1, 1", "2, 2");
+        second.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testWriterFailoverThenGlobalRestoreUsesCheckpointedEndInput() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 2);
+
+        Committable checkpointedSubtaskZero = committable(table, Long.MAX_VALUE, 1);
+        Committable checkpointedSubtaskOne = committable(table, Long.MAX_VALUE, 2);
+
+        // The coordinator checkpoint is persisted, but its completion callback is lost when the
+        // JM fails. Both writers have already snapshotted EndInput into this checkpoint.
+        CommittingWriteOperatorCoordinator first = createCoordinator(table, context, true);
+        first.start();
+        first.waitProcessAllActions();
+        CompletableFuture<byte[]> checkpoint = new CompletableFuture<>();
+        first.checkpointCoordinator(1L, checkpoint);
+        first.handleEventFromOperator(0, 0, event(checkpointedSubtaskZero));
+        first.handleEventFromOperator(1, 0, event(checkpointedSubtaskOne));
+        first.waitProcessAllActions();
+        byte[] state = checkpoint.get();
+        assertResults(table);
+
+        // Before the JM fails, writer-0 fails and restores locally. This replay only mutates the
+        // old coordinator instance and must not become recovery authority for the new instance.
+        first.executionAttemptFailed(0, 0, new Exception("Fail subtask 0 as expected"));
+        first.executionAttemptReady(0, 1, new MockSubtaskGateway());
+        first.subtaskReset(0, 1L);
+        first.waitProcessAllActions();
+        first.handleEventFromOperator(0, 1, restoreEvent(1L, checkpointedSubtaskZero));
+        first.waitProcessAllActions();
+        assertResults(table);
+        first.close();
+
+        // JM failover creates a fresh coordinator. All writers recover from the same completed
+        // checkpoint, so only the checkpointed EndInput committables are eligible for final commit.
+        CommittingWriteOperatorCoordinator second = createCoordinator(table, context, true);
+        second.resetToCheckpoint(1L, state);
+        second.start();
+        second.waitProcessAllActions();
+        second.handleEventFromOperator(
+                0,
+                2,
+                restoreEventOfEntries(
+                        1L,
+                        new CheckpointCommittables(
+                                Long.MAX_VALUE,
+                                Collections.singletonList(checkpointedSubtaskZero),
+                                Long.MIN_VALUE)));
+        second.waitProcessAllActions();
+        assertThat(second.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RESTORING);
+        assertResults(table);
+
+        second.handleEventFromOperator(
+                1,
+                1,
+                restoreEventOfEntries(
+                        1L,
+                        new CheckpointCommittables(
+                                Long.MAX_VALUE,
+                                Collections.singletonList(checkpointedSubtaskOne),
+                                Long.MIN_VALUE)));
+        second.waitProcessAllActions();
+
+        assertResults(table, "1, 1", "2, 2");
+        assertThat(failureCause).isInstanceOf(RuntimeException.class);
+        assertThat(failureCause).hasMessageContaining("intentionally thrown");
+        failureCause = null;
+        second.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testWriterFailoverThenGlobalRestoreRetainsPartialCheckpointedEndInput()
+            throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 2);
+
+        Committable earlyEndInput = committable(table, Long.MAX_VALUE, 1);
+        Committable checkpointedRunningWriter = committable(table, 1L, 2);
+
+        // Checkpoint 1 contains EndInput for writer-0 while writer-1 is still running. Its
+        // completion commits only writer-1's ordinary entry and leaves writer-0's MAX pending.
+        CommittingWriteOperatorCoordinator first = createCoordinator(table, context, true);
+        first.start();
+        first.waitProcessAllActions();
+        CompletableFuture<byte[]> checkpoint = new CompletableFuture<>();
+        first.checkpointCoordinator(1L, checkpoint);
+        first.handleEventFromOperator(0, 0, event(earlyEndInput));
+        first.handleEventFromOperator(1, 0, event(checkpointedRunningWriter));
+        first.notifyCheckpointComplete(1L);
+        first.waitProcessAllActions();
+        byte[] state = checkpoint.get();
+        assertResults(table, "2, 2");
+
+        // Writer-0 then fails and replays its checkpointed MAX to the old running coordinator.
+        // A following JM failover must discard this local recovery progress.
+        first.executionAttemptFailed(0, 0, new Exception("Fail subtask 0 as expected"));
+        first.executionAttemptReady(0, 1, new MockSubtaskGateway());
+        first.subtaskReset(0, 1L);
+        first.waitProcessAllActions();
+        first.handleEventFromOperator(
+                0,
+                1,
+                restoreEventOfEntries(
+                        1L,
+                        new CheckpointCommittables(
+                                Long.MAX_VALUE,
+                                Collections.singletonList(earlyEndInput),
+                                Long.MIN_VALUE)));
+        first.waitProcessAllActions();
+        assertResults(table, "2, 2");
+        first.close();
+
+        // Global recovery restarts every writer from checkpoint 1. Only writer-0 restores
+        // EndInput, so the new coordinator recovers the ordinary target and keeps MAX pending.
+        CommittingWriteOperatorCoordinator second = createCoordinator(table, context, true);
+        second.resetToCheckpoint(1L, state);
+        second.start();
+        second.waitProcessAllActions();
+        second.handleEventFromOperator(
+                0,
+                2,
+                restoreEventOfEntries(
+                        1L,
+                        new CheckpointCommittables(
+                                Long.MAX_VALUE,
+                                Collections.singletonList(earlyEndInput),
+                                Long.MIN_VALUE)));
+        second.waitProcessAllActions();
+        assertThat(second.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RESTORING);
+
+        second.handleEventFromOperator(
+                1,
+                1,
+                restoreEventOfEntries(
+                        1L,
+                        new CheckpointCommittables(
+                                1L,
+                                Collections.singletonList(checkpointedRunningWriter),
+                                Long.MIN_VALUE)));
+        second.waitProcessAllActions();
+        assertThat(second.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        assertThat(failureCause).isNull();
+        assertResults(table, "2, 2");
+
+        // The retained MAX is committed only after writer-1 reaches EndInput and a later streaming
+        // checkpoint completes.
+        second.handleEventFromOperator(1, 1, event(committable(table, Long.MAX_VALUE, 3)));
+        second.waitProcessAllActions();
+        assertResults(table, "2, 2");
+        second.notifyCheckpointComplete(2L);
+        second.waitProcessAllActions();
+        assertThat(failureCause).isNull();
+        assertResults(table, "1, 1", "2, 2", "3, 3");
         second.close();
     }
 
