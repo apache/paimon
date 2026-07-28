@@ -14,7 +14,6 @@ import flinkConnectorConfigurationHtml from '@site/generated/flink_connector_con
 import sparkCatalogConfigurationHtml from '@site/generated/spark_catalog_configuration.html';
 import sparkConnectorConfigurationHtml from '@site/generated/spark_connector_configuration.html';
 import orcConfigurationHtml from '@site/generated/orc_configuration.html';
-import rocksdbConfigurationHtml from '@site/generated/rocksdb_configuration.html';
 
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -94,9 +93,3 @@ Spark connector options for paimon.
 ### ORC Options
 
 <ConfigTable html={orcConfigurationHtml} />
-
-### RocksDB Options
-
-The following options allow users to finely adjust RocksDB for better performance. You can either specify them in table properties or in dynamic table hints.
-
-<ConfigTable html={rocksdbConfigurationHtml} />

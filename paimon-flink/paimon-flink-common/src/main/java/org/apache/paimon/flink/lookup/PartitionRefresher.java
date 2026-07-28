@@ -42,7 +42,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.apache.paimon.lookup.rocksdb.RocksDBOptions.LOOKUP_CACHE_ROWS;
+import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_ROWS;
 
 /** Manages partition refresh logic for {@link FullCacheLookupTable}. */
 public class PartitionRefresher implements Closeable {

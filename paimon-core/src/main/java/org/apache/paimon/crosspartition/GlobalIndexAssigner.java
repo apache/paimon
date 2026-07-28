@@ -34,7 +34,6 @@ import org.apache.paimon.lookup.StateUtils;
 import org.apache.paimon.lookup.ValueBulkLoader;
 import org.apache.paimon.lookup.ValueState;
 import org.apache.paimon.lookup.local.LocalKvStateFactory;
-import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -74,7 +73,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.lookup.rocksdb.RocksDBOptions.BLOCK_CACHE_SIZE;
+import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Assign UPDATE_BEFORE and bucket for the input record, output record with bucket. */
@@ -148,10 +147,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         Options options = coreOptions.toConfiguration();
         Options stateOptions = Options.fromMap(new HashMap<>(options.toMap()));
         // we should avoid too small memory
-        long configuredCache =
-                options.contains(CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE)
-                        ? coreOptions.lookupCacheMaxMemory().getBytes()
-                        : options.get(BLOCK_CACHE_SIZE).getBytes();
+        long configuredCache = coreOptions.lookupCacheMaxMemory().getBytes();
         long cacheMemory = Math.max(offHeapMemory, configuredCache);
         stateOptions.set(CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE, new MemorySize(cacheMemory));
         this.stateFactory =
@@ -167,7 +163,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         INDEX_NAME,
                         new RowCompactedSerializer(keyType),
                         new PositiveIntIntSerializer(),
-                        options.get(RocksDBOptions.LOOKUP_CACHE_ROWS));
+                        options.get(LOOKUP_CACHE_ROWS));
 
         this.partMapping = new IDMapping<>(BinaryRow::copy);
         this.bucketAssigner = new BucketAssigner();

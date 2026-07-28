@@ -1498,6 +1498,19 @@ public class CoreOptions implements Serializable {
                     .defaultValue(0.75F)
                     .withDescription("The index load factor for lookup.");
 
+    public static final ConfigOption<Long> LOOKUP_CACHE_ROWS =
+            key("lookup.cache-rows")
+                    .longType()
+                    .defaultValue(10_000L)
+                    .withDescription("The maximum number of rows to store in the cache.");
+
+    public static final ConfigOption<Duration> LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL =
+            key("lookup.continuous.discovery-interval")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The discovery interval of lookup continuous reading. This is used as an SQL hint. If it's not configured, the lookup function will fallback to 'continuous.discovery-interval'.");
+
     public static final ConfigOption<Duration> LOOKUP_CACHE_FILE_RETENTION =
             key("lookup.cache-file-retention")
                     .durationType()
@@ -2068,7 +2081,7 @@ public class CoreOptions implements Serializable {
                     .durationType()
                     .noDefaultValue()
                     .withDescription(
-                            "The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), "
+                            "The TTL in local index for cross partition upsert (primary keys not contain all partition fields), "
                                     + "this can avoid maintaining too many indexes and lead to worse and worse performance, "
                                     + "but please note that this may also cause data duplication.");
 

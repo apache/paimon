@@ -25,7 +25,6 @@ import org.apache.paimon.lookup.ListState;
 import org.apache.paimon.lookup.SetState;
 import org.apache.paimon.lookup.StateFactory;
 import org.apache.paimon.lookup.ValueState;
-import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
 import org.apache.paimon.lookup.sort.db.LocalKvDb;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -86,10 +85,7 @@ public class LocalKvStateFactory implements StateFactory {
         }
         this.coreOptions = new CoreOptions(options);
         this.options = options;
-        MemorySize cacheMemory =
-                options.contains(CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE)
-                        ? coreOptions.lookupCacheMaxMemory()
-                        : options.get(RocksDBOptions.BLOCK_CACHE_SIZE);
+        MemorySize cacheMemory = coreOptions.lookupCacheMaxMemory();
         this.cacheManager =
                 offHeapCache
                         ? CacheManager.createOffHeap(

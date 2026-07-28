@@ -27,7 +27,6 @@ import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.LocalQueryExecutor;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.QueryExecutor;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.RemoteQueryExecutor;
-import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -143,7 +142,7 @@ public class FileStoreLookupFunctionTest {
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 3);
         conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 2);
-        conf.set(RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
+        conf.set(CoreOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
         if (dynamicPartition) {
             conf.set(FlinkConnectorOptions.SCAN_PARTITIONS, "max_pt()");
         }
@@ -441,7 +440,7 @@ public class FileStoreLookupFunctionTest {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
+        conf.set(CoreOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
 
         RowType rowType =
                 RowType.of(
