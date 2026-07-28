@@ -142,6 +142,16 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
                                 BinaryString.fromString(stringStats.maxAsString()),
                                 nullCount);
                 break;
+            case BINARY:
+            case VARBINARY:
+                assertStatsClass(field, stats, BinaryStatistics.class);
+                BinaryStatistics binaryStats = (BinaryStatistics) stats;
+                fieldStats =
+                        new SimpleColStats(
+                                binaryStats.genericGetMin().getBytes(),
+                                binaryStats.genericGetMax().getBytes(),
+                                nullCount);
+                break;
             case BOOLEAN:
                 assertStatsClass(field, stats, BooleanStatistics.class);
                 BooleanStatistics boolStats = (BooleanStatistics) stats;

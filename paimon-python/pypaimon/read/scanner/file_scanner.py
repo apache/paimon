@@ -614,8 +614,6 @@ class FileScanner:
     def _validate_chunk_shuffle_compat(self) -> None:
         if self.table.is_primary_key_table:
             raise ValueError("chunk_shuffle only supports append tables")
-        if self.deletion_vectors_enabled:
-            raise ValueError("chunk_shuffle not supported with deletion vectors")
         if self.start_pos_of_this_subtask is not None:
             raise ValueError("chunk_shuffle cannot combine with with_slice")
         if self.limit is not None:

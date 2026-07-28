@@ -34,7 +34,7 @@ env:
   JDK_VERSION: 8
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
   LUMINA_DATA_VERSION: 0.1.0
-  PYPAIMON_RUST_REV: 7c568274a4c5df6bd00e8d60edea21395412202b
+  PYPAIMON_RUST_REV: 6b6782923a59eeba766cbd45dde6989705b282bc
 
 
 concurrency:
@@ -131,11 +131,12 @@ jobs:
           else
             python -m pip install --upgrade pip
             pip install torch --index-url https://download.pytorch.org/whl/cpu
-            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.54.0 fastavro==1.11.1 'isal>=1.8,<2' pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==0.39.0 cramjam flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 'daft>=0.7.6' 'datafusion>=52' datasketches
+            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.54.0 fastavro==1.11.1 'isal>=1.8,<2' pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==0.39.0 cramjam flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 'daft>=0.7.6' 'datafusion>=54,<55' datasketches
             if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
-              # Exercise the split-planning API in one lane until the compatible 0.3 wheel is published.
+              # Exercise the 0.4 API in one lane until its wheel is published.
               python -m pip install "git+https://github.com/apache/paimon-rust.git@${PYPAIMON_RUST_REV}#subdirectory=bindings/python"
-              python -c "from pypaimon_rust.datafusion import PaimonCatalog; assert hasattr(PaimonCatalog, 'get_table')"
+              python -m pip install "./paimon-python[sql]"
+              python -c "import tempfile; from datafusion import SessionContext; from pypaimon_rust.datafusion import PaimonCatalog; warehouse = tempfile.TemporaryDirectory(); ctx = SessionContext(); ctx.register_catalog_provider('paimon', PaimonCatalog({'warehouse': warehouse.name}))"
             else
               python -m pip install pypaimon-rust==0.2.0
             fi
