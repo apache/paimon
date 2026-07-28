@@ -31,16 +31,17 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Index for row-range mappings. */
 final class RowRangeMappingIndex {
 
-    private final List<Mapping> mappings;
+    private final long[] oldStarts;
     private final long[] oldEnds;
+    private final long[] newStarts;
+    private final long newStartOffset;
 
-    private RowRangeMappingIndex(List<Mapping> mappings) {
-        this.mappings = mappings;
-        this.oldEnds = new long[mappings.size()];
-        for (int i = 0; i < mappings.size(); i++) {
-            Mapping mapping = mappings.get(i);
-            oldEnds[i] = mapping.oldEnd;
-        }
+    private RowRangeMappingIndex(
+            long[] oldStarts, long[] oldEnds, long[] newStarts, long newStartOffset) {
+        this.oldStarts = oldStarts;
+        this.oldEnds = oldEnds;
+        this.newStarts = newStarts;
+        this.newStartOffset = newStartOffset;
     }
 
     static RowRangeMappingIndex create(List<Mapping> mappings) {
@@ -49,21 +50,48 @@ final class RowRangeMappingIndex {
 
         List<Mapping> sorted = new ArrayList<>(mappings);
         Collections.sort(sorted, Comparator.comparingLong(mapping -> mapping.oldStart));
-        Mapping previous = null;
-        for (Mapping mapping : sorted) {
-            checkArgument(
-                    mapping.oldStart <= mapping.oldEnd,
-                    "Invalid old row range [%s, %s].",
-                    mapping.oldStart,
-                    mapping.oldEnd);
-            if (previous != null) {
-                checkArgument(
-                        previous.oldEnd < mapping.oldStart,
-                        "Old row range mappings cannot overlap.");
-            }
-            previous = mapping;
+        long[] oldStarts = new long[sorted.size()];
+        long[] oldEnds = new long[sorted.size()];
+        long[] newStarts = new long[sorted.size()];
+        for (int i = 0; i < sorted.size(); i++) {
+            Mapping mapping = sorted.get(i);
+            oldStarts[i] = mapping.oldStart;
+            oldEnds[i] = mapping.oldEnd;
+            newStarts[i] = mapping.newStart;
         }
-        return new RowRangeMappingIndex(Collections.unmodifiableList(sorted));
+        validate(oldStarts, oldEnds, newStarts);
+        return new RowRangeMappingIndex(oldStarts, oldEnds, newStarts, 0L);
+    }
+
+    /** Creates an index by taking ownership of the three arrays. */
+    static RowRangeMappingIndex createFromOwnedArrays(
+            long[] oldStarts, long[] oldEnds, long[] newStarts) {
+        checkArgument(oldStarts != null, "Old row range starts cannot be null.");
+        checkArgument(oldEnds != null, "Old row range ends cannot be null.");
+        checkArgument(newStarts != null, "New row range starts cannot be null.");
+
+        validate(oldStarts, oldEnds, newStarts);
+        return new RowRangeMappingIndex(oldStarts, oldEnds, newStarts, 0L);
+    }
+
+    private static void validate(long[] oldStarts, long[] oldEnds, long[] newStarts) {
+        checkArgument(
+                oldStarts.length == oldEnds.length && oldStarts.length == newStarts.length,
+                "Row range mapping arrays must have the same length.");
+        checkArgument(oldStarts.length > 0, "Row range mappings cannot be empty.");
+
+        for (int i = 0; i < oldStarts.length; i++) {
+            checkArgument(
+                    oldStarts[i] <= oldEnds[i],
+                    "Invalid old row range [%s, %s].",
+                    oldStarts[i],
+                    oldEnds[i]);
+            if (i > 0) {
+                checkArgument(
+                        oldEnds[i - 1] < oldStarts[i],
+                        "Old row range mappings cannot overlap or be out of order.");
+            }
+        }
     }
 
     static Mapping mapping(long oldStart, long oldEnd, long newStart) {
@@ -71,15 +99,26 @@ final class RowRangeMappingIndex {
     }
 
     RowRangeMappingIndex shiftNewStarts(long offset) {
-        List<Mapping> shifted = new ArrayList<>(mappings.size());
-        for (Mapping mapping : mappings) {
-            shifted.add(
-                    mapping(
-                            mapping.oldStart,
-                            mapping.oldEnd,
-                            Math.addExact(mapping.newStart, offset)));
+        long combinedOffset;
+        try {
+            combinedOffset = Math.addExact(newStartOffset, offset);
+        } catch (ArithmeticException ignored) {
+            // The offsets themselves may overflow even though every shifted row ID remains valid.
+            // Materialize the effective starts in that uncommon case.
+            long[] shiftedNewStarts = new long[newStarts.length];
+            for (int i = 0; i < newStarts.length; i++) {
+                shiftedNewStarts[i] =
+                        Math.addExact(Math.addExact(newStarts[i], newStartOffset), offset);
+            }
+            return new RowRangeMappingIndex(oldStarts, oldEnds, shiftedNewStarts, 0L);
         }
-        return create(shifted);
+
+        // Preserve the old eager implementation's contract: shift fails immediately if any
+        // individual new row ID overflows, even when that mapping is never queried later.
+        for (long newStart : newStarts) {
+            Math.addExact(Math.addExact(newStart, newStartOffset), offset);
+        }
+        return new RowRangeMappingIndex(oldStarts, oldEnds, newStarts, combinedOffset);
     }
 
     Optional<Range> map(Range oldRange) {
@@ -91,33 +130,32 @@ final class RowRangeMappingIndex {
         long newTo = Long.MIN_VALUE;
         boolean mapped = false;
 
-        for (int i = lowerBound(oldEnds, cursor); i < mappings.size(); i++) {
-            Mapping mapping = mappings.get(i);
-            if (mapping.oldStart > cursor) {
+        for (int i = lowerBound(oldEnds, cursor); i < oldStarts.length; i++) {
+            if (oldStarts[i] > cursor) {
                 break;
             }
 
-            long segmentTo = Math.min(mapping.oldEnd, oldRange.to);
-            long segmentNewFrom = mapping.newStart + cursor - mapping.oldStart;
-            long segmentNewTo = mapping.newStart + segmentTo - mapping.oldStart;
+            long segmentTo = Math.min(oldEnds[i], oldRange.to);
+            long shiftedNewStart = Math.addExact(newStarts[i], newStartOffset);
+            long segmentNewFrom =
+                    Math.addExact(shiftedNewStart, Math.subtractExact(cursor, oldStarts[i]));
+            long segmentNewTo =
+                    Math.addExact(shiftedNewStart, Math.subtractExact(segmentTo, oldStarts[i]));
 
             if (!mapped) {
                 newFrom = segmentNewFrom;
                 mapped = true;
-            } else if (newTo + 1 != segmentNewFrom) {
+            } else if (Math.addExact(newTo, 1L) != segmentNewFrom) {
                 return Optional.empty();
             }
             newTo = segmentNewTo;
-            cursor = segmentTo + 1;
-            if (cursor > oldRange.to) {
-                break;
+            if (segmentTo == oldRange.to) {
+                return Optional.of(new Range(newFrom, newTo));
             }
+            cursor = Math.addExact(segmentTo, 1L);
         }
 
-        if (cursor <= oldRange.to) {
-            return Optional.empty();
-        }
-        return Optional.of(new Range(newFrom, newTo));
+        return Optional.empty();
     }
 
     boolean overlaps(Range oldRange) {
@@ -125,7 +163,7 @@ final class RowRangeMappingIndex {
         checkArgument(oldRange.from <= oldRange.to, "Invalid old row range %s.", oldRange);
 
         int index = lowerBound(oldEnds, oldRange.from);
-        return index < mappings.size() && mappings.get(index).oldStart <= oldRange.to;
+        return index < oldStarts.length && oldStarts[index] <= oldRange.to;
     }
 
     private static int lowerBound(long[] sorted, long target) {
