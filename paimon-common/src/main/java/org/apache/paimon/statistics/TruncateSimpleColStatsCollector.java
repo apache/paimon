@@ -22,12 +22,14 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SortUtil;
 
+import java.util.Arrays;
 import java.util.regex.Pattern;
 
 /**
  * The truncate stats collector which will report null count, truncated min/max value. Currently,
- * truncation only performs on the {@link BinaryString} value.
+ * truncation only performs on the {@link BinaryString} and {@code byte[]} values.
  */
 public class TruncateSimpleColStatsCollector extends AbstractSimpleColStatsCollector {
 
@@ -58,7 +60,26 @@ public class TruncateSimpleColStatsCollector extends AbstractSimpleColStatsColle
             return;
         }
 
-        // TODO use comparator for not comparable types and extract this logic to a util class
+        if (field instanceof byte[]) {
+            byte[] bytes = (byte[]) field;
+            if (minValue == null || SortUtil.compareBinary(bytes, (byte[]) minValue) < 0) {
+                minValue = fieldSerializer.copy(truncateMin(field));
+            }
+            if (maxValue == null || SortUtil.compareBinary(bytes, (byte[]) maxValue) > 0) {
+                Object max = truncateMax(field);
+                // may fail
+                if (max != null) {
+                    if (max != field) {
+                        // copied in `truncateMax`
+                        maxValue = max;
+                    } else {
+                        maxValue = fieldSerializer.copy(max);
+                    }
+                }
+            }
+            return;
+        }
+
         if (!(field instanceof Comparable)) {
             return;
         }
@@ -106,6 +127,9 @@ public class TruncateSimpleColStatsCollector extends AbstractSimpleColStatsColle
         }
         if (field instanceof BinaryString) {
             return ((BinaryString) field).substring(0, length);
+        } else if (field instanceof byte[]) {
+            byte[] bytes = (byte[]) field;
+            return bytes.length <= length ? bytes : Arrays.copyOf(bytes, length);
         } else {
             return field;
         }
@@ -139,6 +163,26 @@ public class TruncateSimpleColStatsCollector extends AbstractSimpleColStatsColle
                     // Append next code point to the truncated substring
                     truncatedStringBuilder.appendCodePoint(nextCodePoint);
                     return BinaryString.fromString(truncatedStringBuilder.toString());
+                }
+            }
+            failed = true;
+            return null; // Cannot find a valid upper bound
+        } else if (field instanceof byte[]) {
+            byte[] bytes = (byte[]) field;
+
+            // No need to increment if the input length is under the truncate length
+            if (bytes.length <= length) {
+                return field;
+            }
+
+            byte[] truncated = Arrays.copyOf(bytes, length);
+
+            // Try incrementing the bytes from the end
+            for (int i = length - 1; i >= 0; i--) {
+                // No overflow
+                if (truncated[i] != (byte) 0xFF) {
+                    truncated[i]++;
+                    return Arrays.copyOf(truncated, i + 1);
                 }
             }
             failed = true;
