@@ -629,7 +629,8 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             Row(5, "real-5"),
             Row(6, "postpone-6")))
         checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(5L)))
-        assert(query.queryExecution.executedPlan.toString.contains("PaimonPostponeMergeScan test.t"))
+        assert(
+          query.queryExecution.executedPlan.toString.contains("PaimonPostponeMergeScan test.t"))
       }
     }
   }
