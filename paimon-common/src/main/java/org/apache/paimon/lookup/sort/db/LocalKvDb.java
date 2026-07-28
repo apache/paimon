@@ -471,12 +471,10 @@ public class LocalKvDb implements Closeable {
 
     private void flushMemTable() throws IOException {
         TreeMap<MemorySlice, byte[]> snapshot = memTable;
+        SstFileMetadata metadata = writeMemTableToSst(snapshot);
+        levels.addLevelZeroFile(metadata);
         memTable = new TreeMap<>(keyComparator);
         memTableSize = 0;
-
-        SstFileMetadata metadata = writeMemTableToSst(snapshot);
-
-        levels.addLevelZeroFile(metadata);
 
         LOG.info(
                 "Flushed MemTable to L0 SST file: {}, entries: {}",
@@ -610,12 +608,14 @@ public class LocalKvDb implements Closeable {
     private SstFileMetadata writeMemTableToSst(TreeMap<MemorySlice, byte[]> data)
             throws IOException {
         File sstFile = newSstFile();
-        SortLookupStoreWriter writer =
-                storeFactory.createWriter(sstFile, bloomFilterBuilderFactory.apply(data.size()));
+        SortLookupStoreWriter writer = null;
         MemorySlice minKey = null;
         MemorySlice maxKey = null;
         long tombstoneCount = 0;
         try {
+            writer =
+                    storeFactory.createWriter(
+                            sstFile, bloomFilterBuilderFactory.apply(data.size()));
             for (Map.Entry<MemorySlice, byte[]> entry : data.entrySet()) {
                 writer.put(entry.getKey().copyBytes(), entry.getValue());
                 if (minKey == null) {
@@ -626,10 +626,20 @@ public class LocalKvDb implements Closeable {
                     tombstoneCount++;
                 }
             }
-        } finally {
             writer.close();
+            writer = null;
+            return new SstFileMetadata(sstFile, minKey, maxKey, tombstoneCount, 0);
+        } catch (IOException | RuntimeException e) {
+            if (writer != null) {
+                try {
+                    writer.close();
+                } catch (IOException suppressed) {
+                    e.addSuppressed(suppressed);
+                }
+            }
+            deleteFileQuietly(sstFile);
+            throw e;
         }
-        return new SstFileMetadata(sstFile, minKey, maxKey, tombstoneCount, 0);
     }
 
     private File newSstFile() {

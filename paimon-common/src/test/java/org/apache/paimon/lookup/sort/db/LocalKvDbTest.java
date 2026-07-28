@@ -30,6 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.file.Files;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -389,6 +390,31 @@ public class LocalKvDbTest {
 
         // After close, data should have been flushed to SST
         Assertions.assertEquals(1, db.getSstFileCount());
+    }
+
+    @Test
+    public void testFlushFailureKeepsMemTableForRetry() throws IOException {
+        File dbDir = new File(tempDir.toFile(), "flush-failure-db");
+        try (LocalKvDb db =
+                LocalKvDb.builder(dbDir)
+                        .memTableFlushThreshold(1024 * 1024)
+                        .blockSize(256)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .build()) {
+            putString(db, "key", "value");
+
+            Files.delete(dbDir.toPath());
+            Files.createFile(dbDir.toPath());
+            Assertions.assertThrows(IOException.class, db::flush);
+            Assertions.assertEquals("value", getString(db, "key"));
+            Assertions.assertTrue(db.getMemTableSize() > 0);
+
+            Files.delete(dbDir.toPath());
+            Files.createDirectories(dbDir.toPath());
+            db.flush();
+            Assertions.assertEquals("value", getString(db, "key"));
+            Assertions.assertEquals(0, db.getMemTableSize());
+        }
     }
 
     @Test
