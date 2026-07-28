@@ -71,23 +71,19 @@ case class SparkOrphanFilesClean(
       .mapPartitions(_.flatMap {
         branch =>
           val liveSnapshotIds =
-            if (Identifier.DEFAULT_MAIN_BRANCH.equals(branch)) {
-              specifiedTable
-                .switchToBranch(branch)
-                .snapshotManager()
-                .safelyGetAllSnapshots()
-                .asScala
-                .map(_.id())
-                .toSet
-            } else {
-              Set.empty[Long]
-            }
+            specifiedTable
+              .switchToBranch(branch)
+              .snapshotManager()
+              .safelyGetAllSnapshots()
+              .asScala
+              .map(_.id())
+              .toSet
           safelyGetAllSnapshots(branch).asScala.map(
             snapshot => (branch, snapshot.toJson, liveSnapshotIds.contains(snapshot.id())))
       })
       .repartition(parallelism)
       .flatMap {
-        case (branch, snapshotJson, liveOnMainBranch) =>
+        case (branch, snapshotJson, isLive) =>
           val usedFileBuffer = new ArrayBuffer[BranchAndManifestFile]()
           val usedFileConsumer =
             new Consumer[org.apache.paimon.utils.Pair[String, java.lang.Boolean]] {
@@ -98,10 +94,10 @@ case class SparkOrphanFilesClean(
                     pair.getLeft,
                     pair.getRight,
                     isMissing = false,
-                    isLiveSnapshot = liveOnMainBranch))
+                    isLiveSnapshot = isLive))
               }
             }
-          val missingManifest = if (liveOnMainBranch) new AtomicBoolean(false) else null
+          val missingManifest = if (isLive) new AtomicBoolean(false) else null
           val snapshot = Snapshot.fromJson(snapshotJson)
           collectWithoutDataFileWithManifestFlag(
             branch,

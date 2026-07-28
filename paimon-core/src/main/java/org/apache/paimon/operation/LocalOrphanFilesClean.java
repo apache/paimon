@@ -54,7 +54,6 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
@@ -181,12 +180,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             AtomicBoolean missingManifest)
             throws IOException {
         Set<Snapshot> liveSnapshots =
-                DEFAULT_MAIN_BRANCH.equals(branch)
-                        ? new HashSet<>(
-                                table.switchToBranch(branch)
-                                        .snapshotManager()
-                                        .safelyGetAllSnapshots())
-                        : Collections.emptySet();
+                new HashSet<>(
+                        table.switchToBranch(branch).snapshotManager().safelyGetAllSnapshots());
         randomlyOnlyExecute(
                 executor,
                 snapshot -> {

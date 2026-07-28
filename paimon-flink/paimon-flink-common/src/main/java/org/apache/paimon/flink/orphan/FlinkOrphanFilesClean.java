@@ -166,13 +166,10 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             Collector<Tuple3<String, String, Boolean>> out)
                                             throws Exception {
                                         Set<Long> liveSnapshotIds =
-                                                Identifier.DEFAULT_MAIN_BRANCH.equals(branch)
-                                                        ? table.switchToBranch(branch)
-                                                                .snapshotManager()
-                                                                .safelyGetAllSnapshots().stream()
-                                                                .map(Snapshot::id)
-                                                                .collect(Collectors.toSet())
-                                                        : Collections.emptySet();
+                                                table.switchToBranch(branch).snapshotManager()
+                                                        .safelyGetAllSnapshots().stream()
+                                                        .map(Snapshot::id)
+                                                        .collect(Collectors.toSet());
                                         for (Snapshot snapshot : safelyGetAllSnapshots(branch)) {
                                             out.collect(
                                                     new Tuple3<>(
@@ -198,7 +195,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             throws Exception {
                                         String branch = branchAndSnapshot.f0;
                                         Snapshot snapshot = Snapshot.fromJson(branchAndSnapshot.f1);
-                                        boolean liveOnMainBranch = branchAndSnapshot.f2;
+                                        boolean isLiveSnapshot = branchAndSnapshot.f2;
                                         Consumer<String> manifestConsumer =
                                                 manifest ->
                                                         ctx.output(
@@ -206,9 +203,9 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                                 new Tuple3<>(
                                                                         branch,
                                                                         manifest,
-                                                                        liveOnMainBranch));
+                                                                        isLiveSnapshot));
                                         AtomicBoolean missingManifest =
-                                                liveOnMainBranch ? new AtomicBoolean(false) : null;
+                                                isLiveSnapshot ? new AtomicBoolean(false) : null;
                                         collectWithoutDataFile(
                                                 branch,
                                                 snapshot,

@@ -212,8 +212,13 @@ public class LocalOrphanFilesCleanTest {
         table.copy(expireOptions.toMap()).newCommit("").expireSnapshots();
 
         // randomly delete tags
-        List<String> deleteTags = Collections.emptyList();
-        deleteTags = randomlyPick(allTags);
+        String branchBaseTag = allTags.get(0);
+        List<String> deletableTags =
+                allTags.stream()
+                        .filter(tag -> !tag.equals(branchBaseTag))
+                        .collect(Collectors.toList());
+        List<String> deleteTags =
+                deletableTags.isEmpty() ? Collections.emptyList() : randomlyPick(deletableTags);
         for (String tagName : deleteTags) {
             table.deleteTag(tagName);
         }
@@ -315,8 +320,13 @@ public class LocalOrphanFilesCleanTest {
         table.copy(expireOptions.toMap()).newCommit("").expireSnapshots();
 
         // randomly delete tags
-        List<String> deleteTags = Collections.emptyList();
-        deleteTags = randomlyPick(allTags);
+        String branchBaseTag = allTags.get(0);
+        List<String> deletableTags =
+                allTags.stream()
+                        .filter(tag -> !tag.equals(branchBaseTag))
+                        .collect(Collectors.toList());
+        List<String> deleteTags =
+                deletableTags.isEmpty() ? Collections.emptyList() : randomlyPick(deletableTags);
         for (String tagName : deleteTags) {
             table.deleteTag(tagName);
         }
@@ -725,6 +735,44 @@ public class LocalOrphanFilesCleanTest {
 
         Snapshot latest = table.snapshotManager().latestSnapshot();
         Path missingManifestList = new Path(manifestDir, latest.baseManifestList());
+        assertThat(fileIO.exists(missingManifestList)).isTrue();
+        fileIO.deleteQuietly(missingManifestList);
+
+        LocalOrphanFilesClean orphanFilesClean =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
+        CleanOrphanFilesResult result = orphanFilesClean.clean();
+
+        assertThat(result.getDeletedFileCount()).isEqualTo(0);
+        for (Path dataFile : dataFilesBefore) {
+            assertThat(fileIO.exists(dataFile)).isTrue();
+        }
+    }
+
+    @Test
+    void testAbortWhenBranchManifestListMissingDuringConcurrentExpiration() throws Exception {
+        commit(Collections.singletonList(new TestPojo(1, 0, "a", "v1")));
+
+        String branchName = "branch1";
+        table.createBranch(branchName);
+        FileStoreTable branchTable = table.switchToBranch(branchName);
+        String branchCommitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> branchWrite = branchTable.newWrite(branchCommitUser);
+                TableCommitImpl branchCommit = branchTable.newCommit(branchCommitUser)) {
+            branchWrite.write(new TestPojo(2, 0, "a", "v2").toRow(RowKind.INSERT));
+            branchCommit.commit(0, branchWrite.prepareCommit(true, 0));
+            branchWrite.write(new TestPojo(3, 0, "b", "v3").toRow(RowKind.INSERT));
+            branchCommit.commit(1, branchWrite.prepareCommit(true, 1));
+            branchWrite.write(new TestPojo(4, 1, "c", "v4").toRow(RowKind.INSERT));
+            branchCommit.commit(2, branchWrite.prepareCommit(true, 2));
+        }
+
+        List<Path> dataFilesBefore = new ArrayList<>();
+        collectDataFiles(tablePath, dataFilesBefore);
+        assertThat(dataFilesBefore).isNotEmpty();
+
+        Snapshot branchLatest = branchTable.snapshotManager().latestSnapshot();
+        Path missingManifestList = new Path(manifestDir, branchLatest.baseManifestList());
         assertThat(fileIO.exists(missingManifestList)).isTrue();
         fileIO.deleteQuietly(missingManifestList);
 
