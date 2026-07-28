@@ -445,12 +445,13 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         BlobDescriptorReaderFactory.create(rootTable);
 
         String readVia = RESTUtil.encodeString(JsonSerdeUtil.toFlatJson(root));
-        assertThat(restCatalogServer.getReceivedHeaders())
-                .hasSizeGreaterThanOrEqualTo(2)
-                .allSatisfy(
-                        headers ->
-                                assertThat(headers)
-                                        .containsEntry(READ_VIA_HEADER.toLowerCase(), readVia));
+        ResourcePaths resourcePaths =
+                ResourcePaths.forCatalogProperties(restCatalog.api().options());
+        assertReadViaHeader(
+                resourcePaths.table(target.getDatabaseName(), target.getObjectName()), readVia);
+        assertReadViaHeader(
+                resourcePaths.tableToken(target.getDatabaseName(), target.getObjectName()),
+                readVia);
     }
 
     @Test
@@ -526,6 +527,15 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         }
 
         assert foundCustomHeader : "Header was not found in any request";
+    }
+
+    private void assertReadViaHeader(String resourcePath, String readVia) {
+        assertThat(restCatalogServer.getReceivedHeaders(resourcePath))
+                .singleElement()
+                .satisfies(
+                        headers ->
+                                assertThat(headers)
+                                        .containsEntry(READ_VIA_HEADER.toLowerCase(), readVia));
     }
 
     private void testDlfAuth(RESTCatalog restCatalog) throws Exception {
