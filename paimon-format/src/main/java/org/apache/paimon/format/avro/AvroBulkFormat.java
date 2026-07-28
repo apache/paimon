@@ -43,21 +43,19 @@ import java.io.IOException;
 public class AvroBulkFormat implements FormatReaderFactory {
 
     protected final RowType projectedRowType;
-    private final boolean objectReuse;
 
     public AvroBulkFormat(RowType projectedRowType) {
-        this(projectedRowType, false);
-    }
-
-    public AvroBulkFormat(RowType projectedRowType, boolean objectReuse) {
         this.projectedRowType = projectedRowType;
-        this.objectReuse = objectReuse;
     }
 
     @Override
     public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
-        return new AvroReader(context.fileIO(), context.filePath(), context.fileSize());
+        return new AvroReader(
+                context.fileIO(),
+                context.filePath(),
+                context.fileSize(),
+                context.isRecordReuseAllowed());
     }
 
     private class AvroReader implements FileRecordReader<InternalRow> {
@@ -68,9 +66,11 @@ public class AvroBulkFormat implements FormatReaderFactory {
         private final long end;
         private final Pool<Object> pool;
         private final Path filePath;
+        private final boolean objectReuse;
         private long currentRowPosition;
 
-        private AvroReader(FileIO fileIO, Path path, long fileSize) throws IOException {
+        private AvroReader(FileIO fileIO, Path path, long fileSize, boolean objectReuse)
+                throws IOException {
             this.fileIO = fileIO;
             this.end = fileSize;
             this.reader = createReaderFromPath(path, end);
@@ -78,6 +78,7 @@ public class AvroBulkFormat implements FormatReaderFactory {
             this.pool = new Pool<>(1);
             this.pool.add(new Object());
             this.filePath = path;
+            this.objectReuse = objectReuse;
             this.currentRowPosition = 0;
         }
 

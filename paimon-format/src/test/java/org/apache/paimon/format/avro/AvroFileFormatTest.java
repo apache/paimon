@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderContext;
+import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -170,11 +171,22 @@ public class AvroFileFormatTest {
             writer.close();
         }
 
+        FormatReaderFactory readerFactory =
+                fileFormat.createReaderFactory(rowType, rowType, new ArrayList<>());
         try (RecordReader<InternalRow> reader =
-                fileFormat
-                        .createObjectReuseReaderFactory(rowType)
-                        .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                readerFactory.createReader(
+                        new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+            RecordIterator<InternalRow> batch = reader.readBatch();
+            assertThat(batch).isNotNull();
+            InternalRow first = batch.next();
+            InternalRow second = batch.next();
+            assertThat(second).isNotSameAs(first);
+            batch.releaseBatch();
+        }
+
+        try (RecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), true))) {
             RecordIterator<InternalRow> batch = reader.readBatch();
             assertThat(batch).isNotNull();
             InternalRow first = batch.next();

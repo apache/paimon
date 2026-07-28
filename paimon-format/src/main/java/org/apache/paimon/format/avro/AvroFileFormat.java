@@ -80,11 +80,6 @@ public class AvroFileFormat extends FileFormat {
         return new AvroBulkFormat(projectedRowType);
     }
 
-    /** Creates an Avro reader which may reuse the row returned by the previous read. */
-    public FormatReaderFactory createObjectReuseReaderFactory(RowType projectedRowType) {
-        return new AvroBulkFormat(projectedRowType, true);
-    }
-
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         return new RowAvroWriterFactory(type);

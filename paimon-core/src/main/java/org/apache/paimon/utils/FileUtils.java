@@ -127,11 +127,22 @@ public class FileUtils {
     public static RecordReader<InternalRow> createFormatReader(
             FileIO fileIO, FormatReaderFactory format, Path file, @Nullable Long fileSize)
             throws IOException {
+        return createFormatReader(fileIO, format, file, fileSize, false);
+    }
+
+    public static RecordReader<InternalRow> createFormatReader(
+            FileIO fileIO,
+            FormatReaderFactory format,
+            Path file,
+            @Nullable Long fileSize,
+            boolean recordReuseAllowed)
+            throws IOException {
         try {
             if (fileSize == null) {
                 fileSize = fileIO.getFileSize(file);
             }
-            return format.createReader(new FormatReaderContext(fileIO, file, fileSize));
+            return format.createReader(
+                    new FormatReaderContext(fileIO, file, fileSize, recordReuseAllowed));
         } catch (Exception e) {
             checkExists(fileIO, file);
             throw e;

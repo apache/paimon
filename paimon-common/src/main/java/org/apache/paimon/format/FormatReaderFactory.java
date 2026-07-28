@@ -53,5 +53,15 @@ public interface FormatReaderFactory {
 
         @Nullable
         RoaringBitmap32 selection();
+
+        /**
+         * Returns whether the caller allows the reader to reuse records.
+         *
+         * <p>If enabled, a returned record and its nested mutable values may become invalid after
+         * advancing the reader.
+         */
+        default boolean isRecordReuseAllowed() {
+            return false;
+        }
     }
 }

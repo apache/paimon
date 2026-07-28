@@ -24,7 +24,6 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsCollector;
-import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.RollingFileWriter;
@@ -167,19 +166,15 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         BinaryManifestEntry entry = projection.createEntry();
         try {
             FormatReaderFactory projectedReaderFactory =
-                    fileFormat instanceof AvroFileFormat
-                            ? ((AvroFileFormat) fileFormat)
-                                    .createObjectReuseReaderFactory(projection.projectedType())
-                            : fileFormat.createReaderFactory(
-                                    manifestType,
-                                    projection.projectedType(),
-                                    Collections.emptyList());
+                    fileFormat.createReaderFactory(
+                            manifestType, projection.projectedType(), Collections.emptyList());
             CloseableIterator<InternalRow> rows =
                     FileUtils.createFormatReader(
                                     fileIO,
                                     projectedReaderFactory,
                                     pathFactory.toPath(fileName),
-                                    fileSize)
+                                    fileSize,
+                                    true)
                             .toCloseableIterator();
             return new CloseableIterator<BinaryManifestEntry>() {
 
