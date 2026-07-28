@@ -276,6 +276,37 @@ class LocalKvStateFactoryTest {
     }
 
     @Test
+    void testListStateTtlIsRefreshedAcrossRepeatedFlushes() throws Exception {
+        AtomicLong clock = new AtomicLong(1_000);
+        try (LocalKvStateFactory factory =
+                new LocalKvStateFactory(
+                        tempDir.resolve("list-ttl-repeated-flush").toString(),
+                        options(),
+                        Duration.ofMillis(100),
+                        null,
+                        false,
+                        clock::get)) {
+            @SuppressWarnings("unchecked")
+            LocalKvListState<Integer, Integer> state =
+                    (LocalKvListState<Integer, Integer>)
+                            factory.listState(
+                                    "list", IntSerializer.INSTANCE, IntSerializer.INSTANCE, 10);
+
+            state.add(1, 10);
+            state.add(1, 20);
+            state.db.flush();
+            clock.addAndGet(50);
+            state.add(1, 30);
+            state.db.flush();
+            clock.addAndGet(50);
+
+            state.db.compact();
+            state.cache.invalidateAll();
+            assertThat(state.get(1)).containsExactly(10, 20, 30);
+        }
+    }
+
+    @Test
     void testListMergeRefreshesTtlIncludingExpiredFragments() throws Exception {
         AtomicLong clock = new AtomicLong(1_000);
         LocalKvValueCodec valueCodec = new LocalKvValueCodec(Duration.ofMillis(100), clock::get);

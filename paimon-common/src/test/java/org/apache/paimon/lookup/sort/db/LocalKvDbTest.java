@@ -564,6 +564,54 @@ public class LocalKvDbTest {
     }
 
     @Test
+    public void testCompactionMergesAcrossAbsorbedTombstones() throws IOException {
+        File directory = new File(tempDir.toFile(), "tombstone-merge-db");
+        LocalKvDb.MergeOperator mergeOperator =
+                new LocalKvDb.MergeOperator() {
+                    @Override
+                    public boolean canMerge(MemorySlice firstKey, MemorySlice nextKey) {
+                        return firstKey.readByte(0) == nextKey.readByte(0);
+                    }
+
+                    @Override
+                    public boolean canMergeTombstone(
+                            MemorySlice firstKey, MemorySlice tombstoneKey) {
+                        return canMerge(firstKey, tombstoneKey);
+                    }
+
+                    @Override
+                    public byte[] merge(List<byte[]> values) {
+                        StringBuilder merged = new StringBuilder();
+                        for (byte[] value : values) {
+                            if (merged.length() > 0) {
+                                merged.append('+');
+                            }
+                            merged.append(new String(value, UTF_8));
+                        }
+                        return merged.toString().getBytes(UTF_8);
+                    }
+                };
+        try (LocalKvDb db =
+                LocalKvDb.builder(directory)
+                        .level0FileNumCompactTrigger(100)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .mergeOperator(mergeOperator)
+                        .build()) {
+            putString(db, "a-0", "one");
+            putString(db, "a-1", "two");
+            db.flush();
+            putString(db, "a-2", "three");
+            db.flush();
+
+            db.compact();
+
+            Assertions.assertEquals("one+two+three", getString(db, "a-0"));
+            Assertions.assertNull(getString(db, "a-1"));
+            Assertions.assertNull(getString(db, "a-2"));
+        }
+    }
+
+    @Test
     public void testCompactionMergesAcrossFileGroupsBeforeFilteringExpiration() throws IOException {
         File directory = new File(tempDir.toFile(), "cross-group-expiration-merge-db");
         LocalKvDb.MergeOperator mergeOperator =
