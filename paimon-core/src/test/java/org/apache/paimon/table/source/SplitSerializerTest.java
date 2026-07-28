@@ -79,25 +79,22 @@ public class SplitSerializerTest {
     }
 
     @Test
-    public void testV1Compatibility() throws IOException {
-        List<String> v1CompatibleFileNames =
-                Arrays.asList(
-                        "split-v1-data",
-                        "split-v1-incremental",
-                        "split-v1-indexed",
-                        "split-v1-query-auth",
-                        "split-v1-fallback-data",
-                        "split-v1-chain",
-                        "split-v1-fallback");
-
-        for (String fileName : v1CompatibleFileNames) {
-            assertThat(SplitSerializer.deserialize(readGoldenFile(fileName))).isNotNull();
+    public void testCompatibility() throws IOException {
+        // These files were generated with the original split serialization format
+        // (e.g., ChainSplit without deletion vectors). They verify that the current
+        // serializer can still deserialize old serialized splits.
+        List<GoldenCase> cases = new ArrayList<>();
+        cases.add(new GoldenCase("split-v1-chain", chainSplit()));
+        cases.add(new GoldenCase("split-v1-fallback", fallbackSplit()));
+        for (GoldenCase goldenCase : cases) {
+            byte[] actual = readGoldenFile(goldenCase.fileName);
+            assertSplitEquals(goldenCase.split, SplitSerializer.deserialize(actual));
         }
     }
 
     @Test
     public void testFallbackSplitImplSerializeAndDeserialize() throws IOException {
-        FallbackReadFileStoreTable.FallbackSplitImpl split = fallbackSplit();
+        FallbackReadFileStoreTable.FallbackSplitImpl split = fallbackSplitV2();
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         split.serialize(new DataOutputViewStreamWrapper(out));
@@ -110,7 +107,7 @@ public class SplitSerializerTest {
 
     @Test
     public void testFallbackSplitImplJavaSerializeAndDeserialize() throws Exception {
-        FallbackReadFileStoreTable.FallbackSplitImpl split = fallbackSplit();
+        FallbackReadFileStoreTable.FallbackSplitImpl split = fallbackSplitV2();
 
         byte[] bytes = InstantiationUtil.serializeObject(split);
         FallbackReadFileStoreTable.FallbackSplitImpl deserialized =
@@ -133,20 +130,20 @@ public class SplitSerializerTest {
         DataSplit dataSplit = dataSplit();
         IncrementalSplit incrementalSplit = incrementalSplit();
         IndexedSplit indexedSplit = indexedSplit(dataSplit);
-        ChainSplit chainSplit = chainSplit();
+        ChainSplit chainSplit = chainSplitV2();
         QueryAuthSplit queryAuthSplit = queryAuthSplit(dataSplit);
         FallbackReadFileStoreTable.FallbackDataSplit fallbackDataSplit =
                 (FallbackReadFileStoreTable.FallbackDataSplit)
                         FallbackReadFileStoreTable.toFallbackSplit(dataSplit, true);
-        FallbackReadFileStoreTable.FallbackSplitImpl fallbackSplit = fallbackSplit();
+        FallbackReadFileStoreTable.FallbackSplitImpl fallbackSplit = fallbackSplitV2();
 
-        cases.add(new GoldenCase("split-v2-data", dataSplit));
-        cases.add(new GoldenCase("split-v2-incremental", incrementalSplit));
-        cases.add(new GoldenCase("split-v2-indexed", indexedSplit));
-        cases.add(new GoldenCase("split-v2-chain", chainSplit));
-        cases.add(new GoldenCase("split-v2-query-auth", queryAuthSplit));
-        cases.add(new GoldenCase("split-v2-fallback-data", fallbackDataSplit));
-        cases.add(new GoldenCase("split-v2-fallback", fallbackSplit));
+        cases.add(new GoldenCase("split-v1-data", dataSplit));
+        cases.add(new GoldenCase("split-v1-incremental", incrementalSplit));
+        cases.add(new GoldenCase("split-v1-indexed", indexedSplit));
+        cases.add(new GoldenCase("split-v1-chain-v2", chainSplit));
+        cases.add(new GoldenCase("split-v1-query-auth", queryAuthSplit));
+        cases.add(new GoldenCase("split-v1-fallback-data", fallbackDataSplit));
+        cases.add(new GoldenCase("split-v1-fallback-v2", fallbackSplit));
         return cases;
     }
 
@@ -202,6 +199,33 @@ public class SplitSerializerTest {
                         .withBucketPath("dt=20260707/bucket-5")
                         .withDataFiles(
                                 Collections.singletonList(dataFile("chain-file", 0, 21, 30, 300L)))
+                        .rawConvertible(false)
+                        .build();
+        Map<String, String> fileBucketPathMapping = new LinkedHashMap<>();
+        Map<String, String> fileBranchMapping = new LinkedHashMap<>();
+        List<DataFileMeta> files = new ArrayList<>();
+        for (DataSplit split : Arrays.asList(left, right)) {
+            files.addAll(split.dataFiles());
+            for (DataFileMeta file : split.dataFiles()) {
+                fileBucketPathMapping.put(file.fileName(), split.bucketPath());
+                fileBranchMapping.put(file.fileName(), split == left ? "snapshot" : "delta");
+            }
+        }
+        return new ChainSplit(
+                DataFileTestUtils.row(2026), files, fileBranchMapping, fileBucketPathMapping, null);
+    }
+
+    private static ChainSplit chainSplitV2() {
+        DataSplit left = dataSplit();
+        DataSplit right =
+                DataSplit.builder()
+                        .withSnapshot(44L)
+                        .withPartition(DataFileTestUtils.row(2026, 9))
+                        .withBucket(5)
+                        .withTotalBuckets(8)
+                        .withBucketPath("dt=20260707/bucket-5")
+                        .withDataFiles(
+                                Collections.singletonList(dataFile("chain-file", 0, 21, 30, 300L)))
                         .withDataDeletionFiles(
                                 Collections.singletonList(
                                         new DeletionFile("deletion_file", 100, 22, null)))
@@ -243,6 +267,10 @@ public class SplitSerializerTest {
 
     private static FallbackReadFileStoreTable.FallbackSplitImpl fallbackSplit() {
         return new FallbackReadFileStoreTable.FallbackSplitImpl(chainSplit(), true);
+    }
+
+    private static FallbackReadFileStoreTable.FallbackSplitImpl fallbackSplitV2() {
+        return new FallbackReadFileStoreTable.FallbackSplitImpl(chainSplitV2(), true);
     }
 
     private static DataFileMeta dataFile(
