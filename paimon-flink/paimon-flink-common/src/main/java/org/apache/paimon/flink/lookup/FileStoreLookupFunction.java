@@ -249,9 +249,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
 
         if (lookupTable == null) {
+            FileStoreTable fullCacheTable = table;
+            // Resolve fallback AUTO to FULL for scan mode selection, but preserve explicit MEMORY.
+            if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO) {
+                fullCacheTable =
+                        table.copy(
+                                Collections.singletonMap(
+                                        LOOKUP_CACHE_MODE.key(), LookupCacheMode.FULL.toString()));
+            }
             FullCacheLookupTable.Context context =
                     new FullCacheLookupTable.Context(
-                            table,
+                            fullCacheTable,
                             projection,
                             predicate,
                             createProjectedPredicate(projection),

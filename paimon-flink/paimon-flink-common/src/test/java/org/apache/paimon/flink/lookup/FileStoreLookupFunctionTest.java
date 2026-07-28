@@ -78,7 +78,10 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode.FULL;
+import static org.apache.paimon.flink.lookup.LookupFileStoreTable.LookupStreamScanMode.CHANGELOG;
 import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -217,6 +220,28 @@ public class FileStoreLookupFunctionTest {
         QueryExecutor queryExecutor =
                 ((PrimaryKeyPartialLookupTable) lookupFunction.lookupTable()).queryExecutor();
         assertThat(queryExecutor).isInstanceOf(RemoteQueryExecutor.class);
+    }
+
+    @Test
+    public void testFallbackUpdatesCacheModeToFull() throws Exception {
+        table =
+                createFileStoreTable(false, false, false, null)
+                        .copy(Collections.singletonMap(CoreOptions.SEQUENCE_FIELD.key(), "v"));
+        lookupFunction = createLookupFunction(table, true);
+        lookupFunction.open(tempDir.toString());
+
+        assertThat(lookupFunction.lookupTable()).isInstanceOf(FullCacheLookupTable.class);
+        FullCacheLookupTable fullCacheLookupTable =
+                (FullCacheLookupTable) lookupFunction.lookupTable();
+        assertThat(
+                        Options.fromMap(fullCacheLookupTable.context.table.options())
+                                .get(LOOKUP_CACHE_MODE))
+                .isEqualTo(FULL);
+        assertThat(
+                        fullCacheLookupTable.context.table.lookupStreamScanMode(
+                                fullCacheLookupTable.context.table.wrapped(),
+                                fullCacheLookupTable.context.joinKey))
+                .isEqualTo(CHANGELOG);
     }
 
     @Test
