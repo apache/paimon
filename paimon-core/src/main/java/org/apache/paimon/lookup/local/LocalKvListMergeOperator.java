@@ -21,8 +21,6 @@ package org.apache.paimon.lookup.local;
 import org.apache.paimon.lookup.sort.db.LocalKvDb;
 import org.apache.paimon.memory.MemorySlice;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.util.List;
 
@@ -33,9 +31,6 @@ import java.util.List;
  * expiration time, matching RocksDB's TTL merge behavior.
  */
 final class LocalKvListMergeOperator implements LocalKvDb.MergeOperator {
-
-    /** Bound repeated array copies while reducing the number of fragments scanned by reads. */
-    private static final int MAX_MEMTABLE_VALUES = 32;
 
     private final LocalKvValueCodec valueCodec;
     private final ThreadLocal<LocalKvListValueCodec> listValueCodec =
@@ -58,19 +53,6 @@ final class LocalKvListMergeOperator implements LocalKvDb.MergeOperator {
             }
         }
         return true;
-    }
-
-    @Override
-    @Nullable
-    public byte[] tryMergeMemTableValues(byte[] previousValue, byte[] newValue) throws IOException {
-        return listValueCodec
-                .get()
-                .mergeIfBelowLimit(previousValue, newValue, valueCodec, MAX_MEMTABLE_VALUES);
-    }
-
-    @Override
-    public boolean canMergeTombstone(MemorySlice firstKey, MemorySlice tombstoneKey) {
-        return canMerge(firstKey, tombstoneKey);
     }
 
     @Override

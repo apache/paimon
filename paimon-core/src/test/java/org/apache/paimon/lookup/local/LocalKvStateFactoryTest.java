@@ -212,7 +212,7 @@ class LocalKvStateFactoryTest {
     }
 
     @Test
-    void testListStateBatchesMemTableDeltas() throws Exception {
+    void testListStateCollectsMemTableDeltasLazily() throws Exception {
         try (LocalKvStateFactory factory = createFactory()) {
             @SuppressWarnings("unchecked")
             LocalKvListState<Integer, Integer> state =
@@ -237,10 +237,10 @@ class LocalKvStateFactoryTest {
                 state.add(4, value);
             }
 
-            assertThat(rawEntries(state, 1)).hasSize(4);
-            assertThat(rawEntries(state, 2)).hasSize(4);
+            assertThat(rawEntries(state, 1)).hasSize(1);
+            assertThat(rawEntries(state, 2)).hasSize(1);
             assertThat(rawEntries(state, 3)).hasSize(1);
-            assertThat(rawEntries(state, 4)).hasSize(2);
+            assertThat(rawEntries(state, 4)).hasSize(1);
             assertThat(state.get(1)).containsExactlyElementsOf(firstExpected);
             assertThat(state.get(2)).containsExactlyElementsOf(secondExpected);
             assertThat(state.get(3)).containsExactlyElementsOf(firstExpected.subList(0, 32));

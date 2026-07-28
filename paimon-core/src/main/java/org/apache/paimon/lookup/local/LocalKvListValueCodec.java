@@ -22,8 +22,6 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.util.List;
 
@@ -71,28 +69,6 @@ final class LocalKvListValueCodec {
         for (byte[] stored : storedValues) {
             outputOffset = copyStoredValue(stored, valueCodec, packed, outputOffset);
         }
-        return valueCodec.encode(packed);
-    }
-
-    @Nullable
-    byte[] mergeIfBelowLimit(
-            byte[] first, byte[] second, LocalKvValueCodec valueCodec, int maxFirstValueCount)
-            throws IOException {
-        resetMergeStats();
-        inspectStoredValue(first, valueCodec, mergeStats);
-        if (mergeStats[0] >= maxFirstValueCount) {
-            return null;
-        }
-        inspectStoredValue(second, valueCodec, mergeStats);
-        if (mergeStats[0] > Integer.MAX_VALUE || mergeStats[1] > Integer.MAX_VALUE - 5) {
-            throw new IOException("Merged local KV list value is too large.");
-        }
-
-        byte[] packed = new byte[5 + (int) mergeStats[1]];
-        packed[0] = PACKED_VALUES;
-        writeInt(packed, 1, (int) mergeStats[0]);
-        int outputOffset = copyStoredValue(first, valueCodec, packed, 5);
-        copyStoredValue(second, valueCodec, packed, outputOffset);
         return valueCodec.encode(packed);
     }
 

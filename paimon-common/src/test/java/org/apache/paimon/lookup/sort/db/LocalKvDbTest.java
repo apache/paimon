@@ -40,6 +40,8 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
@@ -564,54 +566,6 @@ public class LocalKvDbTest {
     }
 
     @Test
-    public void testCompactionMergesAcrossAbsorbedTombstones() throws IOException {
-        File directory = new File(tempDir.toFile(), "tombstone-merge-db");
-        LocalKvDb.MergeOperator mergeOperator =
-                new LocalKvDb.MergeOperator() {
-                    @Override
-                    public boolean canMerge(MemorySlice firstKey, MemorySlice nextKey) {
-                        return firstKey.readByte(0) == nextKey.readByte(0);
-                    }
-
-                    @Override
-                    public boolean canMergeTombstone(
-                            MemorySlice firstKey, MemorySlice tombstoneKey) {
-                        return canMerge(firstKey, tombstoneKey);
-                    }
-
-                    @Override
-                    public byte[] merge(List<byte[]> values) {
-                        StringBuilder merged = new StringBuilder();
-                        for (byte[] value : values) {
-                            if (merged.length() > 0) {
-                                merged.append('+');
-                            }
-                            merged.append(new String(value, UTF_8));
-                        }
-                        return merged.toString().getBytes(UTF_8);
-                    }
-                };
-        try (LocalKvDb db =
-                LocalKvDb.builder(directory)
-                        .level0FileNumCompactTrigger(100)
-                        .compressOptions(new CompressOptions("none", 1))
-                        .mergeOperator(mergeOperator)
-                        .build()) {
-            putString(db, "a-0", "one");
-            putString(db, "a-1", "two");
-            db.flush();
-            putString(db, "a-2", "three");
-            db.flush();
-
-            db.compact();
-
-            Assertions.assertEquals("one+two+three", getString(db, "a-0"));
-            Assertions.assertNull(getString(db, "a-1"));
-            Assertions.assertNull(getString(db, "a-2"));
-        }
-    }
-
-    @Test
     public void testCompactionMergesAcrossFileGroupsBeforeFilteringExpiration() throws IOException {
         File directory = new File(tempDir.toFile(), "cross-group-expiration-merge-db");
         LocalKvDb.MergeOperator mergeOperator =
@@ -667,8 +621,9 @@ public class LocalKvDbTest {
     }
 
     @Test
-    public void testFlushMergeShadowsConsumedKeysInOlderRuns() throws IOException {
-        File directory = new File(tempDir.toFile(), "flush-merge-shadow-db");
+    public void testMemTableMergeMaterializesLazily() throws IOException {
+        AtomicBoolean failMerge = new AtomicBoolean();
+        AtomicInteger mergeCount = new AtomicInteger();
         LocalKvDb.MergeOperator mergeOperator =
                 new LocalKvDb.MergeOperator() {
                     @Override
@@ -677,32 +632,51 @@ public class LocalKvDbTest {
                     }
 
                     @Override
-                    public byte[] merge(List<byte[]> values) {
-                        return (new String(values.get(0), UTF_8)
-                                        + "+"
-                                        + new String(values.get(1), UTF_8))
-                                .getBytes(UTF_8);
+                    public byte[] merge(List<byte[]> values) throws IOException {
+                        mergeCount.incrementAndGet();
+                        if (failMerge.get()) {
+                            throw new IOException("Expected merge failure.");
+                        }
+                        StringBuilder result = new StringBuilder();
+                        for (byte[] value : values) {
+                            result.append(new String(value, UTF_8));
+                        }
+                        return result.toString().getBytes(UTF_8);
                     }
                 };
         try (LocalKvDb db =
-                LocalKvDb.builder(directory)
+                LocalKvDb.builder(new File(tempDir.toFile(), "lazy-memtable-merge"))
                         .level0FileNumCompactTrigger(100)
                         .compressOptions(new CompressOptions("none", 1))
                         .mergeOperator(mergeOperator)
                         .build()) {
-            List<Map.Entry<byte[], byte[]>> oldValues = new ArrayList<>();
-            oldValues.add(entry("a-1", "old-1"));
-            oldValues.add(entry("a-2", "old-2"));
-            db.bulkLoad(oldValues.iterator(), oldValues.size());
+            putString(db, "a-0", "one");
+            putString(db, "a-1", "two");
+            putString(db, "a-2", "three");
+            Assertions.assertEquals(0, mergeCount.get());
 
-            putString(db, "a-1", "new-1");
-            putString(db, "a-2", "new-2");
-            Assertions.assertEquals("new-2", getString(db, "a-2"));
+            Assertions.assertEquals("onetwothree", getString(db, "a-0"));
+            Assertions.assertEquals(1, mergeCount.get());
+            Assertions.assertEquals("onetwothree", getString(db, "a-0"));
+            Assertions.assertEquals(1, mergeCount.get());
+
+            putString(db, "a-3", "four");
+            Assertions.assertEquals(1, mergeCount.get());
+            Assertions.assertEquals("onetwothreefour", getString(db, "a-0"));
+            Assertions.assertEquals(2, mergeCount.get());
+
+            putString(db, "a-4", "five");
+            failMerge.set(true);
+            Assertions.assertThrows(IOException.class, db::flush);
+            Assertions.assertEquals(3, mergeCount.get());
+            failMerge.set(false);
+            Assertions.assertEquals("onetwothreefourfive", getString(db, "a-0"));
+            Assertions.assertEquals(4, mergeCount.get());
 
             db.flush();
-
-            Assertions.assertEquals("new-1+new-2", getString(db, "a-1"));
-            Assertions.assertNull(getString(db, "a-2"));
+            Assertions.assertEquals(4, mergeCount.get());
+            Assertions.assertEquals("onetwothreefourfive", getString(db, "a-0"));
+            Assertions.assertNull(getString(db, "a-1"));
         }
     }
 

@@ -115,16 +115,6 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
 
     public void open(
             long offHeapMemory,
-            IOManager ioManager,
-            int numAssigners,
-            int assignId,
-            BiConsumer<InternalRow, Integer> collector)
-            throws Exception {
-        open(offHeapMemory, null, ioManager, numAssigners, assignId, collector);
-    }
-
-    public void open(
-            long offHeapMemory,
             @Nullable ExecutorService compactionExecutor,
             IOManager ioManager,
             int numAssigners,
