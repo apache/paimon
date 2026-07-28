@@ -32,7 +32,7 @@
     <packaging>jar</packaging>
 
     <properties>
-        <fs.oss.sdk.version>3.13.2</fs.oss.sdk.version>
+        <fs.oss.sdk.version>3.17.4</fs.oss.sdk.version>
     </properties>
 
     <dependencies>
@@ -93,6 +93,13 @@
             <version>${jaxb.api.version}</version>
             <!-- packaged as an optional dependency that is only accessible on Java 11+ -->
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
