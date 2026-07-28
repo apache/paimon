@@ -21,38 +21,49 @@ package org.apache.paimon.append.dataevolution;
 import org.apache.paimon.utils.LongTripleArrayList;
 import org.apache.paimon.utils.PrimitiveRowRanges;
 
-import javax.annotation.Nullable;
-
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Object-free storage for current row-id entries. */
-final class CurrentRowIdEntries {
+/**
+ * Collects live file row-id ranges and emits logical ranges for fragmented partitions.
+ *
+ * <p>Normal files define the logical range of an overlapping file group. Dedicated files, such as
+ * blob and vector files, must be contained in that logical range. If a group contains only
+ * dedicated files, their spanning range is used.
+ *
+ * <p>The hot collection path retains three primitive words per file and does not retain manifest
+ * objects. {@link #finish(FragmentedPartitionConsumer)} is terminal and releases this storage.
+ */
+final class LiveFileRowIdRangeCollector {
 
-    private static final long SPECIAL = 1L << 32;
+    private static final long DEDICATED_FILE_FLAG = 1L << 32;
 
     private final LongTripleArrayList entries;
+    private boolean finished;
 
-    CurrentRowIdEntries() {
+    LiveFileRowIdRangeCollector() {
         this(0);
     }
 
-    CurrentRowIdEntries(int expectedEntries) {
-        checkArgument(expectedEntries >= 0, "Expected current entry count cannot be negative.");
-        this.entries = new LongTripleArrayList(expectedEntries);
+    LiveFileRowIdRangeCollector(int expectedFileCount) {
+        checkArgument(expectedFileCount >= 0, "Expected live file count cannot be negative.");
+        this.entries = new LongTripleArrayList(expectedFileCount);
     }
 
-    void add(int partitionId, boolean special, long firstRowId, long rowCount) {
+    void add(int partitionId, FileRole role, long firstRowId, long rowCount) {
+        checkState(!finished, "Cannot add a file range after the collector is finished.");
         checkArgument(partitionId >= 0, "Partition id cannot be negative.");
+        checkArgument(role != null, "File role cannot be null.");
         checkArgument(rowCount > 0, "Row count must be positive.");
         Math.addExact(firstRowId, rowCount - 1L);
         entries.add(
-                Integer.toUnsignedLong(partitionId) | (special ? SPECIAL : 0L),
+                Integer.toUnsignedLong(partitionId)
+                        | (role == FileRole.DEDICATED ? DEDICATED_FILE_FLAG : 0L),
                 firstRowId,
                 rowCount);
     }
 
-    int size() {
+    int fileCount() {
         return entries.size();
     }
 
@@ -64,16 +75,12 @@ final class CurrentRowIdEntries {
         return entries.usedLongCount();
     }
 
-    void release() {
-        entries.release();
-    }
-
-    int partitionId(int index) {
+    private int partitionId(int index) {
         return (int) entries.first(index);
     }
 
-    private boolean special(int index) {
-        return (entries.first(index) & SPECIAL) != 0;
+    private boolean dedicatedFile(int index) {
+        return (entries.first(index) & DEDICATED_FILE_FLAG) != 0;
     }
 
     private long firstRowId(int index) {
@@ -88,7 +95,45 @@ final class CurrentRowIdEntries {
         return firstRowId(index) + rowCount(index) - 1L;
     }
 
-    void sort() {
+    /**
+     * Emits only partitions whose logical row-id ranges contain gaps.
+     *
+     * <p>The callback owns each emitted {@link PrimitiveRowRanges}. This collector is released even
+     * when range validation or the callback fails.
+     */
+    void finish(FragmentedPartitionConsumer consumer) {
+        checkState(!finished, "Live file row-id range collector is already finished.");
+        checkArgument(consumer != null, "Fragmented partition consumer cannot be null.");
+        finished = true;
+        try {
+            sortByPartitionAndRange();
+            long[] rangeScratch = new long[2];
+            LogicalRangeAnalysis analysis = new LogicalRangeAnalysis();
+            int partitionStart = 0;
+            while (partitionStart < entries.size()) {
+                int partitionId = partitionId(partitionStart);
+                int partitionEnd = partitionStart + 1;
+                while (partitionEnd < entries.size() && partitionId(partitionEnd) == partitionId) {
+                    partitionEnd++;
+                }
+                analyzeLogicalRanges(partitionStart, partitionEnd, rangeScratch, analysis);
+                if (analysis.fragmented) {
+                    consumer.accept(
+                            partitionId,
+                            materializeLogicalRanges(
+                                    partitionStart,
+                                    partitionEnd,
+                                    analysis.rangeCount,
+                                    rangeScratch));
+                }
+                partitionStart = partitionEnd;
+            }
+        } finally {
+            entries.release();
+        }
+    }
+
+    private void sortByPartitionAndRange() {
         if (entries.size() > 1) {
             sort(0, entries.size() - 1);
         }
@@ -151,11 +196,10 @@ final class CurrentRowIdEntries {
     /**
      * Scans logical ranges without retaining one object (or even one primitive pair) per range.
      *
-     * <p>The absolute return value is the number of logical ranges. A negative result means that
-     * all logical ranges are contiguous and therefore this partition does not need a plan. A
-     * positive result means that the ranges are fragmented and need materialization.
+     * <p>The result records both the number of logical ranges and whether gaps exist between them.
      */
-    int scanLogicalRanges(int from, int to, long[] rangeScratch) {
+    private void analyzeLogicalRanges(
+            int from, int to, long[] rangeScratch, LogicalRangeAnalysis analysis) {
         checkArgument(from >= 0 && from < to && to <= entries.size(), "Invalid entry slice.");
         int overlapStart = from;
         long currentEnd = lastRowId(from);
@@ -184,10 +228,11 @@ final class CurrentRowIdEntries {
         if (hasPrevious && (previousEnd == Long.MAX_VALUE || rangeScratch[0] != previousEnd + 1L)) {
             contiguous = false;
         }
-        return contiguous ? -rangeCount : rangeCount;
+        analysis.rangeCount = rangeCount;
+        analysis.fragmented = !contiguous;
     }
 
-    PrimitiveRowRanges materializeLogicalRanges(
+    private PrimitiveRowRanges materializeLogicalRanges(
             int from, int to, int expectedRangeCount, long[] rangeScratch) {
         checkArgument(
                 from >= 0 && from < to && to <= entries.size() && expectedRangeCount > 0,
@@ -214,9 +259,9 @@ final class CurrentRowIdEntries {
     }
 
     private void computeLogicalRange(int from, int to, long[] result) {
-        boolean hasOrdinary = false;
-        long ordinaryStart = 0L;
-        long ordinaryEnd = 0L;
+        boolean hasNormalFile = false;
+        long normalStart = 0L;
+        long normalEnd = 0L;
         long spanningStart = Long.MAX_VALUE;
         long spanningEnd = Long.MIN_VALUE;
         for (int i = from; i < to; i++) {
@@ -224,17 +269,17 @@ final class CurrentRowIdEntries {
             long end = lastRowId(i);
             spanningStart = Math.min(spanningStart, start);
             spanningEnd = Math.max(spanningEnd, end);
-            if (!special(i)) {
+            if (!dedicatedFile(i)) {
                 checkState(
-                        !hasOrdinary || (ordinaryStart == start && ordinaryEnd == end),
-                        "Data files in one overlapping row-id group must have the same row-id range.");
-                ordinaryStart = start;
-                ordinaryEnd = end;
-                hasOrdinary = true;
+                        !hasNormalFile || (normalStart == start && normalEnd == end),
+                        "Normal files in one overlapping row-id group must have the same row-id range.");
+                normalStart = start;
+                normalEnd = end;
+                hasNormalFile = true;
             }
         }
-        long logicalStart = hasOrdinary ? ordinaryStart : spanningStart;
-        long logicalEnd = hasOrdinary ? ordinaryEnd : spanningEnd;
+        long logicalStart = hasNormalFile ? normalStart : spanningStart;
+        long logicalEnd = hasNormalFile ? normalEnd : spanningEnd;
         for (int i = from; i < to; i++) {
             checkState(
                     firstRowId(i) >= logicalStart && lastRowId(i) <= logicalEnd,
@@ -244,20 +289,20 @@ final class CurrentRowIdEntries {
         result[1] = logicalEnd;
     }
 
-    @Nullable
-    PrimitiveRowRanges selectedRangesForTesting() {
-        checkState(entries.size() > 0, "Cannot inspect an empty current-entry buffer.");
-        sort();
-        int partitionId = partitionId(0);
-        for (int i = 1; i < entries.size(); i++) {
-            checkState(
-                    partitionId(i) == partitionId,
-                    "The structural range test helper requires one partition.");
-        }
-        long[] rangeScratch = new long[2];
-        int rangeScan = scanLogicalRanges(0, entries.size(), rangeScratch);
-        return rangeScan < 0
-                ? null
-                : materializeLogicalRanges(0, entries.size(), rangeScan, rangeScratch);
+    enum FileRole {
+        NORMAL,
+        DEDICATED
+    }
+
+    @FunctionalInterface
+    interface FragmentedPartitionConsumer {
+
+        void accept(int partitionId, PrimitiveRowRanges logicalRanges);
+    }
+
+    private static final class LogicalRangeAnalysis {
+
+        private int rangeCount;
+        private boolean fragmented;
     }
 }
