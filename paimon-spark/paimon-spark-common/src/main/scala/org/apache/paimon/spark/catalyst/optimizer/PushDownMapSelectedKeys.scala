@@ -47,8 +47,6 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
 
 abstract class PushDownMapSelectedKeysBase extends Rule[LogicalPlan] {
 
-  private val mapMergeAggregateFunctions = Set("merge_map", "merge_map_with_keytime")
-
   override def apply(plan: LogicalPlan): LogicalPlan = plan.transform {
     case project @ Project(projectList, relation: DataSourceV2ScanRelation) =>
       relation.scan match {
@@ -195,19 +193,17 @@ abstract class PushDownMapSelectedKeysBase extends Rule[LogicalPlan] {
         fieldType(scan.table.rowType(), access.fieldName) match {
           case Some(mapType: org.apache.paimon.types.MapType) if isStringKeyMap(mapType) =>
             options.mapStorageLayout(access.fieldName) == MapStorageLayout.SHARED_SHREDDING &&
-            !usesMapMergeAggregator(options, access.fieldName)
+            !hasConfiguredAggregator(options, access.fieldName)
           case _ => false
         }
       case _ => false
     }
   }
 
-  private def usesMapMergeAggregator(options: CoreOptions, fieldName: String): Boolean = {
+  private def hasConfiguredAggregator(options: CoreOptions, fieldName: String): Boolean = {
     Option(options.fieldAggFunc(fieldName))
       .orElse(Option(options.fieldsDefaultFunc()))
-      .exists(
-        aggregateFunction =>
-          mapMergeAggregateFunctions.exists(_.equalsIgnoreCase(aggregateFunction)))
+      .isDefined
   }
 
   private def canEncodeKey(key: String): Boolean = {

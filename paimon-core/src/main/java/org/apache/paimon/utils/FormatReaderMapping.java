@@ -374,16 +374,10 @@ public class FormatReaderMapping {
             Map<Integer, DataField> tableFields = tableSchema.idToFieldMap();
             Set<Integer> selectedKeysFieldIds = new HashSet<>();
             for (DataField expectedField : expectedFields) {
-                if (MapSelectedKeysMetadataUtils.isMapSelectedKeysField(expectedField)) {
-                    DataField tableField = tableFields.get(expectedField.id());
-                    checkArgument(
-                            tableField != null,
-                            "Cannot find selected-key MAP field id %s in table schema.",
-                            expectedField.id());
-                    checkArgument(
-                            tableField.type() instanceof MapType,
-                            "Selected-key MAP pushdown only supports top-level MAP field: %s.",
-                            tableField.name());
+                DataField tableField = tableFields.get(expectedField.id());
+                if (MapSelectedKeysMetadataUtils.isMapSelectedKeysField(expectedField)
+                        && tableField != null
+                        && tableField.type() instanceof MapType) {
                     checkArgument(
                             options.mapStorageLayout(tableField.name())
                                     == MapStorageLayout.SHARED_SHREDDING,

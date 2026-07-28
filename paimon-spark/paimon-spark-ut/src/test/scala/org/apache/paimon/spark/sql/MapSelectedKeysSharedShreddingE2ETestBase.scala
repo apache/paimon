@@ -67,54 +67,15 @@ abstract class MapSelectedKeysSharedShreddingE2ETestBase extends PaimonSparkTest
       Seq(false, true).foreach {
         thinMode =>
           test(s"skip selected-key pushdown for merge_map from $format with thin mode $thinMode") {
-            withTable("T") {
-              sql(s"""
-                     |CREATE TABLE T (
-                     |  id INT,
-                     |  attrs MAP<STRING, BIGINT>
-                     |)
-                     |TBLPROPERTIES (
-                     |  'primary-key' = 'id',
-                     |  'bucket' = '1',
-                     |  'file.format' = '$format',
-                     |  'data-file.thin-mode' = '$thinMode',
-                     |  'merge-engine' = 'aggregation',
-                     |  'fields.attrs.aggregate-function' = 'merge_map',
-                     |  'fields.attrs.map.storage-layout' = 'shared-shredding',
-                     |  'fields.attrs.map.shared-shredding.max-columns' = '1',
-                     |  'write-only' = 'true'
-                     |)
-                     |""".stripMargin)
+            checkMapAggregatorRead(format, thinMode, "fields.attrs.aggregate-function", "merge_map")
+          }
+      }
 
-              sql("""
-                    |INSERT INTO T VALUES
-                    |  (1, map('key1', CAST(10 AS BIGINT), 'key2', CAST(20 AS BIGINT))),
-                    |  (2, NULL)
-                    |""".stripMargin)
-              sql("""
-                    |INSERT INTO T VALUES
-                    |  (1, map('key2', CAST(30 AS BIGINT), 'cold', CAST(40 AS BIGINT))),
-                    |  (2, map('key1', CAST(50 AS BIGINT)))
-                    |""".stripMargin)
-
-              val query =
-                sql("SELECT id, attrs['key1'], attrs['key2'] FROM T ORDER BY id")
-              val sparkPlan = query.queryExecution.sparkPlan
-              val paimonScan = sparkPlan
-                .collectFirst {
-                  case scan: BatchScanExec if scan.scan.isInstanceOf[PaimonScan] =>
-                    scan.scan.asInstanceOf[PaimonScan]
-                }
-                .getOrElse(fail(s"Expected a Paimon scan in physical plan:\n$sparkPlan"))
-              assert(
-                !paimonScan.pushedMapSelectedKeys.contains("attrs"),
-                s"""Expected selected-key pushdown to be skipped for merge_map.
-                   |Physical plan:
-                   |$sparkPlan""".stripMargin
-              )
-
-              checkAnswer(query, Row(1, 10L, 30L) :: Row(2, 50L, null) :: Nil)
-            }
+      Seq("fields.attrs.aggregate-function", "fields.default-aggregate-function").foreach {
+        aggregateOption =>
+          test(
+            s"skip selected-key pushdown for custom MAP aggregator configured by $aggregateOption from $format") {
+            checkMapAggregatorRead(format, false, aggregateOption, "my_merge_map")
           }
       }
 
@@ -195,5 +156,60 @@ abstract class MapSelectedKeysSharedShreddingE2ETestBase extends PaimonSparkTest
               Row(3, null) :: Nil)
         }
       }
+  }
+
+  private def checkMapAggregatorRead(
+      format: String,
+      thinMode: Boolean,
+      aggregateOption: String,
+      aggregateFunction: String): Unit = {
+    withTable("T") {
+      sql(s"""
+             |CREATE TABLE T (
+             |  id INT,
+             |  attrs MAP<STRING, BIGINT>
+             |)
+             |TBLPROPERTIES (
+             |  'primary-key' = 'id',
+             |  'bucket' = '1',
+             |  'file.format' = '$format',
+             |  'data-file.thin-mode' = '$thinMode',
+             |  'merge-engine' = 'aggregation',
+             |  '$aggregateOption' = '$aggregateFunction',
+             |  'fields.attrs.map.storage-layout' = 'shared-shredding',
+             |  'fields.attrs.map.shared-shredding.max-columns' = '1',
+             |  'write-only' = 'true'
+             |)
+             |""".stripMargin)
+
+      sql("""
+            |INSERT INTO T VALUES
+            |  (1, map('key1', CAST(10 AS BIGINT), 'key2', CAST(20 AS BIGINT))),
+            |  (2, NULL)
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO T VALUES
+            |  (1, map('key2', CAST(30 AS BIGINT), 'cold', CAST(40 AS BIGINT))),
+            |  (2, map('key1', CAST(50 AS BIGINT)))
+            |""".stripMargin)
+
+      val query =
+        sql("SELECT id, attrs['key1'], attrs['key2'] FROM T ORDER BY id")
+      val sparkPlan = query.queryExecution.sparkPlan
+      val paimonScan = sparkPlan
+        .collectFirst {
+          case scan: BatchScanExec if scan.scan.isInstanceOf[PaimonScan] =>
+            scan.scan.asInstanceOf[PaimonScan]
+        }
+        .getOrElse(fail(s"Expected a Paimon scan in physical plan:\n$sparkPlan"))
+      assert(
+        !paimonScan.pushedMapSelectedKeys.contains("attrs"),
+        s"""Expected selected-key pushdown to be skipped for $aggregateFunction.
+           |Physical plan:
+           |$sparkPlan""".stripMargin
+      )
+
+      checkAnswer(query, Row(1, 10L, 30L) :: Row(2, 50L, null) :: Nil)
+    }
   }
 }

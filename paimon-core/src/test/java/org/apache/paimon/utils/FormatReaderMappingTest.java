@@ -281,6 +281,27 @@ public class FormatReaderMappingTest {
     }
 
     @Test
+    public void testNormalRowWithSelectedKeysMetadataComment() throws Exception {
+        RowType rowType = DataTypes.ROW(DataTypes.FIELD(3, "value", DataTypes.BIGINT()));
+        DataField rowField =
+                DataTypes.FIELD(2, "payload", rowType)
+                        .newDescription(MapSelectedKeysMetadataUtils.METADATA_KEY + "key1");
+        TableSchema tableSchema =
+                tableSchema(Collections.singletonList(rowField), Collections.emptyMap());
+
+        Set<Integer> selectedKeysFieldIds =
+                invokeSelectedKeysFieldIds(tableSchema, Collections.singletonList(rowField));
+
+        Assertions.assertThat(selectedKeysFieldIds).isEmpty();
+        Assertions.assertThat(
+                        invokeDataFields(
+                                Collections.singletonList(rowField),
+                                Collections.singletonList(rowField),
+                                selectedKeysFieldIds))
+                .containsExactly(rowField);
+    }
+
+    @Test
     public void testRejectSelectedKeysDataFieldWithNonMapType() {
         DataField dataField = DataTypes.FIELD(2, "attrs", DataTypes.BIGINT());
         DataField expectedField = selectedKeysField(2, "attrs", DataTypes.BIGINT());
@@ -297,6 +318,15 @@ public class FormatReaderMappingTest {
     @SuppressWarnings("unchecked")
     private static List<DataField> invokeDataFields(
             List<DataField> allDataFields, List<DataField> expectedFields) throws Exception {
+        return invokeDataFields(allDataFields, expectedFields, Collections.singleton(2));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<DataField> invokeDataFields(
+            List<DataField> allDataFields,
+            List<DataField> expectedFields,
+            Set<Integer> selectedKeysFieldIds)
+            throws Exception {
         FormatReaderMapping.Builder builder =
                 new FormatReaderMapping.Builder(
                         null, Collections.emptyList(), null, null, null, null);
@@ -305,7 +335,7 @@ public class FormatReaderMappingTest {
                         "readDataFields", List.class, List.class, Set.class);
         method.setAccessible(true);
         return (List<DataField>)
-                method.invoke(builder, allDataFields, expectedFields, Collections.singleton(2));
+                method.invoke(builder, allDataFields, expectedFields, selectedKeysFieldIds);
     }
 
     @SuppressWarnings("unchecked")
