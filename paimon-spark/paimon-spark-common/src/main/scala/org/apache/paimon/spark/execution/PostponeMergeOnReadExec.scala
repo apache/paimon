@@ -21,11 +21,13 @@ package org.apache.paimon.spark.execution
 import org.apache.paimon.{CoreOptions, KeyValue}
 import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
 import org.apache.paimon.reader.RecordReaderIterator
+import org.apache.paimon.spark.PaimonMetrics._
 import org.apache.paimon.spark.PostponeMergeInputScan._
 import org.apache.paimon.spark.PostponeMergeOnRead.MergePlan
 import org.apache.paimon.spark.SparkUtils
 import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.read.BinPackingSplits
+import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.table.source.{DataSplit, PostponeMergePlan, PostponeMergeReadBuilder, SplitSerializer}
 import org.apache.paimon.types.{RowKind, RowType}
 import org.apache.paimon.utils.{IteratorRecordReader, SerializationUtils}
@@ -35,7 +37,8 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Ascending, Attribute, SortOrder, UnsafeProjection}
 import org.apache.spark.sql.catalyst.plans.physical.{Distribution, Partitioning, UnknownPartitioning}
-import org.apache.spark.sql.execution.{SparkPlan, UnaryExecNode}
+import org.apache.spark.sql.execution.{ExplainUtils, SparkPlan, SQLExecution, UnaryExecNode}
+import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
@@ -50,6 +53,38 @@ private[spark] case class PostponeMergeOnReadExec(
     numShufflePartitions: Int,
     child: SparkPlan)
   extends UnaryExecNode {
+
+  private val NUM_OUTPUT_ROWS = "numOutputRows"
+
+  override def nodeName: String = s"PaimonPostponeMergeScan ${mergePlan.realScanInfo.tableName}"
+
+  override def simpleString(maxFields: Int): String = {
+    s"$nodeName ${mergePlan.realScanInfo.description}"
+  }
+
+  override def verboseStringWithOperatorId(): String = {
+    s"""
+       |$formattedNodeName
+       |${ExplainUtils.generateFieldString("Input", child.output)}
+       |Scan: ${mergePlan.realScanInfo.description}
+       |""".stripMargin
+  }
+
+  override lazy val metrics: Map[String, SQLMetric] = {
+    Map(
+      NUM_OUTPUT_ROWS -> SQLMetrics.createMetric(sparkContext, "number of output rows"),
+      NUM_SPLITS -> SQLMetrics.createMetric(sparkContext, "number of splits read"),
+      PARTITION_SIZE -> SQLMetrics.createSizeMetric(sparkContext, "partition size"),
+      READ_BATCH_TIME -> SQLMetrics.createTimingMetric(sparkContext, "read batch time"),
+      PLANNING_DURATION -> SQLMetrics.createTimingMetric(sparkContext, "planing duration"),
+      SCANNED_SNAPSHOT_ID -> SQLMetrics.createMetric(sparkContext, "scanned snapshot id"),
+      SCANNED_MANIFESTS -> SQLMetrics.createMetric(sparkContext, "number of scanned manifests"),
+      SKIPPED_TABLE_FILES -> SQLMetrics.createMetric(sparkContext, "number of skipped table files"),
+      RESULTED_TABLE_FILES -> SQLMetrics.createMetric(
+        sparkContext,
+        "number of resulted table files")
+    )
+  }
 
   override def requiredChildDistribution: Seq[Distribution] = {
     Seq(
@@ -79,10 +114,16 @@ private[spark] case class PostponeMergeOnReadExec(
   }
 
   override protected def doExecute(): RDD[InternalRow] = {
+    postDriverMetrics()
+
     val readBuilder = mergePlan.readBuilder
     val resultRowType = mergePlan.corePlan.resultReadType()
     val blobAsDescriptor = mergePlan.blobAsDescriptor
     val outputAttributes = output
+    val numOutputRows = longMetric(NUM_OUTPUT_ROWS)
+    val numSplits = longMetric(NUM_SPLITS)
+    val partitionSize = longMetric(PARTITION_SIZE)
+    val readBatchTime = longMetric(READ_BATCH_TIME)
 
     child.execute().mapPartitions {
       rows =>
@@ -91,9 +132,29 @@ private[spark] case class PostponeMergeOnReadExec(
           rows,
           readBuilder,
           resultRowType,
-          blobAsDescriptor)
-          .map(row => unsafeProjection(row): InternalRow)
+          blobAsDescriptor,
+          numSplits,
+          partitionSize,
+          readBatchTime)
+          .map {
+            row =>
+              numOutputRows += 1L
+              unsafeProjection(row): InternalRow
+          }
     }
+  }
+
+  private def postDriverMetrics(): Unit = {
+    val updatedMetrics = mergePlan.realScanInfo.driverMetrics.flatMap {
+      case (name, value) =>
+        metrics.get(name).map {
+          metric =>
+            metric.set(value)
+            metric
+        }
+    }.toSeq
+    val executionId = sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
+    SQLMetrics.postDriverMetricUpdates(sparkContext, executionId, updatedMetrics)
   }
 }
 
@@ -135,7 +196,10 @@ private[spark] object PostponeMergeOnReadExec {
       rows: Iterator[InternalRow],
       readBuilder: PostponeMergeReadBuilder,
       resultRowType: RowType,
-      blobAsDescriptor: Boolean)
+      blobAsDescriptor: Boolean,
+      numSplits: SQLMetric,
+      partitionSize: SQLMetric,
+      readBatchTime: SQLMetric)
     extends Iterator[InternalRow]
     with AutoCloseable {
 
@@ -144,6 +208,7 @@ private[spark] object PostponeMergeOnReadExec {
     private val read = readBuilder.newRead().withIOManager(ioManager)
     private val sparkRow = SparkInternalRow.create(resultRowType, blobAsDescriptor)
     private var currentReader: RecordReaderIterator[PaimonInternalRow] = _
+    private var currentTimedReader: TimedRecordReader[PaimonInternalRow] = _
     private var nextRow: InternalRow = _
     private var closed = false
 
@@ -192,6 +257,10 @@ private[spark] object PostponeMergeOnReadExec {
           } else {
             null
           }
+        if (realSplit != null) {
+          numSplits += 1L
+          partitionSize += SplitUtils.splitSize(realSplit)
+        }
 
         val postponeRecords = new Iterator[KeyValue] {
           override def hasNext: Boolean = {
@@ -213,10 +282,11 @@ private[spark] object PostponeMergeOnReadExec {
           }
         }
 
-        currentReader = new RecordReaderIterator[PaimonInternalRow](
+        currentTimedReader = new TimedRecordReader[PaimonInternalRow](
           read.createBucketMergeReader(
             realSplit,
             new IteratorRecordReader[KeyValue](postponeRecords.asJava)))
+        currentReader = new RecordReaderIterator[PaimonInternalRow](currentTimedReader)
         if (bufferedRows.hasNext && sameBucket(bufferedRows.head, bucketKey)) {
           throw new IllegalStateException(
             "Unexpected postpone merge carrier kind " +
@@ -228,8 +298,13 @@ private[spark] object PostponeMergeOnReadExec {
 
     private def closeCurrentReader(): Unit = {
       if (currentReader != null) {
-        currentReader.close()
-        currentReader = null
+        try {
+          currentReader.close()
+        } finally {
+          readBatchTime += currentTimedReader.readBatchTimeMs
+          currentReader = null
+          currentTimedReader = null
+        }
       }
     }
 

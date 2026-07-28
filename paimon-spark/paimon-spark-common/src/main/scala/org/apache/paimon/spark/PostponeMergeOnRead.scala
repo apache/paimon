@@ -21,7 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.PredicateBuilder
-import org.apache.paimon.spark.PostponeMergeOnRead.MergePlan
+import org.apache.paimon.spark.PostponeMergeOnRead.{MergePlan, RealScanInfo}
 import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.source.{PostponeMergePlan, PostponeMergeReadBuilder}
 
@@ -75,7 +75,15 @@ final private[spark] class PostponeMergeOnRead(scan: PaimonBaseScan) {
           val postponeFiles =
             corePlan.postponeSplits().asScala.iterator.map(_.dataFiles().size().toLong).sum
           scan.ensureNoFullScan(postponeFiles)
-          mergePlan = MergePlan(builder, corePlan, scan.coreOptions.blobAsDescriptor())
+          val realScanInfo = RealScanInfo(
+            scan.table.fullName,
+            scan.description(),
+            scan
+              .reportDriverMetrics()
+              .map(metric => metric.name() -> metric.value())
+              .toMap)
+          mergePlan =
+            MergePlan(builder, corePlan, scan.coreOptions.blobAsDescriptor(), realScanInfo)
         }
         mergePlan
     }
@@ -123,5 +131,11 @@ private[spark] object PostponeMergeOnRead {
   private[spark] case class MergePlan(
       readBuilder: PostponeMergeReadBuilder,
       corePlan: PostponeMergePlan,
-      blobAsDescriptor: Boolean)
+      blobAsDescriptor: Boolean,
+      realScanInfo: RealScanInfo)
+
+  private[spark] case class RealScanInfo(
+      tableName: String,
+      description: String,
+      driverMetrics: Map[String, Long])
 }
