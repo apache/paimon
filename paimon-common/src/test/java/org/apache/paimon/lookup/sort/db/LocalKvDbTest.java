@@ -1493,6 +1493,49 @@ public class LocalKvDbTest {
     }
 
     @Test
+    public void testStreamingBulkLoad() throws IOException {
+        File directory = new File(tempDir.toFile(), "streaming-bulk-load");
+        try (LocalKvDb db =
+                LocalKvDb.builder(directory)
+                        .maxSstFileSize(16)
+                        .blockSize(128)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .build()) {
+            LocalKvDb.BulkLoadWriter writer = db.createBulkLoadWriter();
+            writer.put("key-1".getBytes(UTF_8), "value-1".getBytes(UTF_8));
+            writer.put("key-2".getBytes(UTF_8), "value-2".getBytes(UTF_8));
+            writer.put("key-3".getBytes(UTF_8), "value-3".getBytes(UTF_8));
+            writer.finish();
+
+            Assertions.assertEquals("value-1", getString(db, "key-1"));
+            Assertions.assertEquals("value-2", getString(db, "key-2"));
+            Assertions.assertEquals("value-3", getString(db, "key-3"));
+            Assertions.assertTrue(db.getLevelFileCount(LocalKvDb.MAX_LEVELS - 1) > 1);
+        }
+    }
+
+    @Test
+    public void testStreamingBulkLoadRejectsDuplicateKeysAndCleansFiles() throws IOException {
+        File directory = new File(tempDir.toFile(), "streaming-bulk-load-duplicate");
+        try (LocalKvDb db =
+                LocalKvDb.builder(directory)
+                        .blockSize(128)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .build()) {
+            LocalKvDb.BulkLoadWriter writer = db.createBulkLoadWriter();
+            writer.put("key".getBytes(UTF_8), "value-1".getBytes(UTF_8));
+
+            IllegalArgumentException exception =
+                    Assertions.assertThrows(
+                            IllegalArgumentException.class,
+                            () -> writer.put("key".getBytes(UTF_8), "value-2".getBytes(UTF_8)));
+            Assertions.assertTrue(exception.getMessage().contains("strictly increasing"));
+            Assertions.assertEquals(0, db.getSstFileCount());
+            assertNoSstFiles(directory);
+        }
+    }
+
+    @Test
     public void testBulkLoadValidatesEntryCount() throws IOException {
         List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
         entries.add(entry("key-00001", "value-1"));
