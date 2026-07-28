@@ -212,6 +212,54 @@ class LocalKvStateFactoryTest {
     }
 
     @Test
+    void testListStateBatchesMemTableDeltas() throws Exception {
+        try (LocalKvStateFactory factory = createFactory()) {
+            @SuppressWarnings("unchecked")
+            LocalKvListState<Integer, Integer> state =
+                    (LocalKvListState<Integer, Integer>)
+                            factory.listState(
+                                    "batched-list",
+                                    IntSerializer.INSTANCE,
+                                    IntSerializer.INSTANCE,
+                                    10);
+            List<Integer> firstExpected = new ArrayList<>();
+            List<Integer> secondExpected = new ArrayList<>();
+            for (int value = 0; value < 100; value++) {
+                state.add(1, value);
+                state.add(2, 1_000 + value);
+                firstExpected.add(value);
+                secondExpected.add(1_000 + value);
+            }
+            for (int value = 0; value < 32; value++) {
+                state.add(3, value);
+            }
+            for (int value = 0; value < 33; value++) {
+                state.add(4, value);
+            }
+
+            assertThat(rawEntries(state, 1)).hasSize(4);
+            assertThat(rawEntries(state, 2)).hasSize(4);
+            assertThat(rawEntries(state, 3)).hasSize(1);
+            assertThat(rawEntries(state, 4)).hasSize(2);
+            assertThat(state.get(1)).containsExactlyElementsOf(firstExpected);
+            assertThat(state.get(2)).containsExactlyElementsOf(secondExpected);
+            assertThat(state.get(3)).containsExactlyElementsOf(firstExpected.subList(0, 32));
+            assertThat(state.get(4)).containsExactlyElementsOf(firstExpected.subList(0, 33));
+
+            state.db.flush();
+            state.cache.invalidateAll();
+            assertThat(rawEntries(state, 1)).hasSize(1);
+            assertThat(rawEntries(state, 2)).hasSize(1);
+            assertThat(rawEntries(state, 3)).hasSize(1);
+            assertThat(rawEntries(state, 4)).hasSize(1);
+            assertThat(state.get(1)).containsExactlyElementsOf(firstExpected);
+            assertThat(state.get(2)).containsExactlyElementsOf(secondExpected);
+            assertThat(state.get(3)).containsExactlyElementsOf(firstExpected.subList(0, 32));
+            assertThat(state.get(4)).containsExactlyElementsOf(firstExpected.subList(0, 33));
+        }
+    }
+
+    @Test
     void testListStateMergesFragmentsDuringFlushAndCompaction() throws Exception {
         try (LocalKvStateFactory factory = createFactory()) {
             @SuppressWarnings("unchecked")

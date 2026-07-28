@@ -22,6 +22,8 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.List;
 
@@ -33,6 +35,7 @@ final class LocalKvListValueCodec {
 
     private final DataInputDeserializer input = new DataInputDeserializer();
     private final DataOutputSerializer output = new DataOutputSerializer(128);
+    private final long[] mergeStats = new long[2];
 
     byte[] encodeSingle(byte[] value) {
         byte[] result = new byte[value.length + 1];
@@ -53,38 +56,49 @@ final class LocalKvListValueCodec {
     }
 
     byte[] merge(List<byte[]> storedValues, LocalKvValueCodec valueCodec) throws IOException {
-        long[] stats = new long[2];
+        resetMergeStats();
         for (byte[] stored : storedValues) {
-            inspectStoredValue(stored, valueCodec, stats);
+            inspectStoredValue(stored, valueCodec, mergeStats);
         }
-        if (stats[0] > Integer.MAX_VALUE || stats[1] > Integer.MAX_VALUE - 5) {
+        if (mergeStats[0] > Integer.MAX_VALUE || mergeStats[1] > Integer.MAX_VALUE - 5) {
             throw new IOException("Merged local KV list value is too large.");
         }
 
-        byte[] packed = new byte[5 + (int) stats[1]];
+        byte[] packed = new byte[5 + (int) mergeStats[1]];
         packed[0] = PACKED_VALUES;
-        writeInt(packed, 1, (int) stats[0]);
+        writeInt(packed, 1, (int) mergeStats[0]);
         int outputOffset = 5;
         for (byte[] stored : storedValues) {
-            int valueOffset = valueCodec.valueOffset(stored, 0, stored.length);
-            input.setBuffer(stored, valueOffset, stored.length - valueOffset);
-            int type = input.readUnsignedByte();
-            if (type == SINGLE_VALUE) {
-                int valueLength = input.available();
-                writeInt(packed, outputOffset, valueLength);
-                outputOffset += Integer.BYTES;
-                System.arraycopy(stored, input.getPosition(), packed, outputOffset, valueLength);
-                outputOffset += valueLength;
-            } else if (type == PACKED_VALUES) {
-                input.readInt();
-                int payloadLength = input.available();
-                System.arraycopy(stored, input.getPosition(), packed, outputOffset, payloadLength);
-                outputOffset += payloadLength;
-            } else {
-                throw new IOException("Corrupted local KV list value marker.");
-            }
+            outputOffset = copyStoredValue(stored, valueCodec, packed, outputOffset);
         }
         return valueCodec.encode(packed);
+    }
+
+    @Nullable
+    byte[] mergeIfBelowLimit(
+            byte[] first, byte[] second, LocalKvValueCodec valueCodec, int maxFirstValueCount)
+            throws IOException {
+        resetMergeStats();
+        inspectStoredValue(first, valueCodec, mergeStats);
+        if (mergeStats[0] >= maxFirstValueCount) {
+            return null;
+        }
+        inspectStoredValue(second, valueCodec, mergeStats);
+        if (mergeStats[0] > Integer.MAX_VALUE || mergeStats[1] > Integer.MAX_VALUE - 5) {
+            throw new IOException("Merged local KV list value is too large.");
+        }
+
+        byte[] packed = new byte[5 + (int) mergeStats[1]];
+        packed[0] = PACKED_VALUES;
+        writeInt(packed, 1, (int) mergeStats[0]);
+        int outputOffset = copyStoredValue(first, valueCodec, packed, 5);
+        copyStoredValue(second, valueCodec, packed, outputOffset);
+        return valueCodec.encode(packed);
+    }
+
+    private void resetMergeStats() {
+        mergeStats[0] = 0;
+        mergeStats[1] = 0;
     }
 
     <V> void decode(byte[] bytes, int offset, int length, Serializer<V> serializer, List<V> target)
@@ -176,6 +190,29 @@ final class LocalKvListValueCodec {
         }
         stats[0] += size;
         stats[1] += payloadLength;
+    }
+
+    private int copyStoredValue(
+            byte[] stored, LocalKvValueCodec valueCodec, byte[] target, int targetOffset)
+            throws IOException {
+        int valueOffset = valueCodec.valueOffset(stored, 0, stored.length);
+        input.setBuffer(stored, valueOffset, stored.length - valueOffset);
+        int type = input.readUnsignedByte();
+        if (type == SINGLE_VALUE) {
+            int valueLength = input.available();
+            writeInt(target, targetOffset, valueLength);
+            targetOffset += Integer.BYTES;
+            System.arraycopy(stored, input.getPosition(), target, targetOffset, valueLength);
+            return targetOffset + valueLength;
+        }
+        if (type != PACKED_VALUES) {
+            throw new IOException("Corrupted local KV list value marker.");
+        }
+
+        input.readInt();
+        int payloadLength = input.available();
+        System.arraycopy(stored, input.getPosition(), target, targetOffset, payloadLength);
+        return targetOffset + payloadLength;
     }
 
     private static void writeInt(byte[] bytes, int offset, int value) {

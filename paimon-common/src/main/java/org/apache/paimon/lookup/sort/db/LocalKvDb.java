@@ -43,8 +43,8 @@ import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
@@ -94,6 +94,9 @@ public class LocalKvDb implements Closeable {
 
     /** Marker used when an SST's entry count cannot be estimated before writing. */
     static final long UNKNOWN_NUM_ENTRIES = -1;
+
+    /** Bound open SST inputs while retaining one hot reader per LSM level. */
+    static final int MAX_CACHED_READERS = MAX_LEVELS;
 
     /**
      * Estimated per-entry memory overhead in the MemTable's TreeMap, beyond the raw key/value
@@ -157,7 +160,7 @@ public class LocalKvDb implements Closeable {
         this.memTable = new TreeMap<>(keyComparator);
         this.memTableSize = 0;
         this.levels = new LsmLevels(MAX_LEVELS);
-        this.readerCache = new HashMap<>();
+        this.readerCache = new LinkedHashMap<>(16, 0.75f, true);
         this.fileSequence = new AtomicLong();
         this.activeBulkLoadWriter = null;
         this.openRangeIterators = 0;
@@ -240,6 +243,24 @@ public class LocalKvDb implements Closeable {
                             + "Use delete() to remove a key.");
         }
         MemorySlice wrappedKey = MemorySlice.wrap(key);
+        if (mergeOperator != null) {
+            Map.Entry<MemorySlice, byte[]> previous = memTable.lowerEntry(wrappedKey);
+            if (previous != null
+                    && !isTombstone(previous.getValue())
+                    && mergeOperator.canMerge(previous.getKey(), wrappedKey)) {
+                byte[] merged = mergeOperator.tryMergeMemTableValues(previous.getValue(), value);
+                if (merged != null) {
+                    if (isTombstone(merged)) {
+                        throw new IllegalStateException(
+                                "MergeOperator returned the tombstone marker.");
+                    }
+                    memTableSize += merged.length - previous.getValue().length;
+                    memTable.put(previous.getKey(), merged);
+                    maybeFlushMemTable();
+                    return;
+                }
+            }
+        }
         byte[] oldValue = memTable.put(wrappedKey, value);
         long delta = key.length + value.length;
         if (oldValue != null) {
@@ -802,12 +823,30 @@ public class LocalKvDb implements Closeable {
 
     @Nullable
     private byte[] lookupInFile(File file, byte[] key) throws IOException {
+        return getOrCreateReader(file).lookup(key);
+    }
+
+    private SortLookupStoreReader getOrCreateReader(File file) throws IOException {
         SortLookupStoreReader reader = readerCache.get(file);
         if (reader == null) {
             reader = storeFactory.createReader(file);
+            if (readerCache.size() >= MAX_CACHED_READERS) {
+                Iterator<Map.Entry<File, SortLookupStoreReader>> iterator =
+                        readerCache.entrySet().iterator();
+                Map.Entry<File, SortLookupStoreReader> eldest = iterator.next();
+                iterator.remove();
+                try {
+                    eldest.getValue().closeInput();
+                } catch (IOException e) {
+                    LOG.warn(
+                            "Failed to close evicted reader for SST file: {}",
+                            eldest.getKey().getName(),
+                            e);
+                }
+            }
             readerCache.put(file, reader);
         }
-        return reader.lookup(key);
+        return reader;
     }
 
     private SstFileMetadata writeMemTableToSst(TreeMap<MemorySlice, byte[]> data)
@@ -1099,29 +1138,26 @@ public class LocalKvDb implements Closeable {
                 return null;
             }
 
-            SortLookupStoreReader reader = storeFactory.createReader(file);
-            try (Closeable ignored = reader::closeInput) {
-                SstFileReader.SstFileIterator iterator = reader.createIterator();
-                byte[] seekKey =
-                        resumeAfterKey == null ? fromInclusive : resumeAfterKey.copyBytes();
-                iterator.seekTo(seekKey);
-                boolean skipResumeKey = resumeAfterKey != null;
-                while (true) {
-                    BlockIterator nextBlock = iterator.readBatch();
-                    if (nextBlock == null) {
-                        finished = true;
-                        return null;
-                    }
+            SortLookupStoreReader reader = getOrCreateReader(file);
+            SstFileReader.SstFileIterator iterator = reader.createIterator();
+            byte[] seekKey = resumeAfterKey == null ? fromInclusive : resumeAfterKey.copyBytes();
+            iterator.seekTo(seekKey);
+            boolean skipResumeKey = resumeAfterKey != null;
+            while (true) {
+                BlockIterator nextBlock = iterator.readBatch();
+                if (nextBlock == null) {
+                    finished = true;
+                    return null;
+                }
 
-                    if (skipResumeKey) {
-                        if (nextBlock.seekTo(resumeAfterKey)) {
-                            nextBlock.next();
-                        }
-                        skipResumeKey = false;
+                if (skipResumeKey) {
+                    if (nextBlock.seekTo(resumeAfterKey)) {
+                        nextBlock.next();
                     }
-                    if (nextBlock.hasNext()) {
-                        return nextBlock;
-                    }
+                    skipResumeKey = false;
+                }
+                if (nextBlock.hasNext()) {
+                    return nextBlock;
                 }
             }
         }
@@ -1151,12 +1187,25 @@ public class LocalKvDb implements Closeable {
     /**
      * Operator for combining adjacent logical records while flushing and compacting SST files.
      *
-     * <p>MemTable writes remain independent so merge-heavy workloads do not pay repeated
-     * read-modify-write costs. The first record's key is retained for the combined value.
+     * <p>The first record's key is retained for the combined value.
      */
     public interface MergeOperator {
 
         boolean canMerge(MemorySlice firstKey, MemorySlice nextKey);
+
+        /**
+         * Optionally merge two adjacent MemTable values.
+         *
+         * <p>This is invoked for non-tombstone values only after {@link #canMerge} returns {@code
+         * true}. Returning {@code null} keeps the new value as a separate physical record.
+         * Operators should bound the work performed here to avoid repeated merging becoming
+         * quadratic.
+         */
+        @Nullable
+        default byte[] tryMergeMemTableValues(byte[] previousValue, byte[] newValue)
+                throws IOException {
+            return null;
+        }
 
         /**
          * Return whether a tombstone can be absorbed into the pending merge group.

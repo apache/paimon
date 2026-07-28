@@ -277,7 +277,7 @@ public class LocalKvDbTest {
     }
 
     @Test
-    public void testRangeIteratorDoesNotCacheReadersForOverlappingSsts() throws IOException {
+    public void testRangeIteratorBoundsCachedReadersForOverlappingSsts() throws IOException {
         int fileCount = 128;
         File directory = new File(tempDir.toFile(), "range-iterator-many-ssts");
         try (LocalKvDb db =
@@ -294,14 +294,14 @@ public class LocalKvDbTest {
             int entryCount = 0;
             try (LocalKvDb.RangeIterator iterator =
                     db.rangeIterator("key-00000".getBytes(UTF_8), "key-99999".getBytes(UTF_8))) {
-                Assertions.assertEquals(0, db.getCachedReaderCount());
+                Assertions.assertEquals(LocalKvDb.MAX_CACHED_READERS, db.getCachedReaderCount());
                 while (iterator.advanceNext()) {
                     entryCount++;
                 }
             }
 
             Assertions.assertEquals(fileCount, entryCount);
-            Assertions.assertEquals(0, db.getCachedReaderCount());
+            Assertions.assertEquals(LocalKvDb.MAX_CACHED_READERS, db.getCachedReaderCount());
         }
     }
 
