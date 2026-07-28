@@ -26,7 +26,10 @@ import org.apache.paimon.lookup.sort.SortLookupStoreReader;
 import org.apache.paimon.lookup.sort.SortLookupStoreWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.sst.BlockIterator;
+import org.apache.paimon.sst.SstFileReader;
 import org.apache.paimon.utils.BloomFilter;
+import org.apache.paimon.utils.KeyValueIterator;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +39,7 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -43,6 +47,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -125,6 +130,7 @@ public class LocalKvDb implements Closeable {
 
     private final AtomicLong fileSequence;
     @Nullable private BulkLoadWriter activeBulkLoadWriter;
+    private int openRangeIterators;
     private boolean closed;
 
     private LocalKvDb(
@@ -150,6 +156,7 @@ public class LocalKvDb implements Closeable {
         this.readerCache = new HashMap<>();
         this.fileSequence = new AtomicLong();
         this.activeBulkLoadWriter = null;
+        this.openRangeIterators = 0;
         this.closed = false;
         LsmCompactor.CompactorFactory compactorFactory =
                 fileDeleter ->
@@ -218,6 +225,7 @@ public class LocalKvDb implements Closeable {
     public void put(byte[] key, byte[] value) throws IOException {
         ensureOpen();
         ensureNoBulkLoad();
+        ensureNoRangeIterator();
         checkCompactionFailure();
         if (value.length == 0) {
             throw new IllegalArgumentException(
@@ -244,6 +252,7 @@ public class LocalKvDb implements Closeable {
     public void delete(byte[] key) throws IOException {
         ensureOpen();
         ensureNoBulkLoad();
+        ensureNoRangeIterator();
         checkCompactionFailure();
         MemorySlice wrappedKey = MemorySlice.wrap(key);
         byte[] oldValue = memTable.put(wrappedKey, TOMBSTONE);
@@ -298,6 +307,7 @@ public class LocalKvDb implements Closeable {
 
     private BulkLoadWriter createBulkLoadWriter(long expectedEntries) throws IOException {
         ensureOpen();
+        ensureNoRangeIterator();
         checkCompactionFailure();
         if (activeBulkLoadWriter != null) {
             throw new IllegalStateException("Another bulk load is already in progress.");
@@ -549,6 +559,77 @@ public class LocalKvDb implements Closeable {
         return value == null || isTombstone(value) ? null : value;
     }
 
+    /**
+     * Scan live entries in the half-open range [{@code fromInclusive}, {@code toExclusive}).
+     *
+     * <p>The result is sorted by the configured key comparator. Newer values and tombstones shadow
+     * older versions in the same way as {@link #get(byte[])}. A null upper bound scans to the end
+     * of the database.
+     */
+    public List<Map.Entry<byte[], byte[]>> rangeScan(
+            byte[] fromInclusive, @Nullable byte[] toExclusive) throws IOException {
+        List<Map.Entry<byte[], byte[]>> result = new ArrayList<>();
+        forEachInRange(
+                fromInclusive,
+                toExclusive,
+                (key, value) ->
+                        result.add(
+                                new AbstractMap.SimpleImmutableEntry<>(
+                                        key.copyBytes(), value.copyBytes())));
+        return result;
+    }
+
+    /**
+     * Visit live entries in the half-open range [{@code fromInclusive}, {@code toExclusive}).
+     *
+     * <p>Entries are visited in key order with the same shadowing rules as {@link #get(byte[])}.
+     * The supplied slices are only valid for the duration of the callback and must be copied if
+     * retained.
+     */
+    public void forEachInRange(
+            byte[] fromInclusive, @Nullable byte[] toExclusive, RangeEntryConsumer consumer)
+            throws IOException {
+        try (RangeIterator iterator = rangeIterator(fromInclusive, toExclusive)) {
+            while (iterator.advanceNext()) {
+                consumer.accept(iterator.getKey(), iterator.getValue());
+            }
+        }
+    }
+
+    /**
+     * Create a lazy iterator over live entries in the half-open range [{@code fromInclusive},
+     * {@code toExclusive}).
+     *
+     * <p>The iterator merges the MemTable and all overlapping SST files in key order. For duplicate
+     * keys, the newest source wins and tombstones suppress older values. The iterator must be
+     * closed before modifying or closing the database. Closing releases the levels read lock so a
+     * concurrent compaction can publish its result.
+     */
+    public RangeIterator rangeIterator(byte[] fromInclusive, @Nullable byte[] toExclusive)
+            throws IOException {
+        ensureOpen();
+        ensureNoBulkLoad();
+        checkCompactionFailure();
+
+        MemorySlice from = MemorySlice.wrap(fromInclusive);
+        MemorySlice to = toExclusive == null ? null : MemorySlice.wrap(toExclusive);
+        checkArgument(
+                to == null || keyComparator.compare(from, to) <= 0,
+                "Range start must not be greater than range end.");
+
+        Map<MemorySlice, byte[]> memoryEntries =
+                to == null ? memTable.tailMap(from, true) : memTable.subMap(from, true, to, false);
+        LsmLevels.RangeSnapshot snapshot = levels.openRangeSnapshot(from, to, keyComparator);
+        try {
+            RangeIterator iterator = new RangeIterator(snapshot, memoryEntries, fromInclusive, to);
+            openRangeIterators++;
+            return iterator;
+        } catch (IOException | RuntimeException e) {
+            snapshot.close();
+            throw e;
+        }
+    }
+
     // -------------------------------------------------------------------------
     //  Flush & Compaction
     // -------------------------------------------------------------------------
@@ -563,6 +644,7 @@ public class LocalKvDb implements Closeable {
     public void flush() throws IOException {
         ensureOpen();
         ensureNoBulkLoad();
+        ensureNoRangeIterator();
         checkCompactionFailure();
         if (memTable.isEmpty()) {
             return;
@@ -594,6 +676,7 @@ public class LocalKvDb implements Closeable {
     public void compact() throws IOException {
         ensureOpen();
         ensureNoBulkLoad();
+        ensureNoRangeIterator();
         compaction.fullCompact();
     }
 
@@ -606,6 +689,7 @@ public class LocalKvDb implements Closeable {
         if (closed) {
             return;
         }
+        ensureNoRangeIterator();
         closed = true;
 
         IOException failure = null;
@@ -651,6 +735,12 @@ public class LocalKvDb implements Closeable {
     @VisibleForTesting
     int getSstFileCount() {
         return levels.fileCount();
+    }
+
+    /** Return the number of readers retained for point lookups. */
+    @VisibleForTesting
+    int getCachedReaderCount() {
+        return readerCache.size();
     }
 
     /** Return the number of SST files at a specific level. */
@@ -769,6 +859,264 @@ public class LocalKvDb implements Closeable {
 
     private static MemorySlice copyKey(byte[] key) {
         return MemorySlice.wrap(Arrays.copyOf(key, key.length));
+    }
+
+    private void ensureNoRangeIterator() {
+        if (openRangeIterators > 0) {
+            throw new IllegalStateException(
+                    "The database cannot be modified or closed while a range iterator is open.");
+        }
+    }
+
+    /** Lazy range iterator with newest-version-wins semantics. */
+    public final class RangeIterator
+            implements KeyValueIterator<MemorySlice, MemorySlice>, AutoCloseable {
+
+        private final LsmLevels.RangeSnapshot snapshot;
+        private final PriorityQueue<RangeSource> sources;
+
+        @Nullable private MemorySlice currentKey;
+        @Nullable private MemorySlice currentValue;
+        private boolean closed;
+
+        private RangeIterator(
+                LsmLevels.RangeSnapshot snapshot,
+                Map<MemorySlice, byte[]> memoryEntries,
+                byte[] fromInclusive,
+                @Nullable MemorySlice toExclusive)
+                throws IOException {
+            this.snapshot = snapshot;
+            this.sources =
+                    new PriorityQueue<>(
+                            (left, right) -> {
+                                int compare = keyComparator.compare(left.key(), right.key());
+                                return compare != 0
+                                        ? compare
+                                        : Integer.compare(left.priority(), right.priority());
+                            });
+
+            int priority = 0;
+            advanceAndAdd(new MemoryRangeSource(priority++, memoryEntries.entrySet().iterator()));
+            for (File file : snapshot.files()) {
+                advanceAndAdd(new SstRangeSource(priority++, file, fromInclusive, toExclusive));
+            }
+        }
+
+        @Override
+        public boolean advanceNext() throws IOException {
+            if (closed) {
+                return false;
+            }
+
+            currentKey = null;
+            currentValue = null;
+            try {
+                while (!sources.isEmpty()) {
+                    RangeSource newest = sources.poll();
+                    MemorySlice key = newest.key();
+                    MemorySlice value = newest.value();
+                    advanceAndAdd(newest);
+
+                    while (!sources.isEmpty()
+                            && keyComparator.compare(sources.peek().key(), key) == 0) {
+                        advanceAndAdd(sources.poll());
+                    }
+
+                    if (!isTombstoneSlice(value)) {
+                        currentKey = key;
+                        currentValue = value;
+                        return true;
+                    }
+                }
+                close();
+                return false;
+            } catch (IOException | RuntimeException e) {
+                close();
+                throw e;
+            }
+        }
+
+        @Override
+        public MemorySlice getKey() {
+            if (currentKey == null) {
+                throw new IllegalStateException("Range iterator is not positioned on an entry.");
+            }
+            return currentKey;
+        }
+
+        @Override
+        public MemorySlice getValue() {
+            if (currentValue == null) {
+                throw new IllegalStateException("Range iterator is not positioned on an entry.");
+            }
+            return currentValue;
+        }
+
+        private void advanceAndAdd(RangeSource source) throws IOException {
+            if (source.advance()) {
+                sources.add(source);
+            }
+        }
+
+        @Override
+        public void close() {
+            if (!closed) {
+                closed = true;
+                sources.clear();
+                currentKey = null;
+                currentValue = null;
+                snapshot.close();
+                openRangeIterators--;
+            }
+        }
+    }
+
+    private interface RangeSource {
+
+        int priority();
+
+        boolean advance() throws IOException;
+
+        MemorySlice key();
+
+        MemorySlice value();
+    }
+
+    private static final class MemoryRangeSource implements RangeSource {
+
+        private final int priority;
+        private final Iterator<Map.Entry<MemorySlice, byte[]>> iterator;
+
+        @Nullable private Map.Entry<MemorySlice, byte[]> current;
+
+        private MemoryRangeSource(int priority, Iterator<Map.Entry<MemorySlice, byte[]>> iterator) {
+            this.priority = priority;
+            this.iterator = iterator;
+        }
+
+        @Override
+        public int priority() {
+            return priority;
+        }
+
+        @Override
+        public boolean advance() {
+            current = iterator.hasNext() ? iterator.next() : null;
+            return current != null;
+        }
+
+        @Override
+        public MemorySlice key() {
+            return current.getKey();
+        }
+
+        @Override
+        public MemorySlice value() {
+            return MemorySlice.wrap(current.getValue());
+        }
+    }
+
+    private final class SstRangeSource implements RangeSource {
+
+        private final int priority;
+        private final File file;
+        private final byte[] fromInclusive;
+        @Nullable private final MemorySlice toExclusive;
+
+        @Nullable private BlockIterator block;
+        @Nullable private MemorySlice resumeAfterKey;
+        @Nullable private Map.Entry<MemorySlice, MemorySlice> current;
+        private boolean finished;
+
+        private SstRangeSource(
+                int priority, File file, byte[] fromInclusive, @Nullable MemorySlice toExclusive) {
+            this.priority = priority;
+            this.file = file;
+            this.fromInclusive = Arrays.copyOf(fromInclusive, fromInclusive.length);
+            this.toExclusive =
+                    toExclusive == null ? null : MemorySlice.wrap(toExclusive.copyBytes());
+        }
+
+        @Override
+        public int priority() {
+            return priority;
+        }
+
+        @Override
+        public boolean advance() throws IOException {
+            while (block == null || !block.hasNext()) {
+                block = loadNextBlock();
+                if (block == null) {
+                    current = null;
+                    return false;
+                }
+            }
+
+            current = block.next();
+            if (toExclusive != null && keyComparator.compare(current.getKey(), toExclusive) >= 0) {
+                current = null;
+                finished = true;
+                return false;
+            }
+            if (!block.hasNext()) {
+                resumeAfterKey = MemorySlice.wrap(current.getKey().copyBytes());
+            }
+            return true;
+        }
+
+        @Nullable
+        private BlockIterator loadNextBlock() throws IOException {
+            if (finished) {
+                return null;
+            }
+
+            SortLookupStoreReader reader = storeFactory.createReader(file);
+            try (Closeable ignored = reader::closeInput) {
+                SstFileReader.SstFileIterator iterator = reader.createIterator();
+                byte[] seekKey =
+                        resumeAfterKey == null ? fromInclusive : resumeAfterKey.copyBytes();
+                iterator.seekTo(seekKey);
+                boolean skipResumeKey = resumeAfterKey != null;
+                while (true) {
+                    BlockIterator nextBlock = iterator.readBatch();
+                    if (nextBlock == null) {
+                        finished = true;
+                        return null;
+                    }
+
+                    if (skipResumeKey) {
+                        if (nextBlock.seekTo(resumeAfterKey)) {
+                            nextBlock.next();
+                        }
+                        skipResumeKey = false;
+                    }
+                    if (nextBlock.hasNext()) {
+                        return nextBlock;
+                    }
+                }
+            }
+        }
+
+        @Override
+        public MemorySlice key() {
+            return current.getKey();
+        }
+
+        @Override
+        public MemorySlice value() {
+            return current.getValue();
+        }
+    }
+
+    private static boolean isTombstoneSlice(MemorySlice value) {
+        return value.length() == 0;
+    }
+
+    /** Callback for visiting an entry during a range scan. */
+    @FunctionalInterface
+    public interface RangeEntryConsumer {
+
+        void accept(MemorySlice key, MemorySlice value) throws IOException;
     }
 
     // -------------------------------------------------------------------------
