@@ -134,13 +134,13 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         writeOneRow(table, "b", 1);
         writeOneRow(table, "a", 2);
 
-        DataEvolutionRowIdReassigner.PlanningState.Result result = planProjectedState(table, null);
+        DataEvolutionRowIdAssignmentPlanner.Result result = planProjectedState(table, null);
 
         assertThat(result.isEmpty()).isFalse();
         assertThat(result.totalOffset).isEqualTo(2L);
         assertThat(result.manifestOrdinals).isNotEmpty().isSorted();
         assertThat(result.partitionMappings).hasSize(1);
-        DataEvolutionRowIdReassigner.PlanningState.PartitionMapping mapping =
+        DataEvolutionRowIdAssignmentPlanner.PartitionMapping mapping =
                 result.partitionMappings.get(0);
         assertThat(mapping.partition.getString(0).toString()).isEqualTo("a");
         assertThat(mapping.oldStarts).containsExactly(0L, 2L);
@@ -161,7 +161,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         Collections.singletonList(Collections.singletonMap("pt", "b")),
                         table.coreOptions().partitionDefaultName());
 
-        DataEvolutionRowIdReassigner.PlanningState.Result result = planProjectedState(table, onlyB);
+        DataEvolutionRowIdAssignmentPlanner.Result result = planProjectedState(table, onlyB);
 
         assertThat(result.isEmpty()).isTrue();
         assertThat(result.manifestOrdinals).isEmpty();
@@ -176,7 +176,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         writeOneRow(table, "b", 1);
         writeOneRow(table, "a", 2);
 
-        DataEvolutionRowIdReassigner.PlanningState.Result result = planProjectedState(table, null);
+        DataEvolutionRowIdAssignmentPlanner.Result result = planProjectedState(table, null);
 
         assertThat(result.partitionMappings).hasSize(1);
         assertThat(result.partitionMappings.get(0).oldStarts).containsExactly(0L, 2L);
@@ -185,8 +185,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
     @Test
     public void testCurrentEntryHotStateUsesThreePrimitiveWords() {
-        DataEvolutionRowIdReassigner.PlanningState.CurrentEntries entries =
-                new DataEvolutionRowIdReassigner.PlanningState.CurrentEntries(10_000);
+        DataEvolutionRowIdAssignmentPlanner.CurrentEntries entries =
+                new DataEvolutionRowIdAssignmentPlanner.CurrentEntries(10_000);
 
         for (int i = 0; i < 10_000; i++) {
             entries.add(i % 7, (i & 1) == 0, i * 10L, 3L);
@@ -199,48 +199,46 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
     @Test
     public void testInitialCapacityEstimatesLiveEntriesAfterDeletes() {
-        assertThat(
-                        DataEvolutionRowIdReassigner.PlanningState.initialCurrentEntryCapacity(
-                                13_572_157L, 0L))
+        assertThat(DataEvolutionRowIdAssignmentPlanner.initialCurrentEntryCapacity(13_572_157L, 0L))
                 .isEqualTo(13_572_157);
         assertThat(
-                        DataEvolutionRowIdReassigner.PlanningState.initialCurrentEntryCapacity(
+                        DataEvolutionRowIdAssignmentPlanner.initialCurrentEntryCapacity(
                                 800_000_000L, 799_999_990L))
                 .isEqualTo(10);
         assertThat(
-                        DataEvolutionRowIdReassigner.PlanningState.initialCurrentEntryCapacity(
+                        DataEvolutionRowIdAssignmentPlanner.initialCurrentEntryCapacity(
                                 800_000_000L, 0L))
                 .isEqualTo(1 << 24);
     }
 
     @Test
     public void testContiguousEntriesDoNotMaterializePerEntryRanges() {
-        DataEvolutionRowIdReassigner.PlanningState.CurrentEntries entries =
-                new DataEvolutionRowIdReassigner.PlanningState.CurrentEntries(10_000);
+        DataEvolutionRowIdAssignmentPlanner.CurrentEntries entries =
+                new DataEvolutionRowIdAssignmentPlanner.CurrentEntries(10_000);
         for (int i = 0; i < 10_000; i++) {
             entries.add(0, false, i, 1L);
         }
 
-        DataEvolutionRowIdReassigner.PlanningState.PrimitiveRangeBuffer ranges =
+        DataEvolutionRowIdAssignmentPlanner.PrimitiveRangeBuffer ranges =
                 entries.selectedRangesForTesting();
 
         assertThat(ranges).isNull();
         assertThat(entries.usedWordCount()).isEqualTo(30_000);
         assertThat(entries.retainedWordCount()).isEqualTo(30_000);
-        assertThat(DataEvolutionRowIdReassigner.PlanningState.class.getDeclaredClasses())
+        assertThat(DataEvolutionRowIdAssignmentPlanner.class.getDeclaredClasses())
                 .extracting(Class::getSimpleName)
                 .doesNotContain("RowRange");
     }
 
     @Test
     public void testFragmentedEntriesUsePrimitiveLogicalRanges() {
-        DataEvolutionRowIdReassigner.PlanningState.CurrentEntries entries =
-                new DataEvolutionRowIdReassigner.PlanningState.CurrentEntries(10_000);
+        DataEvolutionRowIdAssignmentPlanner.CurrentEntries entries =
+                new DataEvolutionRowIdAssignmentPlanner.CurrentEntries(10_000);
         for (int i = 0; i < 10_000; i++) {
             entries.add(0, false, i * 2L, 1L);
         }
 
-        DataEvolutionRowIdReassigner.PlanningState.PrimitiveRangeBuffer ranges =
+        DataEvolutionRowIdAssignmentPlanner.PrimitiveRangeBuffer ranges =
                 entries.selectedRangesForTesting();
 
         assertThat(ranges).isNotNull();
@@ -256,8 +254,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
     @Test
     public void testDeletedIdentifiersUseCompactArenaAndIncludePartition() {
-        DataEvolutionRowIdReassigner.PlanningState.DeletedIdentifierSet identifiers =
-                new DataEvolutionRowIdReassigner.PlanningState.DeletedIdentifierSet();
+        DataEvolutionRowIdAssignmentPlanner.DeletedIdentifierSet identifiers =
+                new DataEvolutionRowIdAssignmentPlanner.DeletedIdentifierSet();
         byte[] identifier = {1, 2, 3, 4};
 
         identifiers.add(3, identifier, identifier.length);
@@ -273,13 +271,13 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(identifiers.retainedIdentifierBytes()).isEqualTo(identifier.length * 2);
     }
 
-    private DataEvolutionRowIdReassigner.PlanningState.Result planProjectedState(
+    private DataEvolutionRowIdAssignmentPlanner.Result planProjectedState(
             FileStoreTable table, PartitionPredicate predicate) {
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         ManifestList manifestList = table.store().manifestListFactory().create();
         List<ManifestFileMeta> manifestMetas = manifestList.readDataManifests(snapshot);
-        DataEvolutionRowIdReassigner.PlanningState state =
-                new DataEvolutionRowIdReassigner.PlanningState(table, predicate, manifestMetas);
+        DataEvolutionRowIdAssignmentPlanner state =
+                new DataEvolutionRowIdAssignmentPlanner(table, predicate, manifestMetas);
         List<List<ManifestFileMeta>> groups = Collections.singletonList(manifestMetas);
         state.validateGroups(groups);
         state.planGroup(manifestMetas);
