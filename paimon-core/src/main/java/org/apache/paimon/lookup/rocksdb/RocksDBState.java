@@ -25,9 +25,8 @@ import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.lookup.ByteArray;
 import org.apache.paimon.lookup.State;
+import org.apache.paimon.lookup.StateUtils;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
@@ -118,17 +117,11 @@ public abstract class RocksDBState<K, V, CacheV> implements State<K, V> {
         return new RocksDBBulkLoader(db, stateFactory.options(), columnFamily, stateFactory.path());
     }
 
+    /** @deprecated Use {@link StateUtils#createBulkLoadSorter(IOManager, CoreOptions)}. */
+    @Deprecated
     public static BinaryExternalSortBuffer createBulkLoadSorter(
             IOManager ioManager, CoreOptions options) {
-        return BinaryExternalSortBuffer.create(
-                ioManager,
-                RowType.of(DataTypes.BYTES(), DataTypes.BYTES()),
-                new int[] {0},
-                options.writeBufferSize() / 2,
-                options.pageSize(),
-                options.localSortMaxNumFileHandles(),
-                options.spillCompressOptions(),
-                options.writeBufferSpillDiskSize());
+        return StateUtils.createBulkLoadSorter(ioManager, options);
     }
 
     /** A class wraps byte[] to indicate contain or not contain. */
