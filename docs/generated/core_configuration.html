@@ -480,7 +480,7 @@ under the License.
             <td><h5>cross-partition-upsert.index-ttl</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
-            <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
+            <td>The TTL in local index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.compaction.rewrite-row-ids</h5></td>
@@ -922,6 +922,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Max memory size for lookup cache.</td>
         </tr>
         <tr>
+            <td><h5>lookup.cache-rows</h5></td>
+            <td style="word-wrap: break-word;">10000</td>
+            <td>Long</td>
+            <td>The maximum number of rows to store in the cache.</td>
+        </tr>
+        <tr>
             <td><h5>lookup.cache-spill-compression</h5></td>
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
@@ -944,6 +950,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">0.25</td>
             <td>Double</td>
             <td>The fraction of cache memory that is reserved for high-priority data like index, filter.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.continuous.discovery-interval</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The discovery interval of lookup continuous reading. This is used as an SQL hint. If it's not configured, the lookup function will fallback to 'continuous.discovery-interval'.</td>
         </tr>
         <tr>
             <td><h5>lookup.hash-load-factor</h5></td>

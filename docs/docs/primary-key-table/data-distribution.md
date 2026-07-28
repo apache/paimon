@@ -120,7 +120,7 @@ Performance: For tables with a large amount of data, there will be a significant
 initialization takes a long time.
 
 If your upsert does not rely on too old data, you can consider configuring index TTL to reduce Index and initialization time:
-- `'cross-partition-upsert.index-ttl'`: The TTL in rocksdb index and initialization, this can avoid maintaining too many
+- `'cross-partition-upsert.index-ttl'`: The TTL in local index and initialization, this can avoid maintaining too many
   indexes and lead to worse and worse performance.
 
 You can also use Cross Partitions Upsert with bucket (N > 0) or bucket (-2), in these modes, there is no global index to

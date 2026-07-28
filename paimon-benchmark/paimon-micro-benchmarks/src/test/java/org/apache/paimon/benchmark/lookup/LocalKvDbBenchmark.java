@@ -32,9 +32,6 @@ import org.apache.paimon.lookup.ListState;
 import org.apache.paimon.lookup.SetState;
 import org.apache.paimon.lookup.StateFactory;
 import org.apache.paimon.lookup.local.LocalKvStateFactory;
-import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
-import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
-import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
 import org.apache.paimon.lookup.sort.db.LocalKvDb;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -44,13 +41,8 @@ import org.apache.paimon.utils.FileIOUtils;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.rocksdb.CompressionType;
-import org.rocksdb.RocksDB;
-import org.rocksdb.RocksDBException;
-import org.rocksdb.WriteOptions;
 
 import java.io.ByteArrayOutputStream;
-import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -151,47 +143,6 @@ public class LocalKvDbBenchmark {
             benchmark.run();
         } finally {
             FileIOUtils.deleteDirectoryQuietly(directory);
-        }
-        assertThat(checksum).isNotZero();
-    }
-
-    @Test
-    public void testPointLookupComparison() throws IOException {
-        File localDirectory = new File(tempDir.toFile(), "point-lookup-local-kv-db");
-        File rocksDirectory = new File(tempDir.toFile(), "point-lookup-rocks");
-        byte[][] hitKeys = queryKeys(false);
-        byte[][] missKeys = queryKeys(true);
-
-        try (LocalKvDb localDb = createDb(localDirectory);
-                RocksDbHandle rocksDb = createRocksDb(rocksDirectory)) {
-            long localLoadStart = System.nanoTime();
-            localDb.bulkLoad(entries(RECORD_COUNT), RECORD_COUNT);
-            long localLoadNanos = System.nanoTime() - localLoadStart;
-            long rocksLoadStart = System.nanoTime();
-            rocksDb.bulkLoad(entries(RECORD_COUNT));
-            long rocksLoadNanos = System.nanoTime() - rocksLoadStart;
-            System.out.printf(
-                    Locale.ROOT,
-                    "Build: local-kv-db=%.1f ms / %.2f MB, rocks=%.1f ms / %.2f MB%n",
-                    localLoadNanos / 1_000_000.0,
-                    directorySize(localDirectory) / (1024.0 * 1024.0),
-                    rocksLoadNanos / 1_000_000.0,
-                    directorySize(rocksDirectory) / (1024.0 * 1024.0));
-
-            Benchmark benchmark =
-                    new Benchmark(
-                                    "local-kv-db-vs-rocks-point-lookup-" + benchmarkDescription(),
-                                    OPERATION_COUNT)
-                            .setNumWarmupIters(2)
-                            .setOutputPerIteration(true);
-            benchmark.addCase("local-kv-db-hit", 5, () -> lookup(localDb, hitKeys, false));
-            benchmark.addCase("rocks-hit", 5, () -> lookup(rocksDb.db, hitKeys, false));
-            benchmark.addCase("local-kv-db-miss", 5, () -> lookup(localDb, missKeys, true));
-            benchmark.addCase("rocks-miss", 5, () -> lookup(rocksDb.db, missKeys, true));
-            benchmark.run();
-        } finally {
-            FileIOUtils.deleteDirectoryQuietly(localDirectory);
-            FileIOUtils.deleteDirectoryQuietly(rocksDirectory);
         }
         assertThat(checksum).isNotZero();
     }
@@ -299,120 +250,57 @@ public class LocalKvDbBenchmark {
     }
 
     @Test
-    public void testMixedReadWriteComparison() throws IOException {
-        File localDirectory = new File(tempDir.toFile(), "mixed-read-write-local-kv-db");
-        File rocksDirectory = new File(tempDir.toFile(), "mixed-read-write-rocks");
-        byte[][] hitKeys = queryKeys(false);
-        byte[][] values = updateValues();
+    public void testStateFanOut() throws IOException {
+        benchmarkListState("list-warmup");
+        benchmarkListBulkLoad("list-bulk-warmup");
+        benchmarkSetState("set-warmup");
 
-        try (LocalKvDb localDb = createDb(localDirectory);
-                RocksDbHandle rocksDb = createRocksDb(rocksDirectory)) {
-            localDb.bulkLoad(entries(RECORD_COUNT), RECORD_COUNT);
-            rocksDb.bulkLoad(entries(RECORD_COUNT));
-
-            Benchmark benchmark =
-                    new Benchmark(
-                                    "local-kv-db-vs-rocks-mixed-read-write-"
-                                            + benchmarkDescription(),
-                                    OPERATION_COUNT)
-                            .setNumWarmupIters(2)
-                            .setOutputPerIteration(true);
-            benchmark.addCase(
-                    "local-kv-db-50-percent-put",
-                    5,
-                    () -> mixedReadWrite(localDb, hitKeys, values));
-            benchmark.addCase(
-                    "rocks-50-percent-put", 5, () -> mixedReadWrite(rocksDb, hitKeys, values));
-            benchmark.run();
-        } finally {
-            FileIOUtils.deleteDirectoryQuietly(localDirectory);
-            FileIOUtils.deleteDirectoryQuietly(rocksDirectory);
-        }
-        assertThat(checksum).isNotZero();
-    }
-
-    @Test
-    public void testStateFanOutComparison() throws IOException {
-        benchmarkListState("local-list-warmup", true);
-        benchmarkListState("rocks-list-warmup", false);
-        benchmarkListBulkLoad("local-list-bulk-warmup", true);
-        benchmarkListBulkLoad("rocks-list-bulk-warmup", false);
-        benchmarkSetState("local-set-warmup", true);
-        benchmarkSetState("rocks-set-warmup", false);
-
-        StateBenchmarkResult localList = benchmarkListState("local-list", true);
-        StateBenchmarkResult rocksList = benchmarkListState("rocks-list", false);
-        StateBenchmarkResult localListBulk = benchmarkListBulkLoad("local-list-bulk", true);
-        StateBenchmarkResult rocksListBulk = benchmarkListBulkLoad("rocks-list-bulk", false);
-        StateBenchmarkResult localSet = benchmarkSetState("local-set", true);
-        StateBenchmarkResult rocksSet = benchmarkSetState("rocks-set", false);
+        StateBenchmarkResult list = benchmarkListState("list");
+        StateBenchmarkResult listBulk = benchmarkListBulkLoad("list-bulk");
+        StateBenchmarkResult set = benchmarkSetState("set");
 
         System.out.printf(
                 Locale.ROOT,
                 "ListState (%d keys x %d values, local cache=%s):%n"
-                        + "  local-kv-db add=%.1f ms, get=%.1f ms, cached=%.1f ms, close=%.1f ms, size=%.2f MB%n"
-                        + "  rocks       add=%.1f ms, get=%.1f ms, cached=%.1f ms, close=%.1f ms, size=%.2f MB%n",
+                        + "  add=%.1f ms, get=%.1f ms, cached=%.1f ms, close=%.1f ms, size=%.2f MB%n",
                 STATE_KEY_COUNT,
                 STATE_FAN_OUT,
                 CACHE_OFF_HEAP ? "off-heap" : "heap",
-                localList.updateNanos / 1_000_000.0,
-                localList.readNanos / 1_000_000.0,
-                localList.cachedReadNanos / 1_000_000.0,
-                localList.closeNanos / 1_000_000.0,
-                localList.directoryBytes / (1024.0 * 1024.0),
-                rocksList.updateNanos / 1_000_000.0,
-                rocksList.readNanos / 1_000_000.0,
-                rocksList.cachedReadNanos / 1_000_000.0,
-                rocksList.closeNanos / 1_000_000.0,
-                rocksList.directoryBytes / (1024.0 * 1024.0));
+                list.updateNanos / 1_000_000.0,
+                list.readNanos / 1_000_000.0,
+                list.cachedReadNanos / 1_000_000.0,
+                list.closeNanos / 1_000_000.0,
+                list.directoryBytes / (1024.0 * 1024.0));
         System.out.printf(
                 Locale.ROOT,
                 "ListState bulk load (%d keys x %d values):%n"
-                        + "  local-kv-db load=%.1f ms, get=%.1f ms, cached=%.1f ms, close=%.1f ms, size=%.2f MB%n"
-                        + "  rocks       load=%.1f ms, get=%.1f ms, cached=%.1f ms, close=%.1f ms, size=%.2f MB%n",
+                        + "  load=%.1f ms, get=%.1f ms, cached=%.1f ms, close=%.1f ms, size=%.2f MB%n",
                 STATE_KEY_COUNT,
                 STATE_FAN_OUT,
-                localListBulk.updateNanos / 1_000_000.0,
-                localListBulk.readNanos / 1_000_000.0,
-                localListBulk.cachedReadNanos / 1_000_000.0,
-                localListBulk.closeNanos / 1_000_000.0,
-                localListBulk.directoryBytes / (1024.0 * 1024.0),
-                rocksListBulk.updateNanos / 1_000_000.0,
-                rocksListBulk.readNanos / 1_000_000.0,
-                rocksListBulk.cachedReadNanos / 1_000_000.0,
-                rocksListBulk.closeNanos / 1_000_000.0,
-                rocksListBulk.directoryBytes / (1024.0 * 1024.0));
+                listBulk.updateNanos / 1_000_000.0,
+                listBulk.readNanos / 1_000_000.0,
+                listBulk.cachedReadNanos / 1_000_000.0,
+                listBulk.closeNanos / 1_000_000.0,
+                listBulk.directoryBytes / (1024.0 * 1024.0));
         System.out.printf(
                 Locale.ROOT,
                 "SetState (%d keys x %d values):%n"
-                        + "  local-kv-db add=%.1f ms, get=%.1f ms, cached=%.1f ms, close=%.1f ms, size=%.2f MB%n"
-                        + "  rocks       add=%.1f ms, get=%.1f ms, cached=%.1f ms, close=%.1f ms, size=%.2f MB%n",
+                        + "  add=%.1f ms, get=%.1f ms, cached=%.1f ms, close=%.1f ms, size=%.2f MB%n",
                 STATE_KEY_COUNT,
                 STATE_FAN_OUT,
-                localSet.updateNanos / 1_000_000.0,
-                localSet.readNanos / 1_000_000.0,
-                localSet.cachedReadNanos / 1_000_000.0,
-                localSet.closeNanos / 1_000_000.0,
-                localSet.directoryBytes / (1024.0 * 1024.0),
-                rocksSet.updateNanos / 1_000_000.0,
-                rocksSet.readNanos / 1_000_000.0,
-                rocksSet.cachedReadNanos / 1_000_000.0,
-                rocksSet.closeNanos / 1_000_000.0,
-                rocksSet.directoryBytes / (1024.0 * 1024.0));
+                set.updateNanos / 1_000_000.0,
+                set.readNanos / 1_000_000.0,
+                set.cachedReadNanos / 1_000_000.0,
+                set.closeNanos / 1_000_000.0,
+                set.directoryBytes / (1024.0 * 1024.0));
 
-        checksum +=
-                localList.checksum
-                        + rocksList.checksum
-                        + localListBulk.checksum
-                        + rocksListBulk.checksum
-                        + localSet.checksum
-                        + rocksSet.checksum;
+        checksum += list.checksum + listBulk.checksum + set.checksum;
         assertThat(checksum).isNotZero();
     }
 
-    private StateBenchmarkResult benchmarkListState(String name, boolean local) throws IOException {
+    private StateBenchmarkResult benchmarkListState(String name) throws IOException {
         File directory = new File(tempDir.toFile(), name);
-        StateFactory factory = createStateFactory(directory, local);
+        StateFactory factory = createStateFactory(directory);
         long updateNanos = 0;
         long readNanos = 0;
         long cachedReadNanos = 0;
@@ -467,9 +355,9 @@ public class LocalKvDbBenchmark {
                 updateNanos, readNanos, cachedReadNanos, closeNanos, directoryBytes, localChecksum);
     }
 
-    private StateBenchmarkResult benchmarkSetState(String name, boolean local) throws IOException {
+    private StateBenchmarkResult benchmarkSetState(String name) throws IOException {
         File directory = new File(tempDir.toFile(), name);
-        StateFactory factory = createStateFactory(directory, local);
+        StateFactory factory = createStateFactory(directory);
         long updateNanos = 0;
         long readNanos = 0;
         long cachedReadNanos = 0;
@@ -524,10 +412,9 @@ public class LocalKvDbBenchmark {
                 updateNanos, readNanos, cachedReadNanos, closeNanos, directoryBytes, localChecksum);
     }
 
-    private StateBenchmarkResult benchmarkListBulkLoad(String name, boolean local)
-            throws IOException {
+    private StateBenchmarkResult benchmarkListBulkLoad(String name) throws IOException {
         File directory = new File(tempDir.toFile(), name);
-        StateFactory factory = createStateFactory(directory, local);
+        StateFactory factory = createStateFactory(directory);
         long loadNanos = 0;
         long readNanos = 0;
         long cachedReadNanos = 0;
@@ -589,18 +476,13 @@ public class LocalKvDbBenchmark {
                 loadNanos, readNanos, cachedReadNanos, closeNanos, directoryBytes, localChecksum);
     }
 
-    private StateFactory createStateFactory(File directory, boolean local) throws IOException {
+    private StateFactory createStateFactory(File directory) {
         Options options = new Options();
         options.set(
                 CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE, MemorySize.ofMebiBytes(CACHE_SIZE_MB));
         options.set(CoreOptions.LOOKUP_CACHE_SPILL_COMPRESSION, COMPRESSION);
-        options.set(RocksDBOptions.BLOCK_CACHE_SIZE, MemorySize.ofMebiBytes(CACHE_SIZE_MB));
-        options.set(RocksDBOptions.COMPRESSION_TYPE, rocksCompression());
-        if (local) {
-            return new LocalKvStateFactory(
-                    directory.getAbsolutePath(), options, null, null, CACHE_OFF_HEAP);
-        }
-        return new RocksDBStateFactory(directory.getAbsolutePath(), options, null);
+        return new LocalKvStateFactory(
+                directory.getAbsolutePath(), options, null, null, CACHE_OFF_HEAP);
     }
 
     private void mixedReadWrite(LocalKvDb db, byte[][] keys, byte[][] values) {
@@ -619,26 +501,6 @@ public class LocalKvDbBenchmark {
             }
             checksum += localChecksum;
         } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private void mixedReadWrite(RocksDbHandle handle, byte[][] keys, byte[][] values) {
-        try {
-            long localChecksum = 0;
-            for (int i = 0; i < OPERATION_COUNT; i++) {
-                byte[] key = keys[i];
-                if ((i & 1) == 0) {
-                    handle.db.put(handle.writeOptions, key, values[i & (values.length - 1)]);
-                } else {
-                    byte[] result = handle.db.get(key);
-                    if (result != null) {
-                        localChecksum += result[0] & 0xff;
-                    }
-                }
-            }
-            checksum += localChecksum;
-        } catch (RocksDBException e) {
             throw new RuntimeException(e);
         }
     }
@@ -668,27 +530,6 @@ public class LocalKvDbBenchmark {
             }
             checksum += localChecksum;
         } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private void lookup(RocksDB db, byte[][] keys, boolean expectMiss) {
-        try {
-            long localChecksum = 0;
-            for (byte[] key : keys) {
-                byte[] value = db.get(key);
-                if (expectMiss) {
-                    if (value != null) {
-                        throw new IllegalStateException("Expected lookup miss.");
-                    }
-                } else if (value == null) {
-                    throw new IllegalStateException("Expected lookup hit.");
-                } else {
-                    localChecksum += value[0] & 0xff;
-                }
-            }
-            checksum += localChecksum;
-        } catch (RocksDBException e) {
             throw new RuntimeException(e);
         }
     }
@@ -727,37 +568,6 @@ public class LocalKvDbBenchmark {
         return CACHE_OFF_HEAP
                 ? CacheManager.createOffHeap(cacheSize, 0)
                 : new CacheManager(cacheSize, 0);
-    }
-
-    private RocksDbHandle createRocksDb(File directory) throws IOException {
-        Options options = new Options();
-        options.set(RocksDBOptions.WRITE_BUFFER_SIZE, MemorySize.ofMebiBytes(MEMTABLE_SIZE_MB));
-        options.set(RocksDBOptions.TARGET_FILE_SIZE_BASE, MemorySize.ofMebiBytes(SST_FILE_SIZE_MB));
-        options.set(RocksDBOptions.BLOCK_SIZE, MemorySize.ofKibiBytes(BLOCK_SIZE_KB));
-        options.set(RocksDBOptions.BLOCK_CACHE_SIZE, MemorySize.ofMebiBytes(CACHE_SIZE_MB));
-        options.set(RocksDBOptions.COMPRESSION_TYPE, rocksCompression());
-        if (BLOOM_FILTER_FPP > 0) {
-            options.set(RocksDBOptions.USE_BLOOM_FILTER, true);
-            options.set(
-                    RocksDBOptions.BLOOM_FILTER_BITS_PER_KEY,
-                    -Math.log(BLOOM_FILTER_FPP) / (Math.log(2) * Math.log(2)));
-        }
-        return new RocksDbHandle(
-                new RocksDBStateFactory(directory.getAbsolutePath(), options, null));
-    }
-
-    private static CompressionType rocksCompression() {
-        switch (COMPRESSION.toLowerCase()) {
-            case "none":
-                return CompressionType.NO_COMPRESSION;
-            case "lz4":
-                return CompressionType.LZ4_COMPRESSION;
-            case "zstd":
-                return CompressionType.ZSTD_COMPRESSION;
-            default:
-                throw new IllegalArgumentException(
-                        "Unsupported RocksDB compression for benchmark: " + COMPRESSION);
-        }
     }
 
     private byte[][] queryKeys(boolean missing) {
@@ -910,40 +720,6 @@ public class LocalKvDbBenchmark {
                 BLOCK_SIZE_KB,
                 COMPRESSION,
                 BLOOM_FILTER_FPP > 0 ? Double.toString(BLOOM_FILTER_FPP) : "disabled");
-    }
-
-    private static class RocksDbHandle implements Closeable {
-
-        private final RocksDBStateFactory factory;
-        private final RocksDB db;
-        private final WriteOptions writeOptions;
-
-        private RocksDbHandle(RocksDBStateFactory factory) {
-            this.factory = factory;
-            this.db = factory.db();
-            this.writeOptions = new WriteOptions().setDisableWAL(true);
-        }
-
-        private void bulkLoad(Iterator<Map.Entry<byte[], byte[]>> entries) throws IOException {
-            RocksDBBulkLoader loader =
-                    new RocksDBBulkLoader(
-                            db, factory.options(), db.getDefaultColumnFamily(), factory.path());
-            try {
-                while (entries.hasNext()) {
-                    Map.Entry<byte[], byte[]> entry = entries.next();
-                    loader.write(entry.getKey(), entry.getValue());
-                }
-            } catch (RocksDBBulkLoader.WriteException e) {
-                throw new IOException(e);
-            }
-            loader.finish();
-        }
-
-        @Override
-        public void close() throws IOException {
-            writeOptions.close();
-            factory.close();
-        }
     }
 
     private static class StateBenchmarkResult {

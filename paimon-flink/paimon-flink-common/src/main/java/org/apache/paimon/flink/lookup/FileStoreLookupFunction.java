@@ -75,13 +75,13 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
+import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_ROWS;
+import static org.apache.paimon.CoreOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_FULL_LOAD_THRESHOLD;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST;
 import static org.apache.paimon.flink.query.RemoteTableQuery.isRemoteServiceAvailable;
-import static org.apache.paimon.lookup.rocksdb.RocksDBOptions.LOOKUP_CACHE_ROWS;
-import static org.apache.paimon.lookup.rocksdb.RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** A lookup {@link TableFunction} for file store. */
