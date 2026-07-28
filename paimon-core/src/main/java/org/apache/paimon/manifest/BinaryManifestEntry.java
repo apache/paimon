@@ -19,17 +19,17 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.io.BinaryDataFileMeta;
+import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -227,6 +227,94 @@ public final class BinaryManifestEntry implements ManifestEntry {
     }
 
     /**
+     * Reusable byte encoding of a binary manifest entry's identity fields.
+     *
+     * <p>The encoded identifier is the prefix of {@link #bytes()} ending at {@link #length()}. It
+     * is valid until the next call to {@link #replace(BinaryManifestEntry)} or {@link #release()}
+     * and must not be modified by callers.
+     */
+    public static final class ReusableIdentifier {
+
+        private byte[] bytes = new byte[256];
+        private int length;
+
+        public ReusableIdentifier replace(BinaryManifestEntry entry) {
+            checkArgument(entry != null, "Binary manifest entry cannot be null.");
+            length = 0;
+            putInt(entry.bucket());
+            BinaryDataFileMeta file = entry.file();
+            putInt(file.level());
+            putString(file.fileNameBinary());
+
+            int extraFileCount = file.extraFileCount();
+            putInt(extraFileCount);
+            for (int i = 0; i < extraFileCount; i++) {
+                putString(file.extraFile(i));
+            }
+
+            if (!file.hasEmbeddedIndex()) {
+                putInt(-1);
+            } else {
+                putBytes(file.embeddedIndex());
+            }
+            if (!file.hasExternalPath()) {
+                putInt(-1);
+            } else {
+                putString(file.externalPathBinary());
+            }
+            return this;
+        }
+
+        public byte[] bytes() {
+            return bytes;
+        }
+
+        public int length() {
+            return length;
+        }
+
+        public void release() {
+            bytes = new byte[0];
+            length = 0;
+        }
+
+        private void putString(BinaryString value) {
+            checkState(value != null, "Manifest string field cannot be null.");
+            int valueLength = value.getSizeInBytes();
+            putInt(valueLength);
+            ensureCapacity(valueLength);
+            MemorySegmentUtils.copyToBytes(
+                    value.getSegments(), value.getOffset(), bytes, length, valueLength);
+            length += valueLength;
+        }
+
+        private void putBytes(byte[] value) {
+            checkState(value != null, "Manifest binary field cannot be null.");
+            putInt(value.length);
+            ensureCapacity(value.length);
+            System.arraycopy(value, 0, bytes, length, value.length);
+            length += value.length;
+        }
+
+        private void putInt(int value) {
+            ensureCapacity(Integer.BYTES);
+            bytes[length++] = (byte) (value >>> 24);
+            bytes[length++] = (byte) (value >>> 16);
+            bytes[length++] = (byte) (value >>> 8);
+            bytes[length++] = (byte) value;
+        }
+
+        private void ensureCapacity(int additional) {
+            int required = Math.addExact(length, additional);
+            if (required <= bytes.length) {
+                return;
+            }
+            int grown = Math.max(required, bytes.length + (bytes.length >>> 1));
+            bytes = Arrays.copyOf(bytes, grown);
+        }
+    }
+
+    /**
      * Projected manifest schema together with its bound binary field layout.
      *
      * <p>The projected type may contain any subset and ordering of the versioned {@link
@@ -235,7 +323,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
      */
     public static final class Projection {
 
-        private final FormatReaderFactory readerFactory;
+        private final RowType projectedType;
         private final int kindPosition;
         private final int partitionPosition;
         private final int bucketPosition;
@@ -245,7 +333,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
         private final @Nullable BinaryDataFileMeta.Projection fileProjection;
 
         private Projection(
-                FormatReaderFactory readerFactory,
+                RowType projectedType,
                 int kindPosition,
                 int partitionPosition,
                 int bucketPosition,
@@ -253,7 +341,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
                 int filePosition,
                 int projectedFileFieldCount,
                 @Nullable BinaryDataFileMeta.Projection fileProjection) {
-            this.readerFactory = readerFactory;
+            this.projectedType = projectedType;
             this.kindPosition = kindPosition;
             this.partitionPosition = partitionPosition;
             this.bucketPosition = bucketPosition;
@@ -263,8 +351,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
             this.fileProjection = fileProjection;
         }
 
-        public static Projection create(FileFormat format, RowType projectedType) {
-            checkArgument(format != null, "Manifest format cannot be null.");
+        public static Projection create(RowType projectedType) {
             checkArgument(projectedType != null, "Projected manifest type cannot be null.");
             validateProjection(projectedType);
 
@@ -279,8 +366,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
             }
 
             return new Projection(
-                    format.createReaderFactory(
-                            MANIFEST_TYPE, projectedType, Collections.emptyList()),
+                    projectedType,
                     projectedType.getFieldIndex(ManifestEntry.KIND),
                     projectedType.getFieldIndex(ManifestEntry.PARTITION),
                     projectedType.getFieldIndex(ManifestEntry.BUCKET),
@@ -306,8 +392,8 @@ public final class BinaryManifestEntry implements ManifestEntry {
             }
         }
 
-        public FormatReaderFactory readerFactory() {
-            return readerFactory;
+        RowType projectedType() {
+            return projectedType;
         }
 
         public BinaryManifestEntry createEntry() {

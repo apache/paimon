@@ -18,15 +18,12 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.io.BinaryDataFileMeta;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.VersionedObjectSerializer;
@@ -156,7 +153,7 @@ public class BinaryManifestEntryTest {
                                 manifestType.getField(ManifestEntry.PARTITION),
                                 manifestType.getField(ManifestEntry.KIND)));
         BinaryManifestEntry entry =
-                BinaryManifestEntry.Projection.create(format(), projectedType)
+                BinaryManifestEntry.Projection.create(projectedType)
                         .createEntry()
                         .replace(
                                 GenericRow.of(
@@ -215,7 +212,7 @@ public class BinaryManifestEntryTest {
                         java.util.Collections.singletonList(
                                 manifestType.getField(ManifestEntry.KIND)));
         BinaryManifestEntry entry =
-                BinaryManifestEntry.Projection.create(format(), projectedType)
+                BinaryManifestEntry.Projection.create(projectedType)
                         .createEntry()
                         .replace(GenericRow.of(FileKind.ADD.toByteValue()));
 
@@ -232,7 +229,7 @@ public class BinaryManifestEntryTest {
                         java.util.Collections.singletonList(
                                 manifestType.getField(ManifestEntry.KIND)));
         BinaryManifestEntry entry =
-                BinaryManifestEntry.Projection.create(format(), projectedType)
+                BinaryManifestEntry.Projection.create(projectedType)
                         .createEntry()
                         .replace(GenericRow.of((byte) 99));
 
@@ -253,11 +250,7 @@ public class BinaryManifestEntryTest {
                 manifestType
                         .getField(ManifestEntry.FILE)
                         .newType(DataFileMeta.SCHEMA.project(projectedFileFields)));
-        return BinaryManifestEntry.Projection.create(format(), new RowType(false, fields));
-    }
-
-    private static FileFormat format() {
-        return FileFormat.manifestFormat(new CoreOptions(new Options()));
+        return BinaryManifestEntry.Projection.create(new RowType(false, fields));
     }
 
     private static void assertUnsupported(ThrowingSupplier call, String field) {

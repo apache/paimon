@@ -139,13 +139,13 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(result.isEmpty()).isFalse();
         assertThat(result.totalOffset).isEqualTo(2L);
         assertThat(result.manifestOrdinals).isNotEmpty().isSorted();
-        assertThat(result.partitionMappings).hasSize(1);
-        DataEvolutionRowIdAssignmentPlanner.PartitionMapping mapping =
-                result.partitionMappings.get(0);
-        assertThat(mapping.partition.getString(0).toString()).isEqualTo("a");
-        assertThat(mapping.oldStarts).containsExactly(0L, 2L);
-        assertThat(mapping.oldEnds).containsExactly(0L, 2L);
-        assertThat(mapping.newRelativeStarts).containsExactly(0L, 1L);
+        assertThat(result.rowIdMappings).hasSize(1);
+        Map.Entry<BinaryRow, RowRangeMappingIndex> mapping =
+                result.rowIdMappings.entrySet().iterator().next();
+        assertThat(mapping.getKey().getString(0).toString()).isEqualTo("a");
+        assertThat(mapping.getValue().map(new Range(0L, 0L))).hasValue(new Range(0L, 0L));
+        assertThat(mapping.getValue().map(new Range(1L, 1L))).isEmpty();
+        assertThat(mapping.getValue().map(new Range(2L, 2L))).hasValue(new Range(1L, 1L));
     }
 
     @Test
@@ -178,23 +178,11 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
         DataEvolutionRowIdAssignmentPlanner.Result result = planProjectedState(table, null);
 
-        assertThat(result.partitionMappings).hasSize(1);
-        assertThat(result.partitionMappings.get(0).oldStarts).containsExactly(0L, 2L);
+        assertThat(result.rowIdMappings).hasSize(1);
+        RowRangeMappingIndex mapping = result.rowIdMappings.values().iterator().next();
+        assertThat(mapping.map(new Range(0L, 0L))).hasValue(new Range(0L, 0L));
+        assertThat(mapping.map(new Range(2L, 2L))).hasValue(new Range(1L, 1L));
         assertThat(result.totalOffset).isEqualTo(2L);
-    }
-
-    @Test
-    public void testCurrentEntryHotStateUsesThreePrimitiveWords() {
-        DataEvolutionRowIdAssignmentPlanner.CurrentEntries entries =
-                new DataEvolutionRowIdAssignmentPlanner.CurrentEntries(10_000);
-
-        for (int i = 0; i < 10_000; i++) {
-            entries.add(i % 7, (i & 1) == 0, i * 10L, 3L);
-        }
-
-        assertThat(entries.size()).isEqualTo(10_000);
-        assertThat(entries.usedWordCount()).isEqualTo(30_000);
-        assertThat(entries.retainedWordCount()).isEqualTo(30_000);
     }
 
     @Test
@@ -211,66 +199,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 .isEqualTo(1 << 24);
     }
 
-    @Test
-    public void testContiguousEntriesDoNotMaterializePerEntryRanges() {
-        DataEvolutionRowIdAssignmentPlanner.CurrentEntries entries =
-                new DataEvolutionRowIdAssignmentPlanner.CurrentEntries(10_000);
-        for (int i = 0; i < 10_000; i++) {
-            entries.add(0, false, i, 1L);
-        }
-
-        DataEvolutionRowIdAssignmentPlanner.PrimitiveRangeBuffer ranges =
-                entries.selectedRangesForTesting();
-
-        assertThat(ranges).isNull();
-        assertThat(entries.usedWordCount()).isEqualTo(30_000);
-        assertThat(entries.retainedWordCount()).isEqualTo(30_000);
-        assertThat(DataEvolutionRowIdAssignmentPlanner.class.getDeclaredClasses())
-                .extracting(Class::getSimpleName)
-                .doesNotContain("RowRange");
-    }
-
-    @Test
-    public void testFragmentedEntriesUsePrimitiveLogicalRanges() {
-        DataEvolutionRowIdAssignmentPlanner.CurrentEntries entries =
-                new DataEvolutionRowIdAssignmentPlanner.CurrentEntries(10_000);
-        for (int i = 0; i < 10_000; i++) {
-            entries.add(0, false, i * 2L, 1L);
-        }
-
-        DataEvolutionRowIdAssignmentPlanner.PrimitiveRangeBuffer ranges =
-                entries.selectedRangesForTesting();
-
-        assertThat(ranges).isNotNull();
-        assertThat(ranges.size()).isEqualTo(10_000);
-        assertThat(ranges.retainedWordCount()).isEqualTo(20_000);
-        assertThat(ranges.start(0)).isZero();
-        assertThat(ranges.end(0)).isZero();
-        assertThat(ranges.start(9_999)).isEqualTo(19_998L);
-        assertThat(ranges.end(9_999)).isEqualTo(19_998L);
-        assertThat(entries.usedWordCount()).isEqualTo(30_000);
-        assertThat(entries.retainedWordCount()).isEqualTo(30_000);
-    }
-
-    @Test
-    public void testDeletedIdentifiersUseCompactArenaAndIncludePartition() {
-        DataEvolutionRowIdAssignmentPlanner.DeletedIdentifierSet identifiers =
-                new DataEvolutionRowIdAssignmentPlanner.DeletedIdentifierSet();
-        byte[] identifier = {1, 2, 3, 4};
-
-        identifiers.add(3, identifier, identifier.length);
-        identifiers.add(3, identifier, identifier.length);
-
-        assertThat(identifiers.size()).isOne();
-        assertThat(identifiers.retainedIdentifierBytes()).isEqualTo(identifier.length);
-        assertThat(identifiers.contains(3, identifier, identifier.length)).isTrue();
-        assertThat(identifiers.contains(4, identifier, identifier.length)).isFalse();
-
-        identifiers.add(4, identifier, identifier.length);
-        assertThat(identifiers.size()).isEqualTo(2);
-        assertThat(identifiers.retainedIdentifierBytes()).isEqualTo(identifier.length * 2);
-    }
-
     private DataEvolutionRowIdAssignmentPlanner.Result planProjectedState(
             FileStoreTable table, PartitionPredicate predicate) {
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
@@ -279,9 +207,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         DataEvolutionRowIdAssignmentPlanner state =
                 new DataEvolutionRowIdAssignmentPlanner(table, predicate, manifestMetas);
         List<List<ManifestFileMeta>> groups = Collections.singletonList(manifestMetas);
-        state.validateGroups(groups);
-        state.planGroup(manifestMetas);
-        return state.buildResult();
+        return state.plan(groups);
     }
 
     private Schema projectedPlannerSchema(String manifestFormat) {
