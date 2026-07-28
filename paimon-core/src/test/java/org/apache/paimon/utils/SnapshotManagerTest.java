@@ -94,6 +94,92 @@ public class SnapshotManagerTest {
     }
 
     @Test
+    public void testRepairEarliestSnapshot() throws IOException {
+        FileIO fileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        fileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(1), createSnapshotWithMillis(1, 1000).toJson());
+        fileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(5), createSnapshotWithMillis(5, 5000).toJson());
+        snapshotManager.commitEarliestHint(1);
+        snapshotManager.commitLatestHint(5);
+
+        assertThat(snapshotManager.repairEarliestSnapshot(5)).isEqualTo(1);
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(5);
+
+        assertThat(snapshotManager.repairEarliestSnapshot(5)).isEqualTo(5);
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(5);
+    }
+
+    @Test
+    public void testRepairEarliestSnapshotRejectsBackwardTarget() throws IOException {
+        FileIO fileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        fileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(1), createSnapshotWithMillis(1, 1000).toJson());
+        fileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(5), createSnapshotWithMillis(5, 5000).toJson());
+        snapshotManager.commitEarliestHint(5);
+        snapshotManager.commitLatestHint(5);
+
+        assertThatThrownBy(() -> snapshotManager.repairEarliestSnapshot(1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must not be earlier than current earliest snapshot");
+    }
+
+    @Test
+    public void testRepairEarliestSnapshotRejectsMissingTarget() throws IOException {
+        FileIO fileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        fileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(1), createSnapshotWithMillis(1, 1000).toJson());
+        fileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(5), createSnapshotWithMillis(5, 5000).toJson());
+        snapshotManager.commitEarliestHint(1);
+        snapshotManager.commitLatestHint(5);
+
+        assertThatThrownBy(() -> snapshotManager.repairEarliestSnapshot(4))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Snapshot 4 does not exist");
+    }
+
+    @Test
+    public void testRepairEarliestSnapshotRejectsTargetAfterLatest() throws IOException {
+        FileIO fileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        fileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(1), createSnapshotWithMillis(1, 1000).toJson());
+        fileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(5), createSnapshotWithMillis(5, 5000).toJson());
+        fileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(10), createSnapshotWithMillis(10, 10000).toJson());
+        snapshotManager.commitEarliestHint(1);
+        snapshotManager.commitLatestHint(5);
+
+        assertThatThrownBy(() -> snapshotManager.repairEarliestSnapshot(10))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must not be later than latest snapshot");
+    }
+
+    @Test
+    public void testRepairEarliestSnapshotRejectsContinuousTarget() throws IOException {
+        FileIO fileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        fileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(1), createSnapshotWithMillis(1, 1000).toJson());
+        fileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(4), createSnapshotWithMillis(4, 4000).toJson());
+        fileIO.tryToWriteAtomic(
+                snapshotManager.snapshotPath(5), createSnapshotWithMillis(5, 5000).toJson());
+        snapshotManager.commitEarliestHint(1);
+        snapshotManager.commitLatestHint(5);
+
+        assertThatThrownBy(() -> snapshotManager.repairEarliestSnapshot(5))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not immediately follow a snapshot gap");
+    }
+
+    @Test
     public void testEarliestSnapshotThrowsWhenRetryExhausted() throws IOException {
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =

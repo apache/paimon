@@ -50,6 +50,7 @@ import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
 import org.apache.paimon.spark.procedure.RemoveUnexistingFilesProcedure;
 import org.apache.paimon.spark.procedure.RenameBranchProcedure;
 import org.apache.paimon.spark.procedure.RenameTagProcedure;
+import org.apache.paimon.spark.procedure.RepairEarliestSnapshotProcedure;
 import org.apache.paimon.spark.procedure.RepairProcedure;
 import org.apache.paimon.spark.procedure.ReplaceTagProcedure;
 import org.apache.paimon.spark.procedure.RescaleProcedure;
@@ -113,6 +114,7 @@ public class SparkProcedures {
         procedureBuilders.put("expire_snapshots", ExpireSnapshotsProcedure::builder);
         procedureBuilders.put("expire_partitions", ExpirePartitionsProcedure::builder);
         procedureBuilders.put("repair", RepairProcedure::builder);
+        procedureBuilders.put("repair_earliest_snapshot", RepairEarliestSnapshotProcedure::builder);
         procedureBuilders.put("fast_forward", FastForwardProcedure::builder);
         procedureBuilders.put("merge_branch", MergeBranchProcedure::builder);
         procedureBuilders.put("reset_consumer", ResetConsumerProcedure::builder);

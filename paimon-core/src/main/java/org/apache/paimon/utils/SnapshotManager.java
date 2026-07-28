@@ -272,6 +272,42 @@ public class SnapshotManager implements Serializable {
         }
     }
 
+    /**
+     * Repairs the earliest snapshot hint after a snapshot gap and returns the previous earliest
+     * snapshot id.
+     */
+    public long repairEarliestSnapshot(long snapshotId) {
+        long previous =
+                Preconditions.checkNotNull(
+                        earliestSnapshotId(),
+                        "Cannot repair earliest snapshot for an empty table.");
+        long latest =
+                Preconditions.checkNotNull(
+                        latestSnapshotId(), "Cannot repair earliest snapshot for an empty table.");
+        Preconditions.checkArgument(
+                snapshotId >= previous,
+                "Snapshot %s must not be earlier than current earliest snapshot %s.",
+                snapshotId,
+                previous);
+        Preconditions.checkArgument(
+                snapshotId <= latest,
+                "Snapshot %s must not be later than latest snapshot %s.",
+                snapshotId,
+                latest);
+        Preconditions.checkArgument(
+                snapshotExists(snapshotId), "Snapshot %s does not exist.", snapshotId);
+        Preconditions.checkArgument(
+                snapshotId == previous || !snapshotExists(snapshotId - 1),
+                "Snapshot %s does not immediately follow a snapshot gap.",
+                snapshotId);
+        try {
+            commitEarliestHint(snapshotId);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return previous;
+    }
+
     public @Nullable Long pickOrLatest(Predicate<Snapshot> predicate) {
         Long latestId = latestSnapshotId();
         Long earliestId = earliestSnapshotId();
