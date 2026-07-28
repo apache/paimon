@@ -72,15 +72,6 @@ final class DataEvolutionRowIdAssignmentPlanner {
             BinaryString.fromString(SpecialFields.ROW_ID.name());
     private static final BinaryString BLOB_FILE_SUFFIX = BinaryString.fromString(".blob");
     private static final BinaryString VECTOR_FILE_MARKER = BinaryString.fromString(".vector.");
-    private static final String FILE_NAME = "_FILE_NAME";
-    private static final String ROW_COUNT = "_ROW_COUNT";
-    private static final String MAX_SEQUENCE_NUMBER = "_MAX_SEQUENCE_NUMBER";
-    private static final String LEVEL = "_LEVEL";
-    private static final String EXTRA_FILES = "_EXTRA_FILES";
-    private static final String EMBEDDED_FILE_INDEX = "_EMBEDDED_FILE_INDEX";
-    private static final String EXTERNAL_PATH = "_EXTERNAL_PATH";
-    private static final String FIRST_ROW_ID = "_FIRST_ROW_ID";
-    private static final String WRITE_COLS = "_WRITE_COLS";
 
     private final FileStoreTable table;
     private final @Nullable PartitionPredicate partitionPredicate;
@@ -109,35 +100,40 @@ final class DataEvolutionRowIdAssignmentPlanner {
                 manifestProjection(
                         format,
                         true,
-                        FILE_NAME,
-                        LEVEL,
-                        EXTRA_FILES,
-                        EMBEDDED_FILE_INDEX,
-                        EXTERNAL_PATH);
+                        DataFileMeta.FILE_NAME,
+                        DataFileMeta.LEVEL,
+                        DataFileMeta.EXTRA_FILES,
+                        DataFileMeta.EMBEDDED_FILE_INDEX,
+                        DataFileMeta.EXTERNAL_PATH);
         this.addIdentifierProjection =
                 manifestProjection(
                         format,
                         true,
-                        FILE_NAME,
-                        ROW_COUNT,
-                        LEVEL,
-                        EXTRA_FILES,
-                        EMBEDDED_FILE_INDEX,
-                        EXTERNAL_PATH,
-                        FIRST_ROW_ID,
-                        WRITE_COLS,
-                        MAX_SEQUENCE_NUMBER);
+                        DataFileMeta.FILE_NAME,
+                        DataFileMeta.ROW_COUNT,
+                        DataFileMeta.LEVEL,
+                        DataFileMeta.EXTRA_FILES,
+                        DataFileMeta.EMBEDDED_FILE_INDEX,
+                        DataFileMeta.EXTERNAL_PATH,
+                        DataFileMeta.FIRST_ROW_ID,
+                        DataFileMeta.WRITE_COLS,
+                        DataFileMeta.MAX_SEQUENCE_NUMBER);
         this.compactAddProjection =
                 manifestProjection(
                         format,
                         false,
-                        FILE_NAME,
-                        ROW_COUNT,
-                        FIRST_ROW_ID,
-                        WRITE_COLS,
-                        MAX_SEQUENCE_NUMBER);
+                        DataFileMeta.FILE_NAME,
+                        DataFileMeta.ROW_COUNT,
+                        DataFileMeta.FIRST_ROW_ID,
+                        DataFileMeta.WRITE_COLS,
+                        DataFileMeta.MAX_SEQUENCE_NUMBER);
         this.rewriteProjection =
-                manifestProjection(format, false, ROW_COUNT, FIRST_ROW_ID, WRITE_COLS);
+                manifestProjection(
+                        format,
+                        false,
+                        DataFileMeta.ROW_COUNT,
+                        DataFileMeta.FIRST_ROW_ID,
+                        DataFileMeta.WRITE_COLS);
         this.selectedPartitions = new LinkedHashMap<>();
     }
 
@@ -145,14 +141,14 @@ final class DataEvolutionRowIdAssignmentPlanner {
             FileFormat format, boolean includeBucket, String... projectedFileFields) {
         RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
         List<DataField> fields = new ArrayList<>();
-        fields.add(manifestType.getField("_KIND"));
-        fields.add(manifestType.getField("_PARTITION"));
+        fields.add(manifestType.getField(ManifestEntry.KIND));
+        fields.add(manifestType.getField(ManifestEntry.PARTITION));
         if (includeBucket) {
-            fields.add(manifestType.getField("_BUCKET"));
+            fields.add(manifestType.getField(ManifestEntry.BUCKET));
         }
         fields.add(
                 manifestType
-                        .getField("_FILE")
+                        .getField(ManifestEntry.FILE)
                         .newType(DataFileMeta.SCHEMA.project(projectedFileFields)));
         return Projection.create(format, new RowType(false, fields));
     }

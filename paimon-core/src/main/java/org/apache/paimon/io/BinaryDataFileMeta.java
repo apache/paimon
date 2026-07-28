@@ -50,27 +50,6 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
  */
 public final class BinaryDataFileMeta implements DataFileMeta {
 
-    private static final int FILE_NAME = fieldIndex("_FILE_NAME");
-    private static final int FILE_SIZE = fieldIndex("_FILE_SIZE");
-    private static final int ROW_COUNT = fieldIndex("_ROW_COUNT");
-    private static final int MIN_KEY = fieldIndex("_MIN_KEY");
-    private static final int MAX_KEY = fieldIndex("_MAX_KEY");
-    private static final int KEY_STATS = fieldIndex("_KEY_STATS");
-    private static final int VALUE_STATS = fieldIndex("_VALUE_STATS");
-    private static final int MIN_SEQUENCE_NUMBER = fieldIndex("_MIN_SEQUENCE_NUMBER");
-    private static final int MAX_SEQUENCE_NUMBER = fieldIndex("_MAX_SEQUENCE_NUMBER");
-    private static final int SCHEMA_ID = fieldIndex("_SCHEMA_ID");
-    private static final int LEVEL = fieldIndex("_LEVEL");
-    private static final int EXTRA_FILES = fieldIndex("_EXTRA_FILES");
-    private static final int CREATION_TIME = fieldIndex("_CREATION_TIME");
-    private static final int DELETE_ROW_COUNT = fieldIndex("_DELETE_ROW_COUNT");
-    private static final int EMBEDDED_FILE_INDEX = fieldIndex("_EMBEDDED_FILE_INDEX");
-    private static final int FILE_SOURCE = fieldIndex("_FILE_SOURCE");
-    private static final int VALUE_STATS_COLS = fieldIndex("_VALUE_STATS_COLS");
-    private static final int EXTERNAL_PATH = fieldIndex("_EXTERNAL_PATH");
-    private static final int FIRST_ROW_ID = fieldIndex("_FIRST_ROW_ID");
-    private static final int WRITE_COLS = fieldIndex("_WRITE_COLS");
-
     private final Projection projection;
     private @Nullable InternalRow row;
 
@@ -101,78 +80,78 @@ public final class BinaryDataFileMeta implements DataFileMeta {
     }
 
     public BinaryString fileNameBinary() {
-        BinaryString fileName = currentRow().getString(requiredPosition(FILE_NAME));
+        BinaryString fileName = currentRow().getString(requiredPosition(Fields.FILE_NAME));
         checkState(fileName != null, "Data file name cannot be null.");
         return fileName;
     }
 
     @Override
     public long fileSize() {
-        return currentRow().getLong(requiredPosition(FILE_SIZE));
+        return currentRow().getLong(requiredPosition(Fields.FILE_SIZE));
     }
 
     @Override
     public long rowCount() {
-        return currentRow().getLong(requiredPosition(ROW_COUNT));
+        return currentRow().getLong(requiredPosition(Fields.ROW_COUNT));
     }
 
     @Override
     public Optional<Long> deleteRowCount() {
-        int position = requiredPosition(DELETE_ROW_COUNT);
+        int position = requiredPosition(Fields.DELETE_ROW_COUNT);
         InternalRow row = currentRow();
         return row.isNullAt(position) ? Optional.empty() : Optional.of(row.getLong(position));
     }
 
     public boolean hasEmbeddedIndex() {
-        return !currentRow().isNullAt(requiredPosition(EMBEDDED_FILE_INDEX));
+        return !currentRow().isNullAt(requiredPosition(Fields.EMBEDDED_FILE_INDEX));
     }
 
     @Nullable
     @Override
     public byte[] embeddedIndex() {
-        int position = requiredPosition(EMBEDDED_FILE_INDEX);
+        int position = requiredPosition(Fields.EMBEDDED_FILE_INDEX);
         InternalRow row = currentRow();
         return row.isNullAt(position) ? null : row.getBinary(position);
     }
 
     @Override
     public BinaryRow minKey() {
-        return deserializeBinaryRow(currentRow().getBinary(requiredPosition(MIN_KEY)));
+        return deserializeBinaryRow(currentRow().getBinary(requiredPosition(Fields.MIN_KEY)));
     }
 
     @Override
     public BinaryRow maxKey() {
-        return deserializeBinaryRow(currentRow().getBinary(requiredPosition(MAX_KEY)));
+        return deserializeBinaryRow(currentRow().getBinary(requiredPosition(Fields.MAX_KEY)));
     }
 
     @Override
     public SimpleStats keyStats() {
-        return stats(KEY_STATS);
+        return stats(Fields.KEY_STATS);
     }
 
     @Override
     public SimpleStats valueStats() {
-        return stats(VALUE_STATS);
+        return stats(Fields.VALUE_STATS);
     }
 
     @Override
     public long minSequenceNumber() {
-        return currentRow().getLong(requiredPosition(MIN_SEQUENCE_NUMBER));
+        return currentRow().getLong(requiredPosition(Fields.MIN_SEQUENCE_NUMBER));
     }
 
     @Override
     public long maxSequenceNumber() {
-        return currentRow().getLong(requiredPosition(MAX_SEQUENCE_NUMBER));
+        return currentRow().getLong(requiredPosition(Fields.MAX_SEQUENCE_NUMBER));
     }
 
     @Override
     public long schemaId() {
-        return currentRow().getLong(requiredPosition(SCHEMA_ID));
+        return currentRow().getLong(requiredPosition(Fields.SCHEMA_ID));
     }
 
     @Override
     public int level() {
-        return currentRow().getInt(requiredPosition(LEVEL));
+        return currentRow().getInt(requiredPosition(Fields.LEVEL));
     }
 
     public int extraFileCount() {
@@ -195,7 +174,8 @@ public final class BinaryDataFileMeta implements DataFileMeta {
 
     @Override
     public Timestamp creationTime() {
-        Timestamp creationTime = currentRow().getTimestamp(requiredPosition(CREATION_TIME), 3);
+        Timestamp creationTime =
+                currentRow().getTimestamp(requiredPosition(Fields.CREATION_TIME), 3);
         checkState(creationTime != null, "Data file creation time cannot be null.");
         return creationTime;
     }
@@ -211,11 +191,11 @@ public final class BinaryDataFileMeta implements DataFileMeta {
     }
 
     public boolean hasExternalPath() {
-        return !currentRow().isNullAt(requiredPosition(EXTERNAL_PATH));
+        return !currentRow().isNullAt(requiredPosition(Fields.EXTERNAL_PATH));
     }
 
     public BinaryString externalPathBinary() {
-        BinaryString externalPath = currentRow().getString(requiredPosition(EXTERNAL_PATH));
+        BinaryString externalPath = currentRow().getString(requiredPosition(Fields.EXTERNAL_PATH));
         checkState(externalPath != null, "External path cannot be null.");
         return externalPath;
     }
@@ -232,7 +212,7 @@ public final class BinaryDataFileMeta implements DataFileMeta {
 
     @Override
     public Optional<FileSource> fileSource() {
-        int position = requiredPosition(FILE_SOURCE);
+        int position = requiredPosition(Fields.FILE_SOURCE);
         InternalRow row = currentRow();
         return row.isNullAt(position)
                 ? Optional.empty()
@@ -242,17 +222,17 @@ public final class BinaryDataFileMeta implements DataFileMeta {
     @Nullable
     @Override
     public List<String> valueStatsCols() {
-        return nullableStringArray(VALUE_STATS_COLS);
+        return nullableStringArray(Fields.VALUE_STATS_COLS);
     }
 
     public boolean hasFirstRowId() {
-        return !currentRow().isNullAt(requiredPosition(FIRST_ROW_ID));
+        return !currentRow().isNullAt(requiredPosition(Fields.FIRST_ROW_ID));
     }
 
     @Nullable
     @Override
     public Long firstRowId() {
-        int position = requiredPosition(FIRST_ROW_ID);
+        int position = requiredPosition(Fields.FIRST_ROW_ID);
         InternalRow row = currentRow();
         return row.isNullAt(position) ? null : row.getLong(position);
     }
@@ -260,11 +240,11 @@ public final class BinaryDataFileMeta implements DataFileMeta {
     @Nullable
     @Override
     public List<String> writeCols() {
-        return nullableStringArray(WRITE_COLS);
+        return nullableStringArray(Fields.WRITE_COLS);
     }
 
     public boolean containsWriteColumn(BinaryString fieldName) {
-        int position = requiredPosition(WRITE_COLS);
+        int position = requiredPosition(Fields.WRITE_COLS);
         InternalRow row = currentRow();
         if (row.isNullAt(position)) {
             return false;
@@ -334,7 +314,7 @@ public final class BinaryDataFileMeta implements DataFileMeta {
     }
 
     private InternalArray extraFilesArray() {
-        InternalArray extraFiles = currentRow().getArray(requiredPosition(EXTRA_FILES));
+        InternalArray extraFiles = currentRow().getArray(requiredPosition(Fields.EXTRA_FILES));
         checkState(extraFiles != null, "Data file extra files cannot be null.");
         return extraFiles;
     }
@@ -373,6 +353,30 @@ public final class BinaryDataFileMeta implements DataFileMeta {
 
     private static int fieldIndex(String fieldName) {
         return SCHEMA.getFieldIndex(fieldName);
+    }
+
+    private static class Fields {
+
+        private static final int FILE_NAME = fieldIndex(DataFileMeta.FILE_NAME);
+        private static final int FILE_SIZE = fieldIndex(DataFileMeta.FILE_SIZE);
+        private static final int ROW_COUNT = fieldIndex(DataFileMeta.ROW_COUNT);
+        private static final int MIN_KEY = fieldIndex(DataFileMeta.MIN_KEY);
+        private static final int MAX_KEY = fieldIndex(DataFileMeta.MAX_KEY);
+        private static final int KEY_STATS = fieldIndex(DataFileMeta.KEY_STATS);
+        private static final int VALUE_STATS = fieldIndex(DataFileMeta.VALUE_STATS);
+        private static final int MIN_SEQUENCE_NUMBER = fieldIndex(DataFileMeta.MIN_SEQUENCE_NUMBER);
+        private static final int MAX_SEQUENCE_NUMBER = fieldIndex(DataFileMeta.MAX_SEQUENCE_NUMBER);
+        private static final int SCHEMA_ID = fieldIndex(DataFileMeta.SCHEMA_ID);
+        private static final int LEVEL = fieldIndex(DataFileMeta.LEVEL);
+        private static final int EXTRA_FILES = fieldIndex(DataFileMeta.EXTRA_FILES);
+        private static final int CREATION_TIME = fieldIndex(DataFileMeta.CREATION_TIME);
+        private static final int DELETE_ROW_COUNT = fieldIndex(DataFileMeta.DELETE_ROW_COUNT);
+        private static final int EMBEDDED_FILE_INDEX = fieldIndex(DataFileMeta.EMBEDDED_FILE_INDEX);
+        private static final int FILE_SOURCE = fieldIndex(DataFileMeta.FILE_SOURCE);
+        private static final int VALUE_STATS_COLS = fieldIndex(DataFileMeta.VALUE_STATS_COLS);
+        private static final int EXTERNAL_PATH = fieldIndex(DataFileMeta.EXTERNAL_PATH);
+        private static final int FIRST_ROW_ID = fieldIndex(DataFileMeta.FIRST_ROW_ID);
+        private static final int WRITE_COLS = fieldIndex(DataFileMeta.WRITE_COLS);
     }
 
     /** Projected data-file schema together with its bound binary field layout. */

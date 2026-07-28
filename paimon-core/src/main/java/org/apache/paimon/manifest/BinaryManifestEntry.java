@@ -83,24 +83,26 @@ public final class BinaryManifestEntry implements ManifestEntry {
     }
 
     public boolean isAdd() {
-        return row.getByte(requiredOuterPosition(projection.kindPosition, "_KIND"))
+        return row.getByte(requiredOuterPosition(projection.kindPosition, ManifestEntry.KIND))
                 == FileKind.ADD.toByteValue();
     }
 
     public boolean isDelete() {
-        return row.getByte(requiredOuterPosition(projection.kindPosition, "_KIND"))
+        return row.getByte(requiredOuterPosition(projection.kindPosition, ManifestEntry.KIND))
                 == FileKind.DELETE.toByteValue();
     }
 
     @Override
     public FileKind kind() {
         return FileKind.fromByteValue(
-                row.getByte(requiredOuterPosition(projection.kindPosition, "_KIND")));
+                row.getByte(requiredOuterPosition(projection.kindPosition, ManifestEntry.KIND)));
     }
 
     public byte[] partitionBytes() {
         byte[] partition =
-                row.getBinary(requiredOuterPosition(projection.partitionPosition, "_PARTITION"));
+                row.getBinary(
+                        requiredOuterPosition(
+                                projection.partitionPosition, ManifestEntry.PARTITION));
         checkState(partition != null, "Serialized manifest partition cannot be null.");
         return partition;
     }
@@ -112,12 +114,14 @@ public final class BinaryManifestEntry implements ManifestEntry {
 
     @Override
     public int bucket() {
-        return row.getInt(requiredOuterPosition(projection.bucketPosition, "_BUCKET"));
+        return row.getInt(requiredOuterPosition(projection.bucketPosition, ManifestEntry.BUCKET));
     }
 
     @Override
     public int totalBuckets() {
-        return row.getInt(requiredOuterPosition(projection.totalBucketsPosition, "_TOTAL_BUCKETS"));
+        return row.getInt(
+                requiredOuterPosition(
+                        projection.totalBucketsPosition, ManifestEntry.TOTAL_BUCKETS));
     }
 
     @Override
@@ -179,7 +183,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
     public BinaryDataFileMeta file() {
         checkState(row != null, "Binary manifest entry is not backed by a row.");
         if (file == null) {
-            throw unsupported("_FILE");
+            throw unsupported(ManifestEntry.FILE);
         }
         return file;
     }
@@ -264,7 +268,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
             checkArgument(projectedType != null, "Projected manifest type cannot be null.");
             validateProjection(projectedType);
 
-            int filePosition = projectedType.getFieldIndex("_FILE");
+            int filePosition = projectedType.getFieldIndex(ManifestEntry.FILE);
             int projectedFileFieldCount = 0;
             BinaryDataFileMeta.Projection fileProjection = null;
             if (filePosition >= 0) {
@@ -277,10 +281,10 @@ public final class BinaryManifestEntry implements ManifestEntry {
             return new Projection(
                     format.createReaderFactory(
                             MANIFEST_TYPE, projectedType, Collections.emptyList()),
-                    projectedType.getFieldIndex("_KIND"),
-                    projectedType.getFieldIndex("_PARTITION"),
-                    projectedType.getFieldIndex("_BUCKET"),
-                    projectedType.getFieldIndex("_TOTAL_BUCKETS"),
+                    projectedType.getFieldIndex(ManifestEntry.KIND),
+                    projectedType.getFieldIndex(ManifestEntry.PARTITION),
+                    projectedType.getFieldIndex(ManifestEntry.BUCKET),
+                    projectedType.getFieldIndex(ManifestEntry.TOTAL_BUCKETS),
                     filePosition,
                     projectedFileFieldCount,
                     fileProjection);

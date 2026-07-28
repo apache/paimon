@@ -89,7 +89,7 @@ public class BinaryDataFileMetaTest {
         assertThat(actual.externalPathDir()).isEqualTo(expected.externalPathDir());
         assertThat(actual.hasFirstRowId()).isTrue();
         assertThat(actual.firstRowId()).isEqualTo(10L);
-        assertThat(actual.firstRowIdValue()).isEqualTo(10L);
+        assertThat(actual.nonNullFirstRowId()).isEqualTo(10L);
         assertThat(actual.writeCols()).containsExactly("write_col");
         assertThat(actual.containsWriteColumn(BinaryString.fromString("write_col"))).isTrue();
         assertThat(actual.containsWriteColumn(BinaryString.fromString("other"))).isFalse();
@@ -112,7 +112,10 @@ public class BinaryDataFileMetaTest {
     void testBindsArbitraryProjectedSchema() {
         RowType projectedType =
                 DataFileMeta.SCHEMA.project(
-                        "_FIRST_ROW_ID", "_FILE_NAME", "_ROW_COUNT", "_WRITE_COLS");
+                        DataFileMeta.FIRST_ROW_ID,
+                        DataFileMeta.FILE_NAME,
+                        DataFileMeta.ROW_COUNT,
+                        DataFileMeta.WRITE_COLS);
         BinaryDataFileMeta file =
                 BinaryDataFileMeta.Projection.create(projectedType)
                         .createDataFile()
@@ -124,12 +127,12 @@ public class BinaryDataFileMetaTest {
         assertThat(file.rowCount()).isEqualTo(7L);
         assertThat(file.firstRowId()).isNull();
         assertThat(file.writeCols()).isNull();
-        assertUnsupported(file::fileSize, "_FILE_SIZE");
+        assertUnsupported(file::fileSize, DataFileMeta.FILE_SIZE);
     }
 
     @Test
     void testReusesAndClearsView() {
-        RowType projectedType = DataFileMeta.SCHEMA.project("_FILE_NAME");
+        RowType projectedType = DataFileMeta.SCHEMA.project(DataFileMeta.FILE_NAME);
         BinaryDataFileMeta file =
                 BinaryDataFileMeta.Projection.create(projectedType).createDataFile();
 
@@ -148,13 +151,13 @@ public class BinaryDataFileMetaTest {
     void testRejectsPartiallyProjectedNestedField() {
         DataField partialKeyStats =
                 DataFileMeta.SCHEMA
-                        .getField("_KEY_STATS")
+                        .getField(DataFileMeta.KEY_STATS)
                         .newType(SimpleStats.SCHEMA.project("_MIN_VALUES"));
         RowType projectedType = new RowType(false, Collections.singletonList(partialKeyStats));
 
         assertThatThrownBy(() -> BinaryDataFileMeta.Projection.create(projectedType))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("_KEY_STATS");
+                .hasMessageContaining(DataFileMeta.KEY_STATS);
     }
 
     private static void assertUnsupported(ThrowingSupplier call, String value) {

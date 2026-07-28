@@ -43,29 +43,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests for {@link BinaryManifestEntry}. */
 public class BinaryManifestEntryTest {
 
-    private static final String FILE_NAME = "_FILE_NAME";
-    private static final String ROW_COUNT = "_ROW_COUNT";
-    private static final String MIN_KEY = "_MIN_KEY";
-    private static final String MAX_KEY = "_MAX_KEY";
-    private static final String LEVEL = "_LEVEL";
-    private static final String EXTRA_FILES = "_EXTRA_FILES";
-    private static final String EMBEDDED_FILE_INDEX = "_EMBEDDED_FILE_INDEX";
-    private static final String EXTERNAL_PATH = "_EXTERNAL_PATH";
-    private static final String FIRST_ROW_ID = "_FIRST_ROW_ID";
-
     @Test
     void testImplementsProjectedManifestEntry() {
         BinaryRow partition = BinaryRow.EMPTY_ROW;
         BinaryManifestEntry entry =
                 projection(
                                 true,
-                                FILE_NAME,
-                                ROW_COUNT,
-                                LEVEL,
-                                EXTRA_FILES,
-                                EMBEDDED_FILE_INDEX,
-                                EXTERNAL_PATH,
-                                FIRST_ROW_ID)
+                                DataFileMeta.FILE_NAME,
+                                DataFileMeta.ROW_COUNT,
+                                DataFileMeta.LEVEL,
+                                DataFileMeta.EXTRA_FILES,
+                                DataFileMeta.EMBEDDED_FILE_INDEX,
+                                DataFileMeta.EXTERNAL_PATH,
+                                DataFileMeta.FIRST_ROW_ID)
                         .createEntry()
                         .replace(
                                 GenericRow.of(
@@ -101,9 +91,9 @@ public class BinaryManifestEntryTest {
         assertThat(file.fileName()).isEqualTo("data.parquet");
         assertThat(file.rowCount()).isEqualTo(7L);
 
-        assertUnsupported(manifestEntry::totalBuckets, "_TOTAL_BUCKETS");
-        assertUnsupported(manifestEntry::minKey, MIN_KEY);
-        assertUnsupported(manifestEntry::maxKey, MAX_KEY);
+        assertUnsupported(manifestEntry::totalBuckets, ManifestEntry.TOTAL_BUCKETS);
+        assertUnsupported(manifestEntry::minKey, DataFileMeta.MIN_KEY);
+        assertUnsupported(manifestEntry::maxKey, DataFileMeta.MAX_KEY);
         assertUnsupported(manifestEntry::copyWithoutStats, "copyWithoutStats()");
         assertUnsupported(
                 () -> manifestEntry.assignSequenceNumber(1L, 2L),
@@ -115,7 +105,7 @@ public class BinaryManifestEntryTest {
     @Test
     void testMissingProjectionIsUnsupported() {
         FileEntry entry =
-                projection(false, ROW_COUNT)
+                projection(false, DataFileMeta.ROW_COUNT)
                         .createEntry()
                         .replace(
                                 GenericRow.of(
@@ -126,16 +116,16 @@ public class BinaryManifestEntryTest {
         assertThat(entry.kind()).isEqualTo(FileKind.DELETE);
         assertThat(entry.partition()).isEqualTo(BinaryRow.EMPTY_ROW);
         assertThat(entry.rowCount()).isEqualTo(5L);
-        assertUnsupported(entry::bucket, "_BUCKET");
-        assertUnsupported(entry::fileName, "_FILE_NAME");
-        assertUnsupported(entry::firstRowId, "_FIRST_ROW_ID");
-        assertUnsupported(entry::identifier, "_BUCKET");
+        assertUnsupported(entry::bucket, ManifestEntry.BUCKET);
+        assertUnsupported(entry::fileName, DataFileMeta.FILE_NAME);
+        assertUnsupported(entry::firstRowId, DataFileMeta.FIRST_ROW_ID);
+        assertUnsupported(entry::identifier, ManifestEntry.BUCKET);
     }
 
     @Test
     void testProjectedNullIsNotUnsupported() {
         FileEntry entry =
-                projection(false, FIRST_ROW_ID)
+                projection(false, DataFileMeta.FIRST_ROW_ID)
                         .createEntry()
                         .replace(
                                 GenericRow.of(
@@ -152,15 +142,19 @@ public class BinaryManifestEntryTest {
         BinaryRow minKey = BinaryRow.EMPTY_ROW;
         BinaryRow maxKey = BinaryRow.EMPTY_ROW.copy();
         RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
-        RowType projectedFileType = DataFileMeta.SCHEMA.project(MAX_KEY, FILE_NAME, MIN_KEY);
+        RowType projectedFileType =
+                DataFileMeta.SCHEMA.project(
+                        DataFileMeta.MAX_KEY, DataFileMeta.FILE_NAME, DataFileMeta.MIN_KEY);
         RowType projectedType =
                 new RowType(
                         false,
                         java.util.Arrays.asList(
-                                manifestType.getField("_FILE").newType(projectedFileType),
-                                manifestType.getField("_TOTAL_BUCKETS"),
-                                manifestType.getField("_PARTITION"),
-                                manifestType.getField("_KIND")));
+                                manifestType
+                                        .getField(ManifestEntry.FILE)
+                                        .newType(projectedFileType),
+                                manifestType.getField(ManifestEntry.TOTAL_BUCKETS),
+                                manifestType.getField(ManifestEntry.PARTITION),
+                                manifestType.getField(ManifestEntry.KIND)));
         BinaryManifestEntry entry =
                 BinaryManifestEntry.Projection.create(format(), projectedType)
                         .createEntry()
@@ -180,13 +174,13 @@ public class BinaryManifestEntryTest {
         assertThat(entry.fileName()).isEqualTo("data.parquet");
         assertThat(entry.minKey()).isEqualTo(minKey);
         assertThat(entry.maxKey()).isEqualTo(maxKey);
-        assertUnsupported(entry::bucket, "_BUCKET");
-        assertUnsupported(entry::rowCount, ROW_COUNT);
+        assertUnsupported(entry::bucket, ManifestEntry.BUCKET);
+        assertUnsupported(entry::rowCount, DataFileMeta.ROW_COUNT);
     }
 
     @Test
     void testReusesAndClearsBinaryViews() {
-        BinaryManifestEntry entry = projection(false, FILE_NAME).createEntry();
+        BinaryManifestEntry entry = projection(false, DataFileMeta.FILE_NAME).createEntry();
         entry.replace(
                 GenericRow.of(
                         FileKind.ADD.toByteValue(),
@@ -217,14 +211,16 @@ public class BinaryManifestEntryTest {
         RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
         RowType projectedType =
                 new RowType(
-                        false, java.util.Collections.singletonList(manifestType.getField("_KIND")));
+                        false,
+                        java.util.Collections.singletonList(
+                                manifestType.getField(ManifestEntry.KIND)));
         BinaryManifestEntry entry =
                 BinaryManifestEntry.Projection.create(format(), projectedType)
                         .createEntry()
                         .replace(GenericRow.of(FileKind.ADD.toByteValue()));
 
         assertThat(entry.kind()).isEqualTo(FileKind.ADD);
-        assertUnsupported(entry::file, "_FILE");
+        assertUnsupported(entry::file, ManifestEntry.FILE);
     }
 
     @Test
@@ -232,7 +228,9 @@ public class BinaryManifestEntryTest {
         RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
         RowType projectedType =
                 new RowType(
-                        false, java.util.Collections.singletonList(manifestType.getField("_KIND")));
+                        false,
+                        java.util.Collections.singletonList(
+                                manifestType.getField(ManifestEntry.KIND)));
         BinaryManifestEntry entry =
                 BinaryManifestEntry.Projection.create(format(), projectedType)
                         .createEntry()
@@ -246,14 +244,14 @@ public class BinaryManifestEntryTest {
             boolean includeBucket, String... projectedFileFields) {
         RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
         List<DataField> fields = new ArrayList<>();
-        fields.add(manifestType.getField("_KIND"));
-        fields.add(manifestType.getField("_PARTITION"));
+        fields.add(manifestType.getField(ManifestEntry.KIND));
+        fields.add(manifestType.getField(ManifestEntry.PARTITION));
         if (includeBucket) {
-            fields.add(manifestType.getField("_BUCKET"));
+            fields.add(manifestType.getField(ManifestEntry.BUCKET));
         }
         fields.add(
                 manifestType
-                        .getField("_FILE")
+                        .getField(ManifestEntry.FILE)
                         .newType(DataFileMeta.SCHEMA.project(projectedFileFields)));
         return BinaryManifestEntry.Projection.create(format(), new RowType(false, fields));
     }
