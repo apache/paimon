@@ -443,7 +443,9 @@ final class DataEvolutionRowIdAssignmentPlanner {
     static int initialCurrentEntryCapacity(long addedCount, long deletedCount) {
         checkArgument(addedCount >= 0, "Added entry count cannot be negative.");
         checkArgument(deletedCount >= 0, "Deleted entry count cannot be negative.");
-        // Counts are only a sizing hint: DELETE entries may be duplicated or may not match an ADD in this group. Estimate the live set, cap the eager allocation, and let CurrentRowIdEntries grow if the actual number of retained ADD entries is larger.
+        // Counts are only a sizing hint: DELETE entries may be duplicated or may not match an ADD
+        // in this group. Estimate the live set, cap the eager allocation, and let
+        // CurrentRowIdEntries grow if the actual number of retained ADD entries is larger.
         long estimatedLiveCount = addedCount > deletedCount ? addedCount - deletedCount : 0L;
         return (int) Math.min(estimatedLiveCount, MAX_INITIAL_CURRENT_ENTRIES);
     }
