@@ -1364,7 +1364,7 @@ For an internal format table in a REST catalog, it also makes the catalog own th
         </tr>
         <tr>
             <td><h5>scalar-index.search-mode</h5></td>
-            <td style="word-wrap: break-word;">full</td>
+            <td style="word-wrap: break-word;">fast</td>
             <td><p>Enum</p></td>
             <td>Search mode for scalar index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
