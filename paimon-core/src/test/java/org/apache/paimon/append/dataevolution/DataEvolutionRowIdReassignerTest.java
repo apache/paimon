@@ -186,15 +186,17 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     }
 
     @Test
-    public void testInitialCapacityEstimatesLiveEntriesAfterDeletes() {
-        assertThat(DataEvolutionRowIdAssignmentPlanner.initialCurrentEntryCapacity(13_572_157L, 0L))
+    public void testInitialCapacityEstimatesLiveFileRangesAfterDeletes() {
+        assertThat(
+                        DataEvolutionRowIdAssignmentPlanner.initialLiveFileRangeCapacity(
+                                13_572_157L, 0L))
                 .isEqualTo(13_572_157);
         assertThat(
-                        DataEvolutionRowIdAssignmentPlanner.initialCurrentEntryCapacity(
+                        DataEvolutionRowIdAssignmentPlanner.initialLiveFileRangeCapacity(
                                 800_000_000L, 799_999_990L))
                 .isEqualTo(10);
         assertThat(
-                        DataEvolutionRowIdAssignmentPlanner.initialCurrentEntryCapacity(
+                        DataEvolutionRowIdAssignmentPlanner.initialLiveFileRangeCapacity(
                                 800_000_000L, 0L))
                 .isEqualTo(1 << 24);
     }
