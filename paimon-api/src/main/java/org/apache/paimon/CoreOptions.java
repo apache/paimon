@@ -2733,7 +2733,15 @@ public class CoreOptions implements Serializable {
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "Target row number per bucket for partitions compacted from postpone bucket files for the first time.");
+                            "Target row number per bucket when batch writing fixed buckets or compacting postpone bucket files for a partition without real bucket data.");
+
+    public static final ConfigOption<MemorySize> POSTPONE_TARGET_SIZE_PER_BUCKET =
+            key("postpone.target-size-per-bucket")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("1 gb"))
+                    .withDescription(
+                            "Target uncompressed serialized data size per bucket when Spark batch writes fixed buckets for a partition without real bucket data. "
+                                    + "This option is ignored when 'postpone.target-row-num-per-bucket' is configured.");
 
     public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
             key("global-index.row-count-per-shard")
@@ -4404,6 +4412,10 @@ public class CoreOptions implements Serializable {
 
     public Optional<Long> postponeTargetRowNumPerBucket() {
         return options.getOptional(POSTPONE_TARGET_ROW_NUM_PER_BUCKET);
+    }
+
+    public long postponeTargetSizePerBucket() {
+        return options.get(POSTPONE_TARGET_SIZE_PER_BUCKET).getBytes();
     }
 
     public long globalIndexRowCountPerShard() {

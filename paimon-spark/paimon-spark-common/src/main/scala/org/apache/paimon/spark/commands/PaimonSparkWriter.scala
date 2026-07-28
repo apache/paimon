@@ -52,12 +52,15 @@ import java.io.IOException
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 
 case class PaimonSparkWriter(
     table: FileStoreTable,
     writeRowTracking: Boolean = false,
     batchId: Option[Long] = None)
   extends WriteHelper {
+
+  import PaimonSparkWriter._
 
   private lazy val tableSchema = table.schema
 
@@ -106,6 +109,12 @@ case class PaimonSparkWriter(
   }
 
   def write(data: DataFrame): Seq[CommitMessage] = {
+    write(data, overwriteExistingData = false)
+  }
+
+  private[commands] def write(
+      data: DataFrame,
+      overwriteExistingData: Boolean): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
     val uriReaderFactory = uriReaderFactoryForBlobDescriptor
     import sparkSession.implicits._
@@ -118,19 +127,18 @@ case class PaimonSparkWriter(
           .withColumn(BUCKET_COL, lit(-1))
       case _ => data.withColumn(BUCKET_COL, lit(-1))
     }
-    val rowKindColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, ROW_KIND_COL)
-    val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
-    val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
-    val postponePartitionBucketComputer: Option[BinaryRow => Integer] =
+    val postponeBucketAssignment =
       if (postponeBatchWriteFixedBucket) {
-        val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
-        val defaultPostponeNumBuckets = Math.min(
-          withInitBucketCol.rdd.getNumPartitions,
-          table.coreOptions().postponeBatchWriteFixedBucketMaxParallelism)
-        Some((p: BinaryRow) => knownNumBuckets.getOrDefault(p, defaultPostponeNumBuckets))
+        Some(preparePostponeBucketAssignment(withInitBucketCol, overwriteExistingData))
       } else {
         None
       }
+
+    val rowKindColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, ROW_KIND_COL)
+    val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
+    val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
+    val postponePartitionBucketComputer =
+      postponeBucketAssignment.map(_.partitionBucketComputer)
 
     def newWrite() = PaimonDataWrite(
       writeBuilder,
@@ -349,7 +357,13 @@ case class PaimonSparkWriter(
         throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")
     }
 
-    WriteTaskResult.merge(written.collect())
+    try {
+      WriteTaskResult.merge(written.collect())
+    } finally {
+      if (postponeBucketAssignment.exists(_.dataPersisted)) {
+        withInitBucketCol.unpersist()
+      }
+    }
   }
 
   /**
@@ -536,6 +550,136 @@ case class PaimonSparkWriter(
       .toSeq
   }
 
+  private def preparePostponeBucketAssignment(
+      df: DataFrame,
+      overwriteExistingData: Boolean): PostponeBucketAssignment = {
+    val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
+    val maxNumBuckets = coreOptions.postponeBatchWriteFixedBucketMaxParallelism()
+    val unpartitionedTableHasKnownNumBuckets =
+      tableSchema.partitionKeys().isEmpty &&
+        knownNumBuckets.containsKey(BinaryRow.EMPTY_ROW)
+    val inferBucketNumFromData =
+      maxNumBuckets != 1 && !unpartitionedTableHasKnownNumBuckets
+    if (inferBucketNumFromData) {
+      df.persist()
+    }
+
+    try {
+      val defaultNumBuckets = Math.min(df.rdd.getNumPartitions, maxNumBuckets)
+      val inferredNumBuckets: Map[BinaryRow, Int] =
+        if (inferBucketNumFromData) {
+          val targetRowNum = coreOptions.postponeTargetRowNumPerBucket()
+          val postponeRowCounts =
+            if (overwriteExistingData) {
+              java.util.Collections.emptyMap[BinaryRow, java.lang.Long]()
+            } else {
+              PostponeUtils.getPostponeRowCounts(table)
+            }
+          val dataStats =
+            collectDataStatsByPartition(df, collectSize = !targetRowNum.isPresent)
+          dataStats.map {
+            case (partition, stats) =>
+              val postponeRowCount = postponeRowCounts.getOrDefault(partition, 0L)
+              val numBuckets =
+                if (targetRowNum.isPresent) {
+                  computeBucketNumByRowCount(
+                    Math.addExact(stats.rowCount, postponeRowCount),
+                    targetRowNum.get(),
+                    maxNumBuckets)
+                } else {
+                  computeBucketNumBySize(
+                    stats,
+                    postponeRowCount,
+                    coreOptions.postponeTargetSizePerBucket(),
+                    maxNumBuckets)
+                }
+              partition -> numBuckets
+          }
+        } else {
+          Map.empty
+        }
+      val partitionBucketComputer = (partition: BinaryRow) =>
+        knownNumBuckets.getOrDefault(
+          partition,
+          Integer.valueOf(inferredNumBuckets.getOrElse(partition, defaultNumBuckets)))
+      PostponeBucketAssignment(partitionBucketComputer, inferBucketNumFromData)
+    } catch {
+      case e: Throwable =>
+        if (inferBucketNumFromData) {
+          df.unpersist()
+        }
+        throw e
+    }
+  }
+
+  private def collectDataStatsByPartition(
+      df: DataFrame,
+      collectSize: Boolean): Map[BinaryRow, PartitionDataStats] = {
+    val schema = tableSchema
+    val rowType = writeType
+    val toPaimonRow = SparkRowUtils.toPaimonRow(
+      rowType,
+      SparkRowUtils.getFieldIndex(df.schema, ROW_KIND_COL),
+      uriReaderFactoryForBlobDescriptor)
+    df.rdd
+      .mapPartitions {
+        rows =>
+          val partitionKeyExtractor = new RowPartitionKeyExtractor(schema)
+          val rowSerializer = InternalSerializers.create(rowType)
+          val stats = mutable.HashMap.empty[SerializedPartition, PartitionDataStats]
+          rows.foreach {
+            row =>
+              val paimonRow = toPaimonRow(row)
+              val partition = SerializedPartition(
+                SerializationUtils.serializeBinaryRow(partitionKeyExtractor.partition(paimonRow)))
+              val rowSize =
+                if (collectSize) rowSerializer.toBinaryRow(paimonRow).getSizeInBytes.toLong else 0L
+              val previous = stats.getOrElse(partition, PartitionDataStats(0L, 0L))
+              stats.put(
+                partition,
+                PartitionDataStats(
+                  Math.addExact(previous.rowCount, 1L),
+                  Math.addExact(previous.serializedSize, rowSize)))
+          }
+          stats.iterator
+      }
+      .reduceByKey {
+        (left, right) =>
+          PartitionDataStats(
+            Math.addExact(left.rowCount, right.rowCount),
+            Math.addExact(left.serializedSize, right.serializedSize))
+      }
+      .collect()
+      .map {
+        case (partition, stats) =>
+          SerializationUtils.deserializeBinaryRow(partition.bytes) -> stats
+      }
+      .toMap
+  }
+
+  private def computeBucketNumBySize(
+      dataStats: PartitionDataStats,
+      postponeRowCount: Long,
+      targetSizePerBucket: Long,
+      maxNumBuckets: Int): Int = {
+    if (targetSizePerBucket <= 0) {
+      throw new IllegalArgumentException(
+        "Option 'postpone.target-size-per-bucket' must be greater than 0.")
+    }
+
+    // Previous postpone files do not record their uncompressed serialized size. Estimate it with
+    // the average serialized size of incoming rows from the same partition.
+    val estimatedTotalSizeNumerator =
+      BigInt(dataStats.serializedSize) *
+        (BigInt(dataStats.rowCount) + BigInt(postponeRowCount))
+    val rowCount = BigInt(dataStats.rowCount)
+    val estimatedTotalSize = (estimatedTotalSizeNumerator + rowCount - 1) / rowCount
+    val bucketNum =
+      if (estimatedTotalSize == 0) BigInt(1)
+      else (estimatedTotalSize - 1) / BigInt(targetSizePerBucket) + 1
+    bucketNum.min(BigInt(maxNumBuckets)).toInt
+  }
+
   private def deserializeCommitMessage(
       serializer: CommitMessageSerializer,
       bytes: Array[Byte]): CommitMessage = {
@@ -551,9 +695,41 @@ case class PaimonSparkWriter(
     override def numPartitions: Int = partitions
     override def getPartition(key: Any): Int = Math.abs(key.asInstanceOf[Int] % numPartitions)
   }
+
 }
 
 object PaimonSparkWriter {
+
+  private[spark] def computeBucketNumByRowCount(
+      rowCount: Long,
+      targetRowNumPerBucket: Long,
+      maxNumBuckets: Int): Int = {
+    if (targetRowNumPerBucket <= 0) {
+      throw new IllegalArgumentException(
+        "Option 'postpone.target-row-num-per-bucket' must be greater than 0.")
+    }
+
+    val bucketNum =
+      if (rowCount <= 0) 1L else (rowCount - 1) / targetRowNumPerBucket + 1
+    Math.min(bucketNum, maxNumBuckets.toLong).toInt
+  }
+
+  private case class PostponeBucketAssignment(
+      partitionBucketComputer: BinaryRow => Integer,
+      dataPersisted: Boolean)
+
+  private case class PartitionDataStats(rowCount: Long, serializedSize: Long)
+
+  private case class SerializedPartition(bytes: Array[Byte]) {
+    override def equals(other: Any): Boolean = {
+      other match {
+        case that: SerializedPartition => java.util.Arrays.equals(bytes, that.bytes)
+        case _ => false
+      }
+    }
+
+    override def hashCode(): Int = java.util.Arrays.hashCode(bytes)
+  }
 
   def apply(table: FileStoreTable): PaimonSparkWriter = {
     new PaimonSparkWriter(table)
