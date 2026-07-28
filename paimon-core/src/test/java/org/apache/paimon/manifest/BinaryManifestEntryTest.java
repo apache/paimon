@@ -69,7 +69,6 @@ public class BinaryManifestEntryTest {
                         .createEntry()
                         .replace(
                                 GenericRow.of(
-                                        2,
                                         FileKind.ADD.toByteValue(),
                                         serializeBinaryRow(partition),
                                         3,
@@ -120,7 +119,6 @@ public class BinaryManifestEntryTest {
                         .createEntry()
                         .replace(
                                 GenericRow.of(
-                                        2,
                                         FileKind.DELETE.toByteValue(),
                                         serializeBinaryRow(BinaryRow.EMPTY_ROW),
                                         GenericRow.of(5L)));
@@ -141,7 +139,6 @@ public class BinaryManifestEntryTest {
                         .createEntry()
                         .replace(
                                 GenericRow.of(
-                                        2,
                                         FileKind.ADD.toByteValue(),
                                         serializeBinaryRow(BinaryRow.EMPTY_ROW),
                                         GenericRow.of((Object) null)));
@@ -163,8 +160,7 @@ public class BinaryManifestEntryTest {
                                 manifestType.getField("_FILE").newType(projectedFileType),
                                 manifestType.getField("_TOTAL_BUCKETS"),
                                 manifestType.getField("_PARTITION"),
-                                manifestType.getField("_KIND"),
-                                manifestType.getField("_VERSION")));
+                                manifestType.getField("_KIND")));
         BinaryManifestEntry entry =
                 BinaryManifestEntry.Projection.create(format(), projectedType)
                         .createEntry()
@@ -176,8 +172,7 @@ public class BinaryManifestEntryTest {
                                                 serializeBinaryRow(minKey)),
                                         8,
                                         serializeBinaryRow(partition),
-                                        FileKind.ADD.toByteValue(),
-                                        2));
+                                        FileKind.ADD.toByteValue()));
 
         assertThat(entry.kind()).isEqualTo(FileKind.ADD);
         assertThat(entry.partition()).isEqualTo(partition);
@@ -194,7 +189,6 @@ public class BinaryManifestEntryTest {
         BinaryManifestEntry entry = projection(false, FILE_NAME).createEntry();
         entry.replace(
                 GenericRow.of(
-                        2,
                         FileKind.ADD.toByteValue(),
                         serializeBinaryRow(BinaryRow.EMPTY_ROW),
                         GenericRow.of(BinaryString.fromString("first.parquet"))));
@@ -203,7 +197,6 @@ public class BinaryManifestEntryTest {
 
         entry.replace(
                 GenericRow.of(
-                        2,
                         FileKind.DELETE.toByteValue(),
                         serializeBinaryRow(BinaryRow.EMPTY_ROW),
                         GenericRow.of(BinaryString.fromString("second.parquet"))));
@@ -224,23 +217,35 @@ public class BinaryManifestEntryTest {
         RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
         RowType projectedType =
                 new RowType(
-                        false,
-                        java.util.Arrays.asList(
-                                manifestType.getField("_VERSION"), manifestType.getField("_KIND")));
+                        false, java.util.Collections.singletonList(manifestType.getField("_KIND")));
         BinaryManifestEntry entry =
                 BinaryManifestEntry.Projection.create(format(), projectedType)
                         .createEntry()
-                        .replace(GenericRow.of(2, FileKind.ADD.toByteValue()));
+                        .replace(GenericRow.of(FileKind.ADD.toByteValue()));
 
         assertThat(entry.kind()).isEqualTo(FileKind.ADD);
         assertUnsupported(entry::file, "_FILE");
+    }
+
+    @Test
+    void testDoesNotValidateFileKindOnReplace() {
+        RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
+        RowType projectedType =
+                new RowType(
+                        false, java.util.Collections.singletonList(manifestType.getField("_KIND")));
+        BinaryManifestEntry entry =
+                BinaryManifestEntry.Projection.create(format(), projectedType)
+                        .createEntry()
+                        .replace(GenericRow.of((byte) 99));
+
+        assertThat(entry.isAdd()).isFalse();
+        assertThat(entry.isDelete()).isFalse();
     }
 
     private static BinaryManifestEntry.Projection projection(
             boolean includeBucket, String... projectedFileFields) {
         RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
         List<DataField> fields = new ArrayList<>();
-        fields.add(manifestType.getField("_VERSION"));
         fields.add(manifestType.getField("_KIND"));
         fields.add(manifestType.getField("_PARTITION"));
         if (includeBucket) {

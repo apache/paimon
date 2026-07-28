@@ -46,7 +46,6 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
  */
 public final class BinaryManifestEntry implements ManifestEntry {
 
-    private static final int MANIFEST_ENTRY_VERSION = 2;
     private static final RowType MANIFEST_TYPE =
             VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
 
@@ -65,15 +64,6 @@ public final class BinaryManifestEntry implements ManifestEntry {
     /** Replaces the backing row and returns this reusable view. */
     public BinaryManifestEntry replace(InternalRow row) {
         checkArgument(row != null, "Manifest row cannot be null.");
-        checkState(
-                row.getInt(projection.versionPosition) == MANIFEST_ENTRY_VERSION,
-                "Unsupported manifest entry version %s.",
-                row.getInt(projection.versionPosition));
-        byte kind = row.getByte(projection.kindPosition);
-        checkState(
-                kind == FileKind.ADD.toByteValue() || kind == FileKind.DELETE.toByteValue(),
-                "Unsupported manifest file kind %s.",
-                kind);
         if (projection.filePosition >= 0) {
             InternalRow fileRow =
                     row.getRow(projection.filePosition, projection.projectedFileFieldCount);
@@ -93,16 +83,19 @@ public final class BinaryManifestEntry implements ManifestEntry {
     }
 
     public boolean isAdd() {
-        return row.getByte(projection.kindPosition) == FileKind.ADD.toByteValue();
+        return row.getByte(requiredOuterPosition(projection.kindPosition, "_KIND"))
+                == FileKind.ADD.toByteValue();
     }
 
     public boolean isDelete() {
-        return row.getByte(projection.kindPosition) == FileKind.DELETE.toByteValue();
+        return row.getByte(requiredOuterPosition(projection.kindPosition, "_KIND"))
+                == FileKind.DELETE.toByteValue();
     }
 
     @Override
     public FileKind kind() {
-        return FileKind.fromByteValue(row.getByte(projection.kindPosition));
+        return FileKind.fromByteValue(
+                row.getByte(requiredOuterPosition(projection.kindPosition, "_KIND")));
     }
 
     public byte[] partitionBytes() {
@@ -233,13 +226,12 @@ public final class BinaryManifestEntry implements ManifestEntry {
      * Projected manifest schema together with its bound binary field layout.
      *
      * <p>The projected type may contain any subset and ordering of the versioned {@link
-     * ManifestEntry#SCHEMA}, as long as {@code _VERSION} and {@code _KIND} are present. Unsupported
-     * {@link FileEntry} accessors fail explicitly when their fields were not projected.
+     * ManifestEntry#SCHEMA}. Unsupported {@link FileEntry} accessors fail explicitly when their
+     * fields were not projected.
      */
     public static final class Projection {
 
         private final FormatReaderFactory readerFactory;
-        private final int versionPosition;
         private final int kindPosition;
         private final int partitionPosition;
         private final int bucketPosition;
@@ -250,7 +242,6 @@ public final class BinaryManifestEntry implements ManifestEntry {
 
         private Projection(
                 FormatReaderFactory readerFactory,
-                int versionPosition,
                 int kindPosition,
                 int partitionPosition,
                 int bucketPosition,
@@ -259,7 +250,6 @@ public final class BinaryManifestEntry implements ManifestEntry {
                 int projectedFileFieldCount,
                 @Nullable BinaryDataFileMeta.Projection fileProjection) {
             this.readerFactory = readerFactory;
-            this.versionPosition = versionPosition;
             this.kindPosition = kindPosition;
             this.partitionPosition = partitionPosition;
             this.bucketPosition = bucketPosition;
@@ -287,7 +277,6 @@ public final class BinaryManifestEntry implements ManifestEntry {
             return new Projection(
                     format.createReaderFactory(
                             MANIFEST_TYPE, projectedType, Collections.emptyList()),
-                    projectedType.getFieldIndex("_VERSION"),
                     projectedType.getFieldIndex("_KIND"),
                     projectedType.getFieldIndex("_PARTITION"),
                     projectedType.getFieldIndex("_BUCKET"),
@@ -311,12 +300,6 @@ public final class BinaryManifestEntry implements ManifestEntry {
                         projectedField.name(),
                         manifestField);
             }
-            checkArgument(
-                    projectedType.containsField("_VERSION"),
-                    "Projected manifest type must contain _VERSION.");
-            checkArgument(
-                    projectedType.containsField("_KIND"),
-                    "Projected manifest type must contain _KIND.");
         }
 
         public FormatReaderFactory readerFactory() {

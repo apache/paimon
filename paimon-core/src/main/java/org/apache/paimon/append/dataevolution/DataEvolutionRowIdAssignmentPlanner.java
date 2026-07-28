@@ -145,7 +145,6 @@ final class DataEvolutionRowIdAssignmentPlanner {
             FileFormat format, boolean includeBucket, String... projectedFileFields) {
         RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
         List<DataField> fields = new ArrayList<>();
-        fields.add(manifestType.getField("_VERSION"));
         fields.add(manifestType.getField("_KIND"));
         fields.add(manifestType.getField("_PARTITION"));
         if (includeBucket) {
@@ -371,9 +370,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
     }
 
     private void scan(
-            ManifestFileMeta manifestMeta,
-            Projection projection,
-            ProjectedRowVisitor visitor) {
+            ManifestFileMeta manifestMeta, Projection projection, ProjectedRowVisitor visitor) {
         BinaryManifestEntry entry = projection.createEntry();
         try (RecordReader<InternalRow> reader =
                 FileUtils.createFormatReader(
