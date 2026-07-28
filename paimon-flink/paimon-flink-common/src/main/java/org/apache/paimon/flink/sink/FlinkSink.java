@@ -338,10 +338,10 @@ public abstract class FlinkSink<T> implements Serializable {
     }
 
     protected CommitterOperatorFactory<Committable, ManifestCommittable>
-    createCommitterOperatorFactory(
-            boolean streamingCheckpointEnabled,
-            String commitUser,
-            @Nullable Long endInputWatermark) {
+            createCommitterOperatorFactory(
+                    boolean streamingCheckpointEnabled,
+                    String commitUser,
+                    @Nullable Long endInputWatermark) {
         return new CommitterOperatorFactory<>(
                 streamingCheckpointEnabled,
                 true,

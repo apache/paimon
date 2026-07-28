@@ -26,6 +26,7 @@ import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.SplitListState;
+import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.FileStoreTable;
@@ -120,6 +121,13 @@ public class CoordinatorEndInputCommitITCase {
 
     @Timeout(value = 120, unit = TimeUnit.SECONDS)
     @Test
+    public void testEndInputIsNotCommittedWithoutCheckpointsAfterTasksFinish() throws Exception {
+        assertEndInputNotCommittedWithoutCheckpointsAfterTasksFinish(true);
+        assertEndInputNotCommittedWithoutCheckpointsAfterTasksFinish(false);
+    }
+
+    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    @Test
     public void testEmptyFinalCommitDoesNotUpdateEndInputWatermarkInStreamingMode()
             throws Exception {
         assertEndInputWatermark(
@@ -190,6 +198,25 @@ public class CoordinatorEndInputCommitITCase {
             long expectedWatermark,
             boolean forceCreateSnapshot)
             throws Exception {
+        assertEndInputWatermark(
+                settings,
+                streaming,
+                coordinatorCommit,
+                emitAfterFirstCheckpoint,
+                expectedWatermark,
+                forceCreateSnapshot,
+                true);
+    }
+
+    private void assertEndInputWatermark(
+            EnvironmentSettings settings,
+            boolean streaming,
+            boolean coordinatorCommit,
+            boolean emitAfterFirstCheckpoint,
+            long expectedWatermark,
+            boolean forceCreateSnapshot,
+            boolean checkpointsAfterTasksFinish)
+            throws Exception {
         final long endInputWatermark = 12345L;
         String tableName = coordinatorCommit ? "T_END_INPUT_COORDINATOR" : "T_END_INPUT_OPERATOR";
         StreamExecutionEnvironment streamEnv = null;
@@ -198,7 +225,16 @@ public class CoordinatorEndInputCommitITCase {
             streamEnv = StreamExecutionEnvironment.getExecutionEnvironment();
             streamEnv.setRuntimeMode(RuntimeExecutionMode.STREAMING);
             streamEnv.setParallelism(DEFAULT_PARALLELISM);
-            streamEnv.enableCheckpointing(200L);
+            streamEnv.enableCheckpointing(
+                    checkpointsAfterTasksFinish ? 200L : TimeUnit.HOURS.toMillis(1));
+            Configuration configuration = new Configuration();
+            configuration.setString(
+                    "execution.checkpointing.checkpoints-after-tasks-finish",
+                    String.valueOf(checkpointsAfterTasksFinish));
+            if (!checkpointsAfterTasksFinish) {
+                configuration.setString("restart-strategy.type", "none");
+            }
+            streamEnv.configure(configuration);
             tEnv = StreamTableEnvironment.create(streamEnv);
         } else {
             tEnv = TableEnvironment.create(settings);
@@ -234,16 +270,22 @@ public class CoordinatorEndInputCommitITCase {
             // non-empty END_INPUT committable; emitting before it and ending only after it has
             // completed leaves an empty one.
             DataStream<Row> source =
-                    streamEnv
-                            .fromSource(
-                                    emitAfterFirstCheckpoint
-                                            ? new EmitAfterFirstCheckpointSource()
-                                            : new EmitBeforeFirstCheckpointThenFinishSource(),
-                                    WatermarkStrategy.noWatermarks(),
-                                    "Controlled End Input Source")
-                            .map(row -> row)
-                            .returns(Types.ROW(Types.INT, Types.STRING))
-                            .setParallelism(1);
+                    checkpointsAfterTasksFinish
+                            ? streamEnv
+                                    .fromSource(
+                                            emitAfterFirstCheckpoint
+                                                    ? new EmitAfterFirstCheckpointSource()
+                                                    : new EmitBeforeFirstCheckpointThenFinishSource(),
+                                            WatermarkStrategy.noWatermarks(),
+                                            "Controlled End Input Source")
+                                    .map(row -> row)
+                                    .returns(Types.ROW(Types.INT, Types.STRING))
+                                    .setParallelism(1)
+                            : StreamExecutionEnvironmentUtils.fromData(
+                                            streamEnv,
+                                            Types.ROW(Types.INT, Types.STRING),
+                                            Row.of(1, "end-input"))
+                                    .setParallelism(1);
             StreamTableEnvironment streamTableEnv = (StreamTableEnvironment) tEnv;
             streamTableEnv.createTemporaryView("src", streamTableEnv.fromDataStream(source));
             // The table planner restores the configured sink parallelism, so both source
@@ -269,10 +311,26 @@ public class CoordinatorEndInputCommitITCase {
                         ((FlinkCatalog) tEnv.getCatalog("mycat").get())
                                 .catalog()
                                 .getTable(Identifier.create("default", tableName));
+        if (!checkpointsAfterTasksFinish) {
+            assertThat(table.snapshotManager().latestSnapshot()).isNull();
+            return;
+        }
         waitUntilRowCount(table, expectedRowCount);
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         assertThat(snapshot).isNotNull();
         assertThat(snapshot.watermark()).isEqualTo(expectedWatermark);
+    }
+
+    private void assertEndInputNotCommittedWithoutCheckpointsAfterTasksFinish(
+            boolean coordinatorCommit) throws Exception {
+        assertEndInputWatermark(
+                EnvironmentSettings.newInstance().inStreamingMode().build(),
+                true,
+                coordinatorCommit,
+                true,
+                12345L,
+                false,
+                false);
     }
 
     /** Emits the only record after checkpoint 1 has completed. */

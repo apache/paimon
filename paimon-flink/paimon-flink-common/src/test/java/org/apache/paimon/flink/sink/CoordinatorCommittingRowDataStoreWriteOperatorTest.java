@@ -132,8 +132,8 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
 
     @Test
     public void
-    testPendingCommittablesAccumulateAcrossUncompletedCheckpointsAndAreClearedOnComplete()
-            throws Exception {
+            testPendingCommittablesAccumulateAcrossUncompletedCheckpointsAndAreClearedOnComplete()
+                    throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         String commitUser = UUID.randomUUID().toString();
         List<OperatorEvent> events = new ArrayList<>();
@@ -305,9 +305,9 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
         harness.snapshot(2, 20);
         assertThat(events).hasSize(2);
         assertThat(
-                ((CommittableEvent) events.get(0))
-                        .deserialize(COMMITTABLES_SERIALIZER)
-                        .watermark())
+                        ((CommittableEvent) events.get(0))
+                                .deserialize(COMMITTABLES_SERIALIZER)
+                                .watermark())
                 .isEqualTo(100L);
         CheckpointCommittables cp2 =
                 ((CommittableEvent) events.get(1)).deserialize(COMMITTABLES_SERIALIZER);
@@ -573,11 +573,11 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
                 new RowDataStoreWriteOperator.Factory(
                         table,
                         (fileStoreTable,
-                         initialCommitUser,
-                         state,
-                         ioManager,
-                         memoryPool,
-                         metricGroup) ->
+                                initialCommitUser,
+                                state,
+                                ioManager,
+                                memoryPool,
+                                metricGroup) ->
                                 new StoreSinkWriteImpl(
                                         fileStoreTable,
                                         initialCommitUser,
