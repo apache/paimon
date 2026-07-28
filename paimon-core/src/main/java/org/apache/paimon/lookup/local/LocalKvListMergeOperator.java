@@ -56,11 +56,6 @@ final class LocalKvListMergeOperator implements LocalKvDb.MergeOperator {
     }
 
     @Override
-    public boolean canMergeTombstone(MemorySlice firstKey, MemorySlice tombstoneKey) {
-        return canMerge(firstKey, tombstoneKey);
-    }
-
-    @Override
     public byte[] merge(List<byte[]> values) throws IOException {
         // Foreground flush and background compaction can invoke the operator concurrently.
         return listValueCodec.get().merge(values, valueCodec);

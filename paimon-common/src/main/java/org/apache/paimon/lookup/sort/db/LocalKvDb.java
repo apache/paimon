@@ -43,8 +43,8 @@ import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
@@ -95,6 +95,19 @@ public class LocalKvDb implements Closeable {
     /** Marker used when an SST's entry count cannot be estimated before writing. */
     static final long UNKNOWN_NUM_ENTRIES = -1;
 
+    /** Bound open SST inputs while retaining one hot reader per LSM level. */
+    static final int MAX_CACHED_READERS = MAX_LEVELS;
+
+    /** Initial number of values retained by a lazy MemTable merge. */
+    private static final int MERGE_VALUES_INITIAL_CAPACITY = 32;
+
+    /** Approximate retained memory for a lazy merge function and its initial reference array. */
+    private static final long MEMTABLE_MERGE_FUNCTION_OVERHEAD =
+            64L + MERGE_VALUES_INITIAL_CAPACITY * Long.BYTES;
+
+    /** Approximate array header and reference overhead for each retained merge value. */
+    private static final long MEMTABLE_MERGED_VALUE_OVERHEAD = 24;
+
     /**
      * Estimated per-entry memory overhead in the MemTable's TreeMap, beyond the raw key/value
      * bytes. This accounts for:
@@ -121,8 +134,8 @@ public class LocalKvDb implements Closeable {
     private final LsmCompactor compaction;
     @Nullable private final MergeOperator mergeOperator;
 
-    /** Active MemTable: key -> value bytes (empty byte[] = tombstone). */
-    private TreeMap<MemorySlice, byte[]> memTable;
+    /** Active MemTable: key -> value bytes, tombstone, or lazy merge function. */
+    private TreeMap<MemorySlice, Object> memTable;
 
     /** Estimated size of the current MemTable in bytes. */
     private long memTableSize;
@@ -157,7 +170,7 @@ public class LocalKvDb implements Closeable {
         this.memTable = new TreeMap<>(keyComparator);
         this.memTableSize = 0;
         this.levels = new LsmLevels(MAX_LEVELS);
-        this.readerCache = new HashMap<>();
+        this.readerCache = new LinkedHashMap<>(16, 0.75f, true);
         this.fileSequence = new AtomicLong();
         this.activeBulkLoadWriter = null;
         this.openRangeIterators = 0;
@@ -240,10 +253,31 @@ public class LocalKvDb implements Closeable {
                             + "Use delete() to remove a key.");
         }
         MemorySlice wrappedKey = MemorySlice.wrap(key);
-        byte[] oldValue = memTable.put(wrappedKey, value);
+        if (mergeOperator != null) {
+            Map.Entry<MemorySlice, Object> previous = memTable.lowerEntry(wrappedKey);
+            if (previous != null
+                    && !isMemTableTombstone(previous.getValue())
+                    && mergeOperator.canMerge(previous.getKey(), wrappedKey)) {
+                Object previousValue = previous.getValue();
+                long previousSize = estimatedMemTableValueSize(previousValue);
+                MemTableMergeFunction mergeFunction;
+                if (previousValue instanceof MemTableMergeFunction) {
+                    mergeFunction = (MemTableMergeFunction) previousValue;
+                } else {
+                    mergeFunction = new MemTableMergeFunction(mergeOperator);
+                    mergeFunction.reset((byte[]) previousValue);
+                }
+                mergeFunction.add(value);
+                memTableSize += mergeFunction.estimatedSize() - previousSize;
+                memTable.put(previous.getKey(), mergeFunction);
+                maybeFlushMemTable();
+                return;
+            }
+        }
+        Object oldValue = memTable.put(wrappedKey, value);
         long delta = key.length + value.length;
         if (oldValue != null) {
-            delta -= (key.length + oldValue.length);
+            delta -= (key.length + estimatedMemTableValueSize(oldValue));
         } else {
             delta += PER_ENTRY_OVERHEAD;
         }
@@ -262,10 +296,10 @@ public class LocalKvDb implements Closeable {
         ensureNoRangeIterator();
         checkCompactionFailure();
         MemorySlice wrappedKey = MemorySlice.wrap(key);
-        byte[] oldValue = memTable.put(wrappedKey, TOMBSTONE);
+        Object oldValue = memTable.put(wrappedKey, TOMBSTONE);
         long delta = key.length;
         if (oldValue != null) {
-            delta -= (key.length + oldValue.length);
+            delta -= (key.length + estimatedMemTableValueSize(oldValue));
         } else {
             delta += PER_ENTRY_OVERHEAD;
         }
@@ -556,7 +590,8 @@ public class LocalKvDb implements Closeable {
 
         // 1. Search MemTable first (newest data)
         MemorySlice wrappedKey = MemorySlice.wrap(key);
-        byte[] memValue = memTable.get(wrappedKey);
+        Object memTableValue = memTable.get(wrappedKey);
+        byte[] memValue = memTableValue == null ? null : materializeMemTableValue(memTableValue);
         if (memValue != null) {
             return isTombstone(memValue) ? null : memValue;
         }
@@ -624,7 +659,7 @@ public class LocalKvDb implements Closeable {
                 to == null || keyComparator.compare(from, to) <= 0,
                 "Range start must not be greater than range end.");
 
-        Map<MemorySlice, byte[]> memoryEntries =
+        Map<MemorySlice, Object> memoryEntries =
                 to == null ? memTable.tailMap(from, true) : memTable.subMap(from, true, to, false);
         LsmLevels.RangeSnapshot snapshot = levels.openRangeSnapshot(from, to, keyComparator);
         try {
@@ -663,7 +698,7 @@ public class LocalKvDb implements Closeable {
     }
 
     private void flushMemTable() throws IOException {
-        TreeMap<MemorySlice, byte[]> snapshot = memTable;
+        TreeMap<MemorySlice, Object> snapshot = memTable;
         SstFileMetadata metadata = writeMemTableToSst(snapshot);
         levels.addLevelZeroFile(metadata);
         memTable = new TreeMap<>(keyComparator);
@@ -800,17 +835,57 @@ public class LocalKvDb implements Closeable {
         }
     }
 
+    private boolean isMemTableTombstone(Object value) {
+        return value instanceof byte[] && isTombstone((byte[]) value);
+    }
+
+    private long estimatedMemTableValueSize(Object value) {
+        return value instanceof byte[]
+                ? ((byte[]) value).length
+                : ((MemTableMergeFunction) value).estimatedSize();
+    }
+
+    private byte[] materializeMemTableValue(Object value) throws IOException {
+        if (value instanceof byte[]) {
+            return (byte[]) value;
+        }
+
+        MemTableMergeFunction mergeFunction = (MemTableMergeFunction) value;
+        long previousSize = mergeFunction.estimatedSize();
+        byte[] result = mergeFunction.getResult();
+        memTableSize += mergeFunction.estimatedSize() - previousSize;
+        return result;
+    }
+
     @Nullable
     private byte[] lookupInFile(File file, byte[] key) throws IOException {
+        return getOrCreateReader(file).lookup(key);
+    }
+
+    private SortLookupStoreReader getOrCreateReader(File file) throws IOException {
         SortLookupStoreReader reader = readerCache.get(file);
         if (reader == null) {
             reader = storeFactory.createReader(file);
+            if (readerCache.size() >= MAX_CACHED_READERS) {
+                Iterator<Map.Entry<File, SortLookupStoreReader>> iterator =
+                        readerCache.entrySet().iterator();
+                Map.Entry<File, SortLookupStoreReader> eldest = iterator.next();
+                iterator.remove();
+                try {
+                    eldest.getValue().closeInput();
+                } catch (IOException e) {
+                    LOG.warn(
+                            "Failed to close evicted reader for SST file: {}",
+                            eldest.getKey().getName(),
+                            e);
+                }
+            }
             readerCache.put(file, reader);
         }
-        return reader.lookup(key);
+        return reader;
     }
 
-    private SstFileMetadata writeMemTableToSst(TreeMap<MemorySlice, byte[]> data)
+    private SstFileMetadata writeMemTableToSst(TreeMap<MemorySlice, Object> data)
             throws IOException {
         File sstFile = newSstFile();
         SortLookupStoreWriter writer = null;
@@ -823,8 +898,8 @@ public class LocalKvDb implements Closeable {
             SstMetadataWriter output = new SstMetadataWriter(writer);
             RecordCombiningWriter combiningWriter =
                     new RecordCombiningWriter(mergeOperator, output);
-            for (Map.Entry<MemorySlice, byte[]> entry : data.entrySet()) {
-                combiningWriter.put(entry.getKey(), entry.getValue());
+            for (Map.Entry<MemorySlice, Object> entry : data.entrySet()) {
+                combiningWriter.put(entry.getKey(), materializeMemTableValue(entry.getValue()));
             }
             combiningWriter.finish();
             writer.close();
@@ -910,7 +985,7 @@ public class LocalKvDb implements Closeable {
 
         private RangeIterator(
                 LsmLevels.RangeSnapshot snapshot,
-                Map<MemorySlice, byte[]> memoryEntries,
+                Map<MemorySlice, Object> memoryEntries,
                 byte[] fromInclusive,
                 @Nullable MemorySlice toExclusive)
                 throws IOException {
@@ -1011,14 +1086,15 @@ public class LocalKvDb implements Closeable {
         MemorySlice value();
     }
 
-    private static final class MemoryRangeSource implements RangeSource {
+    private final class MemoryRangeSource implements RangeSource {
 
         private final int priority;
-        private final Iterator<Map.Entry<MemorySlice, byte[]>> iterator;
+        private final Iterator<Map.Entry<MemorySlice, Object>> iterator;
 
-        @Nullable private Map.Entry<MemorySlice, byte[]> current;
+        @Nullable private Map.Entry<MemorySlice, Object> current;
+        @Nullable private byte[] currentValue;
 
-        private MemoryRangeSource(int priority, Iterator<Map.Entry<MemorySlice, byte[]>> iterator) {
+        private MemoryRangeSource(int priority, Iterator<Map.Entry<MemorySlice, Object>> iterator) {
             this.priority = priority;
             this.iterator = iterator;
         }
@@ -1029,8 +1105,9 @@ public class LocalKvDb implements Closeable {
         }
 
         @Override
-        public boolean advance() {
+        public boolean advance() throws IOException {
             current = iterator.hasNext() ? iterator.next() : null;
+            currentValue = current == null ? null : materializeMemTableValue(current.getValue());
             return current != null;
         }
 
@@ -1041,7 +1118,7 @@ public class LocalKvDb implements Closeable {
 
         @Override
         public MemorySlice value() {
-            return MemorySlice.wrap(current.getValue());
+            return MemorySlice.wrap(currentValue);
         }
     }
 
@@ -1099,29 +1176,26 @@ public class LocalKvDb implements Closeable {
                 return null;
             }
 
-            SortLookupStoreReader reader = storeFactory.createReader(file);
-            try (Closeable ignored = reader::closeInput) {
-                SstFileReader.SstFileIterator iterator = reader.createIterator();
-                byte[] seekKey =
-                        resumeAfterKey == null ? fromInclusive : resumeAfterKey.copyBytes();
-                iterator.seekTo(seekKey);
-                boolean skipResumeKey = resumeAfterKey != null;
-                while (true) {
-                    BlockIterator nextBlock = iterator.readBatch();
-                    if (nextBlock == null) {
-                        finished = true;
-                        return null;
-                    }
+            SortLookupStoreReader reader = getOrCreateReader(file);
+            SstFileReader.SstFileIterator iterator = reader.createIterator();
+            byte[] seekKey = resumeAfterKey == null ? fromInclusive : resumeAfterKey.copyBytes();
+            iterator.seekTo(seekKey);
+            boolean skipResumeKey = resumeAfterKey != null;
+            while (true) {
+                BlockIterator nextBlock = iterator.readBatch();
+                if (nextBlock == null) {
+                    finished = true;
+                    return null;
+                }
 
-                    if (skipResumeKey) {
-                        if (nextBlock.seekTo(resumeAfterKey)) {
-                            nextBlock.next();
-                        }
-                        skipResumeKey = false;
+                if (skipResumeKey) {
+                    if (nextBlock.seekTo(resumeAfterKey)) {
+                        nextBlock.next();
                     }
-                    if (nextBlock.hasNext()) {
-                        return nextBlock;
-                    }
+                    skipResumeKey = false;
+                }
+                if (nextBlock.hasNext()) {
+                    return nextBlock;
                 }
             }
         }
@@ -1141,6 +1215,60 @@ public class LocalKvDb implements Closeable {
         return value.length() == 0;
     }
 
+    /**
+     * Retains raw merge operands until a read or flush requires their serialized result.
+     *
+     * <p>After materialization, the operands are reset to the result so repeated reads do not merge
+     * again and later appends only retain the previous result plus new operands.
+     */
+    private static final class MemTableMergeFunction {
+
+        private final MergeOperator mergeOperator;
+        private List<byte[]> values;
+
+        @Nullable private byte[] result;
+        private long retainedValueBytes;
+
+        private MemTableMergeFunction(MergeOperator mergeOperator) {
+            this.mergeOperator = mergeOperator;
+            this.values = new ArrayList<>(MERGE_VALUES_INITIAL_CAPACITY);
+        }
+
+        private void reset(byte[] value) {
+            if (values.size() > MERGE_VALUES_INITIAL_CAPACITY) {
+                values = new ArrayList<>(MERGE_VALUES_INITIAL_CAPACITY);
+            } else {
+                values.clear();
+            }
+            values.add(value);
+            result = value;
+            retainedValueBytes = value.length;
+        }
+
+        private void add(byte[] value) {
+            values.add(value);
+            result = null;
+            retainedValueBytes += value.length;
+        }
+
+        private byte[] getResult() throws IOException {
+            if (result == null) {
+                byte[] merged = mergeOperator.merge(values);
+                if (isTombstone(merged)) {
+                    throw new IllegalStateException("MergeOperator returned the tombstone marker.");
+                }
+                reset(merged);
+            }
+            return result;
+        }
+
+        private long estimatedSize() {
+            return MEMTABLE_MERGE_FUNCTION_OVERHEAD
+                    + retainedValueBytes
+                    + values.size() * MEMTABLE_MERGED_VALUE_OVERHEAD;
+        }
+    }
+
     /** Callback for visiting an entry during a range scan. */
     @FunctionalInterface
     public interface RangeEntryConsumer {
@@ -1151,23 +1279,14 @@ public class LocalKvDb implements Closeable {
     /**
      * Operator for combining adjacent logical records while flushing and compacting SST files.
      *
-     * <p>MemTable writes remain independent so merge-heavy workloads do not pay repeated
-     * read-modify-write costs. The first record's key is retained for the combined value.
+     * <p>The first record's key is retained for the combined value.
+     *
+     * <p>Mergeable physical keys must be append-only and must not be reused after being consumed
+     * into the first record.
      */
     public interface MergeOperator {
 
         boolean canMerge(MemorySlice firstKey, MemorySlice nextKey);
-
-        /**
-         * Return whether a tombstone can be absorbed into the pending merge group.
-         *
-         * <p>Tombstones are merge boundaries by default. Operators which produce tombstones for
-         * consumed physical keys can opt in so later compactions can merge across those synthetic
-         * tombstones.
-         */
-        default boolean canMergeTombstone(MemorySlice firstKey, MemorySlice tombstoneKey) {
-            return false;
-        }
 
         byte[] merge(List<byte[]> values) throws IOException;
     }

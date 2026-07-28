@@ -55,12 +55,8 @@ final class RecordCombiningWriter {
         }
 
         if (isTombstone(value)) {
-            if (pendingKey != null && mergeOperator.canMergeTombstone(pendingKey, key)) {
-                pendingKeys.add(MemorySlice.wrap(key.copyBytes()));
-            } else {
-                flushPending();
-                consumer.accept(key, value);
-            }
+            flushPending();
+            consumer.accept(key, value);
             return;
         }
 

@@ -53,36 +53,51 @@ final class LocalKvListValueCodec {
     }
 
     byte[] merge(List<byte[]> storedValues, LocalKvValueCodec valueCodec) throws IOException {
-        long[] stats = new long[2];
-        for (byte[] stored : storedValues) {
-            inspectStoredValue(stored, valueCodec, stats);
-        }
-        if (stats[0] > Integer.MAX_VALUE || stats[1] > Integer.MAX_VALUE - 5) {
-            throw new IOException("Merged local KV list value is too large.");
-        }
-
-        byte[] packed = new byte[5 + (int) stats[1]];
-        packed[0] = PACKED_VALUES;
-        writeInt(packed, 1, (int) stats[0]);
-        int outputOffset = 5;
+        long valueCount = 0;
+        long payloadLength = 0;
         for (byte[] stored : storedValues) {
             int valueOffset = valueCodec.valueOffset(stored, 0, stored.length);
             input.setBuffer(stored, valueOffset, stored.length - valueOffset);
             int type = input.readUnsignedByte();
             if (type == SINGLE_VALUE) {
-                int valueLength = input.available();
-                writeInt(packed, outputOffset, valueLength);
-                outputOffset += Integer.BYTES;
-                System.arraycopy(stored, input.getPosition(), packed, outputOffset, valueLength);
-                outputOffset += valueLength;
-            } else if (type == PACKED_VALUES) {
-                input.readInt();
-                int payloadLength = input.available();
-                System.arraycopy(stored, input.getPosition(), packed, outputOffset, payloadLength);
-                outputOffset += payloadLength;
-            } else {
+                valueCount++;
+                payloadLength += Integer.BYTES + (long) input.available();
+                continue;
+            }
+            if (type != PACKED_VALUES) {
                 throw new IOException("Corrupted local KV list value marker.");
             }
+
+            int size = input.readInt();
+            if (size < 0 || size > input.available() / Integer.BYTES) {
+                throw new IOException("Corrupted local KV list size: " + size + '.');
+            }
+            int storedPayloadLength = input.available();
+            for (int i = 0; i < size; i++) {
+                int elementLength = input.readInt();
+                if (elementLength < 0 || elementLength > input.available()) {
+                    throw new IOException(
+                            "Corrupted local KV list element length: " + elementLength + '.');
+                }
+                input.skipBytesToRead(elementLength);
+            }
+            if (input.available() != 0) {
+                throw new IOException(
+                        "Corrupted local KV list with " + input.available() + " trailing bytes.");
+            }
+            valueCount += size;
+            payloadLength += storedPayloadLength;
+        }
+        if (valueCount > Integer.MAX_VALUE || payloadLength > Integer.MAX_VALUE - 5) {
+            throw new IOException("Merged local KV list value is too large.");
+        }
+
+        byte[] packed = new byte[5 + (int) payloadLength];
+        packed[0] = PACKED_VALUES;
+        writeInt(packed, 1, (int) valueCount);
+        int outputOffset = 5;
+        for (byte[] stored : storedValues) {
+            outputOffset = copyStoredValue(stored, valueCodec, packed, outputOffset);
         }
         return valueCodec.encode(packed);
     }
@@ -143,39 +158,27 @@ final class LocalKvListValueCodec {
         return value;
     }
 
-    private void inspectStoredValue(byte[] stored, LocalKvValueCodec valueCodec, long[] stats)
+    private int copyStoredValue(
+            byte[] stored, LocalKvValueCodec valueCodec, byte[] target, int targetOffset)
             throws IOException {
         int valueOffset = valueCodec.valueOffset(stored, 0, stored.length);
         input.setBuffer(stored, valueOffset, stored.length - valueOffset);
         int type = input.readUnsignedByte();
         if (type == SINGLE_VALUE) {
-            stats[0]++;
-            stats[1] += Integer.BYTES + input.available();
-            return;
+            int valueLength = input.available();
+            writeInt(target, targetOffset, valueLength);
+            targetOffset += Integer.BYTES;
+            System.arraycopy(stored, input.getPosition(), target, targetOffset, valueLength);
+            return targetOffset + valueLength;
         }
         if (type != PACKED_VALUES) {
             throw new IOException("Corrupted local KV list value marker.");
         }
 
-        int size = input.readInt();
-        if (size < 0 || size > input.available() / Integer.BYTES) {
-            throw new IOException("Corrupted local KV list size: " + size + '.');
-        }
+        input.readInt();
         int payloadLength = input.available();
-        for (int i = 0; i < size; i++) {
-            int elementLength = input.readInt();
-            if (elementLength < 0 || elementLength > input.available()) {
-                throw new IOException(
-                        "Corrupted local KV list element length: " + elementLength + '.');
-            }
-            input.skipBytesToRead(elementLength);
-        }
-        if (input.available() != 0) {
-            throw new IOException(
-                    "Corrupted local KV list with " + input.available() + " trailing bytes.");
-        }
-        stats[0] += size;
-        stats[1] += payloadLength;
+        System.arraycopy(stored, input.getPosition(), target, targetOffset, payloadLength);
+        return targetOffset + payloadLength;
     }
 
     private static void writeInt(byte[] bytes, int offset, int value) {
