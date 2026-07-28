@@ -202,9 +202,6 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
         super().__init__(table, target_split_size, open_file_cost, deletion_files_map)
         self.seed = seed
         self.chunk_size = chunk_size
-        # Planning-only cache. Readers continue to load DVs through their
-        # existing split-local factories.
-        self._deletion_vector_cache = {}
 
     def create_splits(self, file_entries: List[ManifestEntry]) -> List[Split]:
         """TODO: Lazily initialize DataSplits to avoid creating too many objects."""
@@ -294,15 +291,7 @@ class ChunkShuffleSplitGeneratorBase(AbstractSplitGenerator):
             if cardinality == physical_row_count:
                 return None
 
-        cache_key = (
-            deletion_file.dv_index_path,
-            deletion_file.offset,
-            deletion_file.length,
-        )
-        deletion_vector = self._deletion_vector_cache.get(cache_key)
-        if deletion_vector is None:
-            deletion_vector = DeletionVector.read(self.table.file_io, deletion_file)
-            self._deletion_vector_cache[cache_key] = deletion_vector
+        deletion_vector = DeletionVector.read(self.table.file_io, deletion_file)
 
         actual_cardinality = deletion_vector.get_cardinality()
         if cardinality is not None and cardinality != actual_cardinality:
@@ -340,6 +329,7 @@ class _FileSegment:
     file: DataFileMeta
     start: Optional[int]
     end: Optional[int]
+    live_row_count: int
 
 
 class AppendChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
@@ -391,13 +381,21 @@ class AppendChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
                     physical_slice.start_inclusive == 0
                     and physical_slice.end_exclusive == file.row_count
                 ):
-                    current.append(_FileSegment(file, None, None))
+                    current.append(
+                        _FileSegment(
+                            file,
+                            None,
+                            None,
+                            physical_slice.live_row_count,
+                        )
+                    )
                 else:
                     current.append(
                         _FileSegment(
                             file,
                             physical_slice.start_inclusive,
                             physical_slice.end_exclusive,
+                            physical_slice.live_row_count,
                         )
                     )
 
@@ -432,8 +430,18 @@ class AppendChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
             data_deletion_files=data_deletion_files,
         )
 
-        if shard_file_idx_map:
-            return SlicedSplit(data_split, shard_file_idx_map)
+        exact_merged_row_count = sum(
+            seg.live_row_count for seg in chunk.segments
+        )
+        if (
+            shard_file_idx_map
+            or data_split.merged_row_count() != exact_merged_row_count
+        ):
+            return SlicedSplit(
+                data_split,
+                shard_file_idx_map,
+                exact_merged_row_count=exact_merged_row_count,
+            )
         return data_split
 
 
@@ -453,6 +461,7 @@ class _AlignedGroupSegment:
     """
     files: List[DataFileMeta]
     row_range: Range
+    live_row_count: int
 
 
 class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
@@ -541,7 +550,13 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
                 if physical_slice is None:
                     break
                 seg_range = physical_slice.to_closed_row_id_range(first_row_id)
-                current.append(_AlignedGroupSegment(group_files, seg_range))
+                current.append(
+                    _AlignedGroupSegment(
+                        group_files,
+                        seg_range,
+                        physical_slice.live_row_count,
+                    )
+                )
                 current_rows += physical_slice.live_row_count
 
         if current:
@@ -574,7 +589,14 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
             raw_convertible=False,
             data_deletion_files=data_deletion_files,
         )
-        return IndexedSplit(data_split, row_ranges, scores=None)
+        return IndexedSplit(
+            data_split,
+            row_ranges,
+            scores=None,
+            exact_merged_row_count=sum(
+                seg.live_row_count for seg in segments
+            ),
+        )
 
     @staticmethod
     def _split_by_row_id_with_range(

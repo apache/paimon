@@ -292,11 +292,37 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
             sorted(s.shard_file_idx_map()['f1'] for s in splits),
             [(0, 6), (6, 10)],
         )
+        self.assertEqual(
+            sorted(s.merged_row_count() for s in splits),
+            [3, 3],
+        )
         for split in splits:
             self.assertEqual(
                 split.data_split().data_deletion_files,
                 [deletion_file],
             )
+        read.assert_called_once_with(gen.table.file_io, deletion_file)
+
+    def test_whole_file_unknown_dv_cardinality_preserves_live_row_count(self):
+        entry = _mock_entry([], 0, 'f1', 10)
+        deletion_file = DeletionFile('dv.index', 10, 20, cardinality=None)
+        gen = _make_generator(
+            seed=1,
+            chunk_size=6,
+            deletion_files_map={((), 0): {'f1': deletion_file}},
+        )
+
+        with patch(
+            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            return_value=_bitmap_deletion_vector(0, 3, 4, 9),
+        ) as read:
+            splits = gen.create_splits([entry])
+
+        self.assertEqual(len(splits), 1)
+        self.assertIsInstance(splits[0], SlicedSplit)
+        self.assertEqual(splits[0].shard_file_idx_map(), {})
+        self.assertEqual(splits[0].row_count, 10)
+        self.assertEqual(splits[0].merged_row_count(), 6)
         read.assert_called_once_with(gen.table.file_io, deletion_file)
 
     def test_two_deletion_vector_files_share_one_live_row_chunk(self):
@@ -355,32 +381,6 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
             {mock_call.args[1] for mock_call in read.call_args_list},
             {first_deletion_file, second_deletion_file},
         )
-
-    def test_planning_cache_reuses_same_deletion_vector_descriptor(self):
-        entries = [
-            _mock_entry([], 0, 'f1', 5),
-            _mock_entry([], 0, 'f2', 5),
-        ]
-        deletion_file = DeletionFile('dv.index', 10, 20, cardinality=1)
-        deletion_files_map = {
-            ((), 0): {
-                'f1': deletion_file,
-                'f2': deletion_file,
-            }
-        }
-        gen = _make_generator(
-            seed=1,
-            chunk_size=2,
-            deletion_files_map=deletion_files_map,
-        )
-
-        with patch(
-            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
-            return_value=_bitmap_deletion_vector(1),
-        ) as read:
-            gen.create_splits(entries)
-
-        self.assertEqual(read.call_count, 1)
 
     def test_fully_deleted_file_does_not_create_a_segment(self):
         entry = _mock_entry([], 0, 'f1', 5)
@@ -850,6 +850,10 @@ class DataEvolutionChunkShuffleAlgoTest(unittest.TestCase):
             for row_range in split.row_ranges()
         )
         self.assertEqual(ranges, [(100, 104), (105, 109)])
+        self.assertEqual(
+            sorted(split.merged_row_count() for split in splits),
+            [3, 3],
+        )
         for split in splits:
             self.assertEqual(
                 sorted(f.file_name for f in split.files),
@@ -921,6 +925,7 @@ class DataEvolutionChunkShuffleAlgoTest(unittest.TestCase):
             splits[0].data_deletion_files,
             [first_deletion_file, second_deletion_file],
         )
+        self.assertEqual(splits[0].merged_row_count(), 6)
         self.assertEqual(read.call_count, 2)
         self.assertEqual(
             {mock_call.args[1] for mock_call in read.call_args_list},
