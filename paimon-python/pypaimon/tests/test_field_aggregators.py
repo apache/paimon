@@ -55,10 +55,12 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldMergeMapWithKeyTimeAgg,
     FieldMergeMapAgg,
     FieldThetaSketchAgg,
+    FieldRoaringBitmap32Agg,
 )
 from pypaimon.schema.data_types import AtomicType, DataField, RowType, ArrayType, MapType
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.internal_row import InternalRow
+from pypaimon.utils.roaring_bitmap import RoaringBitmap
 
 
 def _make(identifier, sql_type, options: CoreOptions = None):
@@ -2470,6 +2472,45 @@ class FieldThetaSketchAggTest(unittest.TestCase):
         self.assertEqual(agg.agg(acc1, None), acc1)
         self.assertEqual(agg.agg(acc1, input_val), acc2)
         self.assertEqual(agg.agg(acc2, input_val), acc2)
+
+
+class FieldRoaringBitmap32AggTest(unittest.TestCase):
+
+    def test_field_roaring_bitmap32_agg(self):
+        agg = _make("rbm32", "VARBINARY(20)")
+        self.assertIsInstance(agg, FieldRoaringBitmap32Agg)
+
+        input_rbm = RoaringBitmap()
+        acc1_rbm = RoaringBitmap()
+        acc2_rbm = RoaringBitmap()
+
+        input_rbm.add(1)
+        acc1_rbm.add_range(2, 3)
+        acc2_rbm.add_range(1, 3)
+
+        input_val = input_rbm.serialize()
+        acc1 = acc1_rbm.serialize()
+        acc2 = acc2_rbm.serialize()
+
+        self.assertIsNone(agg.agg(None, None))
+
+        result1 = agg.agg(None, input_val)
+        self.assertEqual(result1, input_val)
+
+        result2 = agg.agg(acc1, None)
+        self.assertEqual(result2, acc1)
+
+        result3 = agg.agg(acc1, input_val)
+        self.assertEqual(result3, acc2)
+
+        result4 = agg.agg(acc2, input_val)
+        self.assertEqual(result4, acc2)
+
+    def test_field_roaring_bitmap32_requires_varbinary(self):
+        with self.assertRaises(ValueError) as ctx:
+            _make("rbm32", "VARCHAR(20)")
+
+        self.assertIn("VARBINARY", str(ctx.exception))
 
 
 class RegistrationTest(unittest.TestCase):
