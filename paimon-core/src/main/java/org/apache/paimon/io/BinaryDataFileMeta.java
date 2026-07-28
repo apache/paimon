@@ -60,11 +60,12 @@ public final class BinaryDataFileMeta implements DataFileMeta {
     /** Replaces the backing row and returns this reusable view. */
     public BinaryDataFileMeta replace(InternalRow row) {
         checkArgument(row != null, "Data file row cannot be null.");
-        checkArgument(
-                row.getFieldCount() == projection.fieldCount,
-                "Data file row field count %s does not match projected field count %s.",
-                row.getFieldCount(),
-                projection.fieldCount);
+        if (row.getFieldCount() != projection.fieldCount) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Data file row field count %s does not match projected field count %s.",
+                            row.getFieldCount(), projection.fieldCount));
+        }
         this.row = row;
         return this;
     }

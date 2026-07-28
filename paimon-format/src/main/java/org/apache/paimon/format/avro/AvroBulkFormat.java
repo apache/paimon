@@ -38,15 +38,20 @@ import org.apache.avro.io.DatumReader;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.function.Supplier;
 
 /** Provides a {@link FormatReaderFactory} for Avro records. */
 public class AvroBulkFormat implements FormatReaderFactory {
 
     protected final RowType projectedRowType;
+    private final boolean objectReuse;
 
     public AvroBulkFormat(RowType projectedRowType) {
+        this(projectedRowType, false);
+    }
+
+    public AvroBulkFormat(RowType projectedRowType, boolean objectReuse) {
         this.projectedRowType = projectedRowType;
+        this.objectReuse = objectReuse;
     }
 
     @Override
@@ -111,7 +116,7 @@ public class AvroBulkFormat implements FormatReaderFactory {
             long rowPosition = currentRowPosition;
             currentRowPosition += reader.getBlockCount();
             IteratorWithException<InternalRow, IOException> iterator =
-                    new AvroBlockIterator(reader.getBlockCount(), reader);
+                    new AvroBlockIterator(reader.getBlockCount(), reader, objectReuse);
             return new IteratorResultIterator(
                     iterator, () -> pool.recycler().recycle(ticket), filePath, rowPosition);
         }
@@ -133,10 +138,14 @@ public class AvroBulkFormat implements FormatReaderFactory {
 
         private long numRecordsRemaining;
         private final DataFileReader<InternalRow> reader;
+        private final boolean objectReuse;
+        private InternalRow reuse;
 
-        private AvroBlockIterator(long numRecordsRemaining, DataFileReader<InternalRow> reader) {
+        private AvroBlockIterator(
+                long numRecordsRemaining, DataFileReader<InternalRow> reader, boolean objectReuse) {
             this.numRecordsRemaining = numRecordsRemaining;
             this.reader = reader;
+            this.objectReuse = objectReuse;
         }
 
         @Override
@@ -149,12 +158,15 @@ public class AvroBulkFormat implements FormatReaderFactory {
             numRecordsRemaining--;
             // reader.next merely deserialize bytes in memory to java objects
             // and will not read from file
-            // Do not reuse object, manifest file assumes no object reuse
-            return replaceAvroRuntimeException(reader::next);
+            if (!objectReuse) {
+                return replaceAvroRuntimeException(reader::next);
+            }
+            reuse = replaceAvroRuntimeException(() -> reader.next(reuse));
+            return reuse;
         }
     }
 
-    private static <T> T replaceAvroRuntimeException(Supplier<T> supplier) throws IOException {
+    private static <T> T replaceAvroRuntimeException(IOSupplier<T> supplier) throws IOException {
         try {
             return supplier.get();
         } catch (AvroRuntimeException e) {
@@ -163,5 +175,10 @@ public class AvroBulkFormat implements FormatReaderFactory {
             }
             throw e;
         }
+    }
+
+    private interface IOSupplier<T> {
+
+        T get() throws IOException;
     }
 }

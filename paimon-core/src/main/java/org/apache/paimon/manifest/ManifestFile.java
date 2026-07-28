@@ -24,6 +24,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsCollector;
+import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.RollingFileWriter;
@@ -165,13 +166,18 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             String fileName, @Nullable Long fileSize, Projection projection) {
         BinaryManifestEntry entry = projection.createEntry();
         try {
+            FormatReaderFactory projectedReaderFactory =
+                    fileFormat instanceof AvroFileFormat
+                            ? ((AvroFileFormat) fileFormat)
+                                    .createObjectReuseReaderFactory(projection.projectedType())
+                            : fileFormat.createReaderFactory(
+                                    manifestType,
+                                    projection.projectedType(),
+                                    Collections.emptyList());
             CloseableIterator<InternalRow> rows =
                     FileUtils.createFormatReader(
                                     fileIO,
-                                    fileFormat.createReaderFactory(
-                                            manifestType,
-                                            projection.projectedType(),
-                                            Collections.emptyList()),
+                                    projectedReaderFactory,
                                     pathFactory.toPath(fileName),
                                     fileSize)
                             .toCloseableIterator();
@@ -271,7 +277,11 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
         @Override
         public void write(ManifestEntry entry) throws IOException {
-            super.write(entry);
+            if (entry instanceof BinaryManifestEntry) {
+                writeRow(((BinaryManifestEntry) entry).fullRow());
+            } else {
+                super.write(entry);
+            }
 
             switch (entry.kind()) {
                 case ADD:

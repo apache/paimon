@@ -26,15 +26,22 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.manifest.FileEntry;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.BinaryManifestEntry;
+import org.apache.paimon.manifest.BinaryManifestEntry.Projection;
+import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.DeletedIdentifierSet;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,6 +61,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.function.Function;
+
+import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 
 /**
  * Manifest file sorter that sorts and rewrites manifest files by a configured partition field, or
@@ -62,13 +72,36 @@ import java.util.Set;
 public class ManifestFileSorter {
 
     private static final Logger LOG = LoggerFactory.getLogger(ManifestFileSorter.class);
+    private static final RowType MANIFEST_ROW_TYPE =
+            VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
+    private static final Projection DELETE_ENTRY_PROJECTION = createDeleteEntryProjection();
+
+    /** Compact set for allocation-free binary manifest identifier lookups. */
+    static class BinaryIdentifierSet {
+        private final DeletedIdentifierSet identifiers = new DeletedIdentifierSet();
+        private final ReusableIdentifier lookup = new ReusableIdentifier();
+
+        void add(BinaryManifestEntry entry) {
+            lookup.replaceWithPartition(entry);
+            identifiers.add(0, lookup.bytes(), lookup.length());
+        }
+
+        boolean contains(BinaryManifestEntry entry) {
+            lookup.replaceWithPartition(entry);
+            return identifiers.contains(0, lookup.bytes(), lookup.length());
+        }
+
+        boolean isEmpty() {
+            return identifiers.isEmpty();
+        }
+    }
 
     /** Context object that carries shared state across compaction methods. */
     static class CompactionContext {
         final boolean fullCompaction;
         final ManifestSortKey sortKey;
         final ManifestEntryExternalSort.ExternalSortConfig externalSortConfig;
-        final Set<FileEntry.Identifier> deleteEntries;
+        final BinaryIdentifierSet deleteEntries;
         /**
          * Manifest files that need unsorted compaction.
          *
@@ -86,7 +119,7 @@ public class ManifestFileSorter {
                 boolean fullCompaction,
                 ManifestSortKey sortKey,
                 ManifestEntryExternalSort.ExternalSortConfig externalSortConfig,
-                Set<FileEntry.Identifier> deleteEntries,
+                BinaryIdentifierSet deleteEntries,
                 Map<ManifestFileMeta, Boolean> compactWithoutSort,
                 List<ManifestAdjacentSortedRun> levelRuns,
                 List<ManifestAdjacentSortedRun> pickedRuns) {
@@ -108,7 +141,7 @@ public class ManifestFileSorter {
     /** Result of classifying manifest files. */
     private static class ClassifyResult {
         final List<ManifestFileMeta> lsmFiles;
-        final Set<FileEntry.Identifier> deleteEntries;
+        final BinaryIdentifierSet deleteEntries;
         /**
          * Manifest files that need unsorted compaction.
          *
@@ -121,11 +154,22 @@ public class ManifestFileSorter {
 
         ClassifyResult(
                 List<ManifestFileMeta> lsmFiles,
-                Set<FileEntry.Identifier> deleteEntries,
+                BinaryIdentifierSet deleteEntries,
                 Map<ManifestFileMeta, Boolean> compactWithoutSort) {
             this.lsmFiles = lsmFiles;
             this.deleteEntries = deleteEntries;
             this.compactWithoutSort = compactWithoutSort;
+        }
+    }
+
+    /** Binary identifiers and partition values collected from DELETE entries. */
+    private static class DeletedEntryInfo {
+        final BinaryIdentifierSet identifiers;
+        final Set<BinaryRow> partitions;
+
+        private DeletedEntryInfo(BinaryIdentifierSet identifiers, Set<BinaryRow> partitions) {
+            this.identifiers = identifiers;
+            this.partitions = partitions;
         }
     }
 
@@ -496,19 +540,20 @@ public class ManifestFileSorter {
         // Initialize classification containers and read delete entries
         Map<ManifestFileMeta, Boolean> compactWithoutSort = new LinkedHashMap<>();
         List<ManifestFileMeta> lsmFiles = new LinkedList<>(input);
-        Set<FileEntry.Identifier> classifiedDeleteEntries = Collections.emptySet();
+        BinaryIdentifierSet classifiedDeleteEntries = new BinaryIdentifierSet();
+        Set<BinaryRow> deletePartitions = Collections.emptySet();
         PartitionPredicate predicate = null;
         if (fullCompaction) {
-            classifiedDeleteEntries =
-                    FileEntry.readDeletedEntries(manifestFile, input, manifestReadParallelism);
+            DeletedEntryInfo deletedEntries =
+                    readDeletedEntries(manifestFile, input, manifestReadParallelism);
+            classifiedDeleteEntries = deletedEntries.identifiers;
+            deletePartitions = deletedEntries.partitions;
 
             // Build partition predicate from delete entries for overlap detection.
             if (classifiedDeleteEntries.isEmpty()) {
                 predicate = PartitionPredicate.ALWAYS_FALSE;
             } else {
                 if (partitionType.getFieldCount() > 0) {
-                    Set<BinaryRow> deletePartitions =
-                            ManifestFileMerger.computeDeletePartitions(classifiedDeleteEntries);
                     predicate = PartitionPredicate.fromMultiple(partitionType, deletePartitions);
                 } else {
                     predicate = PartitionPredicate.ALWAYS_TRUE;
@@ -535,6 +580,86 @@ public class ManifestFileSorter {
         }
 
         return new ClassifyResult(lsmFiles, classifiedDeleteEntries, compactWithoutSort);
+    }
+
+    private static DeletedEntryInfo readDeletedEntries(
+            ManifestFile manifestFile,
+            List<ManifestFileMeta> manifestFiles,
+            @Nullable Integer manifestReadParallelism) {
+        BinaryIdentifierSet identifiers = new BinaryIdentifierSet();
+        Set<BinaryRow> partitions = new HashSet<>();
+        List<ManifestFileMeta> filesWithDeletes = new ArrayList<>();
+        for (ManifestFileMeta meta : manifestFiles) {
+            if (meta.numDeletedFiles() > 0) {
+                filesWithDeletes.add(meta);
+            }
+        }
+
+        if (filesWithDeletes.size() <= 1
+                || (manifestReadParallelism != null && manifestReadParallelism <= 1)) {
+            for (ManifestFileMeta meta : filesWithDeletes) {
+                collectDeletedEntries(meta, manifestFile, identifiers, partitions, false);
+            }
+        } else {
+            Function<ManifestFileMeta, List<Boolean>> reader =
+                    meta -> {
+                        collectDeletedEntries(meta, manifestFile, identifiers, partitions, true);
+                        return Collections.singletonList(Boolean.TRUE);
+                    };
+            for (Boolean ignored :
+                    sequentialBatchedExecute(reader, filesWithDeletes, manifestReadParallelism)) {
+                // Iteration waits for each bounded batch of parallel reads.
+            }
+        }
+        return new DeletedEntryInfo(identifiers, partitions);
+    }
+
+    private static void collectDeletedEntries(
+            ManifestFileMeta meta,
+            ManifestFile manifestFile,
+            BinaryIdentifierSet identifiers,
+            Set<BinaryRow> partitions,
+            boolean synchronize) {
+        try (CloseableIterator<BinaryManifestEntry> entries =
+                manifestFile.scan(meta.fileName(), meta.fileSize(), DELETE_ENTRY_PROJECTION)) {
+            while (entries.hasNext()) {
+                BinaryManifestEntry entry = entries.next();
+                if (!entry.isDelete()) {
+                    continue;
+                }
+                BinaryRow partition = entry.partition().copy();
+                if (synchronize) {
+                    synchronized (identifiers) {
+                        identifiers.add(entry);
+                        partitions.add(partition);
+                    }
+                } else {
+                    identifiers.add(entry);
+                    partitions.add(partition);
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    String.format("Failed to scan manifest file '%s'.", meta.fileName()), e);
+        }
+    }
+
+    private static Projection createDeleteEntryProjection() {
+        List<DataField> fields = new ArrayList<>();
+        fields.add(MANIFEST_ROW_TYPE.getField(ManifestEntry.KIND));
+        fields.add(MANIFEST_ROW_TYPE.getField(ManifestEntry.PARTITION));
+        fields.add(MANIFEST_ROW_TYPE.getField(ManifestEntry.BUCKET));
+        fields.add(
+                MANIFEST_ROW_TYPE
+                        .getField(ManifestEntry.FILE)
+                        .newType(
+                                DataFileMeta.SCHEMA.project(
+                                        DataFileMeta.FILE_NAME,
+                                        DataFileMeta.LEVEL,
+                                        DataFileMeta.EXTRA_FILES,
+                                        DataFileMeta.EMBEDDED_FILE_INDEX,
+                                        DataFileMeta.EXTERNAL_PATH)));
+        return Projection.create(new RowType(false, fields));
     }
 
     /**
@@ -1115,9 +1240,10 @@ public class ManifestFileSorter {
 
         int[] externalSortKeyFields();
 
-        InternalRow toExternalSortRow(ManifestEntry entry, byte[] entryBytes);
+        void replaceExternalSortRow(
+                GenericRow row, ManifestEntry entry, InternalRow binaryManifestRow);
 
-        byte[] entryBytes(BinaryRow row);
+        InternalRow binaryManifestRow(BinaryRow row);
     }
 
     private static class PartitionSortKey implements ManifestSortKey {
@@ -1139,7 +1265,7 @@ public class ManifestFileSorter {
                             sortFieldType,
                             DataTypes.TINYINT(),
                             DataTypes.STRING(),
-                            DataTypes.BYTES());
+                            MANIFEST_ROW_TYPE);
             this.externalSortKeyFields = createSequentialFields(sortFieldNum);
         }
 
@@ -1173,18 +1299,21 @@ public class ManifestFileSorter {
         }
 
         @Override
-        public InternalRow toExternalSortRow(ManifestEntry entry, byte[] entryBytes) {
-            GenericRow row = new GenericRow(externalSortRowType.getFieldCount());
+        public void replaceExternalSortRow(
+                GenericRow row, ManifestEntry entry, InternalRow binaryManifestRow) {
             row.setField(0, sortFieldGetter.getFieldOrNull(entry.partition()));
             row.setField(1, entry.kind().toByteValue());
-            row.setField(2, BinaryString.fromString(entry.file().fileName()));
-            row.setField(3, entryBytes);
-            return row;
+            row.setField(
+                    2,
+                    entry instanceof BinaryManifestEntry
+                            ? ((BinaryManifestEntry) entry).file().fileNameBinary()
+                            : BinaryString.fromString(entry.file().fileName()));
+            row.setField(3, binaryManifestRow);
         }
 
         @Override
-        public byte[] entryBytes(BinaryRow row) {
-            return row.getBinary(sortFieldNum);
+        public InternalRow binaryManifestRow(BinaryRow row) {
+            return row.getRow(sortFieldNum, MANIFEST_ROW_TYPE.getFieldCount());
         }
     }
 
@@ -1208,12 +1337,15 @@ public class ManifestFileSorter {
             for (int partitionSortField : partitionSortFields) {
                 fieldTypes.add(partitionType.getTypeAt(partitionSortField));
             }
-            fieldTypes.add(DataTypes.BIGINT());
-            fieldTypes.add(DataTypes.BIGINT());
-            fieldTypes.add(DataTypes.BIGINT());
+            // ADD must precede DELETE for the same partition. Minor compaction streams the sorted
+            // rows once and uses this ordering to eliminate a matching pair without retaining all
+            // ADD identifiers.
             fieldTypes.add(DataTypes.TINYINT());
+            fieldTypes.add(DataTypes.BIGINT());
+            fieldTypes.add(DataTypes.BIGINT());
+            fieldTypes.add(DataTypes.BIGINT());
             fieldTypes.add(DataTypes.STRING());
-            fieldTypes.add(DataTypes.BYTES());
+            fieldTypes.add(MANIFEST_ROW_TYPE);
             this.externalSortRowType = DataTypes.ROW(fieldTypes.toArray(new DataType[0]));
             this.sortFieldNum = externalSortRowType.getFieldCount() - 1;
             this.externalSortKeyFields = createSequentialFields(sortFieldNum);
@@ -1262,24 +1394,27 @@ public class ManifestFileSorter {
         }
 
         @Override
-        public InternalRow toExternalSortRow(ManifestEntry entry, byte[] entryBytes) {
-            GenericRow row = new GenericRow(externalSortRowType.getFieldCount());
+        public void replaceExternalSortRow(
+                GenericRow row, ManifestEntry entry, InternalRow binaryManifestRow) {
             int pos = 0;
             for (InternalRow.FieldGetter partitionFieldGetter : partitionFieldGetters) {
                 row.setField(pos++, partitionFieldGetter.getFieldOrNull(entry.partition()));
             }
+            row.setField(pos++, entry.kind().toByteValue());
             row.setField(pos++, entry.file().nonNullFirstRowId());
             row.setField(pos++, rowIdRangeEnd(entry));
             row.setField(pos++, Long.MAX_VALUE - entry.file().maxSequenceNumber());
-            row.setField(pos++, entry.kind().toByteValue());
-            row.setField(pos++, BinaryString.fromString(entry.file().fileName()));
-            row.setField(pos, entryBytes);
-            return row;
+            row.setField(
+                    pos++,
+                    entry instanceof BinaryManifestEntry
+                            ? ((BinaryManifestEntry) entry).file().fileNameBinary()
+                            : BinaryString.fromString(entry.file().fileName()));
+            row.setField(pos, binaryManifestRow);
         }
 
         @Override
-        public byte[] entryBytes(BinaryRow row) {
-            return row.getBinary(sortFieldNum);
+        public InternalRow binaryManifestRow(BinaryRow row) {
+            return row.getRow(sortFieldNum, MANIFEST_ROW_TYPE.getFieldCount());
         }
 
         private int comparePartitionMin(ManifestFileMeta a, ManifestFileMeta b) {

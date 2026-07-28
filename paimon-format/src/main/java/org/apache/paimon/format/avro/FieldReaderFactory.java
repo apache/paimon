@@ -35,9 +35,9 @@ import org.apache.paimon.utils.UriReader;
 
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
+import org.apache.avro.SystemLimitException;
 import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.Decoder;
-import org.apache.avro.util.Utf8;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
@@ -231,13 +231,10 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
 
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
-            Utf8 utf8 = null;
-            if (reuse instanceof BinaryString) {
-                utf8 = new Utf8(((BinaryString) reuse).toBytes());
-            }
-
-            Utf8 string = decoder.readString(utf8);
-            return BinaryString.fromBytes(string.getBytes(), 0, string.getByteLength());
+            int length = SystemLimitException.checkMaxStringLength(decoder.readLong());
+            byte[] bytes = new byte[length];
+            decoder.readFixed(bytes, 0, length);
+            return BinaryString.fromBytes(bytes);
         }
 
         @Override
@@ -250,7 +247,7 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
 
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
-            return decoder.readBytes(null).array();
+            return readBytes(decoder, reuse);
         }
 
         @Override
@@ -273,7 +270,7 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
 
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
-            byte[] bytes = decoder.readBytes(null).array();
+            byte[] bytes = readBytes(decoder, null);
             return Blob.fromBytesWithReader(bytes, uriReader, null, false);
         }
 
@@ -281,6 +278,16 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         public void skip(Decoder decoder) throws IOException {
             decoder.skipBytes();
         }
+    }
+
+    private static byte[] readBytes(Decoder decoder, @Nullable Object reuse) throws IOException {
+        int length = SystemLimitException.checkMaxBytesLength(decoder.readLong());
+        byte[] bytes =
+                reuse instanceof byte[] && ((byte[]) reuse).length == length
+                        ? (byte[]) reuse
+                        : new byte[length];
+        decoder.readFixed(bytes, 0, length);
+        return bytes;
     }
 
     private static class BooleanReader implements FieldReader {
@@ -662,17 +669,21 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
                 row = new GenericRow(mapping.length);
             }
 
-            Object[] values = new Object[fieldReaders.length];
-            for (int i = 0; i < fieldReaders.length; i += 1) {
-                if (mappingBack[i] >= 0) {
-                    values[i] = fieldReaders[i].read(decoder, row.getField(mappingBack[i]));
-                } else {
-                    fieldReaders[i].skip(decoder);
+            for (int i = 0; i < mapping.length; i++) {
+                if (mapping[i] < 0) {
+                    row.setField(i, null);
                 }
             }
 
-            for (int i = 0; i < mapping.length; i++) {
-                row.setField(i, mapping[i] >= 0 ? values[mapping[i]] : null);
+            for (int i = 0; i < fieldReaders.length; i += 1) {
+                if (mappingBack[i] >= 0) {
+                    int projectedPosition = mappingBack[i];
+                    row.setField(
+                            projectedPosition,
+                            fieldReaders[i].read(decoder, row.getField(projectedPosition)));
+                } else {
+                    fieldReaders[i].skip(decoder);
+                }
             }
 
             return row;

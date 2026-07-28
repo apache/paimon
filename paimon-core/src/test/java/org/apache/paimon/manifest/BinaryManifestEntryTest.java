@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -31,6 +32,7 @@ import org.apache.paimon.utils.VersionedObjectSerializer;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
@@ -204,6 +206,35 @@ public class BinaryManifestEntryTest {
     }
 
     @Test
+    void testReusesPartitionAndPartitionedIdentifierViews() {
+        BinaryManifestEntry entry =
+                projection(
+                                true,
+                                DataFileMeta.FILE_NAME,
+                                DataFileMeta.LEVEL,
+                                DataFileMeta.EXTRA_FILES,
+                                DataFileMeta.EMBEDDED_FILE_INDEX,
+                                DataFileMeta.EXTERNAL_PATH)
+                        .createEntry();
+        BinaryManifestEntry.ReusableIdentifier identifier =
+                new BinaryManifestEntry.ReusableIdentifier();
+
+        entry.replace(identityRow(partition(1)));
+        BinaryRow partitionView = entry.partition();
+        assertThat(partitionView.getInt(0)).isEqualTo(1);
+        assertThat(entry.partition()).isSameAs(partitionView);
+        identifier.replaceWithPartition(entry);
+        byte[] firstIdentifier = Arrays.copyOf(identifier.bytes(), identifier.length());
+
+        entry.replace(identityRow(partition(2)));
+        assertThat(entry.partition()).isSameAs(partitionView);
+        assertThat(partitionView.getInt(0)).isEqualTo(2);
+        identifier.replaceWithPartition(entry);
+        assertThat(Arrays.copyOf(identifier.bytes(), identifier.length()))
+                .isNotEqualTo(firstIdentifier);
+    }
+
+    @Test
     void testProjectionWithoutFile() {
         RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
         RowType projectedType =
@@ -251,6 +282,27 @@ public class BinaryManifestEntryTest {
                         .getField(ManifestEntry.FILE)
                         .newType(DataFileMeta.SCHEMA.project(projectedFileFields)));
         return BinaryManifestEntry.Projection.create(new RowType(false, fields));
+    }
+
+    private static GenericRow identityRow(BinaryRow partition) {
+        return GenericRow.of(
+                FileKind.ADD.toByteValue(),
+                serializeBinaryRow(partition),
+                3,
+                GenericRow.of(
+                        BinaryString.fromString("data.parquet"),
+                        2,
+                        new GenericArray(new Object[0]),
+                        null,
+                        null));
+    }
+
+    private static BinaryRow partition(int value) {
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(partition);
+        writer.writeInt(0, value);
+        writer.complete();
+        return partition;
     }
 
     private static void assertUnsupported(ThrowingSupplier call, String field) {
