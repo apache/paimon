@@ -37,7 +37,7 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     private static final long serialVersionUID = 1L;
 
     private final InnerTable table;
-    private final String commitUser;
+    private String commitUser;
 
     private Map<String, String> staticPartition;
     private boolean appendCommitCheckConflict = false;
@@ -68,6 +68,17 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     @Override
     public Optional<WriteSelector> newWriteSelector() {
         return table.newWriteSelector();
+    }
+
+    @Override
+    public String commitUser() {
+        return commitUser;
+    }
+
+    @Override
+    public BatchWriteBuilder withCommitUser(String commitUser) {
+        this.commitUser = commitUser;
+        return this;
     }
 
     @Override

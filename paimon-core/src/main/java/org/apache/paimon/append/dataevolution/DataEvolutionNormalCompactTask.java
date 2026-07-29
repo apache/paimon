@@ -33,9 +33,6 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SetUtils;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -47,8 +44,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compacts normal structured files of a data evolution table. */
 public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
-
-    private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionNormalCompactTask.class);
 
     public DataEvolutionNormalCompactTask(BinaryRow partition, List<DataFileMeta> files) {
         super(partition, files);
@@ -98,31 +93,50 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         storeWrite.withWriteType(readWriteType);
         RecordWriter<InternalRow> writer = storeWrite.createWriter(partition, 0);
 
-        reader.forEachRemaining(
-                row -> {
-                    try {
-                        writer.write(row);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
-
-        List<DataFileMeta> writeResult = writer.prepareCommit(false).newFilesIncrement().newFiles();
-        checkArgument(
-                writeResult.size() == 1, "Data evolution compaction should produce one file.");
-
         try {
-            writer.close();
-            storeWrite.close();
-        } catch (Exception e) {
-            LOG.warn("Failed to close reader and writer.", e);
-        }
+            reader.forEachRemaining(
+                    row -> {
+                        try {
+                            writer.write(row);
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
 
-        DataFileMeta dataFileMeta = writeResult.get(0).assignFirstRowId(firstRowId);
-        dataFileMeta =
-                dataFileMeta.assignSequenceNumber(
-                        minSequenceId(compactBefore), maxSequenceId(compactBefore));
-        compactAfter.add(dataFileMeta);
+            List<DataFileMeta> writeResult =
+                    writer.prepareCommit(false).newFilesIncrement().newFiles();
+            checkArgument(
+                    writeResult.size() == 1, "Data evolution compaction should produce one file.");
+
+            DataFileMeta dataFileMeta = writeResult.get(0).assignFirstRowId(firstRowId);
+            dataFileMeta =
+                    dataFileMeta.assignSequenceNumber(
+                            minSequenceId(compactBefore), maxSequenceId(compactBefore));
+            compactAfter.add(dataFileMeta);
+        } finally {
+            // Close on the failure path too: RecordWriter.close deletes flushed-but-unprepared
+            // files, so a mid-task failure (e.g. speculative kill) does not leave orphans.
+            // Each close runs independently so a reader failure cannot skip writer cleanup.
+            boolean interrupted = Thread.interrupted();
+            try {
+                try {
+                    reader.close();
+                } catch (Exception ignored) {
+                }
+                try {
+                    writer.close();
+                } catch (Exception ignored) {
+                }
+                try {
+                    storeWrite.close();
+                } catch (Exception ignored) {
+                }
+            } finally {
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
 
         return commitMessage(compactBefore, compactAfter);
     }

@@ -52,6 +52,11 @@ public class DeletionFileWriter implements Closeable {
         return out.size();
     }
 
+    /** Path of the in-flight deletion file, used to delete the partial file on failure. */
+    Path path() {
+        return path;
+    }
+
     public void write(String key, DeletionVector deletionVector) throws IOException {
         int start = out.size();
         int length = deletionVector.serializeTo(out);

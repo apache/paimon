@@ -28,8 +28,6 @@ import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.sql.Row
 
-import scala.collection.JavaConverters._
-
 case class PaimonDataWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
@@ -60,36 +58,56 @@ case class PaimonDataWrite(
     SparkRowUtils.toPaimonRow(writeType, rowKindColIdx, uriReaderFactory)
   }
 
+  private val cleanup = new SparkAttemptCleanup(
+    writeBuilder.tableName(),
+    SparkAttemptCleanup.commitUserOrUnknown(writeBuilder),
+    writeBuilder,
+    () => closeLocalResources())
+
+  override protected def attemptCleanup: Option[SparkAttemptCleanup] = Some(cleanup)
+
+  private def closeLocalResources(): Unit = {
+    write.close()
+    ioManager.close()
+  }
+
   def write(row: Row): Unit = {
+    cleanup.checkInterruptedPeriodically()
     postWrite(write.writeAndReturn(toPaimonRow(row)))
   }
 
   def write(row: Row, bucket: Int): Unit = {
+    cleanup.checkInterruptedPeriodically()
     postWrite(write.writeAndReturn(toPaimonRow(row), bucket))
   }
 
   override def commitImpl(): Seq[CommitMessage] = {
-    val commitMessages = write.prepareCommit().asScala.toSeq
+    val messages = scala.collection.mutable.ListBuffer[CommitMessage]()
+    write.prepareCommit((msg: CommitMessage) => {
+      val transformed = transformCommitMessage(msg)
+      registerPrepared(Seq(transformed))
+      messages += transformed
+    })
+    messages.toSeq
+  }
 
+  private def transformCommitMessage(message: CommitMessage): CommitMessage = {
     if (postponePartitionBucketComputer.isDefined) {
-      commitMessages.map {
-        case message: CommitMessageImpl =>
+      message match {
+        case m: CommitMessageImpl =>
           new CommitMessageImpl(
-            message.partition(),
-            message.bucket(),
-            postponePartitionBucketComputer.get.apply(message.partition()),
-            message.newFilesIncrement(),
-            message.compactIncrement()
+            m.partition(),
+            m.bucket(),
+            postponePartitionBucketComputer.get.apply(m.partition()),
+            m.newFilesIncrement(),
+            m.compactIncrement()
           )
         case _ => throw new RuntimeException()
       }
     } else {
-      commitMessages
+      message
     }
   }
 
-  override def close(): Unit = {
-    write.close()
-    ioManager.close()
-  }
+  override def close(): Unit = cleanup.close()
 }

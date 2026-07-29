@@ -256,7 +256,8 @@ public class KeyValueFileWriterFactory {
         // in WriteFormatKey
         DataFilePathFactory pathFactory =
                 formatContext.pathFactory(new WriteFormatKey(file.level(), false));
-        file.collectFiles(pathFactory).forEach(fileIO::deleteQuietly);
+        // Interrupt-tolerant: used by MergeTreeWriter.close unpublished cleanup after task kill.
+        file.collectFiles(pathFactory).forEach(fileIO::deleteQuietlyIgnoringInterrupt);
     }
 
     public FileIO getFileIO() {
