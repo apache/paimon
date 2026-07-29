@@ -1065,12 +1065,14 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testPartialScalarPreFilterMustNotDropUnindexedScalarRows() throws Exception {
+    public void testPartialScalarPreFilterDropsUnindexedRowsInFastMode() throws Exception {
+        // Default fast scalar mode drops unindexed rows: the btree covers ids
+        // 3-7, so id>=8 (rows 8,9 unindexed) yields an empty pre-filter.
         catalog.createTable(
-                identifier("default_scalar_full_partial_index_table"),
+                identifier("default_scalar_fast_partial_index_table"),
                 vectorSchemaBuilder(VECTOR_FIELD_NAME).build(),
                 false);
-        FileStoreTable table = getTable(identifier("default_scalar_full_partial_index_table"));
+        FileStoreTable table = getTable(identifier("default_scalar_fast_partial_index_table"));
 
         float[][] vectors = new float[10][];
         for (int i = 0; i < vectors.length; i++) {
@@ -1091,7 +1093,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
         VectorScan.Plan vectorPlan = searchBuilder.newVectorScan().scan();
         GlobalIndexResult result = searchBuilder.newVectorRead().read(vectorPlan);
-        assertThat(result.results()).contains(8L);
+        assertThat(result.results().isEmpty()).isTrue();
 
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(idFilter);
         TableScan.Plan readPlan = readBuilder.newScan().withGlobalIndexResult(result).plan();
@@ -1099,7 +1101,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(readPlan)) {
             reader.forEachRemaining(row -> ids.add(row.getInt(0)));
         }
-        assertThat(ids).containsExactly(8);
+        assertThat(ids).isEmpty();
     }
 
     @Test

@@ -544,7 +544,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             fast_builder.new_scan().plan().splits())
         self.assertEqual(0, fast_result.num_rows)
 
-        read_builder = table.new_read_builder()
+        # full mode falls back to a raw scan for the unindexed k4 row
+        full_table = table.copy({'scalar-index.search-mode': 'full'})
+        read_builder = full_table.new_read_builder()
         read_builder.with_filter(
             read_builder.new_predicate_builder().equal('k', 'k4'))
         actual = read_builder.new_read().to_arrow(

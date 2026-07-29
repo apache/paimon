@@ -2796,7 +2796,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_SEARCH_MODE =
             key("scalar-index.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
-                    .defaultValue(GlobalIndexSearchMode.FULL)
+                    .defaultValue(GlobalIndexSearchMode.FAST)
                     .withDescription("Search mode for scalar index queries.");
 
     public static final ConfigOption<GlobalIndexSearchMode> VECTOR_INDEX_SEARCH_MODE =
