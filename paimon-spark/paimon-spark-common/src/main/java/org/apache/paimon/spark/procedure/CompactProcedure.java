@@ -575,7 +575,8 @@ public class CompactProcedure extends BaseProcedure {
                 List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
                 try (TableCommitImpl commit = table.newCommit(commitUser)) {
                     List<CommitMessage> messages =
-                            deserializeAndReleaseCommitMessages(messageSerializerser, serializedMessages);
+                            deserializeAndReleaseCommitMessages(
+                                    messageSerializerser, serializedMessages);
                     messages.addAll(
                             new DataEvolutionCompactionCommitPreparation(table, snapshot)
                                     .prepare(messages));
