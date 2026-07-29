@@ -116,7 +116,8 @@ class CatalogEnvironment:
             return context
 
         dependency_options = context.options.copy()
-        dependency_options.set(CatalogOptions.METASTORE, "rest")
+        if not dependency_options.contains(CatalogOptions.METASTORE):
+            dependency_options.set(CatalogOptions.METASTORE, "rest")
         dependency_options.to_map()[self._READ_VIA_OPTION] = RESTUtil.encode_string(
             JSON.to_json(self.identifier, separators=(",", ":"))
         )

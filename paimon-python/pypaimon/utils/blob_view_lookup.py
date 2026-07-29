@@ -296,8 +296,9 @@ class BlobViewLookup:
         if dependency_context is catalog_environment.catalog_context():
             catalog = catalog_loader.load()
         else:
-            from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
-            catalog = RESTCatalogLoader(dependency_context).load()
+            from pypaimon.catalog.catalog_factory import CatalogFactory
+            catalog = CatalogFactory.create_from_context(
+                dependency_context, config_required=False)
         return catalog.get_table(identifier)
 
     @staticmethod

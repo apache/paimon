@@ -21,6 +21,7 @@ from unittest import mock
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.catalog_context import CatalogContext
+from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
 from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
@@ -97,6 +98,38 @@ class CatalogEnvironmentTest(unittest.TestCase):
 
         self.assertIsNot(environment.dependency_read_context(), context)
 
+    def test_dependency_read_context_preserves_custom_rest_metastore(self):
+        context = CatalogContext.create_from_options(Options({
+            CatalogOptions.METASTORE.key(): "custom-rest",
+        }))
+        environment = CatalogEnvironment(
+            identifier=Identifier.create("db", "table"),
+            catalog_loader=RESTCatalogLoader(context),
+        )
+
+        dependency_context = environment.dependency_read_context()
+
+        self.assertIsNot(dependency_context, context)
+        self.assertEqual(
+            dependency_context.options.get(CatalogOptions.METASTORE),
+            "custom-rest",
+        )
+
+    def test_catalog_factory_creates_rest_from_context(self):
+        context = CatalogContext.create_from_options(Options({
+            CatalogOptions.METASTORE.key(): "rest",
+        }))
+        dependency_catalog = mock.sentinel.dependency_catalog
+        rest_catalog = mock.Mock(return_value=dependency_catalog)
+
+        with mock.patch.dict(
+                CatalogFactory.CATALOG_REGISTRY, {"rest": rest_catalog}):
+            result = CatalogFactory.create_from_context(
+                context, config_required=False)
+
+        rest_catalog.assert_called_once_with(context, config_required=False)
+        self.assertIs(result, dependency_catalog)
+
     def test_blob_view_lookup_loads_dependency_catalog(self):
         root = Identifier.create("db", "root")
         target = Identifier.create("db", "target")
@@ -114,18 +147,54 @@ class CatalogEnvironmentTest(unittest.TestCase):
         dependency_catalog.get_table.return_value = dependency_table
 
         with mock.patch.object(
-                RESTCatalogLoader,
-                "load",
-                autospec=True,
-                return_value=dependency_catalog) as load:
+                CatalogFactory,
+                "create_from_context",
+                return_value=dependency_catalog) as create_catalog:
             result = BlobViewLookup(table)._load_table(target)
 
-        dependency_loader = load.call_args.args[0]
-        self.assertIsNot(dependency_loader, original_loader)
-        dependency_context = dependency_loader.context()
+        dependency_context = create_catalog.call_args.args[0]
+        create_catalog.assert_called_once_with(
+            dependency_context, config_required=False)
         self.assertTrue(
             dependency_context.options.contains_key(self._READ_VIA_OPTION))
         dependency_catalog.get_table.assert_called_once_with(target)
+        self.assertIs(result, dependency_table)
+
+    def test_blob_view_lookup_preserves_custom_rest_catalog(self):
+        target = Identifier.create("db", "target")
+        dependency_table = mock.sentinel.dependency_table
+
+        class CustomRESTCatalog:
+            context = None
+
+            def __init__(self, context):
+                CustomRESTCatalog.context = context
+
+            def get_table(self, identifier):
+                self.identifier = identifier
+                return dependency_table
+
+        context = CatalogContext.create_from_options(Options({
+            CatalogOptions.METASTORE.key(): "custom-rest",
+        }))
+        environment = CatalogEnvironment(
+            identifier=Identifier.create("db", "root"),
+            catalog_loader=RESTCatalogLoader(context),
+        )
+        table = SimpleNamespace(catalog_environment=environment)
+
+        with mock.patch.dict(
+                CatalogFactory.CATALOG_REGISTRY,
+                {"custom-rest": CustomRESTCatalog}):
+            result = BlobViewLookup(table)._load_table(target)
+
+        dependency_context = CustomRESTCatalog.context
+        self.assertEqual(
+            dependency_context.options.get(CatalogOptions.METASTORE),
+            "custom-rest",
+        )
+        self.assertTrue(
+            dependency_context.options.contains_key(self._READ_VIA_OPTION))
         self.assertIs(result, dependency_table)
 
 
