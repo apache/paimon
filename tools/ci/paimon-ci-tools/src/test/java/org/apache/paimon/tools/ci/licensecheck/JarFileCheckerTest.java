@@ -298,6 +298,47 @@ class JarFileCheckerTest {
                 .isEqualTo(0);
     }
 
+    @Test
+    void testRejectedOnNestedMetaInfInMultiReleaseDirectory(@TempDir Path tempDir)
+            throws Exception {
+        assertThat(
+                        JarFileChecker.checkJar(
+                                createJar(
+                                        tempDir,
+                                        Entry.fileEntry(VALID_NOTICE_CONTENTS, VALID_NOTICE_PATH),
+                                        Entry.fileEntry(VALID_LICENSE_CONTENTS, VALID_LICENSE_PATH),
+                                        Entry.fileEntry(
+                                                "Manifest-Version: 1.0",
+                                                Arrays.asList(
+                                                        "META-INF",
+                                                        "versions",
+                                                        "11",
+                                                        "META-INF",
+                                                        "MANIFEST.MF")))))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void testAcceptedOnRegularMultiReleaseContent(@TempDir Path tempDir) throws Exception {
+        assertThat(
+                        JarFileChecker.checkJar(
+                                createJar(
+                                        tempDir,
+                                        Entry.fileEntry(VALID_NOTICE_CONTENTS, VALID_NOTICE_PATH),
+                                        Entry.fileEntry(VALID_LICENSE_CONTENTS, VALID_LICENSE_PATH),
+                                        Entry.fileEntry(
+                                                "some java 11 resource",
+                                                Arrays.asList(
+                                                        "META-INF",
+                                                        "versions",
+                                                        "11",
+                                                        "javax",
+                                                        "xml",
+                                                        "bind",
+                                                        "Messages.properties")))))
+                .isEqualTo(0);
+    }
+
     private static class Entry {
         final String contents;
         final List<String> path;
