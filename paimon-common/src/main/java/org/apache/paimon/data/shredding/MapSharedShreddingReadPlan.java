@@ -30,20 +30,25 @@ import org.apache.paimon.data.columnar.RowToColumnConverter;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.heap.CastedMapColumnVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
+import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Read plan that rebuilds logical MAP values from shared-shredding physical ROW values. */
 public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
+
+    private static final int FIELD_MAPPING_POSITION = 0;
 
     private final RowType logicalType;
     private final RowType physicalType;
@@ -53,7 +58,7 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
             RowType logicalType, Map<String, MapSharedShreddingFieldMeta> fieldMetas) {
         this.logicalType = logicalType;
         this.physicalType = MapSharedShreddingUtils.buildPhysicalReadType(logicalType, fieldMetas);
-        this.contextByFieldIndex = createContexts(logicalType, fieldMetas);
+        this.contextByFieldIndex = createContexts(logicalType, physicalType, fieldMetas);
     }
 
     @Override
@@ -77,13 +82,30 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
     }
 
     private static Map<Integer, SharedShreddingContext> createContexts(
-            RowType logicalType, Map<String, MapSharedShreddingFieldMeta> fieldMetas) {
+            RowType logicalType,
+            RowType physicalType,
+            Map<String, MapSharedShreddingFieldMeta> fieldMetas) {
         Map<Integer, SharedShreddingContext> contexts = new LinkedHashMap<>();
         for (int i = 0; i < logicalType.getFieldCount(); i++) {
             DataField field = logicalType.getFields().get(i);
             MapSharedShreddingFieldMeta fieldMeta = fieldMetas.get(field.name());
-            if (fieldMeta != null && field.type() instanceof MapType) {
-                contexts.put(i, new SharedShreddingContext(fieldMeta, field.type()));
+            if (fieldMeta == null) {
+                continue;
+            }
+
+            RowType physicalStructType = (RowType) physicalType.getTypeAt(i);
+            SharedPhysicalContext physicalContext =
+                    new SharedPhysicalContext(fieldMeta, physicalStructType);
+            if (field.type() instanceof MapType) {
+                contexts.put(i, new FullMapContext(physicalContext, (MapType) field.type()));
+            } else if (MapSelectedKeysMetadataUtils.isMapSelectedKeysField(field)) {
+                contexts.put(
+                        i,
+                        new SelectedKeysContext(
+                                physicalContext,
+                                fieldMeta,
+                                (RowType) field.type(),
+                                field.description()));
             }
         }
         return contexts;
@@ -100,9 +122,8 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
                     logicalVectors[i] = physicalBatch.columns[i];
                 } else {
                     logicalVectors[i] =
-                            materializeLogicalMapVector(
+                            context.materialize(
                                     (RowColumnVector) physicalBatch.columns[i],
-                                    context,
                                     physicalBatch.getNumRows());
                 }
             }
@@ -111,7 +132,7 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
     }
 
     private static CastedMapColumnVector materializeLogicalMapVector(
-            RowColumnVector physicalVector, SharedShreddingContext context, int rowCount) {
+            RowColumnVector physicalVector, FullMapContext context, int rowCount) {
         ColumnVector[] physicalChildren = physicalChildren(physicalVector);
         int totalElements =
                 countLogicalMapElements(physicalVector, physicalChildren, context, rowCount);
@@ -147,6 +168,46 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
                         new WritableColumnVector[] {keyVector, valueVector}));
     }
 
+    private static ColumnVector materializeSelectedKeysRowVector(
+            RowColumnVector physicalVector, SelectedKeysContext context, int rowCount) {
+        ColumnVector[] physicalChildren = physicalChildren(physicalVector);
+        RowType selectedKeysType = context.selectedKeysType;
+        WritableColumnVector[] selectedKeyVectors =
+                new WritableColumnVector[selectedKeysType.getFieldCount()];
+        for (int i = 0; i < selectedKeyVectors.length; i++) {
+            selectedKeyVectors[i] =
+                    ColumnVectorUtils.createWritableColumnVector(
+                            rowCount, selectedKeysType.getTypeAt(i));
+        }
+        HeapRowVector rowVector = new HeapRowVector(rowCount, selectedKeyVectors);
+
+        for (int row = 0; row < rowCount; row++) {
+            if (physicalVector.isNullAt(row)) {
+                rowVector.appendNull();
+                continue;
+            }
+
+            InternalArray fieldMapping = fieldMapping(physicalChildren, row, context.physical);
+            InternalMap overflow = null;
+            for (int ordinal = 0; ordinal < selectedKeyVectors.length; ordinal++) {
+                if (context.selectedKeyOverflow[ordinal] && overflow == null) {
+                    overflow = overflowMap(physicalChildren, row, context.physical);
+                }
+                appendSelectedKeyValue(
+                        physicalChildren,
+                        fieldMapping,
+                        context.selectedKeyOverflow[ordinal] ? overflow : null,
+                        row,
+                        context,
+                        ordinal,
+                        selectedKeyVectors[ordinal]);
+            }
+            rowVector.appendRow();
+        }
+
+        return ColumnVectorUtils.createReadableColumnVector(selectedKeysType, rowVector);
+    }
+
     private static ColumnVector[] physicalChildren(RowColumnVector physicalVector) {
         ColumnVector[] physicalChildren = physicalVector.getChildren();
         if (physicalChildren != null) {
@@ -158,7 +219,7 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
     private static int countLogicalMapElements(
             RowColumnVector physicalVector,
             ColumnVector[] physicalChildren,
-            SharedShreddingContext context,
+            FullMapContext context,
             int rowCount) {
         int totalElements = 0;
         for (int row = 0; row < rowCount; row++) {
@@ -170,20 +231,20 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
     }
 
     private static int countLogicalMapElements(
-            ColumnVector[] physicalChildren, int row, SharedShreddingContext context) {
+            ColumnVector[] physicalChildren, int row, FullMapContext context) {
         int count = 0;
-        InternalArray fieldMapping = fieldMapping(physicalChildren, row, context);
-        for (int column = 0; column < context.numColumns; column++) {
-            if (logicalFieldName(fieldMapping, column, context) != null) {
+        InternalArray fieldMapping = fieldMapping(physicalChildren, row, context.physical);
+        for (int column = 0; column < context.physical.numColumns; column++) {
+            if (logicalFieldName(fieldMapping, column, context.physical) != null) {
                 count++;
             }
         }
 
-        InternalMap overflow = overflowMap(physicalChildren, row, context);
+        InternalMap overflow = overflowMap(physicalChildren, row, context.physical);
         if (overflow != null) {
             InternalArray keys = overflow.keyArray();
             for (int i = 0; i < overflow.size(); i++) {
-                if (context.nameById.containsKey(keys.getInt(i))) {
+                if (context.physical.nameById.containsKey(keys.getInt(i))) {
                     count++;
                 }
             }
@@ -194,32 +255,32 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
     private static int appendLogicalMapElements(
             ColumnVector[] physicalChildren,
             int row,
-            SharedShreddingContext context,
+            FullMapContext context,
             WritableColumnVector keyVector,
             WritableColumnVector valueVector) {
         int count = 0;
-        InternalArray fieldMapping = fieldMapping(physicalChildren, row, context);
-        for (int column = 0; column < context.numColumns; column++) {
-            BinaryString fieldName = logicalFieldName(fieldMapping, column, context);
+        InternalArray fieldMapping = fieldMapping(physicalChildren, row, context.physical);
+        for (int column = 0; column < context.physical.numColumns; column++) {
+            BinaryString fieldName = logicalFieldName(fieldMapping, column, context.physical);
             if (fieldName == null) {
                 continue;
             }
 
             context.keyConverter.append(fieldName, keyVector);
-            ColumnVector valueColumn = physicalChildren[column + 1];
-            appendValue(context, valueColumn, row, valueVector);
+            ColumnVector valueColumn = physicalColumn(physicalChildren, column, context.physical);
+            appendValue(context.valueConverter, valueColumn, row, valueVector);
             count++;
         }
 
-        InternalMap overflow = overflowMap(physicalChildren, row, context);
+        InternalMap overflow = overflowMap(physicalChildren, row, context.physical);
         if (overflow != null) {
             InternalArray keys = overflow.keyArray();
             InternalArray values = overflow.valueArray();
             for (int i = 0; i < overflow.size(); i++) {
-                BinaryString fieldName = context.nameById.get(keys.getInt(i));
+                BinaryString fieldName = context.physical.nameById.get(keys.getInt(i));
                 if (fieldName != null) {
                     context.keyConverter.append(fieldName, keyVector);
-                    appendValue(context, values, i, valueVector);
+                    appendValue(context.valueConverter, values, i, valueVector);
                     count++;
                 }
             }
@@ -227,50 +288,112 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
         return count;
     }
 
+    private static void appendSelectedKeyValue(
+            ColumnVector[] physicalChildren,
+            InternalArray fieldMapping,
+            @Nullable InternalMap overflow,
+            int row,
+            SelectedKeysContext context,
+            int ordinal,
+            WritableColumnVector valueVector) {
+        int fieldId = context.selectedKeyFieldIds[ordinal];
+        if (fieldId < 0) {
+            valueVector.appendNull();
+            return;
+        }
+
+        int[] candidateColumns = context.selectedKeyColumns[ordinal];
+        for (int i = 0; i < candidateColumns.length; i++) {
+            int column = candidateColumns[i];
+            if (mappedFieldId(fieldMapping, column) == fieldId) {
+                appendValue(
+                        context.selectedValueConverters[ordinal],
+                        physicalColumn(physicalChildren, column, context.physical),
+                        row,
+                        valueVector);
+                return;
+            }
+        }
+
+        if (overflow != null) {
+            InternalArray keys = overflow.keyArray();
+            InternalArray values = overflow.valueArray();
+            for (int i = 0; i < overflow.size(); i++) {
+                if (!keys.isNullAt(i) && keys.getInt(i) == fieldId) {
+                    appendValue(context.selectedValueConverters[ordinal], values, i, valueVector);
+                    return;
+                }
+            }
+        }
+
+        valueVector.appendNull();
+    }
+
     private static void appendValue(
-            SharedShreddingContext context,
+            RowToColumnConverter.ElementConverter converter,
             ColumnVector source,
             int row,
             WritableColumnVector valueVector) {
         if (source.isNullAt(row)) {
             valueVector.appendNull();
         } else {
-            context.valueConverter.append(source, row, valueVector);
+            converter.append(source, row, valueVector);
         }
     }
 
     private static void appendValue(
-            SharedShreddingContext context,
+            RowToColumnConverter.ElementConverter converter,
             InternalArray source,
             int pos,
             WritableColumnVector valueVector) {
         if (source.isNullAt(pos)) {
             valueVector.appendNull();
         } else {
-            context.valueConverter.append(source, pos, valueVector);
+            converter.append(source, pos, valueVector);
         }
     }
 
     private static InternalArray fieldMapping(
-            ColumnVector[] physicalChildren, int row, SharedShreddingContext context) {
-        InternalArray fieldMapping = ((ArrayColumnVector) physicalChildren[0]).getArray(row);
+            ColumnVector[] physicalChildren, int row, SharedPhysicalContext context) {
+        InternalArray fieldMapping =
+                ((ArrayColumnVector) physicalChildren[FIELD_MAPPING_POSITION]).getArray(row);
         checkArgument(
                 fieldMapping.size() == context.numColumns,
                 "Shared-shredding field mapping size %s does not match metadata num columns %s.",
                 fieldMapping.size(),
                 context.numColumns);
+        for (int column = 0; column < fieldMapping.size(); column++) {
+            checkArgument(
+                    !fieldMapping.isNullAt(column),
+                    "Shared-shredding field mapping must not contain null at column %s.",
+                    column);
+        }
         return fieldMapping;
     }
 
     private static BinaryString logicalFieldName(
-            InternalArray fieldMapping, int column, SharedShreddingContext context) {
-        int fieldId = fieldMapping.isNullAt(column) ? -1 : fieldMapping.getInt(column);
+            InternalArray fieldMapping, int column, SharedPhysicalContext context) {
+        int fieldId = mappedFieldId(fieldMapping, column);
         return fieldId < 0 ? null : context.nameById.get(fieldId);
     }
 
+    private static int mappedFieldId(InternalArray fieldMapping, int column) {
+        return fieldMapping.getInt(column);
+    }
+
+    private static ColumnVector physicalColumn(
+            ColumnVector[] physicalChildren, int column, SharedPhysicalContext context) {
+        int position = context.physicalColumnPositions[column];
+        checkArgument(
+                position >= 0,
+                "Shared-shredding physical column %s was not included in the read schema.",
+                MapSharedShreddingDefine.physicalColumnName(column));
+        return physicalChildren[position];
+    }
+
     private static InternalMap overflowMap(
-            ColumnVector[] physicalChildren, int row, SharedShreddingContext context) {
-        if (context.overflowPosition >= physicalChildren.length) {
+            ColumnVector[] physicalChildren, int row, SharedPhysicalContext context) {
+        if (context.overflowPosition < 0 || context.overflowPosition >= physicalChildren.length) {
             return null;
         }
 
@@ -278,27 +401,156 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
         return overflowVector.isNullAt(row) ? null : ((MapColumnVector) overflowVector).getMap(row);
     }
 
-    private static class SharedShreddingContext {
+    private interface SharedShreddingContext {
 
-        private final MapType mapType;
+        ColumnVector materialize(RowColumnVector physicalVector, int rowCount);
+    }
+
+    private static class SharedPhysicalContext {
+
         private final Map<Integer, BinaryString> nameById;
-        private final RowToColumnConverter.ElementConverter keyConverter;
-        private final RowToColumnConverter.ElementConverter valueConverter;
         private final int numColumns;
+        private final int[] physicalColumnPositions;
         private final int overflowPosition;
 
-        private SharedShreddingContext(MapSharedShreddingFieldMeta fieldMeta, DataType fieldType) {
-            this.mapType = (MapType) fieldType;
+        private SharedPhysicalContext(
+                MapSharedShreddingFieldMeta fieldMeta, RowType physicalStructType) {
             this.nameById = new LinkedHashMap<>();
             for (Map.Entry<String, Integer> entry : fieldMeta.nameToId().entrySet()) {
                 this.nameById.put(entry.getValue(), BinaryString.fromString(entry.getKey()));
             }
-            this.keyConverter =
-                    RowToColumnConverter.createElementConverter(this.mapType.getKeyType());
-            this.valueConverter =
-                    RowToColumnConverter.createElementConverter(this.mapType.getValueType());
             this.numColumns = fieldMeta.numColumns();
-            this.overflowPosition = fieldMeta.numColumns() + 1;
+            checkArgument(
+                    physicalStructType.getFieldCount() > 0
+                            && MapSharedShreddingDefine.FIELD_MAPPING.equals(
+                                    physicalStructType.getFieldNames().get(FIELD_MAPPING_POSITION)),
+                    "Shared-shredding physical struct must start with %s.",
+                    MapSharedShreddingDefine.FIELD_MAPPING);
+            this.physicalColumnPositions = physicalColumnPositions(physicalStructType, numColumns);
+            this.overflowPosition = overflowPosition(physicalStructType);
+        }
+
+        private static int[] physicalColumnPositions(RowType physicalStructType, int numColumns) {
+            int[] positions = new int[numColumns];
+            Arrays.fill(positions, -1);
+            int physicalColumnEnd = overflowPosition(physicalStructType);
+            if (physicalColumnEnd < 0) {
+                physicalColumnEnd = physicalStructType.getFieldCount();
+            }
+            for (int i = FIELD_MAPPING_POSITION + 1; i < physicalColumnEnd; i++) {
+                String fieldName = physicalStructType.getFieldNames().get(i);
+                int column = physicalColumnIndex(fieldName);
+                checkArgument(
+                        column >= 0,
+                        "Unexpected shared-shredding physical field %s at position %s.",
+                        fieldName,
+                        i);
+                checkArgument(
+                        column < numColumns,
+                        "Shared-shredding physical column %s exceeds metadata num columns %s.",
+                        fieldName,
+                        numColumns);
+                positions[column] = i;
+            }
+            return positions;
+        }
+
+        private static int overflowPosition(RowType physicalStructType) {
+            int lastPosition = physicalStructType.getFieldCount() - 1;
+            if (lastPosition <= FIELD_MAPPING_POSITION) {
+                return -1;
+            }
+            return MapSharedShreddingDefine.OVERFLOW.equals(
+                            physicalStructType.getFieldNames().get(lastPosition))
+                    ? lastPosition
+                    : -1;
+        }
+
+        private static int physicalColumnIndex(String fieldName) {
+            String prefix = "__col_";
+            if (!fieldName.startsWith(prefix)) {
+                return -1;
+            }
+            return Integer.parseInt(fieldName.substring(prefix.length()));
+        }
+    }
+
+    private static class FullMapContext implements SharedShreddingContext {
+
+        private final SharedPhysicalContext physical;
+        private final MapType mapType;
+        private final RowToColumnConverter.ElementConverter keyConverter;
+        private final RowToColumnConverter.ElementConverter valueConverter;
+
+        private FullMapContext(SharedPhysicalContext physical, MapType mapType) {
+            this.physical = physical;
+            this.mapType = mapType;
+            this.keyConverter = RowToColumnConverter.createElementConverter(mapType.getKeyType());
+            this.valueConverter =
+                    RowToColumnConverter.createElementConverter(mapType.getValueType());
+        }
+
+        @Override
+        public ColumnVector materialize(RowColumnVector physicalVector, int rowCount) {
+            return materializeLogicalMapVector(physicalVector, this, rowCount);
+        }
+    }
+
+    private static class SelectedKeysContext implements SharedShreddingContext {
+
+        private final SharedPhysicalContext physical;
+        private final RowType selectedKeysType;
+        private final int[] selectedKeyFieldIds;
+        private final int[][] selectedKeyColumns;
+        private final boolean[] selectedKeyOverflow;
+        private final RowToColumnConverter.ElementConverter[] selectedValueConverters;
+
+        private SelectedKeysContext(
+                SharedPhysicalContext physical,
+                MapSharedShreddingFieldMeta fieldMeta,
+                RowType selectedKeysType,
+                String selectedKeysMetadata) {
+            this.physical = physical;
+            this.selectedKeysType = selectedKeysType;
+            List<String> selectedKeys =
+                    MapSelectedKeysMetadataUtils.selectedKeys(selectedKeysMetadata);
+            checkArgument(
+                    selectedKeys.size() == selectedKeysType.getFieldCount(),
+                    "Selected-key metadata size %s does not match selected ROW field count %s.",
+                    selectedKeys.size(),
+                    selectedKeysType.getFieldCount());
+            this.selectedKeyFieldIds = new int[selectedKeys.size()];
+            this.selectedKeyColumns = new int[selectedKeys.size()][];
+            this.selectedKeyOverflow = new boolean[selectedKeys.size()];
+            this.selectedValueConverters =
+                    new RowToColumnConverter.ElementConverter[selectedKeys.size()];
+            for (int i = 0; i < selectedKeys.size(); i++) {
+                Integer fieldId = fieldMeta.nameToId().get(selectedKeys.get(i));
+                this.selectedKeyFieldIds[i] = fieldId == null ? -1 : fieldId;
+                this.selectedKeyColumns[i] =
+                        fieldId == null ? new int[0] : candidateColumns(fieldMeta, fieldId);
+                this.selectedKeyOverflow[i] =
+                        fieldId != null && fieldMeta.overflowFieldSet().contains(fieldId);
+                this.selectedValueConverters[i] =
+                        RowToColumnConverter.createElementConverter(selectedKeysType.getTypeAt(i));
+            }
+        }
+
+        @Override
+        public ColumnVector materialize(RowColumnVector physicalVector, int rowCount) {
+            return materializeSelectedKeysRowVector(physicalVector, this, rowCount);
+        }
+
+        private static int[] candidateColumns(MapSharedShreddingFieldMeta fieldMeta, int fieldId) {
+            List<Integer> columns = fieldMeta.fieldToColumns().get(fieldId);
+            if (columns == null || columns.isEmpty()) {
+                return new int[0];
+            }
+            int[] result = new int[columns.size()];
+            for (int i = 0; i < columns.size(); i++) {
+                result[i] = columns.get(i);
+            }
+            return result;
         }
     }
 }

@@ -99,7 +99,7 @@ You can use `update_by_predicate` for SQL-like `UPDATE ... SET ... WHERE ...`
 operations. The `Predicate` identifies rows to update, and the assignment map
 contains literal values for updated columns.
 When global indexes are available, `update_by_predicate` discovers matching
-`_ROW_ID` values with `global-index.search-mode=full` on the configured
+`_ROW_ID` values with `scalar-index.search-mode=full` on the configured
 point-in-time scan snapshot or, if none is configured, the latest snapshot.
 
 ```python

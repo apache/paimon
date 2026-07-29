@@ -234,7 +234,9 @@ schema validation.
 | `fields.<column>.pk-btree.index.options` | Not set | JSON object containing BTree build options. Unqualified keys are scoped to `btree-index`. |
 | `pk-bitmap.index.columns` | Not set | Comma-separated columns which own independent Bitmap indexes. |
 | `fields.<column>.pk-bitmap.index.options` | Not set | JSON object containing Bitmap build options. Unqualified keys are scoped to `bitmap-index`. |
-| `global-index.search-mode` | `fast` | Search mode for primary-key Vector and Full Text queries. `fast` searches indexed data only, so uncovered files are omitted. For Vector, `full` and `detail` search uncovered files exactly. Primary-key Full Text supports only `fast`. |
+| `global-index.search-mode` | Not set | Legacy fallback search mode. Family-specific options take precedence. |
+| `vector-index.search-mode` | `fast` | Search mode for primary-key Vector queries. `full` and `detail` search uncovered files exactly. |
+| `full-text-index.search-mode` | `fast` | Search mode for primary-key Full Text queries. Only `fast` is currently supported. |
 
 For algorithm-specific options, see the corresponding
 [BTree](../multimodal-table/global-index/btree),
@@ -272,10 +274,10 @@ Index construction can execute asynchronously inside the writer. A writer which 
 compaction also waits for active index maintenance; a non-blocking writer can complete maintenance
 in a later commit. Coverage can therefore be temporarily partial.
 
-Coverage behavior depends on the index family and search mode. `global-index.search-mode` defaults
-to `fast`. For primary-key Vector and Full Text queries, `fast` searches only data covered by an
-active index group. Uncovered files are not searched, so partial coverage can make results
-incomplete.
+Coverage behavior depends on the index family and search mode. `vector-index.search-mode` and
+`full-text-index.search-mode` default to `fast`. In `fast` mode, primary-key Vector and Full Text
+queries search only data covered by an active index group. Uncovered files are not searched, so
+partial coverage can make results incomplete.
 
 - BTree and Bitmap scans always read uncovered files through the ordinary data path. Partial
   coverage affects their acceleration, not result completeness. The original scalar predicate and
@@ -283,7 +285,7 @@ incomplete.
 - Vector search in `full` or `detail` mode evaluates files without an active ANN group exactly and
   merges those results with ANN candidates. In the default `fast` mode, those files are omitted.
 
-Primary-key Full Text currently supports only `global-index.search-mode = fast`. It searches
+Primary-key Full Text currently supports only `full-text-index.search-mode = fast`. It searches
 persistent archives and ignores uncovered files; `full` and `detail` are rejected because a
 merge-aware logical-row fallback is not implemented. Consequently, newly appended Level-0 rows
 become full-text searchable only after compaction publishes an eligible data file and archive.
@@ -347,8 +349,9 @@ CALL sys.vector_search(
     vector_column => 'embedding',
     query_vector => '0.1,0.2,0.3',
     top_k => 10,
-    projection => 'id,status',
-    options => 'ivf.nprobe=32'
+    projection => 'id,status,__paimon_search_score',
+    options => 'ivf.nprobe=32',
+    `where` => 'status = ''active'''
 );
 ```
 

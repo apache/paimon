@@ -31,7 +31,7 @@ import java.io.IOException;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Cache manager to cache bytes to paged {@link MemorySegment}s. */
-public class CacheManager {
+public class CacheManager implements AutoCloseable {
 
     private static final Logger LOG = LoggerFactory.getLogger(CacheManager.class);
 
@@ -43,18 +43,13 @@ public class CacheManager {
 
     private final Cache dataCache;
     private final Cache indexCache;
+    private final boolean offHeap;
 
-    @VisibleForTesting
-    public CacheManager(MemorySize maxMemorySize) {
-        this(Cache.CacheType.GUAVA, maxMemorySize, 0);
+    public CacheManager(MemorySize maxMemorySize, double highPriorityPoolRatio) {
+        this(maxMemorySize, highPriorityPoolRatio, false);
     }
 
-    public CacheManager(MemorySize dataMaxMemorySize, double highPriorityPoolRatio) {
-        this(Cache.CacheType.GUAVA, dataMaxMemorySize, highPriorityPoolRatio);
-    }
-
-    public CacheManager(
-            Cache.CacheType cacheType, MemorySize maxMemorySize, double highPriorityPoolRatio) {
+    private CacheManager(MemorySize maxMemorySize, double highPriorityPoolRatio, boolean offHeap) {
         Preconditions.checkArgument(
                 highPriorityPoolRatio >= 0 && highPriorityPoolRatio < 1,
                 "The high priority pool ratio should in the range [0, 1).");
@@ -62,17 +57,23 @@ public class CacheManager {
                 MemorySize.ofBytes((long) (maxMemorySize.getBytes() * highPriorityPoolRatio));
         MemorySize dataCacheSize =
                 MemorySize.ofBytes((long) (maxMemorySize.getBytes() * (1 - highPriorityPoolRatio)));
-        this.dataCache = CacheBuilder.newBuilder(cacheType).maximumWeight(dataCacheSize).build();
+        this.dataCache = CacheBuilder.newBuilder().maximumWeight(dataCacheSize).build();
         if (highPriorityPoolRatio == 0) {
             this.indexCache = dataCache;
         } else {
-            this.indexCache =
-                    CacheBuilder.newBuilder(cacheType).maximumWeight(indexCacheSize).build();
+            this.indexCache = CacheBuilder.newBuilder().maximumWeight(indexCacheSize).build();
         }
+        this.offHeap = offHeap;
         LOG.info(
-                "Initialize cache manager with data cache of {} and index cache of {}.",
+                "Initialize {} cache manager with data cache of {} and index cache of {}.",
+                offHeap ? "off-heap" : "heap",
                 dataCacheSize,
                 indexCacheSize);
+    }
+
+    public static CacheManager createOffHeap(
+            MemorySize maxMemorySize, double highPriorityPoolRatio) {
+        return new CacheManager(maxMemorySize, highPriorityPoolRatio, true);
     }
 
     @VisibleForTesting
@@ -93,7 +94,7 @@ public class CacheManager {
                         k -> {
                             try {
                                 return new Cache.CacheValue(
-                                        MemorySegment.wrap(reader.read(key)), callback);
+                                        toMemorySegment(reader.read(key)), callback);
                             } catch (IOException e) {
                                 throw new RuntimeException(e);
                             }
@@ -106,6 +107,23 @@ public class CacheManager {
             indexCache.invalidate(key);
         } else {
             dataCache.invalidate(key);
+        }
+    }
+
+    private MemorySegment toMemorySegment(byte[] bytes) {
+        if (!offHeap) {
+            return MemorySegment.wrap(bytes);
+        }
+        MemorySegment segment = MemorySegment.allocateOffHeapMemory(bytes.length);
+        segment.put(0, bytes);
+        return segment;
+    }
+
+    @Override
+    public void close() {
+        dataCache.invalidateAll();
+        if (indexCache != dataCache) {
+            indexCache.invalidateAll();
         }
     }
 

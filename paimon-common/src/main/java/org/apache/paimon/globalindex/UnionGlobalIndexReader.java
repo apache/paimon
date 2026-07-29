@@ -154,19 +154,17 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                 .thenApply(
                         v -> {
-                            Optional<ScoredGlobalIndexResult> result = Optional.empty();
+                            List<ScoredGlobalIndexResult> results = new ArrayList<>(futures.size());
                             for (CompletableFuture<Optional<ScoredGlobalIndexResult>> f : futures) {
                                 Optional<ScoredGlobalIndexResult> current = f.join();
-                                if (!current.isPresent()) {
-                                    continue;
-                                }
-                                if (!result.isPresent()) {
-                                    result = current;
-                                } else {
-                                    result = Optional.of(result.get().or(current.get()));
+                                if (current.isPresent()) {
+                                    results.add(current.get());
                                 }
                             }
-                            return result;
+                            if (results.isEmpty()) {
+                                return Optional.<ScoredGlobalIndexResult>empty();
+                            }
+                            return Optional.of(ScoredGlobalIndexResult.merge(results));
                         })
                 .whenComplete(
                         (ignored, throwable) -> {

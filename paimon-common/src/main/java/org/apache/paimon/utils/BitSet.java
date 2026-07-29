@@ -19,8 +19,10 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySlice;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** BitSet based on {@link MemorySegment}. */
 public class BitSet {
@@ -60,6 +62,11 @@ public class BitSet {
 
     public MemorySegment getMemorySegment() {
         return this.memorySegment;
+    }
+
+    MemorySlice getMemorySlice() {
+        return new MemorySlice(
+                checkNotNull(memorySegment, "MemorySegment is not set."), offset, byteLength);
     }
 
     /**

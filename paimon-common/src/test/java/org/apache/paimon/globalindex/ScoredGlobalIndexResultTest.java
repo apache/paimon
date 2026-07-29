@@ -22,13 +22,90 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ScoredGlobalIndexResult}. */
 public class ScoredGlobalIndexResultTest {
+
+    @Test
+    public void testMergeEmptyResults() {
+        ScoredGlobalIndexResult merged = ScoredGlobalIndexResult.merge(Collections.emptyList());
+
+        assertThat(merged.results()).isEmpty();
+    }
+
+    @Test
+    public void testMergeSingleResult() {
+        ScoredGlobalIndexResult result = result(new long[] {1}, new float[] {0.1f});
+
+        assertThat(ScoredGlobalIndexResult.merge(Collections.singletonList(result)))
+                .isSameAs(result);
+    }
+
+    @Test
+    public void testMergeDisjointResults() {
+        ScoredGlobalIndexResult first = result(new long[] {1, 3}, new float[] {0.1f, 0.3f});
+        ScoredGlobalIndexResult second = result(new long[] {2, 4}, new float[] {0.2f, 0.4f});
+
+        ScoredGlobalIndexResult merged =
+                ScoredGlobalIndexResult.merge(Arrays.asList(first, second));
+
+        assertThat(merged.results().getIntCardinality()).isEqualTo(4);
+        assertThat(merged.results()).contains(1L, 2L, 3L, 4L);
+        assertThat(merged.scoreGetter().score(1L)).isEqualTo(0.1f);
+        assertThat(merged.scoreGetter().score(2L)).isEqualTo(0.2f);
+        assertThat(merged.scoreGetter().score(3L)).isEqualTo(0.3f);
+        assertThat(merged.scoreGetter().score(4L)).isEqualTo(0.4f);
+    }
+
+    @Test
+    public void testMergeKeepsFirstScoreForDuplicateRowId() {
+        ScoredGlobalIndexResult first = result(new long[] {1, 2}, new float[] {0.1f, 0.2f});
+        ScoredGlobalIndexResult second = result(new long[] {2, 3}, new float[] {2.0f, 0.3f});
+
+        ScoredGlobalIndexResult merged =
+                ScoredGlobalIndexResult.merge(Arrays.asList(first, second));
+
+        assertThat(merged.results().getIntCardinality()).isEqualTo(3);
+        assertThat(merged.scoreGetter().score(2L)).isEqualTo(0.2f);
+    }
+
+    @Test
+    public void testMergeManyResultsMaterializesScoresBeforeTopK() {
+        int resultCount = 5000;
+        AtomicInteger scoreCalls = new AtomicInteger();
+        List<ScoredGlobalIndexResult> results = new ArrayList<>(resultCount);
+        for (int i = 0; i < resultCount; i++) {
+            RoaringNavigableMap64 rowIds = new RoaringNavigableMap64();
+            rowIds.add(i);
+            final float score = i;
+            results.add(
+                    ScoredGlobalIndexResult.create(
+                            rowIds,
+                            ignored -> {
+                                scoreCalls.incrementAndGet();
+                                return score;
+                            }));
+        }
+
+        ScoredGlobalIndexResult merged = ScoredGlobalIndexResult.merge(results);
+        int scoreCallsAfterMerge = scoreCalls.get();
+        RoaringNavigableMap64 topK = merged.topK(1).results();
+
+        assertThat(merged.results().getIntCardinality()).isEqualTo(resultCount);
+        assertThat(scoreCallsAfterMerge).isEqualTo(resultCount);
+        assertThat(scoreCalls).hasValue(scoreCallsAfterMerge);
+        assertThat(topK.getIntCardinality()).isEqualTo(1);
+        assertThat(topK).contains(resultCount - 1L);
+    }
 
     @Test
     public void testTopKBreaksBoundaryTiesByRowId() {

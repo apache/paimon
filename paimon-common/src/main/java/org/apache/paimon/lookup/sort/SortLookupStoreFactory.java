@@ -62,10 +62,10 @@ public class SortLookupStoreFactory implements LookupStoreFactory {
     }
 
     @Override
-    public SortLookupStoreWriter createWriter(File file, @Nullable BloomFilter.Builder bloomFilter)
-            throws IOException {
+    public SortLookupStoreWriter createWriter(
+            File file, @Nullable BloomFilter.Builder bloomFilterBuilder) throws IOException {
         Path filePath = new Path(file.getAbsolutePath());
         PositionOutputStream out = LocalFileIO.INSTANCE.newOutputStream(filePath, true);
-        return new SortLookupStoreWriter(out, blockSize, bloomFilter, compressionFactory);
+        return new SortLookupStoreWriter(out, blockSize, bloomFilterBuilder, compressionFactory);
     }
 }

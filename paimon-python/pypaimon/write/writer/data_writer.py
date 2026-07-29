@@ -52,6 +52,10 @@ class DataWriter(ABC):
 
         self.options = options
         self.target_file_size = self.options.target_file_size(self.table.is_primary_key_table)
+        # Roll a file when it reaches target_file_row_num rows or target_file_size,
+        # whichever comes first. Defaults to the max long (disabled), so plain
+        # size-based rolling is unchanged unless the option is set.
+        self.target_file_row_num = self.options.target_file_row_num()
         # POSTPONE_BUCKET uses AVRO format, otherwise default to PARQUET
         default_format = (
             CoreOptions.FILE_FORMAT_AVRO
@@ -188,16 +192,24 @@ class DataWriter(ABC):
 
     def _check_and_roll_if_needed(self):
         while self.pending_data is not None:
-            current_size = self.pending_data.nbytes
-            if current_size <= self.target_file_size:
+            num_rows = self.pending_data.num_rows
+            # Row-count trigger: keep at most target_file_row_num rows per file.
+            split_row = num_rows
+            if num_rows > self.target_file_row_num:
+                split_row = self.target_file_row_num
+            # Size trigger: roll earlier if the size split point comes first.
+            if self.pending_data.nbytes > self.target_file_size:
+                size_split = self._find_optimal_split_point(
+                    self.pending_data, self.target_file_size)
+                # First row alone exceeds target_file_size: roll it by itself.
+                if size_split <= 0:
+                    size_split = 1
+                if size_split < split_row:
+                    split_row = size_split
+            if split_row <= 0 or split_row >= num_rows:
                 break
-            split_row = self._find_optimal_split_point(self.pending_data, self.target_file_size)
-            if split_row <= 0:
-                break
-            data_to_write = self.pending_data.slice(0, split_row)
-            remaining_data = self.pending_data.slice(split_row)
-            self._write_data_to_file(data_to_write)
-            self.pending_data = remaining_data
+            self._write_data_to_file(self.pending_data.slice(0, split_row))
+            self.pending_data = self.pending_data.slice(split_row)
 
     def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:

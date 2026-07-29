@@ -144,13 +144,24 @@ class _SpecialFieldBunch(FieldBunch):
 class BlobBunch(_SpecialFieldBunch):
     """Files for partial field (blob files)."""
 
+    def __init__(self, expected_row_count: int, row_id_push_down: bool = False):
+        super().__init__(expected_row_count, row_id_push_down)
+        self._finished = False
+
     def add(self, file: DataFileMeta) -> None:
+        if self._finished:
+            raise ValueError("Cannot add a blob file to a finished blob bunch.")
         if not self._is_special_file(file.file_name):
             raise ValueError("Only blob file can be added to a blob bunch.")
         if self._files and file.write_cols != self._files[0].write_cols:
             raise ValueError("All files in a blob bunch should have the same write columns.")
 
         self._files.append(file)
+
+    def finish(self) -> None:
+        if self._finished:
+            return
+
         merged = Range.sort_and_merge_overlap(
             [blob_file.row_id_range() for blob_file in self._files],
             True,
@@ -162,22 +173,19 @@ class BlobBunch(_SpecialFieldBunch):
                 f"Blob files row count exceed the expect {self.expected_row_count}"
             )
 
-    def row_count(self) -> int:
-        merged = Range.sort_and_merge_overlap(
-            [blob_file.row_id_range() for blob_file in self._files],
-            True,
-            True,
-        )
-        row_count = sum(row_range.count() for row_range in merged)
         if not self.row_id_push_down:
             if len(merged) != 1:
                 raise ValueError("Blob file bunch should always contain a contiguous row range.")
-            if self.expected_row_count >= 0 and row_count != self.expected_row_count:
+            if self.expected_row_count >= 0 and self._row_count != self.expected_row_count:
                 raise ValueError(
                     "The merged row count of blob file bunch should be aligned "
-                    f"with normal files, expect {self.expected_row_count}, got {row_count}."
+                    f"with normal files, expect {self.expected_row_count}, got {self._row_count}."
                 )
-        return row_count
+        self._finished = True
+
+    def row_count(self) -> int:
+        self.finish()
+        return self._row_count
 
     def sequential_read_optimize(self) -> bool:
         if not self._files:

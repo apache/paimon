@@ -80,8 +80,8 @@ class _CoverageOptions:
     def __init__(self, mode):
         self.options = Options({"global-index.search-mode": mode})
 
-    def global_index_search_mode(self):
-        return CoreOptions(self.options).global_index_search_mode()
+    def scalar_index_search_mode(self):
+        return CoreOptions(self.options).scalar_index_search_mode()
 
 
 class _CoverageTable:
@@ -223,6 +223,9 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             def global_index_enabled(self):
                 return True
 
+            def scalar_index_search_mode(self):
+                return GlobalIndexSearchMode.FULL
+
         class _Table:
             options = _Options()
 
@@ -249,6 +252,8 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             [Range(1, 1), Range(5, 6)],
             result.results().to_range_list(),
         )
+        fake_scanner.unindexed_rows.assert_called_once_with(
+            predicate, search_mode=GlobalIndexSearchMode.FULL)
 
     def test_eval_global_index_keeps_none_as_full_scan(self):
         from pypaimon.read.scanner.file_scanner import FileScanner

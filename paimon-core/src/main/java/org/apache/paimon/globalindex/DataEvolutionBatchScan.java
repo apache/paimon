@@ -315,7 +315,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 LOG.info(
                         "Scan table '{}' with global index. searchMode='{}', total={} ms, metadata={} ms, lookup={} ms, coverage={} ms.",
                         table.name(),
-                        options.globalIndexSearchMode(),
+                        options.scalarIndexSearchMode(),
                         totalDuration / 1_000_000,
                         metadataDuration / 1_000_000,
                         lookupDuration / 1_000_000,

@@ -101,9 +101,20 @@ class FileStoreWrite:
             raise ValueError(
                 f"target-file-row-num should be at most {max_value}")
         if row_limit != max_value:
-            raise NotImplementedError(
-                "target-file-row-num is set on this table but pypaimon file-store writers do not support "
-                "row-count based file rolling yet; unset it or write with Java/Flink/Spark.")
+            # Row-count rolling is implemented in the base append writer only.
+            # DE (data-evolution) append tables are the target; primary-key,
+            # blob and vector writers override rolling and are not supported yet.
+            row_rolling_supported = (
+                self.table.options.data_evolution_enabled()
+                and not self.table.is_primary_key_table
+                and not self._has_blob_columns()
+                and not (self._has_vector_columns()
+                         and options.with_vector_format()))
+            if not row_rolling_supported:
+                raise NotImplementedError(
+                    "target-file-row-num is set on this table but pypaimon supports row-count "
+                    "based file rolling only for data-evolution append tables (no primary key, "
+                    "blob or vector columns); unset it or write with Java/Flink/Spark.")
 
         def max_seq_number():
             return self._seq_number_stats(partition).get(bucket, 1)

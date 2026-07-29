@@ -168,11 +168,12 @@ class DataEvolutionDelete implements Serializable {
         String query =
                 String.format(
                         "SELECT `_ROW_ID` FROM `%s`.`%s`.`%s$row_tracking` "
-                                + "/*+ OPTIONS('scan.snapshot-id'='%d') */ WHERE %s",
+                                + "/*+ OPTIONS('scan.snapshot-id'='%d', '%s'='full') */ WHERE %s",
                         action.catalogName,
                         action.identifier.getDatabaseName(),
                         action.identifier.getObjectName(),
                         baseSnapshotId,
+                        CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(),
                         filter);
         LOG.info("Data-evolution delete source query: {}", query);
 

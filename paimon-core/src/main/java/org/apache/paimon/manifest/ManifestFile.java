@@ -29,23 +29,26 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.SingleFileWriter;
+import org.apache.paimon.manifest.BinaryManifestEntry.Projection;
 import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
 
@@ -57,6 +60,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
     private final SchemaManager schemaManager;
     private final RowType partitionType;
+    private final FileFormat fileFormat;
+    private final RowType manifestType;
     private final FormatWriterFactory writerFactory;
     private final long suggestedFileSize;
 
@@ -64,8 +69,9 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             FileIO fileIO,
             SchemaManager schemaManager,
             RowType partitionType,
+            FileFormat fileFormat,
             ManifestEntrySerializer serializer,
-            RowType schema,
+            RowType manifestType,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
             String compression,
@@ -75,7 +81,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         super(
                 fileIO,
                 serializer,
-                schema,
+                manifestType,
                 readerFactory,
                 writerFactory,
                 compression,
@@ -83,6 +89,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
+        this.fileFormat = fileFormat;
+        this.manifestType = manifestType;
         this.writerFactory = writerFactory;
         this.suggestedFileSize = suggestedFileSize;
     }
@@ -138,6 +146,57 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     createIterator(path, fileSize), serializer, readFilter, readTFilter, convertor);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * Scans projected manifest entries without materializing {@link PojoManifestEntry}s.
+     *
+     * <p>The returned iterator reuses the same mutable {@link BinaryManifestEntry} for all records.
+     * An entry is only valid until the next call to {@link CloseableIterator#hasNext()}, {@link
+     * CloseableIterator#next()}, or {@link CloseableIterator#close()}, and must not be retained.
+     * The caller must close the iterator.
+     *
+     * <p>This method intentionally bypasses the manifest cache because cached entries are
+     * materialized with the complete manifest schema.
+     */
+    public CloseableIterator<BinaryManifestEntry> scan(
+            String fileName, @Nullable Long fileSize, Projection projection) {
+        BinaryManifestEntry entry = projection.createEntry();
+        try {
+            CloseableIterator<InternalRow> rows =
+                    FileUtils.createFormatReader(
+                                    fileIO,
+                                    fileFormat.createReaderFactory(
+                                            manifestType,
+                                            projection.projectedType(),
+                                            Collections.emptyList()),
+                                    pathFactory.toPath(fileName),
+                                    fileSize)
+                            .toCloseableIterator();
+            return new CloseableIterator<BinaryManifestEntry>() {
+
+                @Override
+                public boolean hasNext() {
+                    entry.clear();
+                    return rows.hasNext();
+                }
+
+                @Override
+                public BinaryManifestEntry next() {
+                    entry.clear();
+                    InternalRow row = rows.next();
+                    return row == null ? null : entry.replace(row);
+                }
+
+                @Override
+                public void close() throws Exception {
+                    entry.clear();
+                    rows.close();
+                }
+            };
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read manifest file " + fileName, e);
         }
     }
 
@@ -211,7 +270,11 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
         @Override
         public void write(ManifestEntry entry) throws IOException {
-            super.write(entry);
+            if (entry instanceof BinaryManifestEntry) {
+                writeRow(((BinaryManifestEntry) entry).fullRow());
+            } else {
+                super.write(entry);
+            }
 
             switch (entry.kind()) {
                 case ADD:
@@ -307,11 +370,12 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         }
 
         public ManifestFile create() {
-            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
+            RowType entryType = ManifestEntry.MANIFEST_ROW_TYPE;
             return new ManifestFile(
                     fileIO,
                     schemaManager,
                     partitionType,
+                    fileFormat,
                     new ManifestEntrySerializer(),
                     entryType,
                     fileFormat.createReaderFactory(entryType, entryType, new ArrayList<>()),

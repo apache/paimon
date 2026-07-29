@@ -621,6 +621,29 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
         assertFalse(indexFileExists("T"));
     }
 
+    @Test
+    public void testMergeUnindexedRowWithFastSearchMode() throws Exception {
+        executeSQL(
+                "CALL sys.create_global_index(`table` => 'default.T', "
+                        + "index_column => 'name', index_type => 'btree')",
+                false,
+                true);
+        insertInto("T", "(21, 'new', 2.1, '01-22')");
+        executeSQL("ALTER TABLE T SET ('scalar-index.search-mode' = 'fast')", false, true);
+
+        builder(warehouse, database, "T")
+                .withMergeCondition("T.name = 'new' AND S.id = 21")
+                .withMatchedUpdateSet("T.value = S.`value`")
+                .withSourceTable("S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        testBatchRead(
+                "SELECT id, name, `value` FROM T WHERE id = 21",
+                Collections.singletonList(changelogRow("+I", 21, "new", 102.1)));
+    }
+
     private boolean indexFileExists(String tableName) throws Exception {
         FileStoreTable table = getFileStoreTable(tableName);
 

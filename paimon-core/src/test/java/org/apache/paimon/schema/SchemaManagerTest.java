@@ -54,6 +54,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
@@ -168,6 +169,97 @@ public class SchemaManagerTest {
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
         assertThat(latest.get().options()).containsEntry("new_k", "new_v");
+    }
+
+    @Test
+    public void testCannotChangeMapStorageLayoutForExistingField() throws Exception {
+        retryArtificialException(() -> manager.createTable(mapStorageLayoutSchema("default")));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                "fields.metrics.map.storage-layout",
+                                                                "shared-shredding"))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(
+                        "Cannot change map storage layout for field id 1 ('metrics' -> 'metrics') from 'default' to 'shared-shredding'.");
+    }
+
+    @Test
+    public void testCannotChangeMapStorageLayoutByRenameColumn() throws Exception {
+        retryArtificialException(() -> manager.createTable(mapStorageLayoutSchema(null)));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        Arrays.asList(
+                                                                SchemaChange.renameColumn(
+                                                                        "metrics",
+                                                                        "renamed_metrics"),
+                                                                SchemaChange.setOption(
+                                                                        "fields.renamed_metrics.map.storage-layout",
+                                                                        "shared-shredding")))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(
+                        "Cannot change map storage layout for field id 1 ('metrics' -> 'renamed_metrics') from 'default' to 'shared-shredding'.");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"plain", "sequential"})
+    public void testRenameColumnKeepsMapStorageLayoutOptions(String placementPolicy)
+            throws Exception {
+        retryArtificialException(
+                () ->
+                        manager.createTable(
+                                mapStorageLayoutSchema("shared-shredding", placementPolicy)));
+
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.renameColumn("metrics", "renamed")));
+
+        Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
+        assertThat(latest.isPresent()).isTrue();
+        assertThat(latest.get().options())
+                .doesNotContainKeys(
+                        "fields.metrics.map.storage-layout",
+                        "fields.metrics.map.shared-shredding.max-columns",
+                        "fields.metrics.map.shared-shredding.column-placement-policy")
+                .containsEntry("fields.renamed.map.storage-layout", "shared-shredding")
+                .containsEntry("fields.renamed.map.shared-shredding.max-columns", "2")
+                .containsEntry(
+                        "fields.renamed.map.shared-shredding.column-placement-policy",
+                        placementPolicy);
+    }
+
+    private Schema mapStorageLayoutSchema(String layout) {
+        return mapStorageLayoutSchema(layout, null);
+    }
+
+    private Schema mapStorageLayoutSchema(String layout, String placementPolicy) {
+        Map<String, String> options = new HashMap<>();
+        if (layout != null) {
+            options.put("fields.metrics.map.storage-layout", layout);
+            options.put("fields.metrics.map.shared-shredding.max-columns", "2");
+        }
+        if (placementPolicy != null) {
+            options.put(
+                    "fields.metrics.map.shared-shredding.column-placement-policy", placementPolicy);
+        }
+        return new Schema(
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "metrics",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT()))),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                options,
+                "");
     }
 
     @Test

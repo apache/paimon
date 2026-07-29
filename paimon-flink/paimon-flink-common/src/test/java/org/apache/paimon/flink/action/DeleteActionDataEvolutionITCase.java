@@ -119,6 +119,25 @@ public class DeleteActionDataEvolutionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testDeleteUnindexedRowWithFastSearchMode() throws Exception {
+        createDataEvolutionTable(TABLE, false, true);
+        insertInto(TABLE, "(1, 'old', 'A')");
+        executeSQL(
+                "CALL sys.create_global_index(`table` => 'default.T', "
+                        + "index_column => 'name', index_type => 'btree')",
+                false,
+                true);
+        insertInto(TABLE, "(2, 'new', 'A')");
+        executeSQL("ALTER TABLE T SET ('scalar-index.search-mode' = 'fast')", false, true);
+
+        action(TABLE, "name = 'new'", 1).run();
+
+        testBatchRead(
+                "SELECT id, name, dt FROM T ORDER BY id",
+                Collections.singletonList(changelogRow("+I", 1, "old", "A")));
+    }
+
+    @Test
     public void testDeleteWithBoundedExternalCandidates() throws Exception {
         createDataEvolutionTable(TABLE, false, true);
         insertInto(TABLE, "(1, 'one', 'A')", "(2, 'two', 'A')", "(3, 'three', 'A')");

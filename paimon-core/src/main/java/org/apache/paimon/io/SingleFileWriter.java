@@ -143,14 +143,34 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
         try {
             InternalRow rowData = converter.apply(record);
-            writer.addElement(rowData);
-            recordCount++;
+            writeRowInternal(rowData);
             return rowData;
         } catch (Throwable e) {
             LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
             abort();
             throw e;
         }
+    }
+
+    /** Writes an already converted row without invoking this writer's record converter. */
+    protected InternalRow writeRow(InternalRow rowData) throws IOException {
+        if (closed) {
+            throw new RuntimeException("Writer has already closed!");
+        }
+
+        try {
+            writeRowInternal(rowData);
+            return rowData;
+        } catch (Throwable e) {
+            LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
+            abort();
+            throw e;
+        }
+    }
+
+    private void writeRowInternal(InternalRow rowData) throws IOException {
+        writer.addElement(rowData);
+        recordCount++;
     }
 
     @Override

@@ -31,6 +31,8 @@ object PaimonMetrics {
   val SCANNED_MANIFESTS = "scannedManifests"
   val SKIPPED_TABLE_FILES = "skippedTableFiles"
   val RESULTED_TABLE_FILES = "resultedTableFiles"
+  val RESULTED_POSTPONE_FILES = "resultedPostponeFiles"
+  val NUM_POSTPONE_RECORDS = "numPostponeRecords"
 
   // write metrics
   val NUM_WRITERS = "numWriters"
@@ -164,6 +166,24 @@ case class PaimonResultedTableFilesMetric() extends PaimonSumMetric {
 
 case class PaimonResultedTableFilesTaskMetric(value: Long) extends PaimonTaskMetric {
   override def name(): String = PaimonMetrics.RESULTED_TABLE_FILES
+}
+
+case class PaimonResultedPostponeFilesMetric() extends PaimonSumMetric {
+  override def name(): String = PaimonMetrics.RESULTED_POSTPONE_FILES
+  override def description(): String = "number of resulted postpone files"
+}
+
+case class PaimonResultedPostponeFilesTaskMetric(value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.RESULTED_POSTPONE_FILES
+}
+
+case class PaimonNumPostponeRecordsMetric() extends PaimonSumMetric {
+  override def name(): String = PaimonMetrics.NUM_POSTPONE_RECORDS
+  override def description(): String = "number of postpone records"
+}
+
+case class PaimonNumPostponeRecordsTaskMetric(value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.NUM_POSTPONE_RECORDS
 }
 
 // Write metrics

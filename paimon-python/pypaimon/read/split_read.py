@@ -330,11 +330,15 @@ class SplitRead(ABC):
                 [nested_path_by_name[f.name] for f in ordered_read_fields]
                 if has_nested else None
             )
+            predicate_fields = (
+                predicate_field_names(self.push_down_predicate)
+                if self.push_down_predicate else set())
             format_reader = FormatPyArrowReader(
                 self.table.file_io, file_format, file_path,
                 ordered_read_fields, read_arrow_predicate, batch_size=batch_size,
                 options=self.table.options,
-                nested_name_paths=ordered_nested_paths)
+                nested_name_paths=ordered_nested_paths,
+                predicate_field_names=predicate_fields)
         elif file_format == CoreOptions.FILE_FORMAT_ROW:
             if has_nested:
                 raise NotImplementedError(
@@ -764,6 +768,11 @@ class RawFileSplitRead(SplitRead):
                 row_tracking_enabled=True)
         dv = dv_factory() if dv_factory else None
         if dv:
+            if file.file_name in shard_file_idx_map:
+                dv = PositionMappedDeletionVector(
+                    dv,
+                    file_offset=start_pos,
+                )
             return ApplyDeletionVectorReader(RowPositionReader(file_batch_reader), dv)
         else:
             return file_batch_reader
@@ -1382,7 +1391,9 @@ class DataEvolutionSplitRead(SplitRead):
                 fields_files.append(DataBunch(file))
                 row_count = file.row_count
 
-        fields_files.extend(blob_bunch_map.values())
+        for bunch in blob_bunch_map.values():
+            bunch.finish()
+            fields_files.append(bunch)
         fields_files.extend(vector_bunch_map.values())
         return fields_files
 

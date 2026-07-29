@@ -210,6 +210,7 @@ class GlobalIndexAssignerIterator(
     val _assigner = new GlobalIndexAssigner(fileStoreTable)
     _assigner.open(
       0,
+      null,
       ioManager,
       numAssigners,
       TaskContext.getPartitionId(),
