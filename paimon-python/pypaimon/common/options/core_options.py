@@ -738,7 +738,7 @@ class CoreOptions:
     SCALAR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
         ConfigOptions.key("scalar-index.search-mode")
         .enum_type(GlobalIndexSearchMode)
-        .default_value(GlobalIndexSearchMode.FULL)
+        .default_value(GlobalIndexSearchMode.FAST)
         .with_description("Search mode for scalar index queries.")
     )
 

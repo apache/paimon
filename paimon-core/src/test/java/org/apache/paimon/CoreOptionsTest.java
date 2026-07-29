@@ -113,7 +113,7 @@ public class CoreOptionsTest {
         CoreOptions options = new CoreOptions(conf);
         assertThat(options.globalIndexSearchMode()).isNull();
         assertThat(options.scalarIndexSearchMode())
-                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
         assertThat(options.vectorIndexSearchMode())
                 .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
         assertThat(options.fullTextIndexSearchMode())

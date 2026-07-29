@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -126,6 +127,103 @@ public class ManifestFileTest {
         }
 
         assertThat(creationTimesFound).isPositive();
+    }
+
+    @Test
+    void testReadDeletedEntriesWithProjectedScan() {
+        ManifestEntry first = gen.next();
+        ManifestEntry second = gen.next();
+        DataFileMeta firstFile =
+                first.file()
+                        .copy(Arrays.asList("extra-1", "extra-2"))
+                        .copy(new byte[] {1, 2})
+                        .newExternalPath("external/first")
+                        .newFirstRowId(10L);
+        DataFileMeta secondFile =
+                second.file()
+                        .copy(Arrays.asList("extra-3"))
+                        .copy(new byte[] {3, 4})
+                        .newExternalPath("external/second")
+                        .newFirstRowId(20L);
+        ManifestEntry firstAdd =
+                ManifestEntry.create(
+                        FileKind.ADD,
+                        first.partition(),
+                        first.bucket(),
+                        first.totalBuckets(),
+                        firstFile);
+        ManifestEntry firstDelete =
+                ManifestEntry.create(
+                        FileKind.DELETE,
+                        first.partition(),
+                        first.bucket(),
+                        first.totalBuckets(),
+                        firstFile);
+        ManifestEntry secondAdd =
+                ManifestEntry.create(
+                        FileKind.ADD,
+                        second.partition(),
+                        second.bucket(),
+                        second.totalBuckets(),
+                        secondFile);
+        ManifestEntry secondDelete =
+                ManifestEntry.create(
+                        FileKind.DELETE,
+                        second.partition(),
+                        second.bucket(),
+                        second.totalBuckets(),
+                        secondFile);
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta firstManifest =
+                writeSingleManifest(manifestFile, Arrays.asList(firstAdd, firstDelete));
+        ManifestFileMeta secondManifest =
+                writeSingleManifest(manifestFile, Arrays.asList(secondAdd, secondDelete));
+
+        Set<FileEntry.Identifier> deleted =
+                FileEntry.readDeletedEntries(
+                        manifestFile, Arrays.asList(firstManifest, secondManifest), 2);
+
+        assertThat(deleted)
+                .containsExactlyInAnyOrder(firstDelete.identifier(), secondDelete.identifier());
+    }
+
+    @Test
+    void testReadExpireFileEntriesWithProjectedScan() {
+        ManifestEntry source = gen.next();
+        DataFileMeta file =
+                source.file()
+                        .copy(Arrays.asList("extra-1", "extra-2"))
+                        .copy(new byte[] {1, 2})
+                        .newExternalPath("external/data-file")
+                        .newFirstRowId(10L);
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        ManifestEntry.create(
+                                FileKind.ADD,
+                                source.partition(),
+                                source.bucket(),
+                                source.totalBuckets(),
+                                file),
+                        ManifestEntry.create(
+                                FileKind.DELETE,
+                                source.partition(),
+                                source.bucket(),
+                                source.totalBuckets(),
+                                file));
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+
+        List<ExpireFileEntry> actual =
+                manifestFile.readExpireFileEntries(manifest.fileName(), manifest.fileSize());
+        List<ExpireFileEntry> expected =
+                entries.stream().map(ExpireFileEntry::from).collect(Collectors.toList());
+
+        assertThat(actual).containsExactlyElementsOf(expected);
+        for (int i = 0; i < actual.size(); i++) {
+            assertThat(actual.get(i).embeddedIndex())
+                    .containsExactly(expected.get(i).embeddedIndex());
+            assertThat(actual.get(i).fileSource()).isEqualTo(expected.get(i).fileSource());
+        }
     }
 
     @Test
