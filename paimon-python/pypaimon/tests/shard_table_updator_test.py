@@ -651,7 +651,6 @@ class ShardTableUpdatorTest(unittest.TestCase):
             "Row-id-check commits must enable conflict detection."
         )
 
-
     def test_shard_update_ignores_target_file_row_num(self):
         """Regression: a shard maps to exactly one output file, so
         target-file-row-num must not split it. Before the fix the
