@@ -686,6 +686,15 @@ public class PartitionPathUtils {
         if (onlyValueInPath && defaultPartValue != null && defaultPartValue.equals(name)) {
             return false;
         }
-        return name.startsWith("_") || name.startsWith(".");
+        return isHiddenName(name);
+    }
+
+    /** Whether a single path component is hidden by the {@code '_'} / {@code '.'} convention. */
+    public static boolean isHiddenName(String name) {
+        return name != null && !name.isEmpty() && isHiddenFirstChar(name.charAt(0));
+    }
+
+    private static boolean isHiddenFirstChar(char c) {
+        return c == '_' || c == '.';
     }
 }
