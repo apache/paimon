@@ -20,9 +20,10 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.KeyValue
 import org.apache.paimon.data.serializer.InternalRowSerializer
-import org.apache.paimon.reader.RecordReaderIterator
+import org.apache.paimon.reader.{RecordReader, RecordReaderIterator}
 import org.apache.paimon.spark.PostponeMergeInputScan._
 import org.apache.paimon.spark.PostponeMergeOnRead.MergePlan
+import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.table.BucketMode
 import org.apache.paimon.table.PostponeUtils.PostponeBucketRouter
 import org.apache.paimon.table.source.{DataSplit, DeletionFile, PostponeMergePlan, PostponeMergeReadBuilder, SplitSerializer}
@@ -31,8 +32,11 @@ import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
+import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReader, PartitionReaderFactory, Scan}
 import org.apache.spark.sql.types.{BinaryType, ByteType, IntegerType, LongType, StructField, StructType}
+
+import java.util.concurrent.TimeUnit.NANOSECONDS
 
 import scala.collection.JavaConverters._
 
@@ -44,7 +48,23 @@ private[spark] case class PostponeMergeInputScan(mergePlan: MergePlan) extends S
   override def toBatch: Batch =
     PostponeMergeInputBatch(mergePlan.readBuilder, mergePlan.corePlan)
 
-  override def description(): String = "PaimonPostponeMergeInput"
+  override def description(): String =
+    "Paimon Postpone Scan: read postpone files and route records by target bucket"
+
+  override def supportedCustomMetrics(): Array[CustomMetric] = {
+    Array(
+      PaimonPartitionSizeMetric(),
+      PaimonReadBatchTimeMetric(),
+      PaimonResultedPostponeFilesMetric(),
+      PaimonNumPostponeRecordsMetric()
+    )
+  }
+
+  override def reportDriverMetrics(): Array[CustomTaskMetric] = {
+    val resultedPostponeFiles =
+      mergePlan.corePlan.postponeSplits().asScala.map(_.dataFiles().size().toLong).sum
+    Array(PaimonResultedPostponeFilesTaskMetric(resultedPostponeFiles))
+  }
 }
 
 private[spark] object PostponeMergeInputScan {
@@ -172,11 +192,18 @@ private[spark] object PostponeMergeInputScan {
     private val keySerializer = new InternalRowSerializer(keyType)
     private val valueSerializer = new InternalRowSerializer(mergeReadType)
     private val partitionBytes = SerializationUtils.serializeBinaryRow(split.partition())
+    private val timedReader =
+      new TimedRecordReader[KeyValue](readBuilder.newRead().createPostponeReader(split))
     private val records =
-      new RecordReaderIterator[KeyValue](readBuilder.newRead().createPostponeReader(split))
+      new RecordReaderIterator[KeyValue](timedReader)
     private val current = new GenericInternalRow(
       Array[Any](partitionBytes, 0, POSTPONE_RECORD, null, null, 0L, 0.toByte, null))
     private var nextWriterLocalOrder = 0L
+    private var numPostponeRecords = 0L
+
+    private lazy val partitionMetrics: Array[CustomTaskMetric] = {
+      Array(PaimonPartitionSizeTaskMetric(SplitUtils.splitSize(split)))
+    }
 
     override def next(): Boolean = {
       if (!records.hasNext) {
@@ -191,13 +218,39 @@ private[spark] object PostponeMergeInputScan {
         current.setByte(ROW_KIND_ORDINAL, keyValue.valueKind().toByteValue)
         current.update(VALUE_ORDINAL, SerializationUtils.serializeBinaryRow(value))
         nextWriterLocalOrder = Math.addExact(nextWriterLocalOrder, 1L)
+        numPostponeRecords = Math.addExact(numPostponeRecords, 1L)
         true
       }
     }
 
     override def get(): InternalRow = current
 
+    override def currentMetricsValues(): Array[CustomTaskMetric] = {
+      partitionMetrics ++ Array(
+        PaimonReadBatchTimeTaskMetric(timedReader.readBatchTimeMs),
+        PaimonNumPostponeRecordsTaskMetric(numPostponeRecords)
+      )
+    }
+
     override def close(): Unit = records.close()
+  }
+
+  private[spark] class TimedRecordReader[T](delegate: RecordReader[T]) extends RecordReader[T] {
+
+    private var readBatchTimeNs = 0L
+
+    override def readBatch(): RecordReader.RecordIterator[T] = {
+      val startTimeNs = System.nanoTime()
+      try {
+        delegate.readBatch()
+      } finally {
+        readBatchTimeNs += System.nanoTime() - startTimeNs
+      }
+    }
+
+    def readBatchTimeMs: Long = NANOSECONDS.toMillis(readBatchTimeNs)
+
+    override def close(): Unit = delegate.close()
   }
 
   private def bucketKey(split: DataSplit) = (split.partition(), split.bucket())

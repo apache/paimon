@@ -21,14 +21,16 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.catalog.{Catalog, CatalogLoader, DelegateCatalog, Identifier}
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
 import org.apache.paimon.fs.Path
-import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase}
+import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase, PostponeMergeInputScan}
+import org.apache.paimon.spark.PaimonMetrics._
 import org.apache.paimon.spark.commands.PaimonSparkWriter
+import org.apache.paimon.spark.execution.PostponeMergeOnReadExec
 import org.apache.paimon.spark.procedure.SparkPostponeCompactProcedure
-import org.apache.paimon.table.{CatalogEnvironment, FileStoreTableFactory}
+import org.apache.paimon.table.{BucketMode, CatalogEnvironment, FileStoreTableFactory}
 
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
+import org.apache.spark.sql.execution.datasources.v2.{BatchScanExec, DataSourceV2ScanRelation}
 
 import scala.collection.JavaConverters._
 
@@ -367,7 +369,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
       withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
         checkAnswer(sql("SELECT * FROM t ORDER BY k"), Seq(Row(1, "base-1"), Row(2, "base-2")))
         val plan = sql("SELECT * FROM t").queryExecution.executedPlan.toString()
-        assert(plan.contains("PostponeMergeOnRead"), plan)
+        assert(plan.contains("PaimonPostponeMergeScan test.t"), plan)
 
         val aggregate = sql("SELECT count(*) FROM t")
         checkAnswer(aggregate, Seq(Row(2L)))
@@ -443,8 +445,8 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         assert(realSplits.size() > 1, realSplits)
 
         val plan = query.queryExecution.executedPlan.toString()
-        assert(plan.contains("PostponeMergeOnRead"), plan)
-        assert(plan.contains("PaimonPostponeMergeInput"), plan)
+        assert(plan.contains("PaimonPostponeMergeScan test.t"), plan)
+        assert(plan.contains("Paimon Postpone Scan"), plan)
         assert(plan.contains("Exchange hashpartitioning"), plan)
         assert(!plan.contains("PostponeArrivalOrder"), plan)
         assert(plan.contains("Sort [__paimon_postpone_partition"), plan)
@@ -484,7 +486,99 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         "spark.paimon.scan.mode" -> "compacted-full") {
         val compactedFull = sql("SELECT * FROM t ORDER BY k")
         checkAnswer(compactedFull, Seq(Row(1, "base-1"), Row(2, "base-2")))
-        assert(!compactedFull.queryExecution.executedPlan.toString.contains("PostponeMergeOnRead"))
+        assert(
+          !compactedFull.queryExecution.executedPlan.toString
+            .contains("PaimonPostponeMergeScan test.t"))
+      }
+    }
+  }
+
+  test("Postpone bucket table: Spark merge on read metrics") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'true',
+            |  'postpone.default-bucket-num' = '1',
+            |  'source.split.target-size' = '1 B'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO t VALUES (1, 'base-1')")
+      sql("INSERT INTO t VALUES (2, 'base-2')")
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        sql("INSERT INTO t VALUES (1, 'new-1'), (1, 'newest-1'), (3, 'new-3')")
+      }
+
+      val table = loadTable("t")
+      val postponeSplits = table
+        .newSnapshotReader()
+        .withBucket(BucketMode.POSTPONE_BUCKET)
+        .read()
+        .dataSplits()
+      val expectedPostponeFiles = postponeSplits.asScala
+        .map(_.dataFiles().size().toLong)
+        .sum
+      val realSplits = table
+        .newSnapshotReader()
+        .onlyReadRealBuckets()
+        .read()
+        .dataSplits()
+      val expectedRealFiles = realSplits.asScala
+        .map(_.dataFiles().size().toLong)
+        .sum
+      val expectedRealCarriers = realSplits.asScala
+        .groupBy(split => (split.partition(), split.bucket()))
+        .size
+        .toLong
+
+      withSparkSQLConf(
+        "spark.paimon.postpone.merge-on-read" -> "true",
+        "spark.sql.adaptive.enabled" -> "false") {
+        val query = sql("SELECT * FROM t WHERE k >= 1")
+        assert(
+          query.collect().sortBy(_.getInt(0)).toSeq ==
+            Seq(Row(1, "newest-1"), Row(2, "base-2"), Row(3, "new-3")))
+
+        val executedPlan = query.queryExecution.executedPlan
+        val inputScan = executedPlan.collectFirst {
+          case scan: BatchScanExec if scan.scan.isInstanceOf[PostponeMergeInputScan] => scan
+        }.get
+        val merge = executedPlan.collectFirst { case exec: PostponeMergeOnReadExec => exec }.get
+
+        assert(
+          inputScan.scan.description() ==
+            "Paimon Postpone Scan: read postpone files and route records by target bucket")
+        assert(merge.nodeName == "PaimonPostponeMergeScan test.t")
+        assert(merge.simpleString(100).contains("PaimonScan"))
+        assert(merge.simpleString(100).contains("DataFilters"))
+
+        val inputMetrics = inputScan.metrics
+        assert(inputMetrics(RESULTED_POSTPONE_FILES).value == expectedPostponeFiles)
+        assert(inputMetrics(NUM_POSTPONE_RECORDS).value == 3L)
+        assert(!inputMetrics.contains(NUM_SPLITS))
+        assert(inputMetrics(PARTITION_SIZE).value > 0L)
+        assert(inputMetrics(READ_BATCH_TIME).value >= 0L)
+        assert(inputMetrics("numOutputRows").value == expectedRealCarriers + 3L)
+        assert(!inputMetrics.contains(RESULTED_TABLE_FILES))
+        assert(!inputMetrics.contains(PLANNING_DURATION))
+
+        val mergeMetrics = merge.metrics
+        assert(mergeMetrics(RESULTED_TABLE_FILES).value == expectedRealFiles)
+        assert(mergeMetrics(SCANNED_SNAPSHOT_ID).value == 3L)
+        assert(mergeMetrics(SCANNED_MANIFESTS).value > 0L)
+        assert(mergeMetrics(SKIPPED_TABLE_FILES).value >= 0L)
+        assert(mergeMetrics(PLANNING_DURATION).value >= 0L)
+        assert(mergeMetrics(NUM_SPLITS).value == expectedRealCarriers)
+        assert(mergeMetrics(PARTITION_SIZE).value > 0L)
+        assert(mergeMetrics(READ_BATCH_TIME).value >= 0L)
+        assert(mergeMetrics("numOutputRows").value == 3L)
+        assert(!mergeMetrics.contains(RESULTED_POSTPONE_FILES))
+        assert(!mergeMetrics.contains(NUM_POSTPONE_RECORDS))
       }
     }
   }
@@ -535,7 +629,8 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             Row(5, "real-5"),
             Row(6, "postpone-6")))
         checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(5L)))
-        assert(query.queryExecution.executedPlan.toString.contains("PostponeMergeOnRead"))
+        assert(
+          query.queryExecution.executedPlan.toString.contains("PaimonPostponeMergeScan test.t"))
       }
     }
   }
@@ -660,8 +755,8 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         val mergePlan = sql("SELECT * FROM t WHERE pt = 'a'").queryExecution.executedPlan.toString
         val ordinaryPlan =
           sql("SELECT * FROM t WHERE pt = 'b'").queryExecution.executedPlan.toString
-        assert(mergePlan.contains("PostponeMergeOnRead"), mergePlan)
-        assert(ordinaryPlan.contains("PostponeMergeOnRead"), ordinaryPlan)
+        assert(mergePlan.contains("PaimonPostponeMergeScan test.t"), mergePlan)
+        assert(ordinaryPlan.contains("PaimonPostponeMergeScan test.t"), ordinaryPlan)
       }
     }
   }
