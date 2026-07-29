@@ -36,8 +36,8 @@ import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_C
 import org.apache.paimon.spark.sort.TableSorter
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
-import org.apache.paimon.spark.write.{PaimonDataWrite, WriteHelper, WriteTaskResult}
-import org.apache.paimon.table.{FileStoreTable, SpecialFields}
+import org.apache.paimon.spark.write.{PaimonDataWrite, SparkAttemptCleanup, WriteHelper, WriteTaskResult}
+import org.apache.paimon.table.{FileStoreTable, PostponeUtils, SpecialFields}
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.sink._
 import org.apache.paimon.types.{RowKind, RowType}
@@ -406,49 +406,70 @@ case class PaimonSparkWriter(
       .groupByKey(_.bucketPath)
       .mapGroups {
         (_, iter: Iterator[SparkDeletionVector]) =>
-          val indexHandler = table.store().newIndexFileHandler()
-          var dvIndexFileMaintainer: BaseAppendDeleteFileMaintainer = null
-          while (iter.hasNext) {
-            val sdv: SparkDeletionVector = iter.next()
-            if (dvIndexFileMaintainer == null) {
-              val partition = SerializationUtils.deserializeBinaryRow(sdv.partition)
-              dvIndexFileMaintainer = if (bucketMode == BUCKET_UNAWARE) {
-                BaseAppendDeleteFileMaintainer.forUnawareAppend(indexHandler, snapshot, partition)
-              } else {
-                BaseAppendDeleteFileMaintainer.forBucketedAppend(
-                  indexHandler,
-                  snapshot,
-                  partition,
-                  sdv.bucket)
+          // DV files are only materialized by dvIndexFileMaintainer.persist(); before that
+          // everything is in-memory, so there is no unprepared writer to close. A partial
+          // index file left by a kill inside persist() is deleted on the failure path by
+          // DeletionVectorIndexFileWriter; files from a completed persist() are registered
+          // via setPrepared below and reclaimed by abort.
+          val cleanup = new SparkAttemptCleanup(
+            table.fullName(),
+            SparkAttemptCleanup.commitUserOrUnknown(writeBuilder),
+            writeBuilder,
+            () => ())
+          try {
+            val indexHandler = table.store().newIndexFileHandler()
+            var dvIndexFileMaintainer: BaseAppendDeleteFileMaintainer = null
+            while (iter.hasNext) {
+              cleanup.checkInterruptedPeriodically()
+              val sdv: SparkDeletionVector = iter.next()
+              if (dvIndexFileMaintainer == null) {
+                val partition = SerializationUtils.deserializeBinaryRow(sdv.partition)
+                dvIndexFileMaintainer = if (bucketMode == BUCKET_UNAWARE) {
+                  BaseAppendDeleteFileMaintainer.forUnawareAppend(indexHandler, snapshot, partition)
+                } else {
+                  BaseAppendDeleteFileMaintainer.forBucketedAppend(
+                    indexHandler,
+                    snapshot,
+                    partition,
+                    sdv.bucket)
+                }
               }
-            }
-            if (dvIndexFileMaintainer == null) {
-              throw new RuntimeException("can't create the dv maintainer.")
-            }
+              if (dvIndexFileMaintainer == null) {
+                throw new RuntimeException("can't create the dv maintainer.")
+              }
 
-            dvIndexFileMaintainer.notifyNewDeletionVector(
-              new Path(sdv.dataFilePath).getName,
-              DeletionVector.deserializeFromBytes(sdv.deletionVector))
+              dvIndexFileMaintainer.notifyNewDeletionVector(
+                new Path(sdv.dataFilePath).getName,
+                DeletionVector.deserializeFromBytes(sdv.deletionVector))
+            }
+            cleanup.checkInterrupted("before persist")
+            val indexEntries = dvIndexFileMaintainer.persist()
+
+            val (added, deleted) = indexEntries.asScala.partition(_.kind() == FileKind.ADD)
+
+            val commitMessage = new CommitMessageImpl(
+              dvIndexFileMaintainer.getPartition,
+              dvIndexFileMaintainer.getBucket,
+              null,
+              new DataIncrement(
+                java.util.Collections.emptyList(),
+                java.util.Collections.emptyList(),
+                java.util.Collections.emptyList(),
+                added.map(_.indexFile).asJava,
+                deleted.map(_.indexFile).asJava
+              ),
+              CompactIncrement.emptyIncrement()
+            )
+            cleanup.setPrepared(Seq(commitMessage))
+            cleanup.checkInterrupted("after persist")
+            val serializer = new CommitMessageSerializer
+            val bytes = serializer.serialize(commitMessage)
+            cleanup.checkInterrupted("before return")
+            cleanup.markReturned()
+            bytes
+          } finally {
+            cleanup.close()
           }
-          val indexEntries = dvIndexFileMaintainer.persist()
-
-          val (added, deleted) = indexEntries.asScala.partition(_.kind() == FileKind.ADD)
-
-          val commitMessage = new CommitMessageImpl(
-            dvIndexFileMaintainer.getPartition,
-            dvIndexFileMaintainer.getBucket,
-            null,
-            new DataIncrement(
-              java.util.Collections.emptyList(),
-              java.util.Collections.emptyList(),
-              java.util.Collections.emptyList(),
-              added.map(_.indexFile).asJava,
-              deleted.map(_.indexFile).asJava
-            ),
-            CompactIncrement.emptyIncrement()
-          )
-          val serializer = new CommitMessageSerializer
-          serializer.serialize(commitMessage)
       }
     serializedCommits
       .collect()

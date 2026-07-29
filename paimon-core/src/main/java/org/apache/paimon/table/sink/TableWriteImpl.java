@@ -28,6 +28,7 @@ import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.BundleFileStoreWriter;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
@@ -42,6 +43,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -269,14 +271,39 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Override
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
-        return write.prepareCommit(waitCompaction, commitIdentifier);
+        return prepareCommit(waitCompaction, commitIdentifier, null);
+    }
+
+    public List<CommitMessage> prepareCommit(
+            boolean waitCompaction, long commitIdentifier, @Nullable Consumer<CommitMessage> onPrepared)
+            throws Exception {
+        if (write instanceof AbstractFileStoreWrite) {
+            return ((AbstractFileStoreWrite<?>) write)
+                    .prepareCommit(waitCompaction, commitIdentifier, onPrepared);
+        }
+        List<CommitMessage> messages = write.prepareCommit(waitCompaction, commitIdentifier);
+        if (onPrepared != null) {
+            for (CommitMessage message : messages) {
+                onPrepared.accept(message);
+            }
+        }
+        return messages;
+    }
+
+    /**
+     * Prepare commit for batch write and invoke {@code onPrepared} after each drained bucket
+     * increment so task-side cleanup can abort partial results on speculative kill.
+     */
+    public List<CommitMessage> prepareCommit(@Nullable Consumer<CommitMessage> onPrepared)
+            throws Exception {
+        checkState(!batchCommitted, "BatchTableWrite only support one-time committing.");
+        batchCommitted = true;
+        return prepareCommit(true, BatchWriteBuilder.COMMIT_IDENTIFIER, onPrepared);
     }
 
     @Override
     public List<CommitMessage> prepareCommit() throws Exception {
-        checkState(!batchCommitted, "BatchTableWrite only support one-time committing.");
-        batchCommitted = true;
-        return prepareCommit(true, BatchWriteBuilder.COMMIT_IDENTIFIER);
+        return prepareCommit((Consumer<CommitMessage>) null);
     }
 
     @Override

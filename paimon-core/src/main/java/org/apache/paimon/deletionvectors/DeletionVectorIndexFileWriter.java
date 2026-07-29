@@ -53,12 +53,21 @@ public class DeletionVectorIndexFileWriter {
      */
     public IndexFileMeta writeSingleFile(Map<String, DeletionVector> input) throws IOException {
         DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory, fileIO);
+        boolean success = false;
         try {
             for (Map.Entry<String, DeletionVector> entry : input.entrySet()) {
                 writer.write(entry.getKey(), entry.getValue());
             }
-        } finally {
             writer.close();
+            success = true;
+        } finally {
+            if (!success) {
+                // Delete the partial index file (e.g. speculative task kill interrupted the
+                // write); the caller never sees its meta, so nobody else can reclaim it.
+                // Interrupt-tolerant because task kill leaves the thread interrupted.
+                closeQuietly(writer);
+                fileIO.deleteQuietlyIgnoringInterrupt(writer.path());
+            }
         }
         return writer.result();
     }
@@ -70,8 +79,17 @@ public class DeletionVectorIndexFileWriter {
         }
         List<IndexFileMeta> result = new ArrayList<>();
         Iterator<Map.Entry<String, DeletionVector>> iterator = input.entrySet().iterator();
-        while (iterator.hasNext()) {
-            result.add(tryWriter(iterator));
+        try {
+            while (iterator.hasNext()) {
+                result.add(tryWriter(iterator));
+            }
+        } catch (Throwable t) {
+            // A failed roll loses the returned metas; delete the already-written files so they
+            // do not stay as orphans.
+            for (IndexFileMeta meta : result) {
+                fileIO.deleteQuietlyIgnoringInterrupt(indexPathFactory.toPath(meta));
+            }
+            throw t;
         }
         return result;
     }
@@ -79,6 +97,7 @@ public class DeletionVectorIndexFileWriter {
     private IndexFileMeta tryWriter(Iterator<Map.Entry<String, DeletionVector>> iterator)
             throws IOException {
         DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory, fileIO);
+        boolean success = false;
         try {
             while (iterator.hasNext()) {
                 Map.Entry<String, DeletionVector> entry = iterator.next();
@@ -87,9 +106,22 @@ public class DeletionVectorIndexFileWriter {
                     break;
                 }
             }
-        } finally {
             writer.close();
+            success = true;
+        } finally {
+            if (!success) {
+                closeQuietly(writer);
+                fileIO.deleteQuietlyIgnoringInterrupt(writer.path());
+            }
         }
         return writer.result();
+    }
+
+    private static void closeQuietly(DeletionFileWriter writer) {
+        try {
+            writer.close();
+        } catch (Throwable ignored) {
+            // best-effort stream close on the failure path
+        }
     }
 }

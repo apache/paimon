@@ -29,6 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.FileAlreadyExistsException;
@@ -139,6 +140,27 @@ public class FileIOTest {
     }
 
     @Test
+    public void testDeleteQuietlyIgnoringInterrupt() throws Exception {
+        Path file = new Path(tempDir.resolve("interrupted-delete.txt").toUri());
+        LocalFileIO local = new LocalFileIO();
+        local.writeFile(file, "data", false);
+
+        FileIO interruptSensitive = new InterruptSensitiveFileIO(local);
+        Thread.currentThread().interrupt();
+        try {
+            // Plain deleteQuietly fails under interrupt with Hadoop-like FileIO.
+            interruptSensitive.deleteQuietly(file);
+            assertThat(local.exists(file)).isTrue();
+
+            interruptSensitive.deleteQuietlyIgnoringInterrupt(file);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            assertThat(local.exists(file)).isFalse();
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
     public void testListFiles() throws Exception {
         Path fileA = new Path(tempDir.resolve("a").toUri());
         Path dirB = new Path(tempDir.resolve("b").toUri());
@@ -196,6 +218,84 @@ public class FileIOTest {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining(DummyFileIO.class.getName())
                 .hasMessageContaining("unarchive");
+    }
+
+    /**
+     * Delegates to another {@link FileIO}, but mimics Hadoop RPC behavior by failing with {@link
+     * InterruptedIOException} when the calling thread is interrupted.
+     */
+    private static class InterruptSensitiveFileIO implements FileIO {
+
+        private final FileIO delegate;
+
+        private InterruptSensitiveFileIO(FileIO delegate) {
+            this.delegate = delegate;
+        }
+
+        private void failIfInterrupted() throws InterruptedIOException {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedIOException("Call interrupted");
+            }
+        }
+
+        @Override
+        public boolean isObjectStore() {
+            return delegate.isObjectStore();
+        }
+
+        @Override
+        public void configure(CatalogContext context) {
+            delegate.configure(context);
+        }
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            failIfInterrupted();
+            return delegate.newInputStream(path);
+        }
+
+        @Override
+        public PositionOutputStream newOutputStream(Path path, boolean overwrite)
+                throws IOException {
+            failIfInterrupted();
+            return delegate.newOutputStream(path, overwrite);
+        }
+
+        @Override
+        public FileStatus getFileStatus(Path path) throws IOException {
+            failIfInterrupted();
+            return delegate.getFileStatus(path);
+        }
+
+        @Override
+        public FileStatus[] listStatus(Path path) throws IOException {
+            failIfInterrupted();
+            return delegate.listStatus(path);
+        }
+
+        @Override
+        public boolean exists(Path path) throws IOException {
+            failIfInterrupted();
+            return delegate.exists(path);
+        }
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            failIfInterrupted();
+            return delegate.delete(path, recursive);
+        }
+
+        @Override
+        public boolean mkdirs(Path path) throws IOException {
+            failIfInterrupted();
+            return delegate.mkdirs(path);
+        }
+
+        @Override
+        public boolean rename(Path src, Path dst) throws IOException {
+            failIfInterrupted();
+            return delegate.rename(src, dst);
+        }
     }
 
     /** A {@link FileIO} on local filesystem to test various default implementations. */

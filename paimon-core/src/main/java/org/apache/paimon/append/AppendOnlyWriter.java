@@ -279,16 +279,31 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         sync();
 
         compactManager.close();
+
+        // Delete newly generated but not committed files (matches RecordWriter.close contract /
+        // MergeTreeWriter). Includes buffer-flush files that never reached prepareCommit.
+        List<DataFileMeta> toDelete = new ArrayList<>(newFiles);
+        newFiles.clear();
+        deletedFiles.clear();
         for (DataFileMeta file : compactAfter) {
             // appendOnlyCompactManager will rewrite the file and no file upgrade will occur, so we
             // can directly delete the file in compactAfter.
-            fileIO.deleteQuietly(pathFactory.toPath(file));
+            toDelete.add(file);
         }
+        compactAfter.clear();
+        compactBefore.clear();
 
-        sinkWriter.close();
-
-        if (compactDeletionFile != null) {
-            compactDeletionFile.clean();
+        // Abort in-flight rolling writer even if delete loops fail.
+        try {
+            sinkWriter.close();
+        } finally {
+            for (DataFileMeta file : toDelete) {
+                // Interrupt-tolerant: close runs after speculative task kill.
+                fileIO.deleteQuietlyIgnoringInterrupt(pathFactory.toPath(file));
+            }
+            if (compactDeletionFile != null) {
+                compactDeletionFile.clean();
+            }
         }
     }
 
@@ -309,7 +324,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             } finally {
                 // remove small files
                 for (DataFileMeta file : files) {
-                    fileIO.deleteQuietly(pathFactory.toPath(file));
+                    fileIO.deleteQuietlyIgnoringInterrupt(pathFactory.toPath(file));
                 }
             }
         }

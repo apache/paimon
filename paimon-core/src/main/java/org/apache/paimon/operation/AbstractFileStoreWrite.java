@@ -234,6 +234,19 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @Override
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
+        return prepareCommit(waitCompaction, commitIdentifier, null);
+    }
+
+    /**
+     * Like {@link #prepareCommit(boolean, long)} but invokes {@code onPrepared} immediately after
+     * each bucket increment is drained, so callers can register or abort partial results before
+     * the whole prepare finishes.
+     */
+    public List<CommitMessage> prepareCommit(
+            boolean waitCompaction,
+            long commitIdentifier,
+            @Nullable java.util.function.Consumer<CommitMessage> onPrepared)
+            throws Exception {
         Function<WriterContainer<T>, Boolean> writerCleanChecker;
         if (writers.values().stream()
                         .map(Map::values)
@@ -288,6 +301,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 newFilesIncrement,
                                 compactIncrement);
                 result.add(committable);
+                if (onPrepared != null) {
+                    onPrepared.accept(committable);
+                }
 
                 if (committable.isEmpty()) {
                     if (writerCleanChecker.apply(writerContainer)

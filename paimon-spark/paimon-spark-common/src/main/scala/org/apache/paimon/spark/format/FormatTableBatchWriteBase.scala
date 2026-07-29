@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.format
 
 import org.apache.paimon.spark.SparkInternalRowWrapper
-import org.apache.paimon.spark.write.{FormatTableWriteTaskResult, V2DataWrite, WriteTaskResult}
+import org.apache.paimon.spark.write.{FormatTableWriteTaskResult, SparkAttemptCleanup, V2DataWrite, WriteTaskResult}
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessage}
 
@@ -100,13 +100,24 @@ private class FormatTableDataWriter(batchWriteBuilder: BatchWriteBuilder, writeS
 
   private val write: BatchTableWrite = batchWriteBuilder.newWrite()
 
+  private val cleanup = new SparkAttemptCleanup(
+    batchWriteBuilder.tableName(),
+    SparkAttemptCleanup.commitUserOrUnknown(batchWriteBuilder),
+    batchWriteBuilder,
+    () => write.close())
+
+  override protected def attemptCleanup: Option[SparkAttemptCleanup] = Some(cleanup)
+
   override def write(record: InternalRow): Unit = {
+    cleanup.checkInterruptedPeriodically()
     val paimonRow = rowConverter.apply(record)
     write.write(paimonRow)
   }
 
   override def commitImpl(): Seq[CommitMessage] = {
-    write.prepareCommit().asScala.toSeq
+    val messages = write.prepareCommit().asScala
+    registerPrepared(messages)
+    messages
   }
 
   def buildWriteTaskResult(commitMessages: Seq[CommitMessage]): FormatTableWriteTaskResult = {
@@ -119,16 +130,9 @@ private class FormatTableDataWriter(batchWriteBuilder: BatchWriteBuilder, writeS
 
   override def abort(): Unit = {
     logInfo("Aborting FormatTable data writer")
-    close()
+    cleanup.abortPrepared()
+    cleanup.close()
   }
 
-  override def close(): Unit = {
-    try {
-      write.close()
-    } catch {
-      case e: Exception =>
-        logError("Error closing FormatTableDataWriter", e)
-        throw new RuntimeException(e)
-    }
-  }
+  override def close(): Unit = cleanup.close()
 }

@@ -44,6 +44,8 @@ import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
+import org.apache.paimon.spark.write.SparkAttemptCleanup;
+import org.apache.paimon.spark.write.SparkAttemptWrite;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -55,6 +57,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -360,31 +363,74 @@ public class CompactProcedure extends BaseProcedure {
                                             IOManager ioManager = SparkUtils.createIOManager();
                                             BatchTableWrite write = writeBuilder.newWrite();
                                             write.withIOManager(ioManager);
-                                            try {
-                                                while (pairIterator.hasNext()) {
-                                                    Pair<byte[], Integer> pair =
-                                                            pairIterator.next();
-                                                    write.compact(
-                                                            SerializationUtils.deserializeBinaryRow(
-                                                                    pair.getLeft()),
-                                                            pair.getRight(),
-                                                            fullCompact);
-                                                }
-                                                CommitMessageSerializer serializer =
-                                                        new CommitMessageSerializer();
-                                                List<CommitMessage> messages =
-                                                        write.prepareCommit();
-                                                List<byte[]> serializedMessages =
-                                                        new ArrayList<>(messages.size());
-                                                for (CommitMessage commitMessage : messages) {
-                                                    serializedMessages.add(
-                                                            serializer.serialize(commitMessage));
-                                                }
-                                                return serializedMessages.iterator();
-                                            } finally {
-                                                write.close();
-                                                ioManager.close();
-                                            }
+                                            return SparkAttemptWrite.runJava(
+                                                    table,
+                                                    writeBuilder,
+                                                    () -> {
+                                                        try {
+                                                            write.close();
+                                                            ioManager.close();
+                                                        } catch (Exception e) {
+                                                            throw new RuntimeException(e);
+                                                        }
+                                                    },
+                                                    cleanup -> {
+                                                        try {
+                                                            while (pairIterator.hasNext()) {
+                                                                cleanup
+                                                                        .checkInterruptedPeriodically();
+                                                                Pair<byte[], Integer> pair =
+                                                                        pairIterator.next();
+                                                                write.compact(
+                                                                        SerializationUtils
+                                                                                .deserializeBinaryRow(
+                                                                                        pair
+                                                                                                .getLeft()),
+                                                                        pair.getRight(),
+                                                                        fullCompact);
+                                                            }
+                                                        } catch (Exception e) {
+                                                            throw new RuntimeException(e);
+                                                        }
+                                                    },
+                                                    cleanup -> {
+                                                        try {
+                                                            List<CommitMessage> messages =
+                                                                    new ArrayList<>();
+                                                            ((TableWriteImpl<?>) write)
+                                                                    .prepareCommit(
+                                                                            message -> {
+                                                                                cleanup
+                                                                                        .addPreparedJava(
+                                                                                                Collections
+                                                                                                        .singletonList(
+                                                                                                                message));
+                                                                                messages.add(
+                                                                                        message);
+                                                                            });
+                                                            return messages;
+                                                        } catch (Exception e) {
+                                                            throw new RuntimeException(e);
+                                                        }
+                                                    },
+                                                    messages -> {
+                                                        try {
+                                                            CommitMessageSerializer serializer =
+                                                                    new CommitMessageSerializer();
+                                                            List<byte[]> serializedMessages =
+                                                                    new ArrayList<>(
+                                                                            messages.size());
+                                                            for (CommitMessage commitMessage :
+                                                                    messages) {
+                                                                serializedMessages.add(
+                                                                        serializer.serialize(
+                                                                                commitMessage));
+                                                            }
+                                                            return serializedMessages.iterator();
+                                                        } catch (Exception e) {
+                                                            throw new RuntimeException(e);
+                                                        }
+                                                    });
                                         });
 
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
@@ -466,6 +512,8 @@ public class CompactProcedure extends BaseProcedure {
 
         int readParallelism = readParallelism(serializedTasks, spark());
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
+        BatchWriteBuilder appendCompactWriteBuilder =
+                table.newBatchWriteBuilder().withCommitUser(commitUser);
         JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
                         .parallelize(serializedTasks, readParallelism)
@@ -481,6 +529,18 @@ public class CompactProcedure extends BaseProcedure {
                                                         SpecialFields.rowTypeWithRowTracking(
                                                                 table.rowType()));
                                             }
+                                            SparkAttemptCleanup cleanup =
+                                                    SparkAttemptCleanup.forJava(
+                                                            table.fullName(),
+                                                            commitUser,
+                                                            appendCompactWriteBuilder,
+                                                            () -> {
+                                                                try {
+                                                                    write.close();
+                                                                } catch (Exception e) {
+                                                                    throw new RuntimeException(e);
+                                                                }
+                                                            });
                                             AppendCompactTaskSerializer ser =
                                                     new AppendCompactTaskSerializer();
                                             List<byte[]> messages = new ArrayList<>();
@@ -488,17 +548,27 @@ public class CompactProcedure extends BaseProcedure {
                                                 CommitMessageSerializer messageSer =
                                                         new CommitMessageSerializer();
                                                 while (taskIterator.hasNext()) {
+                                                    cleanup.checkInterruptedPeriodically();
                                                     AppendCompactTask task =
                                                             ser.deserialize(
                                                                     ser.getVersion(),
                                                                     taskIterator.next());
+                                                    CommitMessage commitMessage =
+                                                            task.doCompact(table, write);
+                                                    // Incremental registration avoids O(n²)
+                                                    // copying of the full prepared list on every
+                                                    // compacted file.
+                                                    cleanup.addPreparedJava(
+                                                            java.util.Collections.singletonList(
+                                                                    commitMessage));
                                                     messages.add(
-                                                            messageSer.serialize(
-                                                                    task.doCompact(table, write)));
+                                                            messageSer.serialize(commitMessage));
                                                 }
+                                                cleanup.checkInterrupted("before return");
+                                                cleanup.markReturned();
                                                 return messages.iterator();
                                             } finally {
-                                                write.close();
+                                                cleanup.close();
                                             }
                                         });
 
@@ -575,29 +645,56 @@ public class CompactProcedure extends BaseProcedure {
                 }
 
                 int readParallelism = readParallelism(serializedTasks, spark());
+                BatchWriteBuilder dataEvolutionCompactWriteBuilder =
+                        table.newBatchWriteBuilder().withCommitUser(commitUser);
                 JavaRDD<byte[]> commitMessageJavaRDD =
                         javaSparkContext
                                 .parallelize(serializedTasks, readParallelism)
                                 .mapPartitions(
                                         (FlatMapFunction<Iterator<byte[]>, byte[]>)
                                                 taskIterator -> {
+                                                    // doCompact creates and closes its own
+                                                    // writers (finally inside the task
+                                                    // implementations), so there is no shared
+                                                    // unprepared writer to close here.
+                                                    SparkAttemptCleanup cleanup =
+                                                            SparkAttemptCleanup.forJava(
+                                                                    table.fullName(),
+                                                                    commitUser,
+                                                                    dataEvolutionCompactWriteBuilder,
+                                                                    () -> {});
                                                     DataEvolutionCompactTaskSerializer ser =
                                                             new DataEvolutionCompactTaskSerializer();
                                                     List<byte[]> messagesBytes = new ArrayList<>();
                                                     CommitMessageSerializer messageSer =
                                                             new CommitMessageSerializer();
-                                                    while (taskIterator.hasNext()) {
-                                                        DataEvolutionCompactTask task =
-                                                                ser.deserialize(
-                                                                        ser.getVersion(),
-                                                                        taskIterator.next());
-                                                        messagesBytes.add(
-                                                                messageSer.serialize(
-                                                                        task.doCompact(
-                                                                                table,
-                                                                                commitUser)));
+                                                    try {
+                                                        while (taskIterator.hasNext()) {
+                                                            cleanup
+                                                                    .checkInterruptedPeriodically();
+                                                            DataEvolutionCompactTask task =
+                                                                    ser.deserialize(
+                                                                            ser.getVersion(),
+                                                                            taskIterator.next());
+                                                            CommitMessage commitMessage =
+                                                                    task.doCompact(
+                                                                            table, commitUser);
+                                                            // Incremental registration so a kill
+                                                            // between tasks can abort the files
+                                                            // of already-finished tasks.
+                                                            cleanup.addPreparedJava(
+                                                                    Collections.singletonList(
+                                                                            commitMessage));
+                                                            messagesBytes.add(
+                                                                    messageSer.serialize(
+                                                                            commitMessage));
+                                                        }
+                                                        cleanup.checkInterrupted("before return");
+                                                        cleanup.markReturned();
+                                                        return messagesBytes.iterator();
+                                                    } finally {
+                                                        cleanup.close();
                                                     }
-                                                    return messagesBytes.iterator();
                                                 });
 
                 List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());

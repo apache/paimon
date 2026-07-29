@@ -32,6 +32,8 @@ public class FileWriterAbortExecutor {
     }
 
     public void abort() {
-        fileIO.deleteQuietly(path);
+        // Task kill leaves Thread interrupted; use interrupt-tolerant delete so abort
+        // during prepareCommit (speculative loser) can still remove written files.
+        fileIO.deleteQuietlyIgnoringInterrupt(path);
     }
 }

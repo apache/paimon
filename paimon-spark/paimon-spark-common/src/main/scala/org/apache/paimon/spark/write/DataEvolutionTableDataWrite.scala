@@ -60,6 +60,30 @@ case class DataEvolutionTableDataWrite(
   private val toPaimonRow = {
     SparkRowUtils.toPaimonRow(writeType, -1, uriReaderFactory)
   }
+
+  private val cleanup = new SparkAttemptCleanup(
+    writeBuilder.tableName(),
+    SparkAttemptCleanup.commitUserOrUnknown(writeBuilder),
+    writeBuilder,
+    () => closeLocalResources())
+
+  override protected def attemptCleanup: Option[SparkAttemptCleanup] = Some(cleanup)
+
+  private def closeLocalResources(): Unit = {
+    try {
+      if (currentWriter != null) {
+        try {
+          // Abort in-flight PerFileWriter so partial data files are deleted. RecordWriter.close
+          // deletes unprepared files (RecordWriter.close contract).
+          currentWriter.abortQuietly()
+        } finally {
+          currentWriter = null
+        }
+      }
+    } finally {
+      ioManager.close()
+    }
+  }
   private val rawBlobFallbackFields = rawBlobPlaceholderMarkerIndexes.toSeq.sortBy(_._1).toArray
   private val rawBlobFallbackFieldIndexes = rawBlobFallbackFields.map(_._1)
   private val rawBlobFallbackMappings = {
@@ -105,6 +129,7 @@ case class DataEvolutionTableDataWrite(
   }
 
   def write(row: Row): Unit = {
+    cleanup.checkInterruptedPeriodically()
     val firstRowId = row.getLong(firstRowIdIndex)
     val rowId = row.getLong(rowIdIndex)
 
@@ -160,9 +185,20 @@ case class DataEvolutionTableDataWrite(
 
   private def finishCurrentWriter(): Unit = {
     if (currentWriter != null) {
-      commitMessages ++= currentWriter.finish()
+      // Register each prepared file incrementally so a mid-attempt kill can abort already
+      // finished PerFileWriters. prepareAndRegister() calls addPrepared inside prepareMessage
+      // immediately after prepareCommit drains newFiles, before returning to closeQuietly().
+      val writer = currentWriter
+      currentWriter = null
+      try {
+        cleanup.checkInterrupted("before per-file prepareCommit")
+        val messages = writer.prepareAndRegister(cleanup.addPrepared)
+        commitMessages ++= messages
+        cleanup.checkInterrupted("after per-file prepareCommit")
+      } finally {
+        writer.closeQuietly()
+      }
     }
-    currentWriter = null
   }
 
   def write(row: Row, bucket: Int): Unit = {
@@ -175,9 +211,7 @@ case class DataEvolutionTableDataWrite(
     commitMessages.toSeq
   }
 
-  override def close(): Unit = {
-    ioManager.close()
-  }
+  override def close(): Unit = cleanup.close()
 
   private case class PerFileWriter(
       partition: BinaryRow,
@@ -209,37 +243,51 @@ case class DataEvolutionTableDataWrite(
       recordWriter.write(row)
     }
 
-    def finish(): Seq[CommitMessageImpl] = {
-      try {
-        fillGapUntil(firstRowId + numRecords)
+    /**
+     * Prepare commit messages and register them with cleanup in the same stack frame as
+     * prepareCommit, so a speculative kill cannot land between draining newFiles and addPrepared.
+     */
+    def prepareAndRegister(
+        registerPrepared: Seq[CommitMessageImpl] => Unit): Seq[CommitMessageImpl] = {
+      fillGapUntil(firstRowId + numRecords)
 
-        assert(
-          numRecords == numWritten,
-          s"Number of written records $numWritten does not match expected number $numRecords for first row ID $firstRowId.")
-        if (fillerRows > 0) {
-          DataEvolutionTableDataWrite.LOG.warn(
-            s"Data evolution merge wrote $fillerRows filler rows out of $numRecords rows " +
-              s"for row-id range [$firstRowId, ${firstRowId + numRecords}) to preserve " +
-              "row-id continuity. Raw blob fields in filler rows are written as NULL.")
-        }
-        val result = recordWriter.prepareCommit(false)
-        val dataFiles = result.newFilesIncrement().newFiles()
-        val dataFileMetas = assignFirstRowIds(dataFiles.asScala.toSeq)
-        Seq(
-          new CommitMessageImpl(
-            partition,
-            0,
-            null,
-            new DataIncrement(
-              dataFileMetas.asJava,
-              Collections.emptyList(),
-              Collections.emptyList()),
-            CompactIncrement.emptyIncrement()
-          ))
-      } finally {
+      assert(
+        numRecords == numWritten,
+        s"Number of written records $numWritten does not match expected number $numRecords for first row ID $firstRowId.")
+      if (fillerRows > 0) {
+        DataEvolutionTableDataWrite.LOG.warn(
+          s"Data evolution merge wrote $fillerRows filler rows out of $numRecords rows " +
+            s"for row-id range [$firstRowId, ${firstRowId + numRecords}) to preserve " +
+            "row-id continuity. Raw blob fields in filler rows are written as NULL.")
+      }
+      val result = recordWriter.prepareCommit(false)
+      val dataFiles = result.newFilesIncrement().newFiles()
+      val dataFileMetas = assignFirstRowIds(dataFiles.asScala.toSeq)
+      val messages = Seq(
+        new CommitMessageImpl(
+          partition,
+          0,
+          null,
+          new DataIncrement(dataFileMetas.asJava, Collections.emptyList(), Collections.emptyList()),
+          CompactIncrement.emptyIncrement()
+        ))
+      registerPrepared(messages)
+      messages
+    }
+
+    def closeQuietly(): Unit = {
+      try {
         recordWriter.close()
+      } catch {
+        case _: Exception =>
       }
     }
+
+    /**
+     * Abort an unfinished PerFileWriter. Unlike a normal prepareMessage path, this must delete the
+     * in-flight data file rather than leave a partial orphan on disk.
+     */
+    def abortQuietly(): Unit = closeQuietly()
 
     private def fillGapUntil(rowId: Long, fillerSourceRow: InternalRow = null): Unit = {
       if (fillerRow == null && fillerSourceRow != null) {

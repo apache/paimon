@@ -768,6 +768,31 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
+    public void testCloseDeletesFlushedButUnpreparedFiles() throws Exception {
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
+        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
+
+        char[] s = new char[990];
+        Arrays.fill(s, 'a');
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+        writer.flush(false, false);
+        List<DataFileMeta> flushed = new ArrayList<>(writer.getNewFiles());
+        Assertions.assertThat(flushed).isNotEmpty();
+        for (DataFileMeta meta : flushed) {
+            Assertions.assertThat(LocalFileIO.create().exists(pathFactory.toPath(meta))).isTrue();
+        }
+
+        writer.close();
+
+        for (DataFileMeta meta : flushed) {
+            Assertions.assertThat(LocalFileIO.create().exists(pathFactory.toPath(meta))).isFalse();
+        }
+        Assertions.assertThat(writer.getNewFiles()).isEmpty();
+    }
+
+    @Test
     public void testClose() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
 

@@ -294,6 +294,25 @@ public interface FileIO extends Serializable, Closeable {
         }
     }
 
+    /**
+     * Same as {@link #deleteQuietly(Path)}, but temporarily clears the calling thread's interrupt
+     * status so Hadoop/RPC deletes are not rejected with {@link java.io.InterruptedIOException}.
+     *
+     * <p>Use this only for abort/cleanup paths (e.g. speculative task kill) where best-effort
+     * deletion must succeed even though the task thread has been interrupted. The previous
+     * interrupt status is restored afterwards.
+     */
+    default void deleteQuietlyIgnoringInterrupt(Path file) {
+        boolean interrupted = Thread.interrupted();
+        try {
+            deleteQuietly(file);
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
     default void deleteFilesQuietly(List<Path> files) {
         for (Path file : files) {
             deleteQuietly(file);
