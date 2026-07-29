@@ -200,6 +200,16 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         NULLS_LAST,
                         1);
 
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.createForTopN(
+                                table, PartitionPredicate.ALWAYS_TRUE, topN)
+                        .orElseThrow(AssertionError::new)) {
+            assertThat(scanner.scan(topN).orElseThrow(AssertionError::new).results().toRangeList())
+                    .containsExactly(new Range(199, 199));
+            // Index-file TopN pruning must not make the excluded indexed range look unindexed.
+            assertThat(scanner.unindexedRows(topN).results()).isEmpty();
+        }
+
         TableScan.Plan plan = table.newReadBuilder().withTopN(topN).newScan().plan();
         assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
         assertThat(
@@ -207,7 +217,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                 .map(IndexedSplit.class::cast)
                                 .flatMap(split -> split.rowRanges().stream())
                                 .collect(Collectors.toList()))
-                .containsExactlyInAnyOrder(new Range(99, 99), new Range(199, 199));
+                .containsExactly(new Range(199, 199));
     }
 
     @Test

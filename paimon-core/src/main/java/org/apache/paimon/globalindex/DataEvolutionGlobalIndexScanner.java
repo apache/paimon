@@ -90,6 +90,28 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             FileIO fileIO,
             IndexPathFactory indexPathFactory,
             Collection<IndexFileMeta> indexFiles) {
+        this(
+                table,
+                snapshot,
+                partitionFilter,
+                options,
+                rowType,
+                fileIO,
+                indexPathFactory,
+                indexFiles,
+                indexFiles);
+    }
+
+    private DataEvolutionGlobalIndexScanner(
+            FileStoreTable table,
+            @Nullable Snapshot snapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            Options options,
+            RowType rowType,
+            FileIO fileIO,
+            IndexPathFactory indexPathFactory,
+            Collection<IndexFileMeta> coverageIndexFiles,
+            Collection<IndexFileMeta> indexFiles) {
         this.table = table;
         this.options = options;
         this.rowType = rowType;
@@ -101,7 +123,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table,
                         snapshot,
                         partitionFilter,
-                        indexFiles,
+                        coverageIndexFiles,
                         table.coreOptions().scalarIndexSearchMode());
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, IndexMetaFileGroup> indexMetas = new HashMap<>();
@@ -261,7 +283,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             return Optional.empty();
         }
 
-        int fieldId = table.rowType().getField(topN.orders().get(0).field().name()).id();
+        DataField indexField = table.rowType().getField(topN.orders().get(0).field().name());
+        int fieldId = indexField.id();
         @Nullable Snapshot snapshot = tryTravelOrLatest(table);
         List<IndexFileMeta> indexFiles =
                 table.store().newIndexFileHandler()
@@ -271,6 +294,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         if (indexFiles.isEmpty()) {
             return Optional.empty();
         }
+        List<IndexFileMeta> selectedIndexFiles =
+                BTreeTopNIndexFileSelector.select(indexFiles, indexField, topN);
         return Optional.of(
                 new DataEvolutionGlobalIndexScanner(
                         table,
@@ -280,7 +305,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.rowType(),
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
-                        indexFiles));
+                        indexFiles,
+                        selectedIndexFiles));
     }
 
     private static boolean isSupportedTopN(TopN topN) {
@@ -351,6 +377,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     public Optional<GlobalIndexResult> scan(TopN topN) {
         if (!isSupportedTopN(topN)) {
             return Optional.empty();
+        }
+        if (topN.limit() == 0) {
+            return Optional.of(GlobalIndexResult.createEmpty());
         }
         String fieldName = topN.orders().get(0).field().name();
         if (!rowType.containsField(fieldName)) {
