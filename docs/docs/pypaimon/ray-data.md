@@ -580,11 +580,13 @@ print(metrics)   # {"num_updated": 50}
 - Partition columns cannot be updated (in-place rewrite can't move a row across partitions).
 - Deletion-vectors-enabled tables are not supported yet: a DV-deleted row still lives
   in its data file, so it can't be told apart from a live row without reading the target.
-- Incremental commits are not atomic across the whole operation. If a group fails,
+- Incremental commits are not atomic across the whole operation. Ordinary exceptions
+  raised while applying a group are reported as results so other groups can finish;
   completed groups are flushed before the error is raised.
-- Incremental mode reports group exceptions as results so other groups can finish.
-  Ray task retry options in `ray_remote_args` do not retry these exceptions; a
-  transient group failure can therefore leave a partial update.
+- Ray task retry options in `ray_remote_args` do not retry group exceptions reported
+  as results, so a transient group failure can leave a partial update. Worker loss and
+  other task-level failures which bypass Python exception handling may still lose
+  results buffered by that task.
 
 ## Read By Row Id
 

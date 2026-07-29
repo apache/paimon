@@ -639,6 +639,8 @@ def distributed_update_apply(
         for blob, n, row_ids_blob, error in zip(
                 message_blobs, updated_counts, row_id_blobs, errors):
             if error is not None:
+                # Keep the first failure as the primary error, but continue
+                # draining results so successful groups can still be committed.
                 if group_error is None:
                     group_error = error
                 continue

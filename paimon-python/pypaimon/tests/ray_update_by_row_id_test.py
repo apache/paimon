@@ -88,6 +88,16 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         tab = self._read(target, ["_ROW_ID", "id"])
         return dict(zip(tab.column("id").to_pylist(), tab.column("_ROW_ID").to_pylist()))
 
+    @staticmethod
+    def _data_files_under(table):
+        table_path = table.file_io.to_filesystem_path(table.table_path)
+        return {
+            os.path.join(root, file_name)
+            for root, _, files in os.walk(table_path)
+            for file_name in files
+            if file_name.endswith(".parquet")
+        }
+
     def test_update_by_row_id_basic(self):
         target = self._create()
         self._write(target, pa.Table.from_pydict(
@@ -313,14 +323,16 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual([["group-3"]], aborted)
         self.assertEqual([True], close_calls)
 
-    def test_incremental_commit_failure_does_not_abort_unknown_outcome(self):
+    def test_incremental_commit_failure_aborts_later_groups(self):
         import importlib
 
         module = importlib.import_module("pypaimon.ray.update_by_row_id")
         aborted = []
+        commit_calls = []
 
         class FakeCommit:
             def commit(self, messages, commit_identifier):
+                commit_calls.append((list(messages), commit_identifier))
                 raise RuntimeError("commit failed")
 
             def close(self):
@@ -339,12 +351,65 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                 module,
                 "_abort_pending_update_messages",
                 side_effect=lambda table, messages: aborted.append(list(messages))):
+            committer.add_group(["group-1"], 1, [])
+            committer.add_group(["group-2"], 1, [])
             with self.assertRaisesRegex(RuntimeError, "commit failed"):
-                committer.add_group(["group-1"], 1, [])
+                committer.finish()
             committer.abort_pending()
             committer.close()
 
-        self.assertEqual([], aborted)
+        self.assertEqual([(["group-1"], 1)], commit_calls)
+        self.assertEqual([["group-2"]], aborted)
+
+    def test_incremental_commit_conflict_aborts_buffered_group_files(self):
+        from pypaimon.write.commit.conflict_detection import CommitConflictError
+        from pypaimon.write.file_store_commit import FileStoreCommit
+
+        target = self._create()
+        for row_id in range(1, 4):
+            self._write(target, pa.Table.from_pydict(
+                {"id": [row_id], "name": ["a"], "age": [0]},
+                schema=self.pa_schema,
+            ))
+
+        table = self.catalog.get_table(target)
+        base_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        files_before = self._data_files_under(table)
+        row_ids = self._rowid_by_id(target)
+        source = pa.table(
+            {
+                "_ROW_ID": [row_ids[1], row_ids[2], row_ids[3]],
+                "age": [100, 200, 300],
+            },
+            schema=pa.schema([
+                ("_ROW_ID", pa.int64()),
+                ("age", pa.int32()),
+            ]),
+        )
+
+        with mock.patch.object(
+                FileStoreCommit,
+                "commit",
+                side_effect=CommitConflictError("forced conflict")):
+            with self.assertRaisesRegex(CommitConflictError, "forced conflict"):
+                update_by_row_id(
+                    target,
+                    ray.data.from_arrow(source),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=1,
+                    max_groups_per_commit=1,
+                )
+
+        self.assertEqual(files_before, self._data_files_under(table))
+        self.assertEqual(
+            base_snapshot_id,
+            table.snapshot_manager().get_latest_snapshot().id,
+        )
+        self.assertEqual(
+            [0, 0, 0],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
 
     def test_pins_base_snapshot_for_conflict_detection(self):
         # The update pins its base snapshot and threads it to distributed_update_apply,

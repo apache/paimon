@@ -71,9 +71,11 @@ def update_by_row_id(
 
     By default, all file groups are committed atomically. Set
     ``max_groups_per_commit`` to commit completed groups in smaller windows.
-    If a group fails, completed groups are flushed before the error is raised.
-    Group exceptions are returned as results in incremental mode, so Ray task
-    retry options in ``ray_remote_args`` do not retry them.
+    Ordinary exceptions raised while applying a group are returned as results
+    in incremental mode, so completed groups are flushed before the error is
+    raised and Ray task retry options in ``ray_remote_args`` do not retry the
+    group. Worker loss and other task-level failures which bypass Python
+    exception handling may still lose results buffered by that task.
 
     Returns ``{"num_updated": <rows>}``.
     """
@@ -205,14 +207,23 @@ class _IncrementalUpdateCommitter:
         self._table_commit = None
         self._next_commit_identifier = 1
         self._commit_failed = False
+        self._deferred_commit_error = None
 
     def add_group(self, commit_messages, _num_updated, _row_ids) -> None:
         self._pending_messages.extend(commit_messages)
         self._pending_groups += 1
-        if self._pending_groups >= self._max_groups_per_commit:
-            self._commit_pending()
+        if (self._deferred_commit_error is None
+                and self._pending_groups >= self._max_groups_per_commit):
+            try:
+                self._commit_pending()
+            except Exception as error:
+                # Keep draining materialized Ray results so their staged files
+                # are known to the driver and can be aborted by the caller.
+                self._deferred_commit_error = error
 
     def finish(self) -> None:
+        if self._deferred_commit_error is not None:
+            raise self._deferred_commit_error
         self._commit_pending()
 
     def _commit_pending(self) -> None:
