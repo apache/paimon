@@ -153,6 +153,23 @@ class CommitConflictError(RuntimeError):
     """A deterministic pre-snapshot conflict which is safe to abort."""
 
 
+class RowIdExistenceConflict(RuntimeError):
+    """A staged row-id file no longer matches the current base-file layout."""
+
+    def __init__(self, entry):
+        self.entry = entry
+        super().__init__(
+            "Row ID existence conflict: file '{}' references "
+            "firstRowId={}, rowCount={} in bucket {}, "
+            "but no matching file exists in the current snapshot. "
+            "The referenced file may have been rewritten by a "
+            "concurrent compaction or removed by an overwrite.".format(
+                entry.file.file_name,
+                entry.file.first_row_id,
+                entry.file.row_count,
+                entry.bucket))
+
+
 class ConflictDetection:
     """Detects conflicts between base and delta files during commit."""
 
@@ -512,16 +529,7 @@ class ConflictDetection:
             key = (entry.partition, entry.bucket,
                    entry.file.first_row_id, entry.file.row_count)
             if key not in existing_index:
-                return RuntimeError(
-                    "Row ID existence conflict: file '{}' references "
-                    "firstRowId={}, rowCount={} in bucket {}, "
-                    "but no matching file exists in the current snapshot. "
-                    "The referenced file may have been rewritten by a "
-                    "concurrent compaction or removed by an overwrite.".format(
-                        entry.file.file_name,
-                        entry.file.first_row_id,
-                        entry.file.row_count,
-                        entry.bucket))
+                return RowIdExistenceConflict(entry)
 
         return None
 
@@ -635,7 +643,8 @@ class ConflictDetection:
             count=entry.file.row_count,
         )
 
-    def check_row_id_from_snapshot(self, latest_snapshot, commit_entries):
+    def check_row_id_from_snapshot(
+            self, latest_snapshot, commit_entries, check_compaction=True):
         if not self.data_evolution_enabled:
             return None
         if self._row_id_check_from_snapshot is None:
@@ -672,10 +681,11 @@ class ConflictDetection:
                 continue
 
             if snapshot.commit_kind == "COMPACT":
-                err = self._compact_conflicts_with_delta(
-                    snapshot, delta_signatures, column_checker, commit_entries)
-                if err is not None:
-                    return err
+                if check_compaction:
+                    err = self._compact_conflicts_with_delta(
+                        snapshot, delta_signatures, column_checker, commit_entries)
+                    if err is not None:
+                        return err
                 continue
 
             incremental_entries = self.commit_scanner.read_incremental_entries_from_changed_partitions(

@@ -2506,6 +2506,16 @@ public class CoreOptions implements Serializable {
                                     + "more than this number of rows are excluded from row-id "
                                     + "reassignment. Set to 0 to disable this filtering.");
 
+    public static final ConfigOption<MemorySize> DATA_EVOLUTION_ROW_ID_CONFLICT_REWRITE_MAX_SIZE =
+            key("data-evolution.row-id-conflict-rewrite.max-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(256))
+                    .withDescription(
+                            "Maximum total size of current data files whose row-id ranges PyPaimon "
+                                    + "may automatically rebase staged updates against when a "
+                                    + "concurrent compaction changes file boundaries. Set to 0 B "
+                                    + "to disable.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_ROW_SIDECAR_ENABLED =
             key("data-evolution.row-sidecar.enabled")
                     .booleanType()
@@ -4233,6 +4243,10 @@ public class CoreOptions implements Serializable {
                 "The option %s cannot be negative.",
                 DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT.key());
         return threshold;
+    }
+
+    public long dataEvolutionRowIdConflictRewriteMaxSize() {
+        return options.get(DATA_EVOLUTION_ROW_ID_CONFLICT_REWRITE_MAX_SIZE).getBytes();
     }
 
     public boolean dataEvolutionRowSidecarEnabled() {

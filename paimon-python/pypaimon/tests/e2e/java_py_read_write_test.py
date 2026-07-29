@@ -1613,7 +1613,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         1. Java writes 5 base files (testCompactConflictWriteBase)
         2. pypaimon ShardTableUpdator scans table, prepares evolution
         3. Java runs compact (testCompactConflictRunCompact)
-        4. pypaimon commits stale evolution -> conflict detected, raises RuntimeError
+        4. pypaimon rebases the stale evolution files and commits successfully
         """
         import subprocess
 
@@ -1659,13 +1659,18 @@ class JavaPyReadWriteTest(unittest.TestCase):
                          f"Java compact failed:\n{result.stdout}\n{result.stderr}")
         print("Java compact completed")
 
-        # Step 4: pypaimon commits stale evolution -> conflict detected
+        # Step 4: pypaimon rewrites stale evolution files against the compacted range
         tc = wb.new_commit()
-        with self.assertRaises(RuntimeError) as ctx:
-            tc.commit(stale_commit_msgs)
-        self.assertIn("conflict", str(ctx.exception))
+        tc.commit(stale_commit_msgs)
         tc.close()
-        print(f"Conflict detected as expected: {ctx.exception}")
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(
+            rows_read,
+            sum(value is not None for value in result.column('f2').to_pylist()),
+        )
 
     def test_blob_compact_conflict_update(self):
         import subprocess
