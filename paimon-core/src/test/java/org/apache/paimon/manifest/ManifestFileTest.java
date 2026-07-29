@@ -260,6 +260,33 @@ public class ManifestFileTest {
     }
 
     @Test
+    void testRetainCompactSimpleEntriesAfterBinaryScanCloses() throws Exception {
+        List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+        List<SimpleFileEntry> retained = new ArrayList<>();
+
+        try (CloseableIterator<BinaryManifestEntry> iterator =
+                manifestFile.scan(
+                        manifest.fileName(),
+                        manifest.fileSize(),
+                        BinaryManifestEntry.SIMPLE_FILE_ENTRY_PROJECTION)) {
+            while (iterator.hasNext()) {
+                retained.add(SimpleFileEntry.fromCompact(iterator.next()));
+            }
+        }
+
+        assertThat(retained).containsExactlyElementsOf(SimpleFileEntry.from(entries));
+        for (int i = 0; i < retained.size(); i++) {
+            assertThat(
+                            Arrays.equals(
+                                    retained.get(i).embeddedIndex(),
+                                    entries.get(i).file().embeddedIndex()))
+                    .isTrue();
+        }
+    }
+
+    @Test
     void testScanProjectedManifestInvalidatesEntryWhenAdvancing() throws Exception {
         List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next());
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);

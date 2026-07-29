@@ -28,20 +28,7 @@ public class SimpleFileEntryWithDV extends SimpleFileEntry {
     @Nullable private final String dvFileName;
 
     public SimpleFileEntryWithDV(SimpleFileEntry entry, @Nullable String dvFileName) {
-        super(
-                entry.kind(),
-                entry.partition(),
-                entry.bucket(),
-                entry.totalBuckets(),
-                entry.level(),
-                entry.fileName(),
-                entry.extraFiles(),
-                entry.embeddedIndex(),
-                entry.minKey(),
-                entry.maxKey(),
-                entry.externalPath(),
-                entry.rowCount(),
-                entry.firstRowId());
+        super(entry);
         this.dvFileName = dvFileName;
     }
 

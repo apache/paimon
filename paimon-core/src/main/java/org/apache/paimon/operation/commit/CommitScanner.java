@@ -74,7 +74,7 @@ public class CommitScanner {
                     scan.withSnapshot(i)
                             .withKind(ScanMode.DELTA)
                             .withPartitionFilter(changedPartitions)
-                            .readSimpleEntries();
+                            .readCompactEntries();
             entries.addAll(delta);
         }
         return entries;
@@ -95,7 +95,7 @@ public class CommitScanner {
             return scan.withSnapshot(snapshot)
                     .withKind(ScanMode.ALL)
                     .withPartitionFilter(changedPartitions)
-                    .readSimpleEntries();
+                    .readCompactEntries();
         } catch (Throwable e) {
             throw new RuntimeException("Cannot read manifest entries from changed partitions.", e);
         }

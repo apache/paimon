@@ -21,6 +21,7 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.io.BinaryDataFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemorySegmentUtils;
@@ -49,6 +50,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
     private static final Projection FULL_PROJECTION =
             Projection.create(ManifestEntry.MANIFEST_ROW_TYPE);
     public static final Projection DELETE_ENTRY_PROJECTION = createDeleteEntryProjection();
+    public static final Projection SIMPLE_FILE_ENTRY_PROJECTION = createSimpleFileEntryProjection();
 
     private final Projection projection;
     private final @Nullable BinaryDataFileMeta file;
@@ -113,6 +115,41 @@ public final class BinaryManifestEntry implements ManifestEntry {
                                                         DataFileMeta.EXTRA_FILES,
                                                         DataFileMeta.EMBEDDED_FILE_INDEX,
                                                         DataFileMeta.EXTERNAL_PATH)))));
+    }
+
+    private static Projection createSimpleFileEntryProjection() {
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
+        return Projection.create(
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                manifestType.getField(ManifestEntry.KIND),
+                                manifestType.getField(ManifestEntry.PARTITION),
+                                manifestType.getField(ManifestEntry.BUCKET),
+                                manifestType.getField(ManifestEntry.TOTAL_BUCKETS),
+                                manifestType
+                                        .getField(ManifestEntry.FILE)
+                                        .newType(
+                                                DataFileMeta.SCHEMA.project(
+                                                        DataFileMeta.FILE_NAME,
+                                                        DataFileMeta.ROW_COUNT,
+                                                        DataFileMeta.MIN_KEY,
+                                                        DataFileMeta.MAX_KEY,
+                                                        DataFileMeta.LEVEL,
+                                                        DataFileMeta.EXTRA_FILES,
+                                                        DataFileMeta.EMBEDDED_FILE_INDEX,
+                                                        DataFileMeta.EXTERNAL_PATH,
+                                                        DataFileMeta.FIRST_ROW_ID)))));
+    }
+
+    /** Copies the currently projected backing row into independently owned binary memory. */
+    BinaryRow copyRow() {
+        checkState(row != null, "Binary manifest entry is not backed by a row.");
+        return projection.serializer().toBinaryRow(row).copy();
+    }
+
+    boolean usesProjection(Projection expectedProjection) {
+        return projection == expectedProjection;
     }
 
     /** Drops references to the current row before its reader batch is released. */
@@ -385,6 +422,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
         private final int projectedFileFieldCount;
         private final @Nullable BinaryDataFileMeta.Projection fileProjection;
         private final boolean fullProjection;
+        private final ThreadLocal<InternalRowSerializer> serializers;
 
         private Projection(
                 RowType projectedType,
@@ -405,6 +443,8 @@ public final class BinaryManifestEntry implements ManifestEntry {
             this.projectedFileFieldCount = projectedFileFieldCount;
             this.fileProjection = fileProjection;
             this.fullProjection = fullProjection;
+            this.serializers =
+                    ThreadLocal.withInitial(() -> new InternalRowSerializer(projectedType));
         }
 
         public static Projection create(RowType projectedType) {
@@ -452,6 +492,10 @@ public final class BinaryManifestEntry implements ManifestEntry {
 
         RowType projectedType() {
             return projectedType;
+        }
+
+        private InternalRowSerializer serializer() {
+            return serializers.get();
         }
 
         public BinaryManifestEntry createEntry() {

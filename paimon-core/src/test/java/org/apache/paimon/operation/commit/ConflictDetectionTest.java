@@ -858,6 +858,31 @@ class ConflictDetectionTest {
         assertThat(exception).isNotPresent();
     }
 
+    @Test
+    void testConflictMessageBoundsBaseEntries() {
+        ConflictDetection detection = createConflictDetection();
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        for (int i = 0; i < 60; i++) {
+            baseEntries.add(createFileEntry(String.format("base-%02d", i), ADD));
+        }
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        baseEntries,
+                        Collections.singletonList(createFileEntry("missing", DELETE)),
+                        Collections.emptyList(),
+                        null,
+                        Snapshot.CommitKind.APPEND);
+
+        assertThat(exception).isPresent();
+        assertThat(exception.get().getMessage())
+                .contains("Base entries (total 60)")
+                .contains("fileName=base-49")
+                .doesNotContain("fileName=base-50")
+                .contains("Only the first 50 entries");
+    }
+
     private ConflictDetection createConflictDetection() {
         return new ConflictDetection(
                 "test-table",

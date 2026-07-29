@@ -190,12 +190,8 @@ public class ConflictDetection {
             }
         }
 
-        List<SimpleFileEntry> allEntries = new ArrayList<>(baseEntries);
-        allEntries.addAll(deltaEntries);
-
         Optional<RuntimeException> exception =
-                checkBucketKeepSame(
-                        baseEntries, deltaEntries, commitKind, allEntries, baseCommitUser);
+                checkBucketKeepSame(baseEntries, deltaEntries, commitKind, baseCommitUser);
         if (exception.isPresent()) {
             return exception;
         }
@@ -211,10 +207,10 @@ public class ConflictDetection {
             throw conflictException.apply(e);
         }
 
-        Collection<SimpleFileEntry> mergedEntries;
+        List<SimpleFileEntry> mergedEntries;
         try {
             // merge manifest entries and also check if the files we want to delete are still there
-            mergedEntries = FileEntry.mergeEntries(allEntries);
+            mergedEntries = FileEntry.mergeBaseEntries(baseEntries, deltaEntries);
         } catch (Throwable e) {
             return Optional.of(conflictException.apply(e));
         }
@@ -285,7 +281,6 @@ public class ConflictDetection {
             List<SimpleFileEntry> baseEntries,
             List<SimpleFileEntry> deltaEntries,
             CommitKind commitKind,
-            List<SimpleFileEntry> allEntries,
             String baseCommitUser) {
         if (commitKind == CommitKind.OVERWRITE) {
             return Optional.empty();
@@ -293,7 +288,31 @@ public class ConflictDetection {
 
         // total buckets within the same partition should remain the same
         Map<BinaryRow, Integer> totalBuckets = new HashMap<>();
-        for (SimpleFileEntry entry : allEntries) {
+        Optional<RuntimeException> exception =
+                checkBucketKeepSame(
+                        baseEntries, baseEntries, deltaEntries, baseCommitUser, totalBuckets);
+        if (exception.isPresent()) {
+            return exception;
+        }
+        exception =
+                checkBucketKeepSame(
+                        deltaEntries, baseEntries, deltaEntries, baseCommitUser, totalBuckets);
+        if (exception.isPresent()) {
+            return exception;
+        }
+        for (BinaryRow partition : totalBuckets.keySet()) {
+            sameBucketCheckedPartitions.put(partition, Boolean.TRUE);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<RuntimeException> checkBucketKeepSame(
+            List<SimpleFileEntry> entries,
+            List<SimpleFileEntry> baseEntries,
+            List<SimpleFileEntry> deltaEntries,
+            String baseCommitUser,
+            Map<BinaryRow, Integer> totalBuckets) {
+        for (SimpleFileEntry entry : entries) {
             if (entry.totalBuckets() <= 0) {
                 continue;
             }
@@ -326,9 +345,6 @@ public class ConflictDetection {
                             null);
             LOG.warn("", conflictException.getLeft());
             return Optional.of(conflictException.getRight());
-        }
-        for (BinaryRow partition : totalBuckets.keySet()) {
-            sameBucketCheckedPartitions.put(partition, Boolean.TRUE);
         }
         return Optional.empty();
     }
@@ -367,30 +383,30 @@ public class ConflictDetection {
         }
 
         // group entries by partitions, buckets and levels
-        Map<LevelIdentifier, List<SimpleFileEntry>> levels = new HashMap<>();
+        Map<LevelIdentifier, List<KeyRangeEntry>> levels = new HashMap<>();
         for (SimpleFileEntry entry : mergedEntries) {
             int level = entry.level();
             if (level >= 1) {
                 levels.computeIfAbsent(
                                 new LevelIdentifier(entry.partition(), entry.bucket(), level),
                                 lv -> new ArrayList<>())
-                        .add(entry);
+                        .add(new KeyRangeEntry(entry));
             }
         }
 
         // check for all LSM level >= 1, key ranges of files do not intersect
-        for (List<SimpleFileEntry> entries : levels.values()) {
-            entries.sort((a, b) -> keyComparator.compare(a.minKey(), b.minKey()));
+        for (List<KeyRangeEntry> entries : levels.values()) {
+            entries.sort((a, b) -> keyComparator.compare(a.minKey, b.minKey));
             for (int i = 0; i + 1 < entries.size(); i++) {
-                SimpleFileEntry a = entries.get(i);
-                SimpleFileEntry b = entries.get(i + 1);
-                if (keyComparator.compare(a.maxKey(), b.minKey()) >= 0) {
+                KeyRangeEntry a = entries.get(i);
+                KeyRangeEntry b = entries.get(i + 1);
+                if (keyComparator.compare(a.maxKey, b.minKey) >= 0) {
                     Pair<RuntimeException, RuntimeException> conflictException =
                             createConflictException(
                                     "LSM conflicts detected! Give up committing. Conflict files are:\n"
-                                            + a.identifier().toString(pathFactory)
+                                            + a.entry.identifier().toString(pathFactory)
                                             + "\n"
-                                            + b.identifier().toString(pathFactory),
+                                            + b.entry.identifier().toString(pathFactory),
                                     baseCommitUser,
                                     baseEntries,
                                     deltaEntries,
@@ -936,16 +952,11 @@ public class ConflictDetection {
                         + baseCommitUser
                         + "; Current commit user is: "
                         + commitUser;
-        String baseEntriesString =
-                "Base entries are:\n"
-                        + baseEntries.stream()
-                                .map(Object::toString)
-                                .collect(Collectors.joining("\n"));
-        String changesString =
-                "Changes are:\n"
-                        + changes.stream().map(Object::toString).collect(Collectors.joining("\n"));
-
-        RuntimeException fullException =
+        int maxEntry = 50;
+        String baseEntriesString = formatEntries("Base entries", baseEntries, maxEntry);
+        String changesString = formatEntries("Changes", changes, maxEntry);
+        boolean truncated = baseEntries.size() > maxEntry || changes.size() > maxEntry;
+        RuntimeException exception =
                 new RuntimeException(
                         message
                                 + "\n\n"
@@ -955,41 +966,23 @@ public class ConflictDetection {
                                 + "\n\n"
                                 + baseEntriesString
                                 + "\n\n"
-                                + changesString,
+                                + changesString
+                                + (truncated
+                                        ? "\n\nOnly the first 50 entries of each list are displayed."
+                                        : ""),
                         cause);
+        return Pair.of(exception, exception);
+    }
 
-        RuntimeException simplifiedException;
-        int maxEntry = 50;
-        if (baseEntries.size() > maxEntry || changes.size() > maxEntry) {
-            baseEntriesString =
-                    "Base entries are:\n"
-                            + baseEntries.subList(0, Math.min(baseEntries.size(), maxEntry))
-                                    .stream()
-                                    .map(Object::toString)
-                                    .collect(Collectors.joining("\n"));
-            changesString =
-                    "Changes are:\n"
-                            + changes.subList(0, Math.min(changes.size(), maxEntry)).stream()
-                                    .map(Object::toString)
-                                    .collect(Collectors.joining("\n"));
-            simplifiedException =
-                    new RuntimeException(
-                            message
-                                    + "\n\n"
-                                    + possibleCauses
-                                    + "\n\n"
-                                    + commitUserString
-                                    + "\n\n"
-                                    + baseEntriesString
-                                    + "\n\n"
-                                    + changesString
-                                    + "\n\n"
-                                    + "The entry list above are not fully displayed, please refer to taskmanager.log for more information.",
-                            cause);
-            return Pair.of(fullException, simplifiedException);
-        } else {
-            return Pair.of(fullException, fullException);
-        }
+    private static String formatEntries(
+            String title, List<SimpleFileEntry> entries, int maxEntries) {
+        return title
+                + " (total "
+                + entries.size()
+                + ") are:\n"
+                + entries.subList(0, Math.min(entries.size(), maxEntries)).stream()
+                        .map(Object::toString)
+                        .collect(Collectors.joining("\n"));
     }
 
     private static class LevelIdentifier {
@@ -1018,6 +1011,19 @@ public class ConflictDetection {
         @Override
         public int hashCode() {
             return Objects.hash(partition, bucket, level);
+        }
+    }
+
+    private static class KeyRangeEntry {
+
+        private final SimpleFileEntry entry;
+        private final BinaryRow minKey;
+        private final BinaryRow maxKey;
+
+        private KeyRangeEntry(SimpleFileEntry entry) {
+            this.entry = entry;
+            this.minKey = entry.minKey();
+            this.maxKey = entry.maxKey();
         }
     }
 

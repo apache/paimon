@@ -21,8 +21,10 @@ package org.apache.paimon.operation;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.manifest.BinaryManifestEntry;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.BucketFilter;
+import org.apache.paimon.manifest.DeletedIdentifierSet;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileEntry.Identifier;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -40,6 +42,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
@@ -360,6 +363,113 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             result.add(iterator.next());
         }
         return result;
+    }
+
+    @Override
+    public List<SimpleFileEntry> readCompactEntries() {
+        List<ManifestFileMeta> manifests = readManifests().filteredManifests;
+        List<SimpleFileEntry> result = new ArrayList<>();
+        if (scanMode != ScanMode.ALL) {
+            for (ManifestFileMeta manifest : manifests) {
+                scanCompactManifest(
+                        manifest,
+                        entry -> {
+                            if (matchesCompactEntry(entry)) {
+                                result.add(SimpleFileEntry.fromCompact(entry));
+                            }
+                        });
+            }
+            return result;
+        }
+
+        DeletedIdentifierSet deletedEntries = new DeletedIdentifierSet();
+        try {
+            for (ManifestFileMeta manifest : manifests) {
+                if (manifest.numDeletedFiles() == 0) {
+                    continue;
+                }
+                scanCompactManifest(
+                        manifest,
+                        entry -> {
+                            if (entry.isDelete() && matchesCompactEntry(entry)) {
+                                deletedEntries.add(entry);
+                            }
+                        });
+            }
+
+            for (ManifestFileMeta manifest : manifests) {
+                if (manifest.numAddedFiles() == 0) {
+                    continue;
+                }
+                scanCompactManifest(
+                        manifest,
+                        entry -> {
+                            if (entry.isAdd()
+                                    && matchesCompactEntry(entry)
+                                    && !deletedEntries.contains(entry)) {
+                                result.add(SimpleFileEntry.fromCompact(entry));
+                            }
+                        });
+            }
+            return result;
+        } finally {
+            deletedEntries.release();
+        }
+    }
+
+    private void scanCompactManifest(
+            ManifestFileMeta manifest, Consumer<BinaryManifestEntry> consumer) {
+        int count = 0;
+        try (CloseableIterator<BinaryManifestEntry> entries =
+                manifestFileFactory
+                        .create()
+                        .scan(
+                                manifest.fileName(),
+                                manifest.fileSize(),
+                                BinaryManifestEntry.SIMPLE_FILE_ENTRY_PROJECTION)) {
+            while (entries.hasNext()) {
+                BinaryManifestEntry entry = entries.next();
+                consumer.accept(entry);
+                count++;
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to scan compact entries from manifest file '%s'.",
+                            manifest.fileName()),
+                    e);
+        }
+        LOG.info("Scanned {} compact manifest entries from {}", count, manifest.fileName());
+    }
+
+    private boolean matchesCompactEntry(BinaryManifestEntry entry) {
+        BinaryRow partition = null;
+        PartitionPredicate partitionFilter = manifestsReader.partitionFilter();
+        if (partitionFilter != null) {
+            partition = entry.partition();
+            if (!partitionFilter.test(partition)) {
+                return false;
+            }
+        }
+
+        BucketFilter compactBucketFilter = createBucketFilter();
+        if (compactBucketFilter != null) {
+            if (partition == null) {
+                partition = entry.partition();
+            }
+            if (!compactBucketFilter.test(partition, entry.bucket(), entry.totalBuckets())) {
+                return false;
+            }
+        }
+
+        int level = entry.level();
+        if (specifiedLevel != null && level != specifiedLevel) {
+            return false;
+        }
+        if (levelFilter != null && !levelFilter.test(level)) {
+            return false;
+        }
+        return fileNameFilter == null || fileNameFilter.test(entry.fileName());
     }
 
     @Override

@@ -184,6 +184,70 @@ public interface FileEntry {
         return map.values();
     }
 
+    /**
+     * Merges changes into an already merged base without building an identifier map for every base
+     * entry.
+     *
+     * <p>Memory grows with the number of changed identifiers instead of the number of base entries.
+     * The base is expected to contain the unique current files of a snapshot.
+     */
+    static <T extends FileEntry> List<T> mergeBaseEntries(List<T> baseEntries, List<T> changes) {
+        if (changes.isEmpty()) {
+            return new ArrayList<>(baseEntries);
+        }
+
+        LinkedHashMap<Identifier, List<T>> changesByIdentifier = new LinkedHashMap<>();
+        for (T change : changes) {
+            changesByIdentifier
+                    .computeIfAbsent(change.identifier(), ignored -> new ArrayList<>())
+                    .add(change);
+        }
+
+        Map<Identifier, T> matchingBaseEntries = new LinkedHashMap<>();
+        List<T> result = new ArrayList<>(baseEntries.size() + changes.size());
+        for (T baseEntry : baseEntries) {
+            Identifier identifier = baseEntry.identifier();
+            if (!changesByIdentifier.containsKey(identifier)) {
+                result.add(baseEntry);
+                continue;
+            }
+
+            T previous = matchingBaseEntries.put(identifier, baseEntry);
+            checkState(
+                    previous == null,
+                    "Trying to add file %s which is already in the the map: %s",
+                    identifier,
+                    previous);
+        }
+
+        for (Map.Entry<Identifier, List<T>> changeGroup : changesByIdentifier.entrySet()) {
+            Identifier identifier = changeGroup.getKey();
+            T current = matchingBaseEntries.get(identifier);
+            for (T change : changeGroup.getValue()) {
+                switch (change.kind()) {
+                    case ADD:
+                        checkState(
+                                current == null,
+                                "Trying to add file %s which is already in the the map: %s",
+                                identifier,
+                                current);
+                        current = change;
+                        break;
+                    case DELETE:
+                        current = current == null ? change : null;
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unknown value kind " + change.kind().name());
+                }
+            }
+            if (current != null) {
+                result.add(current);
+            }
+        }
+        return result;
+    }
+
     static void mergeEntries(
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifestFiles,

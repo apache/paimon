@@ -117,6 +117,17 @@ public interface FileStoreScan {
      */
     List<SimpleFileEntry> readSimpleEntries();
 
+    /**
+     * Reads simple entries through a projected binary manifest scan.
+     *
+     * <p>This path only applies partition, bucket, level and file-name filters. It intentionally
+     * skips statistics and custom manifest-entry filters and is intended for commit conflict
+     * detection, which must inspect every file in the selected partitions.
+     */
+    default List<SimpleFileEntry> readCompactEntries() {
+        return readSimpleEntries();
+    }
+
     List<PartitionEntry> readPartitionEntries();
 
     List<BucketEntry> readBucketEntries();

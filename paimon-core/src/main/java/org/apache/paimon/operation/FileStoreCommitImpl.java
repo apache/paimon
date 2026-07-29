@@ -988,8 +988,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         scanner.readIncrementalChanges(
                                 commitFailRetry.latestSnapshot, latestSnapshot, changedPartitions);
                 if (!incremental.isEmpty()) {
-                    baseDataFiles.addAll(incremental);
-                    baseDataFiles = new ArrayList<>(FileEntry.mergeEntries(baseDataFiles));
+                    baseDataFiles = FileEntry.mergeBaseEntries(baseDataFiles, incremental);
                 }
             } else {
                 baseDataFiles =
@@ -997,13 +996,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 latestSnapshot, changedPartitions);
             }
             if (discardDuplicate) {
-                Set<FileEntry.Identifier> baseIdentifiers =
-                        baseDataFiles.stream()
-                                .map(FileEntry::identifier)
-                                .collect(Collectors.toSet());
+                Set<FileEntry.Identifier> candidateIdentifiers =
+                        deltaFiles.stream().map(FileEntry::identifier).collect(Collectors.toSet());
+                Set<FileEntry.Identifier> duplicateIdentifiers = new HashSet<>();
+                for (SimpleFileEntry baseDataFile : baseDataFiles) {
+                    FileEntry.Identifier fileIdentifier = baseDataFile.identifier();
+                    if (candidateIdentifiers.contains(fileIdentifier)) {
+                        duplicateIdentifiers.add(fileIdentifier);
+                    }
+                }
                 deltaFiles =
                         deltaFiles.stream()
-                                .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
+                                .filter(entry -> !duplicateIdentifiers.contains(entry.identifier()))
                                 .collect(Collectors.toList());
             }
             RowIdColumnConflictChecker rowIdColumnConflictChecker = null;

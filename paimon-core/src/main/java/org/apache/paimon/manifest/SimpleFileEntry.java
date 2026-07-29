@@ -19,32 +19,27 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** A simple {@link FileEntry} only contains identifier and min max key. */
 public class SimpleFileEntry implements FileEntry {
 
     private final FileKind kind;
-    private final BinaryRow partition;
-    private final int bucket;
-    private final int totalBuckets;
-    private final int level;
-    private final String fileName;
-    private final List<String> extraFiles;
-    @Nullable private final byte[] embeddedIndex;
-    private final BinaryRow minKey;
-    private final BinaryRow maxKey;
-    @Nullable private final String externalPath;
-    private final long rowCount;
-    @Nullable private final Long firstRowId;
+    private final EntryData data;
 
     public SimpleFileEntry(
             FileKind kind,
@@ -60,19 +55,31 @@ public class SimpleFileEntry implements FileEntry {
             @Nullable String externalPath,
             long rowCount,
             @Nullable Long firstRowId) {
+        this(
+                kind,
+                new PojoEntryData(
+                        partition,
+                        bucket,
+                        totalBuckets,
+                        level,
+                        fileName,
+                        extraFiles,
+                        embeddedIndex,
+                        minKey,
+                        maxKey,
+                        externalPath,
+                        rowCount,
+                        firstRowId));
+    }
+
+    private SimpleFileEntry(FileKind kind, EntryData data) {
         this.kind = kind;
-        this.partition = partition;
-        this.bucket = bucket;
-        this.totalBuckets = totalBuckets;
-        this.level = level;
-        this.fileName = fileName;
-        this.extraFiles = extraFiles;
-        this.embeddedIndex = embeddedIndex;
-        this.minKey = minKey;
-        this.maxKey = maxKey;
-        this.externalPath = externalPath;
-        this.rowCount = rowCount;
-        this.firstRowId = firstRowId;
+        this.data = data;
+    }
+
+    /** Creates a lightweight wrapper which shares the immutable entry data. */
+    protected SimpleFileEntry(SimpleFileEntry entry) {
+        this(entry.kind, entry.data);
     }
 
     public static SimpleFileEntry from(ManifestEntry entry) {
@@ -92,21 +99,16 @@ public class SimpleFileEntry implements FileEntry {
                 entry.firstRowId());
     }
 
+    /** Copies a compact projected binary entry into independently owned memory. */
+    public static SimpleFileEntry fromCompact(BinaryManifestEntry entry) {
+        checkArgument(
+                entry.usesProjection(BinaryManifestEntry.SIMPLE_FILE_ENTRY_PROJECTION),
+                "Binary entry does not use the simple-file-entry projection.");
+        return new SimpleFileEntry(entry.kind(), new BinaryEntryData(entry.copyRow()));
+    }
+
     public SimpleFileEntry toDelete() {
-        return new SimpleFileEntry(
-                FileKind.DELETE,
-                partition,
-                bucket,
-                totalBuckets,
-                level,
-                fileName,
-                extraFiles,
-                embeddedIndex,
-                minKey,
-                maxKey,
-                externalPath,
-                rowCount,
-                firstRowId);
+        return new SimpleFileEntry(FileKind.DELETE, data);
     }
 
     public static List<SimpleFileEntry> from(List<ManifestEntry> entries) {
@@ -120,69 +122,75 @@ public class SimpleFileEntry implements FileEntry {
 
     @Override
     public BinaryRow partition() {
-        return partition;
+        return data.partition();
     }
 
     @Override
     public int bucket() {
-        return bucket;
+        return data.bucket();
     }
 
     @Override
     public int totalBuckets() {
-        return totalBuckets;
+        return data.totalBuckets();
     }
 
     @Override
     public int level() {
-        return level;
+        return data.level();
     }
 
     @Override
     public String fileName() {
-        return fileName;
+        return data.fileName();
     }
 
     @Nullable
     public byte[] embeddedIndex() {
-        return embeddedIndex;
+        return data.embeddedIndex();
     }
 
     @Nullable
     @Override
     public String externalPath() {
-        return externalPath;
+        return data.externalPath();
     }
 
     @Override
     public Identifier identifier() {
         return new Identifier(
-                partition, bucket, level, fileName, extraFiles, embeddedIndex, externalPath);
+                partition(),
+                bucket(),
+                level(),
+                fileName(),
+                extraFiles(),
+                embeddedIndex(),
+                externalPath());
     }
 
     @Override
     public BinaryRow minKey() {
-        return minKey;
+        return data.minKey();
     }
 
     @Override
     public BinaryRow maxKey() {
-        return maxKey;
+        return data.maxKey();
     }
 
     @Override
     public List<String> extraFiles() {
-        return extraFiles;
+        return data.extraFiles();
     }
 
     @Override
     public long rowCount() {
-        return rowCount;
+        return data.rowCount();
     }
 
     @Override
     public @Nullable Long firstRowId() {
-        return firstRowId;
+        return data.firstRowId();
     }
 
     public long nonNullFirstRowId() {
@@ -205,35 +213,35 @@ public class SimpleFileEntry implements FileEntry {
             return false;
         }
         SimpleFileEntry that = (SimpleFileEntry) o;
-        return bucket == that.bucket
-                && totalBuckets == that.totalBuckets
-                && level == that.level
-                && kind == that.kind
-                && Objects.equals(partition, that.partition)
-                && Objects.equals(fileName, that.fileName)
-                && Objects.equals(extraFiles, that.extraFiles)
-                && Objects.equals(minKey, that.minKey)
-                && Objects.equals(maxKey, that.maxKey)
-                && Objects.equals(externalPath, that.externalPath)
-                && rowCount == that.rowCount
-                && Objects.equals(firstRowId, that.firstRowId);
+        return bucket() == that.bucket()
+                && totalBuckets() == that.totalBuckets()
+                && level() == that.level()
+                && kind == that.kind()
+                && Objects.equals(partition(), that.partition())
+                && Objects.equals(fileName(), that.fileName())
+                && Objects.equals(extraFiles(), that.extraFiles())
+                && Objects.equals(minKey(), that.minKey())
+                && Objects.equals(maxKey(), that.maxKey())
+                && Objects.equals(externalPath(), that.externalPath())
+                && rowCount() == that.rowCount()
+                && Objects.equals(firstRowId(), that.firstRowId());
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(
                 kind,
-                partition,
-                bucket,
-                totalBuckets,
-                level,
-                fileName,
-                extraFiles,
-                minKey,
-                maxKey,
-                externalPath,
-                rowCount,
-                firstRowId);
+                partition(),
+                bucket(),
+                totalBuckets(),
+                level(),
+                fileName(),
+                extraFiles(),
+                minKey(),
+                maxKey(),
+                externalPath(),
+                rowCount(),
+                firstRowId());
     }
 
     @Override
@@ -242,27 +250,277 @@ public class SimpleFileEntry implements FileEntry {
                 + "kind="
                 + kind
                 + ", partition="
-                + partition
+                + partition()
                 + ", bucket="
-                + bucket
+                + bucket()
                 + ", totalBuckets="
-                + totalBuckets
+                + totalBuckets()
                 + ", level="
-                + level
+                + level()
                 + ", fileName="
-                + fileName
+                + fileName()
                 + ", extraFiles="
-                + extraFiles
+                + extraFiles()
                 + ", minKey="
-                + minKey
+                + minKey()
                 + ", maxKey="
-                + maxKey
+                + maxKey()
                 + ", externalPath="
-                + externalPath
+                + externalPath()
                 + ", rowCount="
-                + rowCount
+                + rowCount()
                 + ", firstRowId="
-                + firstRowId
+                + firstRowId()
                 + '}';
+    }
+
+    private interface EntryData {
+
+        BinaryRow partition();
+
+        int bucket();
+
+        int totalBuckets();
+
+        int level();
+
+        String fileName();
+
+        List<String> extraFiles();
+
+        @Nullable
+        byte[] embeddedIndex();
+
+        BinaryRow minKey();
+
+        BinaryRow maxKey();
+
+        @Nullable
+        String externalPath();
+
+        long rowCount();
+
+        @Nullable
+        Long firstRowId();
+    }
+
+    private static final class PojoEntryData implements EntryData {
+
+        private final BinaryRow partition;
+        private final int bucket;
+        private final int totalBuckets;
+        private final int level;
+        private final String fileName;
+        private final List<String> extraFiles;
+        private final @Nullable byte[] embeddedIndex;
+        private final BinaryRow minKey;
+        private final BinaryRow maxKey;
+        private final @Nullable String externalPath;
+        private final long rowCount;
+        private final @Nullable Long firstRowId;
+
+        private PojoEntryData(
+                BinaryRow partition,
+                int bucket,
+                int totalBuckets,
+                int level,
+                String fileName,
+                List<String> extraFiles,
+                @Nullable byte[] embeddedIndex,
+                BinaryRow minKey,
+                BinaryRow maxKey,
+                @Nullable String externalPath,
+                long rowCount,
+                @Nullable Long firstRowId) {
+            this.partition = partition;
+            this.bucket = bucket;
+            this.totalBuckets = totalBuckets;
+            this.level = level;
+            this.fileName = fileName;
+            this.extraFiles = extraFiles;
+            this.embeddedIndex = embeddedIndex;
+            this.minKey = minKey;
+            this.maxKey = maxKey;
+            this.externalPath = externalPath;
+            this.rowCount = rowCount;
+            this.firstRowId = firstRowId;
+        }
+
+        @Override
+        public BinaryRow partition() {
+            return partition;
+        }
+
+        @Override
+        public int bucket() {
+            return bucket;
+        }
+
+        @Override
+        public int totalBuckets() {
+            return totalBuckets;
+        }
+
+        @Override
+        public int level() {
+            return level;
+        }
+
+        @Override
+        public String fileName() {
+            return fileName;
+        }
+
+        @Override
+        public List<String> extraFiles() {
+            return extraFiles;
+        }
+
+        @Override
+        public byte[] embeddedIndex() {
+            return embeddedIndex;
+        }
+
+        @Override
+        public BinaryRow minKey() {
+            return minKey;
+        }
+
+        @Override
+        public BinaryRow maxKey() {
+            return maxKey;
+        }
+
+        @Override
+        public String externalPath() {
+            return externalPath;
+        }
+
+        @Override
+        public long rowCount() {
+            return rowCount;
+        }
+
+        @Override
+        public Long firstRowId() {
+            return firstRowId;
+        }
+    }
+
+    private static final class BinaryEntryData implements EntryData {
+
+        private static final int PARTITION = 1;
+        private static final int BUCKET = 2;
+        private static final int TOTAL_BUCKETS = 3;
+        private static final int FILE = 4;
+
+        private static final int FILE_NAME = 0;
+        private static final int ROW_COUNT = 1;
+        private static final int MIN_KEY = 2;
+        private static final int MAX_KEY = 3;
+        private static final int LEVEL = 4;
+        private static final int EXTRA_FILES = 5;
+        private static final int EMBEDDED_INDEX = 6;
+        private static final int EXTERNAL_PATH = 7;
+        private static final int FIRST_ROW_ID = 8;
+        private static final int FILE_FIELD_COUNT = 9;
+
+        private final BinaryRow row;
+
+        private BinaryEntryData(BinaryRow row) {
+            this.row = row;
+        }
+
+        @Override
+        public BinaryRow partition() {
+            return binaryRow(row, PARTITION);
+        }
+
+        @Override
+        public int bucket() {
+            return row.getInt(BUCKET);
+        }
+
+        @Override
+        public int totalBuckets() {
+            return row.getInt(TOTAL_BUCKETS);
+        }
+
+        @Override
+        public int level() {
+            return fileRow().getInt(LEVEL);
+        }
+
+        @Override
+        public String fileName() {
+            BinaryString fileName = fileRow().getString(FILE_NAME);
+            checkState(fileName != null, "Data file name cannot be null.");
+            return fileName.toString();
+        }
+
+        @Override
+        public List<String> extraFiles() {
+            InternalArray extraFiles = fileRow().getArray(EXTRA_FILES);
+            checkState(extraFiles != null, "Data file extra files cannot be null.");
+            return Collections.unmodifiableList(fromStringArrayData(extraFiles));
+        }
+
+        @Override
+        public byte[] embeddedIndex() {
+            InternalRow file = fileRow();
+            return file.isNullAt(EMBEDDED_INDEX) ? null : file.getBinary(EMBEDDED_INDEX);
+        }
+
+        @Override
+        public BinaryRow minKey() {
+            return binaryRow(fileRow(), MIN_KEY);
+        }
+
+        @Override
+        public BinaryRow maxKey() {
+            return binaryRow(fileRow(), MAX_KEY);
+        }
+
+        @Override
+        public String externalPath() {
+            InternalRow file = fileRow();
+            return file.isNullAt(EXTERNAL_PATH) ? null : file.getString(EXTERNAL_PATH).toString();
+        }
+
+        @Override
+        public long rowCount() {
+            return fileRow().getLong(ROW_COUNT);
+        }
+
+        @Override
+        public Long firstRowId() {
+            InternalRow file = fileRow();
+            return file.isNullAt(FIRST_ROW_ID) ? null : file.getLong(FIRST_ROW_ID);
+        }
+
+        private InternalRow fileRow() {
+            InternalRow file = row.getRow(FILE, FILE_FIELD_COUNT);
+            checkState(file != null, "Manifest data file metadata cannot be null.");
+            return file;
+        }
+
+        private static BinaryRow binaryRow(InternalRow source, int position) {
+            BinaryString serialized = source.getString(position);
+            checkState(serialized != null, "Serialized binary row cannot be null.");
+            checkState(
+                    serialized.getSizeInBytes() >= Integer.BYTES,
+                    "Serialized binary row is too short.");
+            int arity =
+                    ((serialized.byteAt(0) & 0xff) << 24)
+                            | ((serialized.byteAt(1) & 0xff) << 16)
+                            | ((serialized.byteAt(2) & 0xff) << 8)
+                            | (serialized.byteAt(3) & 0xff);
+            BinaryRow result = new BinaryRow(arity);
+            result.pointTo(
+                    serialized.getSegments(),
+                    serialized.getOffset() + Integer.BYTES,
+                    serialized.getSizeInBytes() - Integer.BYTES);
+            return result;
+        }
     }
 }
