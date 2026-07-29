@@ -546,7 +546,10 @@ public class PartitionPathUtils {
             int levelOffset,
             @Nullable GenericRow values)
             throws IOException {
-        if (isHiddenFile(fileStatus, onlyValueInPath, defaultPartValue)) {
+        // The scan root is where the caller told us to look, not a name to judge: a table may
+        // legitimately live at a location such as oss://bucket/db/_raw. Only what is found below
+        // it can be a staging tree.
+        if (level > 0 && isHiddenFile(fileStatus, onlyValueInPath, defaultPartValue)) {
             return;
         }
 

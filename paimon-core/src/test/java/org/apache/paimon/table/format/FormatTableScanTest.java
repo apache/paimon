@@ -1061,6 +1061,30 @@ public class FormatTableScanTest {
     }
 
     @TestTemplate
+    public void testReadsAPartitionedTableWhoseOwnDirectoryNameIsHidden() throws IOException {
+        // A table may live at a location whose last component starts with '_' - a migration or
+        // scratch directory, a name a catalog generated. That is where the caller told us to
+        // look, not a name to judge: judging it found no partitions at all, so the table read as
+        // empty with nothing raised, while the same directory read fine as an unpartitioned one.
+        Path tableLocation = new Path(new Path(tmpPath.toUri()), "db/_t");
+        LocalFileIO fileIO = LocalFileIO.create();
+        String partition = enablePartitionValueOnly ? "2024/1" : "year=2024/month=1";
+        Path dataFile = new Path(new Path(tableLocation, partition), "data.csv");
+        writeTestFile(fileIO, dataFile, 100);
+        // The root and nothing below it: a staging tree standing where a partition directory
+        // would is still skipped.
+        writeTestFile(fileIO, new Path(tableLocation, "_temporary/attempt/part-00010.csv"), 100);
+
+        FormatTable formatTable = createYearMonthFormatTable(fileIO, tableLocation);
+        List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
+
+        assertThat(splits).hasSize(1);
+        assertThat(((FormatDataSplit) splits.get(0)).files())
+                .extracting(FormatDataSplit.FileMeta::filePath)
+                .containsExactly(dataFile);
+    }
+
+    @TestTemplate
     public void testCreateSplitsWithEmptyDirectory() throws IOException {
         Path tableLocation = new Path(tmpPath.toUri());
         LocalFileIO fileIO = LocalFileIO.create();
