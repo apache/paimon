@@ -55,6 +55,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.append.dataevolution.LiveFileRowIdRangeCollector.FileRole.DEDICATED;
 import static org.apache.paimon.append.dataevolution.LiveFileRowIdRangeCollector.FileRole.NORMAL;
@@ -131,19 +132,17 @@ final class DataEvolutionRowIdAssignmentPlanner {
         this.plannedManifests = new boolean[manifestMetas.size()];
         this.rewrittenManifests = new boolean[manifestMetas.size()];
         this.selectedPartitions = new LinkedHashMap<>();
-        String configuredSkipCount =
-                table.coreOptions()
-                        .toMap()
-                        .getOrDefault(
-                                SKIP_CONTIGUOUS_ROW_COUNT,
-                                Long.toString(DEFAULT_SKIP_CONTIGUOUS_ROW_COUNT));
         try {
-            this.skipContiguousRowCount = Long.parseLong(configuredSkipCount);
+            this.skipContiguousRowCount =
+                    Optional.ofNullable(table.options().get(SKIP_CONTIGUOUS_ROW_COUNT))
+                            .map(Long::parseLong)
+                            .orElse(DEFAULT_SKIP_CONTIGUOUS_ROW_COUNT);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(
                     String.format(
                             "Invalid value '%s' for option '%s'.",
-                            configuredSkipCount, SKIP_CONTIGUOUS_ROW_COUNT),
+                            table.options().get(SKIP_CONTIGUOUS_ROW_COUNT),
+                            SKIP_CONTIGUOUS_ROW_COUNT),
                     e);
         }
         checkArgument(
