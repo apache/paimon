@@ -29,6 +29,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafTernaryFunction;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
@@ -50,6 +51,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Predicate for filtering data using global indexes. */
 public class GlobalIndexEvaluator implements Closeable {
 
@@ -68,8 +71,26 @@ public class GlobalIndexEvaluator implements Closeable {
         if (predicate == null) {
             return Optional.empty();
         }
+        return await(visitAsync(predicate));
+    }
+
+    public Optional<GlobalIndexResult> evaluateTopN(TopN topN) {
+        FieldRef fieldRef = topN.orders().get(0).field();
+        int fieldId = rowType.getField(fieldRef.name()).id();
+        Collection<GlobalIndexReader> readers =
+                indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
+
+        if (readers.isEmpty()) {
+            return Optional.empty();
+        }
+        checkArgument(readers.size() == 1, "TopN expects one aggregated global index reader.");
+        return await(readers.iterator().next().visitTopN(topN));
+    }
+
+    private Optional<GlobalIndexResult> await(
+            CompletableFuture<Optional<GlobalIndexResult>> future) {
         try {
-            return visitAsync(predicate).get();
+            return future.get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted during index evaluation", e);

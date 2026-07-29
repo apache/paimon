@@ -27,6 +27,7 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Pair;
@@ -52,6 +53,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -91,6 +94,20 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
             }
         }
         return -1;
+    }
+
+    @TestTemplate
+    public void testTopNCandidatesFromEveryFile() throws Exception {
+        int limit = 5;
+        List<GlobalIndexIOMeta> written = writeData();
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(fileReader, written, newDirectExecutorService())) {
+            GlobalIndexResult result =
+                    reader.visitTopN(new TopN(ref, DESCENDING, NULLS_LAST, limit)).join().get();
+            assertThat(result.results().getLongCardinality()).isEqualTo(written.size() * limit);
+        }
     }
 
     @TestTemplate

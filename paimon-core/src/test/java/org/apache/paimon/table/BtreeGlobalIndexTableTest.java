@@ -33,8 +33,10 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -63,6 +65,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -144,6 +148,133 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         });
 
         assertThat(readF1).containsExactly("a200", "a300", "a400", "a56789");
+    }
+
+    @Test
+    public void testBTreeGlobalIndexTopNCandidatesAcrossRanges() throws Exception {
+        write(100L);
+        createIndex("f1");
+        appendRows(100, 200);
+        createIndexIncremental("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        TopN topN =
+                new TopN(
+                        new FieldRef(1, "f1", table.rowType().getTypeAt(1)),
+                        DESCENDING,
+                        NULLS_LAST,
+                        5);
+
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.createForTopN(
+                                table, PartitionPredicate.ALWAYS_TRUE, topN)
+                        .orElseThrow(AssertionError::new)) {
+            assertThat(scanner.scan(topN).orElseThrow(AssertionError::new).results().toRangeList())
+                    .containsExactly(new Range(95, 99), new Range(195, 199));
+        }
+
+        ReadBuilder readBuilder = table.newReadBuilder().withTopN(topN);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
+        assertThat(readF1(readBuilder, plan))
+                .containsExactlyInAnyOrder(
+                        "a95", "a96", "a97", "a98", "a99", "a195", "a196", "a197", "a198", "a199");
+    }
+
+    @Test
+    public void testBTreeGlobalIndexTopNCandidatesSkipSplitTopN() throws Exception {
+        write(100L);
+        createIndex("f0");
+        appendRows(100, 200);
+        createIndexIncremental("f0");
+
+        FileStoreTable table =
+                ((FileStoreTable) catalog.getTable(identifier()))
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
+        TopN topN =
+                new TopN(
+                        new FieldRef(0, "f0", table.rowType().getTypeAt(0)),
+                        DESCENDING,
+                        NULLS_LAST,
+                        1);
+
+        TableScan.Plan plan = table.newReadBuilder().withTopN(topN).newScan().plan();
+        assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
+        assertThat(
+                        plan.splits().stream()
+                                .map(IndexedSplit.class::cast)
+                                .flatMap(split -> split.rowRanges().stream())
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(new Range(99, 99), new Range(199, 199));
+    }
+
+    @Test
+    public void testBTreeGlobalIndexTopNPartialCoverage() throws Exception {
+        write(100L);
+        createIndex("f1");
+        appendRows(100, 110);
+
+        FileStoreTable table =
+                tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
+        TopN topN =
+                new TopN(
+                        new FieldRef(1, "f1", table.rowType().getTypeAt(1)),
+                        DESCENDING,
+                        NULLS_LAST,
+                        5);
+
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.createForTopN(
+                                table, PartitionPredicate.ALWAYS_TRUE, topN)
+                        .orElseThrow(AssertionError::new)) {
+            assertThat(scanner.scan(topN).orElseThrow(AssertionError::new).results().toRangeList())
+                    .containsExactly(new Range(95, 99));
+            assertThat(scanner.unindexedRows(topN).results().toRangeList())
+                    .containsExactly(new Range(100, 109));
+        }
+
+        FileStoreTable fastTable = tableWithSearchMode(table, "fast");
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.createForTopN(
+                                fastTable, PartitionPredicate.ALWAYS_TRUE, topN)
+                        .orElseThrow(AssertionError::new)) {
+            assertThat(scanner.unindexedRows(topN).results()).isEmpty();
+        }
+    }
+
+    @Test
+    public void testBTreeGlobalIndexTopNFallsBackForUnsafeReads() throws Exception {
+        write(100L);
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        TopN topN =
+                new TopN(
+                        new FieldRef(1, "f1", table.rowType().getTypeAt(1)),
+                        DESCENDING,
+                        NULLS_LAST,
+                        5);
+        Predicate filter = new PredicateBuilder(table.rowType()).lessThan(0, 10);
+        ReadBuilder filtered = table.newReadBuilder().withFilter(filter).withTopN(topN);
+        TableScan.Plan filteredPlan = filtered.newScan().plan();
+        assertThat(filteredPlan.splits()).allMatch(DataSplit.class::isInstance);
+        assertThat(readF1(filtered, filteredPlan))
+                .containsExactlyInAnyOrder(
+                        "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9");
+
+        FileStoreTable modifiableDeletionVectorTable =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DELETION_VECTORS_MODIFIABLE.key(), "true"));
+        FileStoreTable deletionVectorTable =
+                modifiableDeletionVectorTable.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
+        ReadBuilder deletionVectorRead = deletionVectorTable.newReadBuilder().withTopN(topN);
+        assertThat(deletionVectorRead.newScan().plan().splits())
+                .allMatch(DataSplit.class::isInstance);
     }
 
     @Test

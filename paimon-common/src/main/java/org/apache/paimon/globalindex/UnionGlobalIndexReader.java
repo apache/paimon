@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.utils.IOUtils;
 
@@ -172,6 +173,11 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
                                 durationConsumer.accept(System.nanoTime() - start);
                             }
                         });
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitTopN(TopN topN) {
+        return unionAsync(reader -> reader.visitTopN(topN));
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> unionAsync(

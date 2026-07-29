@@ -20,14 +20,23 @@ package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
+import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 
+import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link BTreeIndexReader} to read a single file. */
 @ExtendWith(ParameterizedTestExtension.class)
@@ -42,5 +51,63 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
         GlobalIndexIOMeta written = writeData(data);
         return globalIndexer.createReader(
                 fileReader, Collections.singletonList(written), newDirectExecutorService());
+    }
+
+    @TestTemplate
+    public void testDescendingTopN() throws Exception {
+        int limit = 20;
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        Object[] valuesByRowId = valuesByRowId();
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            GlobalIndexResult result =
+                    reader.visitTopN(new TopN(ref, DESCENDING, NULLS_LAST, limit)).join().get();
+            assertThat(result.results().getLongCardinality()).isEqualTo(limit);
+
+            Object boundary = data.get(dataNum - limit).getKey();
+            for (long rowId : result.results()) {
+                assertThat(comparator.compare(valuesByRowId[(int) rowId], boundary))
+                        .isGreaterThanOrEqualTo(0);
+            }
+
+            assertThat(
+                            reader.visitTopN(new TopN(ref, DESCENDING, NULLS_LAST, 0))
+                                    .join()
+                                    .get()
+                                    .results())
+                    .isEmpty();
+            assertThat(reader.visitTopN(new TopN(ref, ASCENDING, NULLS_LAST, limit)).join())
+                    .isEmpty();
+        }
+
+        int nullCount = dataNum / 10;
+        for (int i = dataNum - nullCount; i < dataNum; i++) {
+            data.get(i).setLeft(null);
+        }
+        valuesByRowId = valuesByRowId();
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            GlobalIndexResult nullsFirst =
+                    reader.visitTopN(new TopN(ref, DESCENDING, NULLS_FIRST, limit)).join().get();
+            assertThat(nullsFirst.results().getLongCardinality()).isEqualTo(limit);
+            for (long rowId : nullsFirst.results()) {
+                assertThat(valuesByRowId[(int) rowId]).isNull();
+            }
+
+            GlobalIndexResult nullsLast =
+                    reader.visitTopN(new TopN(ref, DESCENDING, NULLS_LAST, limit)).join().get();
+            assertThat(nullsLast.results().getLongCardinality()).isEqualTo(limit);
+            Object boundary = data.get(dataNum - nullCount - limit).getKey();
+            for (long rowId : nullsLast.results()) {
+                Object value = valuesByRowId[(int) rowId];
+                assertThat(value).isNotNull();
+                assertThat(comparator.compare(value, boundary)).isGreaterThanOrEqualTo(0);
+            }
+        }
+    }
+
+    private Object[] valuesByRowId() {
+        Object[] values = new Object[dataNum];
+        data.forEach(pair -> values[pair.getValue().intValue()] = pair.getKey());
+        return values;
     }
 }

@@ -30,9 +30,12 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
+import org.apache.paimon.predicate.SortValue;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.sst.BlockCache;
 import org.apache.paimon.sst.BlockHandle;
 import org.apache.paimon.sst.BlockIterator;
+import org.apache.paimon.sst.ReverseBlockIterator;
 import org.apache.paimon.sst.SstFileReader;
 import org.apache.paimon.utils.FileBasedBloomFilter;
 import org.apache.paimon.utils.LazyField;
@@ -339,6 +342,15 @@ public class BTreeIndexReader implements Closeable {
         return createResult(() -> rangeQuery(from, to, true, true));
     }
 
+    public Optional<GlobalIndexResult> visitTopN(TopN topN) {
+        List<SortValue> orders = topN.orders();
+        if (orders.size() != 1 || orders.get(0).direction() != SortValue.SortDirection.DESCENDING) {
+            return Optional.empty();
+        }
+        Preconditions.checkArgument(topN.limit() >= 0, "TopN limit must not be negative.");
+        return createResult(() -> topN(topN.limit(), orders.get(0).nullOrdering()));
+    }
+
     private Optional<GlobalIndexResult> createResult(IOSupplier<RoaringNavigableMap64> supplier) {
         try {
             return Optional.of(GlobalIndexResult.create(supplier.get()));
@@ -360,6 +372,58 @@ public class BTreeIndexReader implements Closeable {
             return new RoaringNavigableMap64();
         }
         return rangeQuery(minKey, maxKey, true, true);
+    }
+
+    private RoaringNavigableMap64 topN(int limit, SortValue.NullOrdering nullOrdering)
+            throws IOException {
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        if (limit == 0) {
+            return result;
+        }
+
+        int remaining = limit;
+        if (nullOrdering == SortValue.NullOrdering.NULLS_FIRST) {
+            remaining = addNullRows(result, remaining);
+        }
+        if (remaining > 0) {
+            remaining = addDescendingNonNullRows(result, remaining);
+        }
+        if (remaining > 0 && nullOrdering == SortValue.NullOrdering.NULLS_LAST) {
+            addNullRows(result, remaining);
+        }
+        return result;
+    }
+
+    private int addNullRows(RoaringNavigableMap64 result, int remaining) {
+        for (long rowId : nullBitmap.get()) {
+            result.add(rowId);
+            if (--remaining == 0) {
+                break;
+            }
+        }
+        return remaining;
+    }
+
+    private int addDescendingNonNullRows(RoaringNavigableMap64 result, int remaining)
+            throws IOException {
+        if (maxKey == null) {
+            return remaining;
+        }
+
+        SstFileReader.SstFileReverseIterator fileIterator = reader.createReverseIterator();
+        ReverseBlockIterator dataIterator;
+        while (remaining > 0 && (dataIterator = fileIterator.readBatch()) != null) {
+            while (remaining > 0 && dataIterator.hasNext()) {
+                Map.Entry<MemorySlice, MemorySlice> entry = dataIterator.next();
+                for (long rowId : deserializeRowIds(entry.getValue())) {
+                    result.add(rowId);
+                    if (--remaining == 0) {
+                        break;
+                    }
+                }
+            }
+        }
+        return remaining;
     }
 
     /**
