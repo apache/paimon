@@ -42,12 +42,16 @@ import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.PrimitiveRowRanges;
 import org.apache.paimon.utils.SerializationUtils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,8 +69,13 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  */
 final class DataEvolutionRowIdAssignmentPlanner {
 
+    private static final Logger LOG =
+            LoggerFactory.getLogger(DataEvolutionRowIdAssignmentPlanner.class);
     private static final int EXCLUDED_PARTITION_CACHE_SIZE = 1024;
     private static final int MAX_INITIAL_LIVE_FILE_RANGES = 1 << 24;
+    private static final String SKIP_CONTIGUOUS_ROW_COUNT =
+            "data-evolution.reassign.skip-contiguous-row-count";
+    private static final long DEFAULT_SKIP_CONTIGUOUS_ROW_COUNT = 1_000_000_000L;
     private static final BinaryString ROW_ID_FIELD =
             BinaryString.fromString(SpecialFields.ROW_ID.name());
     private static final BinaryString BLOB_FILE_SUFFIX = BinaryString.fromString(".blob");
@@ -103,8 +112,10 @@ final class DataEvolutionRowIdAssignmentPlanner {
     private final @Nullable PartitionPredicate partitionPredicate;
     private final List<ManifestFileMeta> manifestMetas;
     private final Map<String, Integer> manifestOrdinals;
+    private final boolean[] plannedManifests;
     private final boolean[] rewrittenManifests;
     private final Map<ByteArrayKey, SelectedPartition> selectedPartitions;
+    private final long skipContiguousRowCount;
     private long nextManifestGroupOrdinal;
     private long nextRetainedAddScanOrdinal;
 
@@ -117,8 +128,28 @@ final class DataEvolutionRowIdAssignmentPlanner {
         this.partitionPredicate = partitionPredicate;
         this.manifestMetas = manifestMetas;
         this.manifestOrdinals = manifestOrdinals(manifestMetas);
+        this.plannedManifests = new boolean[manifestMetas.size()];
         this.rewrittenManifests = new boolean[manifestMetas.size()];
         this.selectedPartitions = new LinkedHashMap<>();
+        String configuredSkipCount =
+                table.coreOptions()
+                        .toMap()
+                        .getOrDefault(
+                                SKIP_CONTIGUOUS_ROW_COUNT,
+                                Long.toString(DEFAULT_SKIP_CONTIGUOUS_ROW_COUNT));
+        try {
+            this.skipContiguousRowCount = Long.parseLong(configuredSkipCount);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid value '%s' for option '%s'.",
+                            configuredSkipCount, SKIP_CONTIGUOUS_ROW_COUNT),
+                    e);
+        }
+        checkArgument(
+                skipContiguousRowCount >= 0,
+                "Option '%s' cannot be negative.",
+                SKIP_CONTIGUOUS_ROW_COUNT);
     }
 
     private static Projection manifestProjection(
@@ -155,21 +186,27 @@ final class DataEvolutionRowIdAssignmentPlanner {
                         partitionPredicate == null
                                 ? initialLiveFileRangeCapacity(manifestGroup)
                                 : 0);
+        for (ManifestFileMeta manifestMeta : manifestGroup) {
+            plannedManifests[ordinal(manifestMeta)] = true;
+        }
         ReusableIdentifier identifier = new ReusableIdentifier();
         long[] rowRangeScratch = new long[2];
 
-        collectDeletedIdentifiers(manifestGroup, group, identifier);
-        collectLiveFileRanges(
-                manifestGroup, group, identifier, manifestGroupOrdinal, rowRangeScratch);
-        identifier.release();
-        group.releaseDeletedIdentifiers();
+        try {
+            collectDeletedIdentifiers(manifestGroup, group, identifier);
+            collectLiveFileRanges(
+                    manifestGroup, group, identifier, manifestGroupOrdinal, rowRangeScratch);
+            identifier.release();
+            group.releaseDeletedIdentifiers();
 
-        List<PartitionState> selections = group.selectFragmentedPartitions();
-        for (PartitionState selection : selections) {
-            mergeSelectedPartition(selection);
-        }
-        if (!selections.isEmpty()) {
-            markRewrittenManifests(manifestGroup, group, rowRangeScratch);
+            List<PartitionState> selections = group.selectFragmentedPartitions();
+            for (PartitionState selection : selections) {
+                mergeSelectedPartition(selection);
+            }
+        } catch (RuntimeException | Error e) {
+            identifier.release();
+            group.abort();
+            throw e;
         }
     }
 
@@ -266,22 +303,35 @@ final class DataEvolutionRowIdAssignmentPlanner {
         }
     }
 
-    private void markRewrittenManifests(
-            List<ManifestFileMeta> manifestGroup, GroupState group, long[] rowRangeScratch) {
-        for (ManifestFileMeta manifestMeta : manifestGroup) {
-            int manifestOrdinal = ordinal(manifestMeta);
+    private void markRewrittenManifests() {
+        ByteArrayLookupKey lookup = new ByteArrayLookupKey();
+        long[] rowRangeScratch = new long[2];
+        for (int manifestOrdinal = 0; manifestOrdinal < manifestMetas.size(); manifestOrdinal++) {
+            if (!plannedManifests[manifestOrdinal]) {
+                continue;
+            }
+            ManifestFileMeta manifestMeta = manifestMetas.get(manifestOrdinal);
+            if (!manifestMayContainSelectedRange(manifestMeta)) {
+                continue;
+            }
             try (CloseableIterator<BinaryManifestEntry> entries =
                     manifestFile.scan(
                             manifestMeta.fileName(), manifestMeta.fileSize(), REWRITE_PROJECTION)) {
                 while (entries.hasNext()) {
                     BinaryManifestEntry entry = entries.next();
-                    PartitionState partition = group.internPartition(entry.partitionBytes());
-                    if (partition == null || partition.logicalRanges == null) {
+                    lookup.reset(entry.partitionBytes());
+                    SelectedPartition selection;
+                    try {
+                        selection = selectedPartitions.get(lookup);
+                    } finally {
+                        lookup.clear();
+                    }
+                    if (selection == null) {
                         continue;
                     }
                     BinaryDataFileMeta file = entry.file();
                     readRowRange(file, manifestOrdinal, null, rowRangeScratch);
-                    if (!partition.logicalRanges.covers(rowRangeScratch[0], rowRangeScratch[1])) {
+                    if (!selection.logicalRanges.covers(rowRangeScratch[0], rowRangeScratch[1])) {
                         continue;
                     }
                     checkState(
@@ -297,11 +347,70 @@ final class DataEvolutionRowIdAssignmentPlanner {
         }
     }
 
+    private boolean manifestMayContainSelectedRange(ManifestFileMeta manifestMeta) {
+        Long minimum = manifestMeta.minRowId();
+        Long maximum = manifestMeta.maxRowId();
+        if (minimum == null || maximum == null) {
+            return true;
+        }
+        for (SelectedPartition partition : selectedPartitions.values()) {
+            if (rangesOverlap(minimum, maximum, partition.logicalRanges)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean rangesOverlap(
+            long rangeStart, long rangeEnd, PrimitiveRowRanges ranges) {
+        int lower = 0;
+        int upper = ranges.size();
+        while (lower < upper) {
+            int middle = lower + ((upper - lower) >>> 1);
+            if (ranges.end(middle) < rangeStart) {
+                lower = middle + 1;
+            } else {
+                upper = middle;
+            }
+        }
+        return lower < ranges.size() && ranges.start(lower) <= rangeEnd;
+    }
+
     private Result buildResult() {
         if (selectedPartitions.isEmpty()) {
             return new Result(new int[0], Collections.emptyMap(), 0L);
         }
 
+        long skippedRangeCount = 0L;
+        long skippedRowCount = 0L;
+        long[] skipped = new long[2];
+        Iterator<Map.Entry<ByteArrayKey, SelectedPartition>> selectedIterator =
+                selectedPartitions.entrySet().iterator();
+        while (selectedIterator.hasNext()) {
+            SelectedPartition partition = selectedIterator.next().getValue();
+            partition.logicalRanges.normalizeOverlapping();
+            if (skipContiguousRowCount > 0) {
+                partition.removeLargeContiguousRuns(skipContiguousRowCount, skipped);
+                skippedRangeCount = Math.addExact(skippedRangeCount, skipped[0]);
+                skippedRowCount = Math.addExact(skippedRowCount, skipped[1]);
+            }
+            if (!partition.hasFragmentedLogicalRanges()) {
+                selectedIterator.remove();
+            }
+        }
+        if (skippedRangeCount > 0) {
+            LOG.info(
+                    "Excluded {} logical ranges containing {} rows from row-id reassignment "
+                            + "because their strictly contiguous same-partition runs exceed {} rows.",
+                    skippedRangeCount,
+                    skippedRowCount,
+                    skipContiguousRowCount);
+        }
+        if (selectedPartitions.isEmpty()) {
+            return new Result(new int[0], Collections.emptyMap(), 0L);
+        }
+
+        markRewrittenManifests();
         List<SelectedPartition> partitions = new ArrayList<>(selectedPartitions.values());
         RecordComparator typedComparator =
                 CodeGenUtils.newRecordComparator(
@@ -317,7 +426,6 @@ final class DataEvolutionRowIdAssignmentPlanner {
         Map<BinaryRow, RowRangeMappingIndex> mappings = new LinkedHashMap<>();
         long nextOffset = 0L;
         for (SelectedPartition partition : partitions) {
-            partition.logicalRanges.normalizeOverlapping();
             int rangeCount = partition.logicalRanges.size();
             checkState(rangeCount > 0, "Selected partition has no logical row-id ranges.");
             PrimitiveRowRanges.Owned ownedRanges = partition.logicalRanges.takeOwned();
@@ -530,6 +638,11 @@ final class DataEvolutionRowIdAssignmentPlanner {
                         selections.add(partition);
                     });
             return selections;
+        }
+
+        private void abort() {
+            deletedIdentifiers.release();
+            liveFileRanges.abort();
         }
     }
 
@@ -759,7 +872,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
 
         private final BinaryRow partition;
         private LegacyPartitionOrderKey legacyOrderKey;
-        private final PrimitiveRowRanges logicalRanges;
+        private PrimitiveRowRanges logicalRanges;
 
         private SelectedPartition(
                 BinaryRow partition,
@@ -768,6 +881,84 @@ final class DataEvolutionRowIdAssignmentPlanner {
             this.partition = partition;
             this.legacyOrderKey = legacyOrderKey;
             this.logicalRanges = logicalRanges;
+        }
+
+        private void removeLargeContiguousRuns(long threshold, long[] result) {
+            checkArgument(threshold > 0, "Skip threshold must be positive.");
+            checkArgument(result != null && result.length >= 2, "Missing skip result buffer.");
+            result[0] = 0L;
+            result[1] = 0L;
+            int originalRangeCount = logicalRanges.size();
+            int retainedRangeCount = 0;
+            long skippedRangeCount = 0L;
+            long skippedRowCount = 0L;
+
+            int index = 0;
+            while (index < originalRangeCount) {
+                int runEnd = contiguousRunEnd(index);
+                long start = logicalRanges.start(index);
+                long end = logicalRanges.end(runEnd);
+                if (rangeCountExceeds(start, end, threshold)) {
+                    skippedRangeCount =
+                            Math.addExact(skippedRangeCount, (long) runEnd - index + 1L);
+                    skippedRowCount =
+                            Math.addExact(skippedRowCount, inclusiveRangeCount(start, end));
+                } else {
+                    retainedRangeCount = Math.addExact(retainedRangeCount, runEnd - index + 1);
+                }
+                index = runEnd + 1;
+            }
+
+            if (skippedRangeCount == 0L) {
+                return;
+            }
+
+            PrimitiveRowRanges retained = new PrimitiveRowRanges(retainedRangeCount);
+            index = 0;
+            while (index < originalRangeCount) {
+                int runEnd = contiguousRunEnd(index);
+                long start = logicalRanges.start(index);
+                long end = logicalRanges.end(runEnd);
+                if (!rangeCountExceeds(start, end, threshold)) {
+                    for (int rangeIndex = index; rangeIndex <= runEnd; rangeIndex++) {
+                        retained.add(
+                                logicalRanges.start(rangeIndex), logicalRanges.end(rangeIndex));
+                    }
+                }
+                index = runEnd + 1;
+            }
+            logicalRanges = retained;
+            result[0] = skippedRangeCount;
+            result[1] = skippedRowCount;
+        }
+
+        private boolean hasFragmentedLogicalRanges() {
+            for (int index = 1; index < logicalRanges.size(); index++) {
+                if (!adjacent(logicalRanges.end(index - 1), logicalRanges.start(index))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private int contiguousRunEnd(int runStart) {
+            int runEnd = runStart;
+            while (runEnd + 1 < logicalRanges.size()
+                    && adjacent(logicalRanges.end(runEnd), logicalRanges.start(runEnd + 1))) {
+                runEnd++;
+            }
+            return runEnd;
+        }
+
+        private static boolean adjacent(long leftEnd, long rightStart) {
+            return leftEnd != Long.MAX_VALUE && rightStart == leftEnd + 1L;
+        }
+
+        private static boolean rangeCountExceeds(long start, long end, long threshold) {
+            if (start > Long.MAX_VALUE - threshold) {
+                return false;
+            }
+            return end >= start + threshold;
         }
     }
 }
