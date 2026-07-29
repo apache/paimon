@@ -334,16 +334,7 @@ public interface DataFileMeta {
 
     DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber);
 
-    default DataFileMeta assignFileSource(FileSource fileSource) {
-        Optional<FileSource> current = fileSource();
-        if (current.isPresent() && current.get() == fileSource) {
-            return this;
-        }
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Cannot assign file source %s to DataFileMeta '%s'.",
-                        fileSource, fileName()));
-    }
+    DataFileMeta assignFileSource(FileSource fileSource);
 
     DataFileMeta assignFirstRowId(long firstRowId);
 
