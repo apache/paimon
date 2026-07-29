@@ -163,9 +163,14 @@ public class ParallelExecutionTest {
                     }
 
                     @Override
-                    public void close() {
+                    public void close() throws IOException {
                         readerCloseStarted.countDown();
-                        allowReaderClose.acquireUninterruptibly();
+                        try {
+                            allowReaderClose.acquire();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new IOException("Reader close was interrupted.", e);
+                        }
                         readerClosed.countDown();
                     }
                 };
