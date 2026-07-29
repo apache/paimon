@@ -20,6 +20,9 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.Public;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.UUID;
 
@@ -29,6 +32,9 @@ import java.util.UUID;
  */
 @Public
 public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
+
+    private static final Logger LOG = LoggerFactory.getLogger(RenamingTwoPhaseOutputStream.class);
+
     private static final String TEMP_DIR_NAME = "_temporary";
 
     private final Path targetPath;
@@ -136,7 +142,26 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
 
         @Override
         public void clean(FileIO fileIO) {
-            fileIO.deleteDirectoryQuietly(tempPath.getParent());
+            fileIO.deleteQuietly(tempPath);
+            Path stagingDir = tempPath.getParent();
+            if (stagingDir == null) {
+                return;
+            }
+            try {
+                // '_temporary' is shared with every other writer of this directory, Paimon or not,
+                // so it may only go away once nothing is staged there any more. A non-recursive
+                // delete asks exactly that: it removes the directory when it is empty and refuses
+                // while a concurrent writer still has files in it. Removing it is best-effort --
+                // a writer that stages here next recreates it anyway.
+                fileIO.delete(stagingDir, false);
+            } catch (IOException e) {
+                LOG.debug(
+                        "Left staging directory {} in place: the non-recursive delete did not"
+                                + " succeed. Usually another writer still has files staged there,"
+                                + " or the directory is already gone; see the attached exception.",
+                        stagingDir,
+                        e);
+            }
         }
     }
 }
