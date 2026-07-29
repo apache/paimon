@@ -294,8 +294,12 @@ public class SnapshotManager implements Serializable {
                 "Snapshot %s must not be later than latest snapshot %s.",
                 snapshotId,
                 latest);
-        Preconditions.checkArgument(
-                snapshotExists(snapshotId), "Snapshot %s does not exist.", snapshotId);
+        for (long id = snapshotId; ; id++) {
+            Preconditions.checkArgument(snapshotExists(id), "Snapshot %s does not exist.", id);
+            if (id == latest) {
+                break;
+            }
+        }
         Preconditions.checkArgument(
                 snapshotId == previous || !snapshotExists(snapshotId - 1),
                 "Snapshot %s does not immediately follow a snapshot gap.",

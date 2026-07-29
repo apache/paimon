@@ -144,6 +144,23 @@ public class SnapshotManagerTest {
     }
 
     @Test
+    public void testRepairEarliestSnapshotRejectsNonContinuousSuffix() throws IOException {
+        FileIO fileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        for (long snapshotId : new long[] {1, 3, 5, 6}) {
+            fileIO.tryToWriteAtomic(
+                    snapshotManager.snapshotPath(snapshotId),
+                    createSnapshotWithMillis(snapshotId, snapshotId * 1000).toJson());
+        }
+        snapshotManager.commitEarliestHint(1);
+        snapshotManager.commitLatestHint(6);
+
+        assertThatThrownBy(() -> snapshotManager.repairEarliestSnapshot(3))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Snapshot 4 does not exist");
+    }
+
+    @Test
     public void testRepairEarliestSnapshotRejectsTargetAfterLatest() throws IOException {
         FileIO fileIO = LocalFileIO.create();
         SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
