@@ -98,8 +98,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     private static final String LARGE_FILE_PREFIX = "large-partition-";
     private static final String LARGE_FILE_SUFFIX = ".parquet";
     private static final int LARGE_PARTITION_ID_WIDTH = 7;
-    private static final String SKIP_CONTIGUOUS_ROW_COUNT =
-            "data-evolution.reassign.skip-contiguous-row-count";
     private static final String[] DATA_INTEGRITY_PARTITIONS = {"a", "b", "c", "d"};
     private static final int DATA_INTEGRITY_FILES_PER_PARTITION = 6;
     private static final long SCRAMBLED_ROW_ID_GAP = 100_000_000L;
@@ -459,6 +457,71 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(floatScanMapping.oldEnds).containsExactly(300L, 302L);
         assertThat(floatScanMapping.newStarts).containsExactly(6L, 7L);
         assertThat(plan.totalOffset).isEqualTo(8L);
+    }
+
+    @Test
+    public void testDeleteEntryAtEndDoesNotAffectEqualPartitionOrdering() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("float_pt", DataTypes.FLOAT());
+        schemaBuilder.column("id", DataTypes.INT());
+        schemaBuilder.partitionKeys("float_pt");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+        FileStoreTable table = getTableDefault();
+
+        InternalRowSerializer partitionSerializer =
+                new InternalRowSerializer(table.schema().logicalPartitionType());
+        BinaryRow laterPartition =
+                partitionSerializer
+                        .toBinaryRow(GenericRow.of(Float.intBitsToFloat(0x7fc00001)))
+                        .copy();
+        BinaryRow earlierPartition =
+                partitionSerializer
+                        .toBinaryRow(GenericRow.of(Float.intBitsToFloat(0x7fc00002)))
+                        .copy();
+        assertThat(laterPartition.toBytes()).isNotEqualTo(earlierPartition.toBytes());
+
+        DataFileMeta deletedFile =
+                planningDataFile("deleted-0.parquet", 0L, 1, Collections.emptyList(), null, null);
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        ManifestEntry.create(FileKind.ADD, laterPartition, 0, 1, deletedFile),
+                        planningManifestEntry(earlierPartition, "earlier-live-10.parquet", 10L, 1L),
+                        planningManifestEntry(earlierPartition, "earlier-live-12.parquet", 12L, 1L),
+                        planningManifestEntry(laterPartition, "later-live-100.parquet", 100L, 1L),
+                        planningManifestEntry(laterPartition, "later-live-102.parquet", 102L, 1L),
+                        // Keep DELETE after its ADD, matching manifest compaction ordering.
+                        ManifestEntry.create(FileKind.DELETE, laterPartition, 0, 1, deletedFile));
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+        List<ManifestFileMeta> manifestMetas = manifestFile.write(entries);
+        assertThat(manifestMetas).hasSize(1);
+        assertThat(
+                        manifestFile.read(
+                                manifestMetas.get(0).fileName(), manifestMetas.get(0).fileSize()))
+                .extracting(ManifestEntry::kind)
+                .containsExactly(
+                        FileKind.ADD,
+                        FileKind.ADD,
+                        FileKind.ADD,
+                        FileKind.ADD,
+                        FileKind.ADD,
+                        FileKind.DELETE);
+
+        Optional<AssignmentPlanView> compactPlan = compactPlanView(table, manifestMetas, null);
+        Optional<AssignmentPlanView> legacyPlan = legacyPlanView(table, manifestMetas, null);
+        assertPlanViewsEqual(compactPlan, legacyPlan);
+
+        assertThat(compactPlan).isPresent();
+        AssignmentPlanView plan = compactPlan.get();
+        assertThat(plan.partitionMappings).hasSize(2);
+        PartitionMappingView earlierMapping = plan.partitionMappings.get(0);
+        assertThat(earlierMapping.partitionBytes).containsExactly(earlierPartition.toBytes());
+        assertThat(earlierMapping.oldStarts).containsExactly(10L, 12L);
+        PartitionMappingView laterMapping = plan.partitionMappings.get(1);
+        assertThat(laterMapping.partitionBytes).containsExactly(laterPartition.toBytes());
+        assertThat(laterMapping.oldStarts).containsExactly(100L, 102L);
+        assertThat(plan.totalOffset).isEqualTo(4L);
     }
 
     @Test
@@ -1315,7 +1378,10 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 42L);
 
         FileStoreTable configured =
-                table.copy(Collections.singletonMap(SKIP_CONTIGUOUS_ROW_COUNT, "10"));
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT.key(),
+                                "10"));
         DataEvolutionRowIdReassigner.Result result =
                 new DataEvolutionRowIdReassigner(configured)
                         .reassign("test-exclude-large-contiguous-run");
@@ -1358,7 +1424,10 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 22L);
 
         FileStoreTable configured =
-                table.copy(Collections.singletonMap(SKIP_CONTIGUOUS_ROW_COUNT, "10"));
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT.key(),
+                                "10"));
         DataEvolutionRowIdReassigner.Result result =
                 new DataEvolutionRowIdReassigner(configured)
                         .reassign("test-retain-threshold-contiguous-run");
@@ -1390,7 +1459,10 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 42L);
 
         FileStoreTable configured =
-                table.copy(Collections.singletonMap(SKIP_CONTIGUOUS_ROW_COUNT, "0"));
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT.key(),
+                                "0"));
         DataEvolutionRowIdReassigner.Result result =
                 new DataEvolutionRowIdReassigner(configured)
                         .reassign("test-disable-contiguous-run-filtering");
@@ -1426,7 +1498,10 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 32L);
 
         FileStoreTable configured =
-                table.copy(Collections.singletonMap(SKIP_CONTIGUOUS_ROW_COUNT, "10"));
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT.key(),
+                                "10"));
         DataEvolutionRowIdReassigner.Result result =
                 new DataEvolutionRowIdReassigner(configured)
                         .reassign("test-exclude-all-large-contiguous-runs");
@@ -1456,7 +1531,10 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 32L);
 
         FileStoreTable configured =
-                table.copy(Collections.singletonMap(SKIP_CONTIGUOUS_ROW_COUNT, "10"));
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT.key(),
+                                "10"));
         DataEvolutionRowIdReassigner.Result result =
                 new DataEvolutionRowIdReassigner(configured).reassign("test-single-retained-run");
 

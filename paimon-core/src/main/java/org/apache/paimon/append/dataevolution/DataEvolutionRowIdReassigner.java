@@ -26,9 +26,7 @@ import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.BinaryManifestEntry;
-import org.apache.paimon.manifest.BinaryManifestEntry.Projection;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -42,8 +40,6 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
@@ -73,23 +69,10 @@ public class DataEvolutionRowIdReassigner {
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionRowIdReassigner.class);
     private static final String COMMIT_USER_PREFIX = "reassign-row-id";
     private static final int MAX_COMMIT_ATTEMPTS = 3;
-    private static final Projection RETRY_PROJECTION =
-            retryProjection(DataFileMeta.ROW_COUNT, DataFileMeta.FIRST_ROW_ID);
 
     private final FileStoreTable table;
     private final @Nullable PartitionPredicate partitionPredicate;
     private final Runnable beforeCommit;
-
-    private static Projection retryProjection(String... projectedFileFields) {
-        List<DataField> fields = new ArrayList<>();
-        fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.KIND));
-        fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.PARTITION));
-        fields.add(
-                ManifestEntry.MANIFEST_ROW_TYPE
-                        .getField(ManifestEntry.FILE)
-                        .newType(DataFileMeta.SCHEMA.project(projectedFileFields)));
-        return Projection.create(new RowType(false, fields));
-    }
 
     public DataEvolutionRowIdReassigner(FileStoreTable table) {
         this(table, null);
@@ -497,7 +480,9 @@ public class DataEvolutionRowIdReassigner {
             ManifestFileMeta manifestMeta) {
         try (CloseableIterator<BinaryManifestEntry> entries =
                 manifestFile.scan(
-                        manifestMeta.fileName(), manifestMeta.fileSize(), RETRY_PROJECTION)) {
+                        manifestMeta.fileName(),
+                        manifestMeta.fileSize(),
+                        BinaryManifestEntry.ROW_RANGE_PROJECTION)) {
             while (entries.hasNext()) {
                 BinaryManifestEntry entry = entries.next();
                 RowRangeMappingIndex mapping =
@@ -523,7 +508,9 @@ public class DataEvolutionRowIdReassigner {
         boolean needsReassign = false;
         try (CloseableIterator<BinaryManifestEntry> entries =
                 manifestFile.scan(
-                        manifestMeta.fileName(), manifestMeta.fileSize(), RETRY_PROJECTION)) {
+                        manifestMeta.fileName(),
+                        manifestMeta.fileSize(),
+                        BinaryManifestEntry.ROW_RANGE_PROJECTION)) {
             while (entries.hasNext()) {
                 BinaryManifestEntry entry = entries.next();
                 if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {

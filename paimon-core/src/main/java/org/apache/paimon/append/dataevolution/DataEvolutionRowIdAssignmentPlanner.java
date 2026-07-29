@@ -39,6 +39,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ByteArrayKey;
 import org.apache.paimon.utils.ByteArrayLookupKey;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PrimitiveRowRanges;
 import org.apache.paimon.utils.SerializationUtils;
 
@@ -55,7 +56,6 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.apache.paimon.append.dataevolution.LiveFileRowIdRangeCollector.FileRole.DEDICATED;
 import static org.apache.paimon.append.dataevolution.LiveFileRowIdRangeCollector.FileRole.NORMAL;
@@ -74,9 +74,6 @@ final class DataEvolutionRowIdAssignmentPlanner {
             LoggerFactory.getLogger(DataEvolutionRowIdAssignmentPlanner.class);
     private static final int EXCLUDED_PARTITION_CACHE_SIZE = 1024;
     private static final int MAX_INITIAL_LIVE_FILE_RANGES = 1 << 24;
-    private static final String SKIP_CONTIGUOUS_ROW_COUNT =
-            "data-evolution.reassign.skip-contiguous-row-count";
-    private static final long DEFAULT_SKIP_CONTIGUOUS_ROW_COUNT = 1_000_000_000L;
     private static final BinaryString ROW_ID_FIELD =
             BinaryString.fromString(SpecialFields.ROW_ID.name());
     private static final BinaryString BLOB_FILE_SUFFIX = BinaryString.fromString(".blob");
@@ -128,23 +125,8 @@ final class DataEvolutionRowIdAssignmentPlanner {
         this.plannedManifests = new boolean[manifestMetas.size()];
         this.rewrittenManifests = new boolean[manifestMetas.size()];
         this.selectedPartitions = new LinkedHashMap<>();
-        try {
-            this.skipContiguousRowCount =
-                    Optional.ofNullable(table.options().get(SKIP_CONTIGUOUS_ROW_COUNT))
-                            .map(Long::parseLong)
-                            .orElse(DEFAULT_SKIP_CONTIGUOUS_ROW_COUNT);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Invalid value '%s' for option '%s'.",
-                            table.options().get(SKIP_CONTIGUOUS_ROW_COUNT),
-                            SKIP_CONTIGUOUS_ROW_COUNT),
-                    e);
-        }
-        checkArgument(
-                skipContiguousRowCount >= 0,
-                "Option '%s' cannot be negative.",
-                SKIP_CONTIGUOUS_ROW_COUNT);
+        this.skipContiguousRowCount =
+                table.coreOptions().dataEvolutionReassignSkipContiguousRowCount();
     }
 
     private static Projection manifestProjection(
@@ -336,26 +318,11 @@ final class DataEvolutionRowIdAssignmentPlanner {
             return true;
         }
         for (SelectedPartition partition : selectedPartitions.values()) {
-            if (rangesOverlap(minimum, maximum, partition.logicalRanges)) {
+            if (partition.logicalRanges.overlaps(minimum, maximum)) {
                 return true;
             }
         }
         return false;
-    }
-
-    private static boolean rangesOverlap(
-            long rangeStart, long rangeEnd, PrimitiveRowRanges ranges) {
-        int lower = 0;
-        int upper = ranges.size();
-        while (lower < upper) {
-            int middle = lower + ((upper - lower) >>> 1);
-            if (ranges.end(middle) < rangeStart) {
-                lower = middle + 1;
-            } else {
-                upper = middle;
-            }
-        }
-        return lower < ranges.size() && ranges.start(lower) <= rangeEnd;
     }
 
     private Result buildResult() {
@@ -365,16 +332,16 @@ final class DataEvolutionRowIdAssignmentPlanner {
 
         long skippedRangeCount = 0L;
         long skippedRowCount = 0L;
-        long[] skipped = new long[2];
         Iterator<Map.Entry<ByteArrayKey, SelectedPartition>> selectedIterator =
                 selectedPartitions.entrySet().iterator();
         while (selectedIterator.hasNext()) {
             SelectedPartition partition = selectedIterator.next().getValue();
             partition.logicalRanges.normalizeOverlapping();
             if (skipContiguousRowCount > 0) {
-                partition.removeLargeContiguousRuns(skipContiguousRowCount, skipped);
-                skippedRangeCount = Math.addExact(skippedRangeCount, skipped[0]);
-                skippedRowCount = Math.addExact(skippedRowCount, skipped[1]);
+                Pair<Long, Long> skipped =
+                        partition.removeLargeContiguousRuns(skipContiguousRowCount);
+                skippedRangeCount = Math.addExact(skippedRangeCount, skipped.getLeft());
+                skippedRowCount = Math.addExact(skippedRowCount, skipped.getRight());
             }
             if (!partition.hasFragmentedLogicalRanges()) {
                 selectedIterator.remove();
@@ -755,11 +722,8 @@ final class DataEvolutionRowIdAssignmentPlanner {
             this.logicalRanges = logicalRanges;
         }
 
-        private void removeLargeContiguousRuns(long threshold, long[] result) {
+        private Pair<Long, Long> removeLargeContiguousRuns(long threshold) {
             checkArgument(threshold > 0, "Skip threshold must be positive.");
-            checkArgument(result != null && result.length >= 2, "Missing skip result buffer.");
-            result[0] = 0L;
-            result[1] = 0L;
             int originalRangeCount = logicalRanges.size();
             int retainedRangeCount = 0;
             long skippedRangeCount = 0L;
@@ -782,7 +746,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
             }
 
             if (skippedRangeCount == 0L) {
-                return;
+                return Pair.of(0L, 0L);
             }
 
             PrimitiveRowRanges retained = new PrimitiveRowRanges(retainedRangeCount);
@@ -800,8 +764,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
                 index = runEnd + 1;
             }
             logicalRanges = retained;
-            result[0] = skippedRangeCount;
-            result[1] = skippedRowCount;
+            return Pair.of(skippedRangeCount, skippedRowCount);
         }
 
         private boolean hasFragmentedLogicalRanges() {

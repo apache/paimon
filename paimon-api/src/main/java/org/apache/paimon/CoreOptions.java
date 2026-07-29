@@ -2497,6 +2497,15 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
 
+    public static final ConfigOption<Long> DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT =
+            key("data-evolution.reassign.skip-contiguous-row-count")
+                    .longType()
+                    .defaultValue(1_000_000_000L)
+                    .withDescription(
+                            "Strictly contiguous same-partition logical row-id runs containing "
+                                    + "more than this number of rows are excluded from row-id "
+                                    + "reassignment. Set to 0 to disable this filtering.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_ROW_SIDECAR_ENABLED =
             key("data-evolution.row-sidecar.enabled")
                     .booleanType()
@@ -4215,6 +4224,15 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionEnabled() {
         return options.get(DATA_EVOLUTION_ENABLED);
+    }
+
+    public long dataEvolutionReassignSkipContiguousRowCount() {
+        long threshold = options.get(DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT);
+        checkArgument(
+                threshold >= 0,
+                "The option %s cannot be negative.",
+                DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT.key());
+        return threshold;
     }
 
     public boolean dataEvolutionRowSidecarEnabled() {

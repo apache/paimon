@@ -79,6 +79,22 @@ class PrimitiveRowRangesTest {
     }
 
     @Test
+    void testOverlaps() {
+        PrimitiveRowRanges ranges = new PrimitiveRowRanges(4);
+        ranges.add(20L, 25L);
+        ranges.add(5L, 8L);
+        ranges.add(8L, 12L);
+        ranges.add(30L, 35L);
+
+        assertThat(ranges.overlaps(0L, 4L)).isFalse();
+        assertThat(ranges.overlaps(4L, 5L)).isTrue();
+        assertThat(ranges.overlaps(12L, 19L)).isTrue();
+        assertThat(ranges.overlaps(13L, 19L)).isFalse();
+        assertThat(ranges.overlaps(24L, 31L)).isTrue();
+        assertThat(ranges.overlaps(36L, Long.MAX_VALUE)).isFalse();
+    }
+
+    @Test
     void testCovers() {
         PrimitiveRowRanges ranges = new PrimitiveRowRanges(4);
         ranges.add(5L, 8L);
@@ -111,6 +127,8 @@ class PrimitiveRowRangesTest {
         assertThatThrownBy(() -> ranges.add(2L, 1L)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> ranges.start(0)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> ranges.append(null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> ranges.overlaps(2L, 1L))
+                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> ranges.covers(2L, 1L))
                 .isInstanceOf(IllegalArgumentException.class);
     }

@@ -120,6 +120,26 @@ public final class PrimitiveRowRanges {
     }
 
     /**
+     * Returns whether any stored range overlaps the inclusive range from {@code start} to {@code
+     * end}.
+     */
+    public boolean overlaps(long start, long end) {
+        checkArgument(start <= end, "Invalid row range [%s, %s].", start, end);
+        normalizeOverlapping();
+        int lower = 0;
+        int upper = size;
+        while (lower < upper) {
+            int middle = lower + ((upper - lower) >>> 1);
+            if (ends[middle] < start) {
+                lower = middle + 1;
+            } else {
+                upper = middle;
+            }
+        }
+        return lower < size && starts[lower] <= end;
+    }
+
+    /**
      * Returns whether these ranges fully cover the inclusive range from {@code start} to {@code
      * end}.
      */
