@@ -101,10 +101,6 @@ public class FormatTableScan implements InnerTableScan {
         throw new UnsupportedOperationException("Filter is not supported for FormatTable.");
     }
 
-    public static boolean isDataFileName(String fileName) {
-        return fileName != null && !PartitionPathUtils.isHiddenName(fileName);
-    }
-
     /**
      * Lists the data files under {@code listedRoot}, skipping committer staging trees ({@code
      * _temporary/}, {@code __magic_job-<id>/}, {@code .hive-staging_*}) without descending into
