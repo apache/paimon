@@ -92,18 +92,35 @@ public class RenamingTwoPhaseOutputStreamTest {
     }
 
     @Test
-    void testCleanRemovesTheStagingDirectoryOnceEmpty() throws IOException {
+    void testCleanLeavesTheStagingDirectoryForItsOwners() throws IOException {
+        RenamingTwoPhaseOutputStream stream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        stream.write("Some data".getBytes());
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+        Path stagingDir = new Path(targetPath.getParent(), "_temporary");
+
+        committer.commit(fileIO);
+        committer.clean(fileIO);
+
+        // Empty is not the same as unused: a writer that has just created '_temporary' has not
+        // staged its file in it yet, and removing the directory would fail that writer's open.
+        assertThat(fileIO.exists(targetPath)).isTrue();
+        assertThat(fileIO.listStatus(stagingDir)).isEmpty();
+    }
+
+    @Test
+    void testCleanRemovesTheFileItStagedWhenThereWasNoCommit() throws IOException {
         RenamingTwoPhaseOutputStream stream =
                 new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
         stream.write("Some data".getBytes());
         TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
 
-        committer.commit(fileIO);
+        // No commit renamed it away, so clean() is what keeps the staged file from being left
+        // behind for good.
         committer.clean(fileIO);
 
-        // Nothing else was staged, so the writer leaves no trace beyond its committed file.
-        assertThat(fileIO.exists(targetPath)).isTrue();
-        assertThat(fileIO.exists(new Path(targetPath.getParent(), "_temporary"))).isFalse();
+        assertThat(fileIO.exists(targetPath)).isFalse();
+        assertThat(fileIO.listStatus(new Path(targetPath.getParent(), "_temporary"))).isEmpty();
     }
 
     @Test
