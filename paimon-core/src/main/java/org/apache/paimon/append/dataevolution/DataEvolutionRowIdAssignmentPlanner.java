@@ -91,16 +91,14 @@ final class DataEvolutionRowIdAssignmentPlanner {
                     DataFileMeta.EMBEDDED_FILE_INDEX,
                     DataFileMeta.EXTERNAL_PATH,
                     DataFileMeta.FIRST_ROW_ID,
-                    DataFileMeta.WRITE_COLS,
-                    DataFileMeta.MAX_SEQUENCE_NUMBER);
+                    DataFileMeta.WRITE_COLS);
     private static final Projection COMPACT_ADD_PROJECTION =
             manifestProjection(
                     false,
                     DataFileMeta.FILE_NAME,
                     DataFileMeta.ROW_COUNT,
                     DataFileMeta.FIRST_ROW_ID,
-                    DataFileMeta.WRITE_COLS,
-                    DataFileMeta.MAX_SEQUENCE_NUMBER);
+                    DataFileMeta.WRITE_COLS);
     private static final Projection REWRITE_PROJECTION =
             manifestProjection(
                     false,
@@ -117,8 +115,6 @@ final class DataEvolutionRowIdAssignmentPlanner {
     private final boolean[] rewrittenManifests;
     private final Map<ByteArrayKey, SelectedPartition> selectedPartitions;
     private final long skipContiguousRowCount;
-    private long nextManifestGroupOrdinal;
-    private long nextRetainedAddScanOrdinal;
 
     DataEvolutionRowIdAssignmentPlanner(
             FileStoreTable table,
@@ -175,8 +171,6 @@ final class DataEvolutionRowIdAssignmentPlanner {
     }
 
     private void planGroup(List<ManifestFileMeta> manifestGroup) {
-        long manifestGroupOrdinal = nextManifestGroupOrdinal;
-        nextManifestGroupOrdinal = Math.addExact(nextManifestGroupOrdinal, 1L);
         GroupState group =
                 new GroupState(
                         table.schema().logicalPartitionType().getFieldCount(),
@@ -193,8 +187,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
 
         try {
             collectDeletedIdentifiers(manifestGroup, group, identifier);
-            collectLiveFileRanges(
-                    manifestGroup, group, identifier, manifestGroupOrdinal, rowRangeScratch);
+            collectLiveFileRanges(manifestGroup, group, identifier, rowRangeScratch);
             identifier.release();
             group.releaseDeletedIdentifiers();
 
@@ -242,7 +235,6 @@ final class DataEvolutionRowIdAssignmentPlanner {
             List<ManifestFileMeta> manifestGroup,
             GroupState group,
             ReusableIdentifier identifier,
-            long manifestGroupOrdinal,
             long[] rowRangeScratch) {
         Projection addProjection =
                 group.deletedIdentifiers.isEmpty()
@@ -279,17 +271,8 @@ final class DataEvolutionRowIdAssignmentPlanner {
                             !file.containsWriteColumn(ROW_ID_FIELD),
                             "Cannot reassign row IDs for file '%s' because it physically stores the row-id field.",
                             fileName);
-                    long maxSequenceNumber = file.maxSequenceNumber();
-                    long retainedAddScanOrdinal = nextRetainedAddScanOrdinal;
-                    nextRetainedAddScanOrdinal = Math.addExact(nextRetainedAddScanOrdinal, 1L);
                     int fileOrder = fileOrder(fileName);
-                    partition.considerLegacyOrderKey(
-                            manifestGroupOrdinal,
-                            rowRangeScratch[0],
-                            fileOrder,
-                            maxSequenceNumber,
-                            fileName,
-                            retainedAddScanOrdinal);
+                    partition.considerFirstRowId(rowRangeScratch[0]);
                     group.liveFileRanges.add(
                             partition.id,
                             fileOrder == 0 ? NORMAL : DEDICATED,
@@ -417,9 +400,11 @@ final class DataEvolutionRowIdAssignmentPlanner {
         partitions.sort(
                 (left, right) -> {
                     int comparison = typedComparator.compare(left.partition, right.partition);
+                    // Row IDs are globally unique, so this also orders binary-distinct
+                    // partitions which compare equal, for example different NaN payloads.
                     return comparison != 0
                             ? comparison
-                            : left.legacyOrderKey.compareTo(right.legacyOrderKey);
+                            : Long.compare(left.minFirstRowId, right.minFirstRowId);
                 });
 
         Map<BinaryRow, RowRangeMappingIndex> mappings = new LinkedHashMap<>();
@@ -465,15 +450,13 @@ final class DataEvolutionRowIdAssignmentPlanner {
         ByteArrayLookupKey lookup = new ByteArrayLookupKey(selection.serialized);
         SelectedPartition selected = selectedPartitions.get(lookup);
         if (selected == null) {
-            LegacyPartitionOrderKey legacyOrderKey = selection.requiredLegacyOrderKey();
-            selected = new SelectedPartition(selection.partition, legacyOrderKey, logicalRanges);
+            selected =
+                    new SelectedPartition(
+                            selection.partition, selection.minFirstRowId, logicalRanges);
             selectedPartitions.put(new ByteArrayKey(selection.serialized), selected);
             return;
         }
-        LegacyPartitionOrderKey incomingOrderKey = selection.requiredLegacyOrderKey();
-        if (incomingOrderKey.compareTo(selected.legacyOrderKey) < 0) {
-            selected.legacyOrderKey = incomingOrderKey;
-        }
+        selected.minFirstRowId = Math.min(selected.minFirstRowId, selection.minFirstRowId);
         selected.logicalRanges.append(logicalRanges);
         selected.logicalRanges.normalizeOverlapping();
     }
@@ -735,7 +718,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
         private final int id;
         private final byte[] serialized;
         private final BinaryRow partition;
-        private @Nullable LegacyPartitionOrderKey legacyOrderKey;
+        private long minFirstRowId = Long.MAX_VALUE;
         private @Nullable PrimitiveRowRanges logicalRanges;
 
         private PartitionState(int id, byte[] serialized, BinaryRow partition) {
@@ -744,66 +727,8 @@ final class DataEvolutionRowIdAssignmentPlanner {
             this.partition = partition;
         }
 
-        private void considerLegacyOrderKey(
-                long manifestGroupOrdinal,
-                long firstRowId,
-                int fileOrder,
-                long maxSequenceNumber,
-                BinaryString fileName,
-                long retainedAddScanOrdinal) {
-            if (legacyOrderKey == null) {
-                legacyOrderKey =
-                        new LegacyPartitionOrderKey(
-                                manifestGroupOrdinal,
-                                firstRowId,
-                                fileOrder,
-                                maxSequenceNumber,
-                                fileName.toString(),
-                                retainedAddScanOrdinal);
-                return;
-            }
-
-            int comparison =
-                    Long.compare(manifestGroupOrdinal, legacyOrderKey.manifestGroupOrdinal);
-            if (comparison == 0) {
-                comparison = Long.compare(firstRowId, legacyOrderKey.firstRowId);
-            }
-            if (comparison == 0) {
-                comparison = Integer.compare(fileOrder, legacyOrderKey.fileOrder);
-            }
-            if (comparison == 0) {
-                comparison = Long.compare(legacyOrderKey.maxSequenceNumber, maxSequenceNumber);
-            }
-
-            String stableFileName = null;
-            if (comparison == 0) {
-                stableFileName = fileName.toString();
-                comparison = stableFileName.compareTo(legacyOrderKey.fileName);
-            }
-            if (comparison == 0) {
-                comparison =
-                        Long.compare(retainedAddScanOrdinal, legacyOrderKey.retainedAddScanOrdinal);
-            }
-            if (comparison < 0) {
-                if (stableFileName == null) {
-                    stableFileName = fileName.toString();
-                }
-                legacyOrderKey =
-                        new LegacyPartitionOrderKey(
-                                manifestGroupOrdinal,
-                                firstRowId,
-                                fileOrder,
-                                maxSequenceNumber,
-                                stableFileName,
-                                retainedAddScanOrdinal);
-            }
-        }
-
-        private LegacyPartitionOrderKey requiredLegacyOrderKey() {
-            checkState(
-                    legacyOrderKey != null,
-                    "Selected partition does not have a retained ADD ordering key.");
-            return legacyOrderKey;
+        private void considerFirstRowId(long firstRowId) {
+            minFirstRowId = Math.min(minFirstRowId, firstRowId);
         }
 
         private void select(PrimitiveRowRanges logicalRanges) {
@@ -817,68 +742,16 @@ final class DataEvolutionRowIdAssignmentPlanner {
         }
     }
 
-    private static final class LegacyPartitionOrderKey
-            implements Comparable<LegacyPartitionOrderKey> {
-
-        private final long manifestGroupOrdinal;
-        private final long firstRowId;
-        private final int fileOrder;
-        private final long maxSequenceNumber;
-        private final String fileName;
-        private final long retainedAddScanOrdinal;
-
-        private LegacyPartitionOrderKey(
-                long manifestGroupOrdinal,
-                long firstRowId,
-                int fileOrder,
-                long maxSequenceNumber,
-                String fileName,
-                long retainedAddScanOrdinal) {
-            this.manifestGroupOrdinal = manifestGroupOrdinal;
-            this.firstRowId = firstRowId;
-            this.fileOrder = fileOrder;
-            this.maxSequenceNumber = maxSequenceNumber;
-            this.fileName = fileName;
-            this.retainedAddScanOrdinal = retainedAddScanOrdinal;
-        }
-
-        @Override
-        public int compareTo(LegacyPartitionOrderKey other) {
-            int comparison = Long.compare(manifestGroupOrdinal, other.manifestGroupOrdinal);
-            if (comparison != 0) {
-                return comparison;
-            }
-            comparison = Long.compare(firstRowId, other.firstRowId);
-            if (comparison != 0) {
-                return comparison;
-            }
-            comparison = Integer.compare(fileOrder, other.fileOrder);
-            if (comparison != 0) {
-                return comparison;
-            }
-            comparison = Long.compare(other.maxSequenceNumber, maxSequenceNumber);
-            if (comparison != 0) {
-                return comparison;
-            }
-            comparison = fileName.compareTo(other.fileName);
-            return comparison != 0
-                    ? comparison
-                    : Long.compare(retainedAddScanOrdinal, other.retainedAddScanOrdinal);
-        }
-    }
-
     private static final class SelectedPartition {
 
         private final BinaryRow partition;
-        private LegacyPartitionOrderKey legacyOrderKey;
+        private long minFirstRowId;
         private PrimitiveRowRanges logicalRanges;
 
         private SelectedPartition(
-                BinaryRow partition,
-                LegacyPartitionOrderKey legacyOrderKey,
-                PrimitiveRowRanges logicalRanges) {
+                BinaryRow partition, long minFirstRowId, PrimitiveRowRanges logicalRanges) {
             this.partition = partition;
-            this.legacyOrderKey = legacyOrderKey;
+            this.minFirstRowId = minFirstRowId;
             this.logicalRanges = logicalRanges;
         }
 
