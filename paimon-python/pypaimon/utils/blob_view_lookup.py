@@ -290,7 +290,14 @@ class BlobViewLookup:
         return max(_MIN_ROWS_PER_TASK, (total_rows + _PRELOAD_THREAD_NUM - 1) // _PRELOAD_THREAD_NUM)
 
     def _load_table(self, identifier: Identifier):
-        catalog = self._table.catalog_environment.catalog_loader.load()
+        catalog_environment = self._table.catalog_environment
+        catalog_loader = catalog_environment.catalog_loader
+        dependency_context = catalog_environment.dependency_read_context()
+        if dependency_context is catalog_environment.catalog_context():
+            catalog = catalog_loader.load()
+        else:
+            from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
+            catalog = RESTCatalogLoader(dependency_context).load()
         return catalog.get_table(identifier)
 
     @staticmethod
