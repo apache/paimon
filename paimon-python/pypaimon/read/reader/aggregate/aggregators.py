@@ -34,8 +34,6 @@ error rather than a silent fallback.
 """
 from typing import Any, List, Dict, Optional, Tuple, Union, Set
 
-from _datasketches import compact_theta_sketch, theta_union
-
 from pypaimon.common.options import CoreOptions
 from pypaimon.common.options.core_options import NestedKeyNullStrategy
 from pypaimon.data.decimal import Decimal
@@ -1413,6 +1411,15 @@ class FieldThetaSketchAgg(FieldAggregator):
             accumulator = bytes(accumulator)
         if isinstance(input_field, bytearray):
             input_field = bytes(input_field)
+
+        try:
+            from _datasketches import compact_theta_sketch, theta_union
+        except ImportError as exc:
+            raise ImportError(
+                "The theta_sketch aggregator requires the 'datasketches' "
+                "package. Install it with "
+                "\"pip install 'pypaimon[theta-sketch]'\"."
+            ) from exc
 
         sketch1 = compact_theta_sketch.deserialize(accumulator)
         sketch2 = compact_theta_sketch.deserialize(input_field)
