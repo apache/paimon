@@ -138,7 +138,7 @@ jobs:
               python -m pip install "./paimon-python[sql]"
               python -c "import tempfile; from datafusion import SessionContext; from pypaimon_rust.datafusion import PaimonCatalog; warehouse = tempfile.TemporaryDirectory(); ctx = SessionContext(); ctx.register_catalog_provider('paimon', PaimonCatalog({'warehouse': warehouse.name}))"
             else
-              python -m pip install pypaimon-rust==0.2.0
+              python -m pip install pypaimon-rust==0.3.0
             fi
             python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
             if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"; then
