@@ -273,8 +273,8 @@ public class SnapshotManager implements Serializable {
     }
 
     /**
-     * Repairs the earliest snapshot hint after a snapshot gap and returns the previous earliest
-     * snapshot id.
+     * Repairs the earliest snapshot hint to the start of a continuous suffix ending at the latest
+     * snapshot and returns the previous earliest snapshot id.
      */
     public long repairEarliestSnapshot(long snapshotId) {
         long previous =
