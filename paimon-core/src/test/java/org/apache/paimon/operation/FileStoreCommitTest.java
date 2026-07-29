@@ -1326,6 +1326,8 @@ public class FileStoreCommitTest {
         BinaryRow partition = gen.getPartition(keyValues.get(0));
         Snapshot dataSnapshot = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
         assertThat(dataSnapshot.nextRowId()).isEqualTo(1L);
+        List<ManifestFileMeta> dataManifests =
+                store.manifestListFactory().create().readDataManifests(dataSnapshot);
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
             commit.commit(indexCommittable(partition, "existing-index", 0, 0), false);
@@ -1333,6 +1335,27 @@ public class FileStoreCommitTest {
 
         Snapshot latest = checkNotNull(store.snapshotManager().latestSnapshot());
         assertThat(latest.indexManifest()).isNotNull();
+        assertThat(store.manifestListFactory().create().readDataManifests(latest))
+                .containsExactlyElementsOf(dataManifests);
+    }
+
+    @Test
+    public void testGlobalIndexCommitChecksAdjacentDataRanges() throws Exception {
+        TestFileStore store = createRowTrackingDataEvolutionStore();
+
+        KeyValue first = generateDataList(1).get(0);
+        BinaryRow partition = gen.getPartition(first);
+        store.commitData(Collections.singletonList(first), s -> partition, kv -> 0);
+        Snapshot secondSnapshot =
+                store.commitData(generateDataList(1), s -> partition, kv -> 0).get(0);
+        assertThat(secondSnapshot.nextRowId()).isEqualTo(2L);
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commit(indexCommittable(partition, "adjacent-index", 0, 1), false);
+        }
+
+        assertThat(checkNotNull(store.snapshotManager().latestSnapshot()).indexManifest())
+                .isNotNull();
     }
 
     @Test
@@ -1357,6 +1380,75 @@ public class FileStoreCommitTest {
                     .hasMessageContaining("Global index row ID existence conflict")
                     .hasMessageContaining("missing-index")
                     .hasMessageContaining("[" + missingRowId + ", " + missingRowId + "]");
+        }
+    }
+
+    @Test
+    public void testGlobalIndexCommitDoesNotUseDeletedDataFileRowIds() throws Exception {
+        TestFileStore store = createRowTrackingDataEvolutionStore();
+
+        KeyValue original = generateDataList(1).get(0);
+        BinaryRow partition = gen.getPartition(original);
+        store.commitData(Collections.singletonList(original), s -> partition, kv -> 0);
+        Snapshot overwrite =
+                store.overwriteData(
+                                generateDataList(1),
+                                s -> partition,
+                                kv -> 0,
+                                Collections.emptyMap())
+                        .get(0);
+        assertThat(overwrite.nextRowId()).isEqualTo(2L);
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.commit(
+                                            indexCommittable(
+                                                    partition, "deleted-row-id-index", 0, 0),
+                                            false))
+                    .hasMessageContaining("Global index row ID existence conflict")
+                    .hasMessageContaining("deleted-row-id-index");
+        }
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commit(indexCommittable(partition, "replacement-row-id-index", 1, 1), false);
+        }
+    }
+
+    @Test
+    public void testGlobalIndexCommitChecksPartitionAndBucket() throws Exception {
+        TestFileStore store = createRowTrackingDataEvolutionStore();
+
+        KeyValue data = gen.nextInsert("20201110", 10, 1L, new int[] {1, 1}, "data");
+        KeyValue otherPartition = gen.nextInsert("20201111", 11, 2L, new int[] {2, 2}, "other");
+        BinaryRow dataPartition = gen.getPartition(data);
+        BinaryRow missingPartition = gen.getPartition(otherPartition);
+        assertThat(missingPartition).isNotEqualTo(dataPartition);
+        store.commitData(Collections.singletonList(data), s -> dataPartition, kv -> 0);
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.commit(
+                                            indexCommittable(
+                                                    missingPartition,
+                                                    "wrong-partition-index",
+                                                    0,
+                                                    0),
+                                            false))
+                    .hasMessageContaining("Global index row ID existence conflict")
+                    .hasMessageContaining("wrong-partition-index");
+        }
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.commit(
+                                            indexCommittable(
+                                                    dataPartition, 1, "wrong-bucket-index", 0, 0),
+                                            false))
+                    .hasMessageContaining("Global index row ID existence conflict")
+                    .hasMessageContaining("wrong-bucket-index");
         }
     }
 
@@ -1898,11 +1990,20 @@ public class FileStoreCommitTest {
 
     private ManifestCommittable indexCommittable(
             BinaryRow partition, String fileName, long rowRangeStart, long rowRangeEnd) {
+        return indexCommittable(partition, 0, fileName, rowRangeStart, rowRangeEnd);
+    }
+
+    private ManifestCommittable indexCommittable(
+            BinaryRow partition,
+            int bucket,
+            String fileName,
+            long rowRangeStart,
+            long rowRangeEnd) {
         ManifestCommittable committable = new ManifestCommittable(0);
         committable.addFileCommittable(
                 new CommitMessageImpl(
                         partition,
-                        0,
+                        bucket,
                         null,
                         DataIncrement.indexIncrement(
                                 Collections.singletonList(

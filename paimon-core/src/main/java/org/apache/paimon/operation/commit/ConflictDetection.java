@@ -135,6 +135,36 @@ public class ConflictDetection {
         return rowIdCheckFromSnapshot != null;
     }
 
+    /**
+     * Returns whether an index-only commit can use the projected manifest conflict check.
+     *
+     * <p>Deletion-vector changes still require the complete base-file conflict path.
+     */
+    public boolean canCheckGlobalIndexOnly(List<IndexManifestEntry> deltaIndexEntries) {
+        if (!dataEvolutionEnabled) {
+            return false;
+        }
+
+        boolean hasGlobalIndexAddition = false;
+        for (IndexManifestEntry entry : deltaIndexEntries) {
+            if (entry.indexFile().indexType().equals(DELETION_VECTORS_INDEX)) {
+                return false;
+            }
+            hasGlobalIndexAddition |=
+                    entry.kind() == FileKind.ADD && entry.indexFile().globalIndexMeta() != null;
+        }
+        return hasGlobalIndexAddition;
+    }
+
+    /** Checks global-index row IDs without materializing the table's data manifest entries. */
+    public Optional<RuntimeException> checkGlobalIndexOnly(
+            Snapshot latestSnapshot, List<IndexManifestEntry> deltaIndexEntries) {
+        List<IndexManifestEntry> indexesToCheck = globalIndexFileAdditions(deltaIndexEntries);
+        return commitScanner
+                .firstGlobalIndexWithMissingRowIds(latestSnapshot, indexesToCheck)
+                .map(this::globalIndexRowIdExistenceConflict);
+    }
+
     @Nullable
     public Comparator<InternalRow> keyComparator() {
         return keyComparator;
@@ -660,18 +690,22 @@ public class ConflictDetection {
             RowRangeIndex rowRangeIndex =
                     rowRangeIndexes.get(Pair.of(indexEntry.partition(), indexEntry.bucket()));
             if (rowRangeIndex == null || !rowRangeIndex.contains(indexRange)) {
-                return Optional.of(
-                        new RuntimeException(
-                                String.format(
-                                        "Global index row ID existence conflict: index file '%s' "
-                                                + "references row range %s, but this range "
-                                                + "is not fully covered by current data "
-                                                + "files. The referenced row IDs may have been "
-                                                + "reassigned or removed by a concurrent commit.",
-                                        indexEntry.indexFile().fileName(), indexRange)));
+                return Optional.of(globalIndexRowIdExistenceConflict(indexEntry));
             }
         }
         return Optional.empty();
+    }
+
+    private RuntimeException globalIndexRowIdExistenceConflict(IndexManifestEntry indexEntry) {
+        return new RuntimeException(
+                String.format(
+                        "Global index row ID existence conflict: index file '%s' "
+                                + "references row range %s, but this range "
+                                + "is not fully covered by current data "
+                                + "files. The referenced row IDs may have been "
+                                + "reassigned or removed by a concurrent commit.",
+                        indexEntry.indexFile().fileName(),
+                        indexEntry.indexFile().globalIndexMeta().rowRange()));
     }
 
     private List<IndexManifestEntry> globalIndexFileAdditions(

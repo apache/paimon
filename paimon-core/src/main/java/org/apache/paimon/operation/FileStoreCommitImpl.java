@@ -204,7 +204,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.manifestList = manifestListFactory.create();
         this.indexManifestFile = indexManifestFileFactory.create();
         this.rollback = rollback;
-        this.scanner = new CommitScanner(scanSupplier, snapshotManager, indexManifestFile, options);
+        this.scanner =
+                new CommitScanner(
+                        scanSupplier,
+                        snapshotManager,
+                        indexManifestFile,
+                        manifestFile,
+                        manifestList,
+                        partitionType,
+                        options);
         this.commitPreCallbacks = commitPreCallbacks;
         this.commitCallbacks = commitCallbacks;
         this.retryWaiter =
@@ -962,67 +970,82 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         boolean discardDuplicate =
                 options.commitDiscardDuplicateFiles() && commitKind == CommitKind.APPEND;
         boolean checkConflicts = latestSnapshot != null && (discardDuplicate || detectConflicts);
+        boolean checkGlobalIndexOnly =
+                checkConflicts
+                        && commitKind == CommitKind.APPEND
+                        && deltaFiles.isEmpty()
+                        && commitPreCallbacks.isEmpty()
+                        && !conflictDetection.hasRowIdCheckFromSnapshot()
+                        && conflictDetection.canCheckGlobalIndexOnly(indexFiles);
         // By default, if checkConflicts is required, we do not have to do the extra check bucket
         // here.
         if (!checkConflicts && shouldCheckSameBucket(commitKind)) {
             checkSameBucketFromSnapshot(deltaFiles, latestSnapshot);
         }
         if (checkConflicts) {
-            // latestSnapshotId is different from the snapshot id we've checked for conflicts,
-            // so we have to check again
-            if (changedPartitions == null) {
-                changedPartitions = changedPartitions(deltaFiles, indexFiles);
-            }
-            CommitFailRetryResult commitFailRetry =
-                    retryResult instanceof CommitFailRetryResult
-                            ? (CommitFailRetryResult) retryResult
-                            : null;
-            // An overwrite may replace the base manifest list without recording the replacements
-            // in its delta manifest, so the cached base cannot always be refreshed incrementally.
-            if (commitFailRetry != null
-                    && commitFailRetry.latestSnapshot != null
-                    && commitFailRetry.baseDataFiles != null
-                    && !hasOverwriteSinceLastAttempt) {
-                baseDataFiles = new ArrayList<>(commitFailRetry.baseDataFiles);
-                List<SimpleFileEntry> incremental =
-                        scanner.readIncrementalChanges(
-                                commitFailRetry.latestSnapshot, latestSnapshot, changedPartitions);
-                if (!incremental.isEmpty()) {
-                    baseDataFiles.addAll(incremental);
-                    baseDataFiles = new ArrayList<>(FileEntry.mergeEntries(baseDataFiles));
-                }
+            Optional<RuntimeException> exception;
+            if (checkGlobalIndexOnly) {
+                exception = conflictDetection.checkGlobalIndexOnly(latestSnapshot, indexFiles);
             } else {
-                baseDataFiles =
-                        scanner.readAllEntriesFromChangedPartitions(
-                                latestSnapshot, changedPartitions);
+                // latestSnapshotId is different from the snapshot id we've checked for conflicts,
+                // so we have to check again
+                if (changedPartitions == null) {
+                    changedPartitions = changedPartitions(deltaFiles, indexFiles);
+                }
+                CommitFailRetryResult commitFailRetry =
+                        retryResult instanceof CommitFailRetryResult
+                                ? (CommitFailRetryResult) retryResult
+                                : null;
+                // An overwrite may replace the base manifest list without recording the
+                // replacements in its delta manifest, so the cached base cannot always be
+                // refreshed incrementally.
+                if (commitFailRetry != null
+                        && commitFailRetry.latestSnapshot != null
+                        && commitFailRetry.baseDataFiles != null
+                        && !hasOverwriteSinceLastAttempt) {
+                    baseDataFiles = new ArrayList<>(commitFailRetry.baseDataFiles);
+                    List<SimpleFileEntry> incremental =
+                            scanner.readIncrementalChanges(
+                                    commitFailRetry.latestSnapshot,
+                                    latestSnapshot,
+                                    changedPartitions);
+                    if (!incremental.isEmpty()) {
+                        baseDataFiles.addAll(incremental);
+                        baseDataFiles = new ArrayList<>(FileEntry.mergeEntries(baseDataFiles));
+                    }
+                } else {
+                    baseDataFiles =
+                            scanner.readAllEntriesFromChangedPartitions(
+                                    latestSnapshot, changedPartitions);
+                }
+                if (discardDuplicate) {
+                    Set<FileEntry.Identifier> baseIdentifiers =
+                            baseDataFiles.stream()
+                                    .map(FileEntry::identifier)
+                                    .collect(Collectors.toSet());
+                    deltaFiles =
+                            deltaFiles.stream()
+                                    .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
+                                    .collect(Collectors.toList());
+                }
+                RowIdColumnConflictChecker rowIdColumnConflictChecker = null;
+                if (conflictDetection.hasRowIdCheckFromSnapshot()) {
+                    rowIdColumnConflictChecker =
+                            RowIdColumnConflictChecker.fromDataFiles(
+                                    schemaManager,
+                                    deltaFiles.stream()
+                                            .map(ManifestEntry::file)
+                                            .collect(Collectors.toList()));
+                }
+                exception =
+                        conflictDetection.checkConflicts(
+                                latestSnapshot,
+                                baseDataFiles,
+                                SimpleFileEntry.from(deltaFiles),
+                                indexFiles,
+                                rowIdColumnConflictChecker,
+                                commitKind);
             }
-            if (discardDuplicate) {
-                Set<FileEntry.Identifier> baseIdentifiers =
-                        baseDataFiles.stream()
-                                .map(FileEntry::identifier)
-                                .collect(Collectors.toSet());
-                deltaFiles =
-                        deltaFiles.stream()
-                                .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
-                                .collect(Collectors.toList());
-            }
-            RowIdColumnConflictChecker rowIdColumnConflictChecker = null;
-            if (conflictDetection.hasRowIdCheckFromSnapshot()) {
-                rowIdColumnConflictChecker =
-                        RowIdColumnConflictChecker.fromDataFiles(
-                                schemaManager,
-                                deltaFiles.stream()
-                                        .map(ManifestEntry::file)
-                                        .collect(Collectors.toList()));
-            }
-            Optional<RuntimeException> exception =
-                    conflictDetection.checkConflicts(
-                            latestSnapshot,
-                            baseDataFiles,
-                            SimpleFileEntry.from(deltaFiles),
-                            indexFiles,
-                            rowIdColumnConflictChecker,
-                            commitKind);
             if (exception.isPresent()) {
                 if (allowRollback && rollback != null) {
                     if (rollback.tryToRollback(latestSnapshot)) {
@@ -1033,6 +1056,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        boolean indexOnlyCommit =
+                deltaFiles.isEmpty() && changelogFiles.isEmpty() && !indexFiles.isEmpty();
         Snapshot newSnapshot;
         Pair<String, Long> baseManifestList = null;
         Pair<String, Long> deltaManifestList = null;
@@ -1066,6 +1091,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 mergeBeforeManifests = emptyList();
                 mergeAfterManifests = emptyList();
                 oldIndexManifest = null;
+            } else if (indexOnlyCommit) {
+                // An index-only commit cannot change table data. Preserve the existing data
+                // manifests instead of opportunistically sorting or compacting them.
+                mergeAfterManifests = mergeBeforeManifests;
+                skipManifestMergeOnRetry = true;
             } else {
                 ManifestMergeReuse manifestMergeReuse =
                         tryReuseManifestMergeResult(retryResult, mergeBeforeManifests);
