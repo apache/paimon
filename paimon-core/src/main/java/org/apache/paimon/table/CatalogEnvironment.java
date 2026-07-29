@@ -232,7 +232,9 @@ public class CatalogEnvironment implements Serializable {
         }
 
         Options dependencyOptions = new Options(options.toMap());
-        dependencyOptions.set(METASTORE, RESTCatalogFactory.IDENTIFIER);
+        if (!dependencyOptions.contains(METASTORE)) {
+            dependencyOptions.set(METASTORE, RESTCatalogFactory.IDENTIFIER);
+        }
         dependencyOptions.set(
                 READ_VIA_OPTION, RESTUtil.encodeString(JsonSerdeUtil.toFlatJson(identifier)));
         return CatalogContext.create(

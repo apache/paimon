@@ -104,6 +104,19 @@ class CatalogEnvironmentTest {
     }
 
     @Test
+    void testDependencyReadContextPreservesCustomRestMetastore() {
+        Options options = new Options();
+        options.set(METASTORE, "custom-rest");
+        CatalogContext context = CatalogContext.create(options);
+        CatalogEnvironment environment = restEnvironment(Identifier.create("db", "table"), context);
+
+        CatalogContext dependencyContext = environment.dependencyReadContext();
+
+        assertThat(dependencyContext).isNotSameAs(context);
+        assertThat(dependencyContext.options().get(METASTORE)).isEqualTo("custom-rest");
+    }
+
+    @Test
     void testAppendTableUsesDependencyReadContext() {
         CatalogEnvironment environment = mock(CatalogEnvironment.class);
         when(environment.dependencyReadContext()).thenReturn(CatalogContext.create(new Options()));
