@@ -272,7 +272,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
                             "Cannot reassign row IDs for file '%s' because it physically stores the row-id field.",
                             fileName);
                     int fileOrder = fileOrder(fileName);
-                    partition.considerFirstRowId(rowRangeScratch[0]);
+                    partition.setMinFirstRowId(rowRangeScratch[0]);
                     group.liveFileRanges.add(
                             partition.id,
                             fileOrder == 0 ? NORMAL : DEDICATED,
@@ -727,7 +727,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
             this.partition = partition;
         }
 
-        private void considerFirstRowId(long firstRowId) {
+        private void setMinFirstRowId(long firstRowId) {
             minFirstRowId = Math.min(minFirstRowId, firstRowId);
         }
 
