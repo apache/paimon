@@ -1066,11 +1066,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
     @Test
     public void testPartialScalarPreFilterDropsUnindexedRowsInFastMode() throws Exception {
-        // With the default scalar-index.search-mode=fast, a scalar pre-filter
-        // matches only rows the scalar index covers. The btree covers ids 3-7,
-        // so the id>=8 filter has no indexed match and the unindexed rows 8 and
-        // 9 are intentionally dropped, leaving the vector search empty. Set
-        // scalar-index.search-mode=full to include such unindexed rows.
+        // Default fast scalar mode drops unindexed rows: the btree covers ids
+        // 3-7, so id>=8 (rows 8,9 unindexed) yields an empty pre-filter.
         catalog.createTable(
                 identifier("default_scalar_fast_partial_index_table"),
                 vectorSchemaBuilder(VECTOR_FIELD_NAME).build(),
