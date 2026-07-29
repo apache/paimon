@@ -23,7 +23,6 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.BinaryDataFileMeta;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -35,6 +34,7 @@ import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
  * Reusable binary view of a projected manifest entry.
@@ -52,7 +52,6 @@ public final class BinaryManifestEntry implements ManifestEntry {
 
     private final Projection projection;
     private final @Nullable BinaryDataFileMeta file;
-    private final ReusablePartition partitionView = new ReusablePartition();
     private @Nullable InternalRow row;
 
     private BinaryManifestEntry(Projection projection) {
@@ -79,7 +78,6 @@ public final class BinaryManifestEntry implements ManifestEntry {
             file.replace(fileRow);
         }
         this.row = row;
-        this.partitionView.reset();
         return this;
     }
 
@@ -120,7 +118,6 @@ public final class BinaryManifestEntry implements ManifestEntry {
     /** Drops references to the current row before its reader batch is released. */
     public void clear() {
         row = null;
-        partitionView.reset();
         if (file != null) {
             file.clear();
         }
@@ -143,54 +140,17 @@ public final class BinaryManifestEntry implements ManifestEntry {
     }
 
     public byte[] partitionBytes() {
-        return partitionView.getBytes(
-                row, requiredOuterPosition(projection.partitionPosition, ManifestEntry.PARTITION));
+        byte[] partition =
+                row.getBinary(
+                        requiredOuterPosition(
+                                projection.partitionPosition, ManifestEntry.PARTITION));
+        checkState(partition != null, "Serialized manifest partition cannot be null.");
+        return partition;
     }
 
     @Override
     public BinaryRow partition() {
-        return partitionView.getRow(
-                row, requiredOuterPosition(projection.partitionPosition, ManifestEntry.PARTITION));
-    }
-
-    private static final class ReusablePartition {
-
-        private final MemorySegment[] segments = new MemorySegment[1];
-        private @Nullable byte[] bytes;
-        private @Nullable BinaryRow row;
-
-        private byte[] getBytes(InternalRow entryRow, int position) {
-            if (bytes == null) {
-                bytes = entryRow.getBinary(position);
-                checkState(bytes != null, "Serialized manifest partition cannot be null.");
-            }
-            return bytes;
-        }
-
-        private BinaryRow getRow(InternalRow entryRow, int position) {
-            if (segments[0] == null) {
-                byte[] bytes = getBytes(entryRow, position);
-                checkState(
-                        bytes.length >= Integer.BYTES,
-                        "Serialized manifest partition is too short.");
-                int arity =
-                        ((bytes[0] & 0xff) << 24)
-                                | ((bytes[1] & 0xff) << 16)
-                                | ((bytes[2] & 0xff) << 8)
-                                | (bytes[3] & 0xff);
-                if (row == null || row.getFieldCount() != arity) {
-                    row = new BinaryRow(arity);
-                }
-                segments[0] = MemorySegment.wrap(bytes);
-                row.pointTo(segments, Integer.BYTES, bytes.length - Integer.BYTES);
-            }
-            return row;
-        }
-
-        private void reset() {
-            bytes = null;
-            segments[0] = null;
-        }
+        return deserializeBinaryRow(partitionBytes());
     }
 
     @Override

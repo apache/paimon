@@ -205,7 +205,7 @@ public class BinaryManifestEntryTest {
     }
 
     @Test
-    void testReusesPartitionAndPartitionedIdentifierViews() {
+    void testDoesNotReusePartitionAndUpdatesPartitionedIdentifier() {
         BinaryManifestEntry entry =
                 projection(
                                 true,
@@ -219,15 +219,15 @@ public class BinaryManifestEntryTest {
                 new BinaryManifestEntry.ReusableIdentifier();
 
         entry.replace(identityRow(partition(1)));
-        BinaryRow partitionView = entry.partition();
-        assertThat(partitionView.getInt(0)).isEqualTo(1);
-        assertThat(entry.partition()).isSameAs(partitionView);
+        BinaryRow firstPartition = entry.partition();
+        assertThat(firstPartition.getInt(0)).isEqualTo(1);
+        assertThat(entry.partition()).isNotSameAs(firstPartition);
         identifier.replaceWithPartition(entry);
         byte[] firstIdentifier = Arrays.copyOf(identifier.bytes(), identifier.length());
 
         entry.replace(identityRow(partition(2)));
-        assertThat(entry.partition()).isSameAs(partitionView);
-        assertThat(partitionView.getInt(0)).isEqualTo(2);
+        assertThat(firstPartition.getInt(0)).isEqualTo(1);
+        assertThat(entry.partition().getInt(0)).isEqualTo(2);
         identifier.replaceWithPartition(entry);
         assertThat(Arrays.copyOf(identifier.bytes(), identifier.length()))
                 .isNotEqualTo(firstIdentifier);
