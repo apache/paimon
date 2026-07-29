@@ -116,8 +116,10 @@ public class FormatTableScan implements InnerTableScan {
      * which is the default partition directory of the value-only layout when a null partition value
      * is read.
      *
-     * @throws FileNotFoundException if {@code listedRoot} does not exist; a directory that
-     *     disappears further down is skipped instead, leaving the rest of the listing complete
+     * @throws FileNotFoundException if {@code listedRoot} does not exist and the {@link FileIO}
+     *     signals that by throwing. {@link FileIO#listStatus} may instead answer with no entries -
+     *     {@code LocalFileIO} does - and the result is then empty. Either way a directory that
+     *     disappears further down is skipped, leaving the rest of the listing complete.
      */
     static List<FileStatus> listDataFiles(FileIO fileIO, Path listedRoot) throws IOException {
         List<FileStatus> dataFiles = new ArrayList<>();

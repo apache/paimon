@@ -47,6 +47,7 @@ import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -66,6 +67,7 @@ import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
 import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -909,31 +911,21 @@ public class FormatTableScanTest {
                         .options(Collections.emptyMap())
                         .build();
 
-        // What a recursive listing costs on the same tree, for comparison.
-        FileStatus[] recursive = fileIO.listFiles(tableLocation, true);
-        int recursiveListings = listCount.getAndSet(0);
-        int recursiveEntries = enumerated.getAndSet(0);
-
         List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
 
         assertThat(splits).hasSize(1);
-        // The recursive listing walks the whole staging tree and returns all of it, leaving the
-        // caller to throw 20 of the 21 files away.
-        assertEquals(21, recursive.length);
-        // Planning skips the staging tree at its root: one listing of the table directory, and the
-        // two entries in it. The recursive baseline is only compared against, not pinned: its
-        // exact cost belongs to FileIO, which this test does not exercise.
+        // Planning skips the staging tree at its root rather than walking it and discarding what
+        // it found: one listing of the table directory, and the two entries in it. A recursive
+        // listing of the same tree returns all 21 files, 20 of which the caller throws away.
         assertEquals(1, listCount.get());
         assertEquals(2, enumerated.get());
-        assertThat(recursiveListings).isGreaterThan(listCount.get());
-        assertThat(recursiveEntries).isGreaterThan(enumerated.get());
     }
 
     @TestTemplate
     public void testCreateSplitsKeepsFilesUnderAStagingLikeTableLocation() throws IOException {
-        // The '_' rule applies below the listed directory only: a warehouse path with a leading
-        // underscore must not make the whole table read as empty.
-        Path tableLocation = new Path(new Path(tmpPath.toUri()), "_warehouse/db/t");
+        // The '_' rule applies below the listed directory only: neither a warehouse path with a
+        // leading underscore nor a table directory named that way makes the table read as empty.
+        Path tableLocation = new Path(new Path(tmpPath.toUri()), "_warehouse/db/_t");
         LocalFileIO fileIO = LocalFileIO.create();
         Path dataFile = new Path(tableLocation, "data.csv");
         writeTestFile(fileIO, dataFile, 100);
@@ -957,6 +949,11 @@ public class FormatTableScanTest {
         Path partitionPath = new Path(tableLocation, partition);
         Path dataFile = new Path(partitionPath, "data.csv");
         writeTestFile(fileIO, dataFile, 100);
+        // Ordinary sub-directories are still descended, to whatever depth: only the '_'/'.' rule
+        // stops the walk. This file and the staged one below sit at the same depth, so what
+        // separates them is the staging directory in the middle of one path and nothing else.
+        Path nestedDataFile = new Path(partitionPath, "sub/deeper/data-b.csv");
+        writeTestFile(fileIO, nestedDataFile, 100);
         writeTestFile(
                 fileIO,
                 new Path(
@@ -969,9 +966,72 @@ public class FormatTableScanTest {
         List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
 
         assertThat(splits).hasSize(1);
+        // Planning sorts by path, so this also pins that files found at different depths come
+        // back as one ordered list.
+        assertThat(((FormatDataSplit) splits.get(0)).files())
+                .extracting(FormatDataSplit.FileMeta::filePath)
+                .containsExactly(dataFile, nestedDataFile);
+    }
+
+    @TestTemplate
+    public void testCreateSplitsSkipsASubDirectoryThatVanishesMidListing() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO setupFileIO = LocalFileIO.create();
+        String partition = enablePartitionValueOnly ? "2024/1" : "year=2024/month=1";
+        Path partitionPath = new Path(tableLocation, partition);
+        Path dataFile = new Path(partitionPath, "data.csv");
+        writeTestFile(setupFileIO, dataFile, 100);
+        Path vanishing = new Path(partitionPath, "sub");
+        writeTestFile(setupFileIO, new Path(vanishing, "data-b.csv"), 100);
+
+        // The directory was there when its parent was listed and is gone by the time it is listed
+        // itself, because another job cleaned up in between. The rest of the listing stands.
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public FileStatus[] listStatus(Path path) throws IOException {
+                        if (path.equals(vanishing)) {
+                            throw new FileNotFoundException(path.toString());
+                        }
+                        return super.listStatus(path);
+                    }
+                };
+        FormatTable formatTable = createYearMonthFormatTable(fileIO, tableLocation);
+        List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
+
+        assertThat(splits).hasSize(1);
         assertThat(((FormatDataSplit) splits.get(0)).files())
                 .extracting(FormatDataSplit.FileMeta::filePath)
                 .containsExactly(dataFile);
+    }
+
+    @TestTemplate
+    public void testCreateSplitsFailsWhenASubDirectoryCannotBeListed() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO setupFileIO = LocalFileIO.create();
+        String partition = enablePartitionValueOnly ? "2024/1" : "year=2024/month=1";
+        Path partitionPath = new Path(tableLocation, partition);
+        writeTestFile(setupFileIO, new Path(partitionPath, "data.csv"), 100);
+        Path unreadable = new Path(partitionPath, "sub");
+        writeTestFile(setupFileIO, new Path(unreadable, "data-b.csv"), 100);
+
+        // A directory that is there but cannot be read is not a vanished one: answering with the
+        // files that happened to be reachable would be a silently short table.
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public FileStatus[] listStatus(Path path) throws IOException {
+                        if (path.equals(unreadable)) {
+                            throw new IOException("permission denied: " + path);
+                        }
+                        return super.listStatus(path);
+                    }
+                };
+        FormatTable formatTable = createYearMonthFormatTable(fileIO, tableLocation);
+
+        assertThatThrownBy(() -> new FormatTableScan(formatTable, null, null).plan().splits())
+                .hasRootCauseInstanceOf(IOException.class)
+                .hasRootCauseMessage("permission denied: " + unreadable);
     }
 
     @TestTemplate

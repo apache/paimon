@@ -205,7 +205,10 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
     void warnIfFilesystemPartitionsExist() {
         try {
             for (FileStatus status : table.fileIO().listStatus(new Path(table.location()))) {
-                if (status.isDir() && !status.getPath().getName().startsWith(".")) {
+                // A staging tree left behind by a committer is not unregistered data, so it
+                // must not send the reader off to run MSCK REPAIR TABLE.
+                if (status.isDir()
+                        && !PartitionPathUtils.isHiddenName(status.getPath().getName())) {
                     LOG.warn(
                             "Format table {} has no partitions registered in the catalog "
                                     + "but its location {} contains directories. Data written "
