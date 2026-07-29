@@ -26,6 +26,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.SingleFileWriter;
@@ -48,6 +49,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
@@ -57,6 +59,8 @@ import java.util.function.Function;
  * snapshot.
  */
 public class ManifestFile extends ObjectsFile<ManifestEntry> {
+
+    private static final Projection EXPIRE_FILE_PROJECTION = createExpireFileProjection();
 
     private final SchemaManager schemaManager;
     private final RowType partitionType;
@@ -206,12 +210,45 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     }
 
     public List<ExpireFileEntry> readExpireFileEntries(String fileName, @Nullable Long fileSize) {
-        List<ManifestEntry> entries = read(fileName, fileSize);
-        List<ExpireFileEntry> result = new ArrayList<>(entries.size());
-        for (ManifestEntry entry : entries) {
-            result.add(ExpireFileEntry.from(entry));
+        List<ExpireFileEntry> result = new ArrayList<>();
+        try (CloseableIterator<BinaryManifestEntry> entries =
+                scan(fileName, fileSize, EXPIRE_FILE_PROJECTION)) {
+            while (entries.hasNext()) {
+                result.add(ExpireFileEntry.from(entries.next()));
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to scan expiring entries from manifest file '%s'.", fileName),
+                    e);
         }
         return result;
+    }
+
+    private static Projection createExpireFileProjection() {
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
+        return Projection.create(
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                manifestType.getField(ManifestEntry.KIND),
+                                manifestType.getField(ManifestEntry.PARTITION),
+                                manifestType.getField(ManifestEntry.BUCKET),
+                                manifestType.getField(ManifestEntry.TOTAL_BUCKETS),
+                                manifestType
+                                        .getField(ManifestEntry.FILE)
+                                        .newType(
+                                                DataFileMeta.SCHEMA.project(
+                                                        DataFileMeta.FILE_NAME,
+                                                        DataFileMeta.ROW_COUNT,
+                                                        DataFileMeta.MIN_KEY,
+                                                        DataFileMeta.MAX_KEY,
+                                                        DataFileMeta.LEVEL,
+                                                        DataFileMeta.EXTRA_FILES,
+                                                        DataFileMeta.EMBEDDED_FILE_INDEX,
+                                                        DataFileMeta.FILE_SOURCE,
+                                                        DataFileMeta.EXTERNAL_PATH,
+                                                        DataFileMeta.FIRST_ROW_ID)))));
     }
 
     /**
