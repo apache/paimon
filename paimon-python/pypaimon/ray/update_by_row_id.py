@@ -59,6 +59,7 @@ def update_by_row_id(
     update_cols: List[str],
     num_partitions: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    commit_mode: str = "atomic",
     max_groups_per_commit: Optional[int] = None,
 ) -> Dict[str, int]:
     """Update ``update_cols`` of a data-evolution table by ``_ROW_ID``.
@@ -70,12 +71,12 @@ def update_by_row_id(
     ``ray >= 2.50`` and a target with ``data-evolution.enabled`` + ``row-tracking.enabled``.
 
     By default, all file groups are committed atomically. Set
-    ``max_groups_per_commit`` to commit completed groups in smaller windows.
-    Ordinary exceptions raised while applying a group are returned as results
-    in incremental mode, so completed groups are flushed before the error is
-    raised and Ray task retry options in ``ray_remote_args`` do not retry the
-    group. Worker loss and other task-level failures which bypass Python
-    exception handling may still lose results buffered by that task.
+    ``commit_mode="incremental"`` together with ``max_groups_per_commit`` to
+    commit completed groups in smaller windows. Incremental mode is not atomic:
+    commits made before a later failure remain visible. Deterministic duplicate
+    ``_ROW_ID`` errors are returned as group results so completed groups can be
+    flushed first. Other application errors propagate to Ray and remain subject
+    to the retry options in ``ray_remote_args``.
 
     Returns ``{"num_updated": <rows>}``.
     """
@@ -86,6 +87,14 @@ def update_by_row_id(
     _require_ray_join()
     if not update_cols:
         raise ValueError("update_cols must be non-empty.")
+    if commit_mode not in ("atomic", "incremental"):
+        raise ValueError("commit_mode must be 'atomic' or 'incremental'.")
+    if commit_mode == "atomic" and max_groups_per_commit is not None:
+        raise ValueError(
+            "max_groups_per_commit requires commit_mode='incremental'.")
+    if commit_mode == "incremental" and max_groups_per_commit is None:
+        raise ValueError(
+            "commit_mode='incremental' requires max_groups_per_commit.")
     if max_groups_per_commit is not None:
         if (isinstance(max_groups_per_commit, bool)
                 or not isinstance(max_groups_per_commit, int)
@@ -158,7 +167,7 @@ def update_by_row_id(
         return {"num_updated": 0}
     incremental_committer = (
         _IncrementalUpdateCommitter(table, max_groups_per_commit)
-        if max_groups_per_commit is not None else None
+        if commit_mode == "incremental" else None
     )
     try:
         apply_kwargs = {

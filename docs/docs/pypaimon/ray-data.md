@@ -553,9 +553,22 @@ metrics = update_by_row_id(
     source=ray_dataset,          # ray.data.Dataset / pa.Table / pandas, carrying _ROW_ID
     catalog_options={"warehouse": "/path/to/warehouse"},
     update_cols=["feature"],     # non-blob columns to overwrite
-    max_groups_per_commit=64,    # optional incremental commit window
 )
 print(metrics)   # {"num_updated": 50}
+```
+
+The default is one atomic commit. To explicitly opt into non-atomic,
+incremental commits:
+
+```python
+metrics = update_by_row_id(
+    target="database_name.table_name",
+    source=ray_dataset,
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    update_cols=["feature"],
+    commit_mode="incremental",
+    max_groups_per_commit=64,
+)
 ```
 
 **Parameters:**
@@ -567,8 +580,10 @@ print(metrics)   # {"num_updated": 50}
 - `num_partitions`: parallelism for grouping the update rows by target file;
   defaults to `max(1, cluster_cpus * 2)`.
 - `ray_remote_args`: Ray remote options applied to the update tasks.
-- `max_groups_per_commit`: optional positive number of completed target file groups
-  per commit. By default, all groups are committed together.
+- `commit_mode`: `"atomic"` (default) commits all groups together.
+  `"incremental"` explicitly opts into non-atomic, windowed commits.
+- `max_groups_per_commit`: required in incremental mode; positive number of
+  completed target file groups per commit. It is rejected in atomic mode.
 
 **Returns:** `{"num_updated": <rows>}`.
 
@@ -580,13 +595,15 @@ print(metrics)   # {"num_updated": 50}
 - Partition columns cannot be updated (in-place rewrite can't move a row across partitions).
 - Deletion-vectors-enabled tables are not supported yet: a DV-deleted row still lives
   in its data file, so it can't be told apart from a live row without reading the target.
-- Incremental commits are not atomic across the whole operation. Ordinary exceptions
-  raised while applying a group are reported as results so other groups can finish;
-  completed groups are flushed before the error is raised.
-- Ray task retry options in `ray_remote_args` do not retry group exceptions reported
-  as results, so a transient group failure can leave a partial update. Worker loss and
-  other task-level failures which bypass Python exception handling may still lose
-  results buffered by that task.
+- Incremental commits are not atomic across the whole operation. Commits completed
+  before a later failure remain visible.
+- A duplicate `_ROW_ID` within a target file group is a deterministic validation
+  error. In incremental mode it is reported as a result so successful groups can
+  finish and be committed before the error is raised.
+- Other application and I/O exceptions propagate to Ray and remain subject to the
+  retry options in `ray_remote_args`. If retries are exhausted, earlier incremental
+  commits remain visible. Worker loss may also discard successful results still
+  buffered in the failed Ray task.
 
 ## Read By Row Id
 

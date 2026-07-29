@@ -562,7 +562,7 @@ def distributed_update_apply(
 
     captured_table = table
     captured_cols = cols
-    capture_group_errors = on_group_result is not None
+    capture_group_validation_errors = on_group_result is not None
 
     def _group_result(msgs_blob, n_updated, row_ids_blob, error):
         return pa.Table.from_pydict({
@@ -581,33 +581,31 @@ def distributed_update_apply(
                 "error": pa.array([], type=pa.string()),
             })
 
-        try:
-            if (
-                pc.count_distinct(group.column(row_id_name)).as_py()
-                != group.num_rows
-            ):
-                raise ValueError(
-                    "MERGE matched multiple source rows to the same "
-                    "target _ROW_ID. Deduplicate the source before "
-                    "merging."
-                )
-
-            for_update = group.drop_columns([frid_col])
-            row_ids = (
-                for_update.column(row_id_name).to_pylist()
-                if collect_row_ids else []
+        if (
+            pc.count_distinct(group.column(row_id_name)).as_py()
+            != group.num_rows
+        ):
+            error = ValueError(
+                "MERGE matched multiple source rows to the same "
+                "target _ROW_ID. Deduplicate the source before "
+                "merging."
             )
-            worker = TableUpdateByRowId(
-                captured_table,
-                "_merge_into_shard_" + uuid.uuid4().hex[:8],
-                BATCH_COMMIT_IDENTIFIER,
-                _precomputed_files_info=ray.get(precomputed_info_ref),
-            )
-            msgs = worker.update_columns(for_update, list(captured_cols))
-        except Exception as error:
-            if not capture_group_errors:
-                raise
+            if not capture_group_validation_errors:
+                raise error
             return _group_result(b"", 0, b"", _group_error_text(error))
+
+        for_update = group.drop_columns([frid_col])
+        row_ids = (
+            for_update.column(row_id_name).to_pylist()
+            if collect_row_ids else []
+        )
+        worker = TableUpdateByRowId(
+            captured_table,
+            "_merge_into_shard_" + uuid.uuid4().hex[:8],
+            BATCH_COMMIT_IDENTIFIER,
+            _precomputed_files_info=ray.get(precomputed_info_ref),
+        )
+        msgs = worker.update_columns(for_update, list(captured_cols))
 
         return _group_result(
             pickle.dumps(msgs),

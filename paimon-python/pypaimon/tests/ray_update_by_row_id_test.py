@@ -177,6 +177,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                 self.catalog_options,
                 update_cols=["age"],
                 num_partitions=4,
+                commit_mode="incremental",
                 max_groups_per_commit=2,
             )
 
@@ -228,6 +229,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                         self.catalog_options,
                         update_cols=["age"],
                         num_partitions=1,
+                        commit_mode="incremental",
                         max_groups_per_commit=max_groups,
                     )
 
@@ -398,6 +400,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                     self.catalog_options,
                     update_cols=["age"],
                     num_partitions=1,
+                    commit_mode="incremental",
                     max_groups_per_commit=1,
                 )
 
@@ -637,8 +640,46 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                         source,
                         self.catalog_options,
                         update_cols=["age"],
+                        commit_mode="incremental",
                         max_groups_per_commit=value,
                     )
+
+    def test_requires_explicit_incremental_commit_mode(self):
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
+        source = pa.table(
+            {"_ROW_ID": [0], "age": [9]},
+            schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
+        )
+
+        with self.assertRaisesRegex(
+                ValueError, "requires commit_mode='incremental'"):
+            update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+                max_groups_per_commit=1,
+            )
+        with self.assertRaisesRegex(
+                ValueError, "requires max_groups_per_commit"):
+            update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+                commit_mode="incremental",
+            )
+        with self.assertRaisesRegex(
+                ValueError, "must be 'atomic' or 'incremental'"):
+            update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+                commit_mode="unknown",
+            )
 
     def _run_with_fake_commit(self, *, recorder=None, new_commit_errors=None,
                               commit_error=None, close_error=None,
@@ -758,6 +799,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                 FakeSource(),
                 self.catalog_options,
                 update_cols=["age"],
+                commit_mode="incremental" if incremental else "atomic",
                 max_groups_per_commit=1 if incremental else None,
             )
         return recorder
