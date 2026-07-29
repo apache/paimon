@@ -381,7 +381,7 @@ public class CompactProcedure extends BaseProcedure {
 
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             CommitMessageSerializer serializer = new CommitMessageSerializer();
-            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
+            List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
             List<CommitMessage> messages =
                     deserializeAndReleaseCommitMessages(serializer, serializedMessages);
             commit.commit(messages);
@@ -478,7 +478,7 @@ public class CompactProcedure extends BaseProcedure {
 
         try (TableCommitImpl commit = table.newCommit(commitUser)) {
             CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
-            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
+            List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
             List<CommitMessage> messages =
                     deserializeAndReleaseCommitMessages(messageSerializerser, serializedMessages);
             commit.commit(messages);
@@ -572,7 +572,7 @@ public class CompactProcedure extends BaseProcedure {
                                                     return messagesBytes.iterator();
                                                 });
 
-                List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
+                List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
                 try (TableCommitImpl commit = table.newCommit(commitUser)) {
                     List<CommitMessage> messages =
                             deserializeAndReleaseCommitMessages(
