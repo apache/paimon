@@ -383,7 +383,8 @@ public class CompactProcedure extends BaseProcedure {
             CommitMessageSerializer serializer = new CommitMessageSerializer();
             List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
             List<CommitMessage> messages =
-                    deserializeAndReleaseCommitMessages(serializer, serializedMessages);
+                    deserializeCommitMessagesAndReleaseSerializedBytes(
+                            serializer, serializedMessages);
             commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -480,7 +481,8 @@ public class CompactProcedure extends BaseProcedure {
             CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
             List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
             List<CommitMessage> messages =
-                    deserializeAndReleaseCommitMessages(messageSerializerser, serializedMessages);
+                    deserializeCommitMessagesAndReleaseSerializedBytes(
+                            messageSerializerser, serializedMessages);
             commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -575,7 +577,7 @@ public class CompactProcedure extends BaseProcedure {
                 List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
                 try (TableCommitImpl commit = table.newCommit(commitUser)) {
                     List<CommitMessage> messages =
-                            deserializeAndReleaseCommitMessages(
+                            deserializeCommitMessagesAndReleaseSerializedBytes(
                                     messageSerializerser, serializedMessages);
                     messages.addAll(
                             new DataEvolutionCompactionCommitPreparation(table, snapshot)
@@ -590,7 +592,7 @@ public class CompactProcedure extends BaseProcedure {
         }
     }
 
-    private static List<CommitMessage> deserializeAndReleaseCommitMessages(
+    private static List<CommitMessage> deserializeCommitMessagesAndReleaseSerializedBytes(
             CommitMessageSerializer serializer, List<byte[]> serializedMessages)
             throws IOException {
         List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
