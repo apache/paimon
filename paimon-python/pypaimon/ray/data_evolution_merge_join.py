@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import pyarrow as pa
 
@@ -30,6 +30,21 @@ from pypaimon.ray.data_evolution_merge_transform import (
     vectorized_insert_transform,
     vectorized_matched_transform,
 )
+
+
+class GroupApplyError(RuntimeError):
+    """A file group failed after other groups may have completed."""
+
+
+def _group_error_text(error: BaseException) -> str:
+    import traceback
+
+    return "update_by_row_id file group failed: {}: {}\n{}".format(
+        type(error).__name__,
+        str(error),
+        "".join(traceback.format_exception(
+            type(error), error, error.__traceback__)),
+    )
 
 
 def _map_kwargs(
@@ -445,6 +460,7 @@ def distributed_update_apply(
     ray_remote_args: Optional[Dict[str, Any]] = None,
     base_snapshot_id: Optional[int] = None,
     collect_row_ids: bool = False,
+    on_group_result: Optional[Callable[[list, int, list], None]] = None,
 ) -> Tuple[list, int, list]:
     import numpy as np
     import pickle
@@ -546,6 +562,15 @@ def distributed_update_apply(
 
     captured_table = table
     captured_cols = cols
+    capture_group_errors = on_group_result is not None
+
+    def _group_result(msgs_blob, n_updated, row_ids_blob, error):
+        return pa.Table.from_pydict({
+            "msgs_blob": pa.array([msgs_blob], type=pa.binary()),
+            "n_updated": pa.array([n_updated], type=pa.int64()),
+            "row_ids_blob": pa.array([row_ids_blob], type=pa.binary()),
+            "error": pa.array([error], type=pa.string()),
+        })
 
     def _apply_group(group: pa.Table) -> pa.Table:
         if group.num_rows == 0:
@@ -553,39 +578,43 @@ def distributed_update_apply(
                 "msgs_blob": pa.array([], type=pa.binary()),
                 "n_updated": pa.array([], type=pa.int64()),
                 "row_ids_blob": pa.array([], type=pa.binary()),
+                "error": pa.array([], type=pa.string()),
             })
 
-        if (
-            pc.count_distinct(group.column(row_id_name)).as_py()
-            != group.num_rows
-        ):
-            raise ValueError(
-                "MERGE matched multiple source rows to the same "
-                "target _ROW_ID. Deduplicate the source before "
-                "merging."
-            )
+        try:
+            if (
+                pc.count_distinct(group.column(row_id_name)).as_py()
+                != group.num_rows
+            ):
+                raise ValueError(
+                    "MERGE matched multiple source rows to the same "
+                    "target _ROW_ID. Deduplicate the source before "
+                    "merging."
+                )
 
-        for_update = group.drop_columns([frid_col])
-        row_ids = (
-            for_update.column(row_id_name).to_pylist()
-            if collect_row_ids else []
+            for_update = group.drop_columns([frid_col])
+            row_ids = (
+                for_update.column(row_id_name).to_pylist()
+                if collect_row_ids else []
+            )
+            worker = TableUpdateByRowId(
+                captured_table,
+                "_merge_into_shard_" + uuid.uuid4().hex[:8],
+                BATCH_COMMIT_IDENTIFIER,
+                _precomputed_files_info=ray.get(precomputed_info_ref),
+            )
+            msgs = worker.update_columns(for_update, list(captured_cols))
+        except Exception as error:
+            if not capture_group_errors:
+                raise
+            return _group_result(b"", 0, b"", _group_error_text(error))
+
+        return _group_result(
+            pickle.dumps(msgs),
+            for_update.num_rows,
+            pickle.dumps(row_ids),
+            None,
         )
-        worker = TableUpdateByRowId(
-            captured_table,
-            "_merge_into_shard_" + uuid.uuid4().hex[:8],
-            BATCH_COMMIT_IDENTIFIER,
-            _precomputed_files_info=ray.get(precomputed_info_ref),
-        )
-        msgs = worker.update_columns(for_update, list(captured_cols))
-        return pa.Table.from_pydict({
-            "msgs_blob": [pickle.dumps(msgs)],
-            "n_updated": pa.array(
-                [for_update.num_rows], type=pa.int64()
-            ),
-            "row_ids_blob": pa.array(
-                [pickle.dumps(row_ids)], type=pa.binary()
-            ),
-        })
 
     # One group per target data file; bounded by file count and num_partitions.
     group_partitions = max(
@@ -598,14 +627,34 @@ def distributed_update_apply(
     all_msgs: list = []
     num_updated = 0
     action_row_ids = []
+    group_error = None
     for batch in msgs_ds.iter_batches(batch_format="pyarrow"):
-        for blob in batch.column("msgs_blob").to_pylist():
-            all_msgs.extend(pickle.loads(blob))
-        for n in batch.column("n_updated").to_pylist():
+        message_blobs = batch.column("msgs_blob").to_pylist()
+        updated_counts = batch.column("n_updated").to_pylist()
+        errors = batch.column("error").to_pylist()
+        row_id_blobs = (
+            batch.column("row_ids_blob").to_pylist()
+            if collect_row_ids else [None] * len(message_blobs)
+        )
+        for blob, n, row_ids_blob, error in zip(
+                message_blobs, updated_counts, row_id_blobs, errors):
+            if error is not None:
+                if group_error is None:
+                    group_error = error
+                continue
+            group_msgs = pickle.loads(blob)
+            group_row_ids = (
+                pickle.loads(row_ids_blob) if collect_row_ids else []
+            )
+            if on_group_result is None:
+                all_msgs.extend(group_msgs)
+            else:
+                on_group_result(group_msgs, n, group_row_ids)
             num_updated += n
-        if collect_row_ids:
-            for blob in batch.column("row_ids_blob").to_pylist():
-                action_row_ids.extend(pickle.loads(blob))
+            if collect_row_ids:
+                action_row_ids.extend(group_row_ids)
+    if group_error is not None:
+        raise GroupApplyError(group_error)
     return all_msgs, num_updated, action_row_ids
 
 

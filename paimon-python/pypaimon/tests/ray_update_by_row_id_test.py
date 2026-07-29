@@ -130,6 +130,222 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual(got[21], 999)
         self.assertTrue(all(v == 0 for k, v in got.items() if k != 21))
 
+    def test_incrementally_commits_file_group_windows(self):
+        from pypaimon.write.table_commit import StreamTableCommit
+
+        target = self._create()
+        chunks = [[start, start + 1] for start in range(10, 60, 10)]
+        for chunk in chunks:
+            self._write(target, pa.Table.from_pydict(
+                {"id": chunk, "name": ["x", "x"], "age": [0, 0]},
+                schema=self.pa_schema,
+            ))
+
+        table = self.catalog.get_table(target)
+        base_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        row_ids = self._rowid_by_id(target)
+        updated_ids = [chunk[0] for chunk in chunks]
+        source = pa.table(
+            {
+                "_ROW_ID": [row_ids[row_id] for row_id in updated_ids],
+                "age": updated_ids,
+            },
+            schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
+        )
+        commits = []
+        original_commit = StreamTableCommit.commit
+
+        def record_commit(stream_commit, messages, commit_identifier):
+            commits.append((len(messages), commit_identifier))
+            return original_commit(
+                stream_commit, messages, commit_identifier)
+
+        with mock.patch.object(StreamTableCommit, "commit", record_commit):
+            stats = update_by_row_id(
+                target,
+                ray.data.from_arrow(source).repartition(4),
+                self.catalog_options,
+                update_cols=["age"],
+                num_partitions=4,
+                max_groups_per_commit=2,
+            )
+
+        self.assertEqual({"num_updated": 5}, stats)
+        self.assertEqual([(2, 1), (2, 2), (1, 3)], commits)
+        self.assertEqual(
+            base_snapshot_id + 3,
+            table.snapshot_manager().get_latest_snapshot().id,
+        )
+        result = self._read(target).sort_by("id").to_pydict()
+        ages = dict(zip(result["id"], result["age"]))
+        self.assertEqual(
+            {row_id: row_id for row_id in updated_ids},
+            {row_id: ages[row_id] for row_id in updated_ids},
+        )
+
+    def test_group_failure_preserves_completed_groups(self):
+        for max_groups, expected_snapshots in [(1, 2), (5, 1)]:
+            with self.subTest(max_groups_per_commit=max_groups):
+                target = self._create()
+                for row_id in range(1, 4):
+                    self._write(target, pa.Table.from_pydict(
+                        {"id": [row_id], "name": ["a"], "age": [0]},
+                        schema=self.pa_schema,
+                    ))
+
+                table = self.catalog.get_table(target)
+                base_snapshot_id = (
+                    table.snapshot_manager().get_latest_snapshot().id
+                )
+                row_ids = self._rowid_by_id(target)
+                source = pa.table(
+                    {
+                        "_ROW_ID": [
+                            row_ids[1], row_ids[2], row_ids[3], row_ids[3],
+                        ],
+                        "age": [100, 200, 300, 301],
+                    },
+                    schema=pa.schema([
+                        ("_ROW_ID", pa.int64()),
+                        ("age", pa.int32()),
+                    ]),
+                )
+
+                with self.assertRaisesRegex(RuntimeError, "Deduplicate"):
+                    update_by_row_id(
+                        target,
+                        ray.data.from_arrow(source),
+                        self.catalog_options,
+                        update_cols=["age"],
+                        num_partitions=1,
+                        max_groups_per_commit=max_groups,
+                    )
+
+                self.assertEqual(
+                    base_snapshot_id + expected_snapshots,
+                    table.snapshot_manager().get_latest_snapshot().id,
+                )
+                self.assertEqual(
+                    [100, 200, 0],
+                    self._read(target).sort_by("id")["age"].to_pylist(),
+                )
+
+    def test_atomic_group_failure_commits_nothing(self):
+        target = self._create()
+        for row_id in range(1, 4):
+            self._write(target, pa.Table.from_pydict(
+                {"id": [row_id], "name": ["a"], "age": [0]},
+                schema=self.pa_schema,
+            ))
+
+        table = self.catalog.get_table(target)
+        base_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        row_ids = self._rowid_by_id(target)
+        source = pa.table(
+            {
+                "_ROW_ID": [
+                    row_ids[1], row_ids[2], row_ids[3], row_ids[3],
+                ],
+                "age": [100, 200, 300, 301],
+            },
+            schema=pa.schema([
+                ("_ROW_ID", pa.int64()),
+                ("age", pa.int32()),
+            ]),
+        )
+
+        with self.assertRaisesRegex(ValueError, "Deduplicate"):
+            update_by_row_id(
+                target,
+                ray.data.from_arrow(source),
+                self.catalog_options,
+                update_cols=["age"],
+                num_partitions=1,
+            )
+
+        self.assertEqual(
+            base_snapshot_id,
+            table.snapshot_manager().get_latest_snapshot().id,
+        )
+        self.assertEqual(
+            [0, 0, 0],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+
+    def test_incremental_committer_batches_and_aborts_pending_groups(self):
+        import importlib
+
+        module = importlib.import_module("pypaimon.ray.update_by_row_id")
+        commits = []
+        aborted = []
+        close_calls = []
+
+        class FakeCommit:
+            def commit(self, messages, commit_identifier):
+                commits.append((list(messages), commit_identifier))
+
+            def close(self):
+                close_calls.append(True)
+
+        class FakeBuilder:
+            def new_commit(self):
+                return FakeCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FakeBuilder()
+
+        committer = module._IncrementalUpdateCommitter(FakeTable(), 2)
+        with mock.patch.object(
+                module,
+                "_abort_pending_update_messages",
+                side_effect=lambda table, messages: aborted.append(list(messages))):
+            committer.add_group(["group-1"], 1, [])
+            committer.add_group(["group-2"], 1, [])
+            committer.add_group(["group-3"], 1, [])
+            committer.abort_pending()
+            committer.close()
+
+        self.assertEqual(
+            [(["group-1", "group-2"], 1)],
+            commits,
+        )
+        self.assertEqual([["group-3"]], aborted)
+        self.assertEqual([True], close_calls)
+
+    def test_incremental_commit_failure_does_not_abort_unknown_outcome(self):
+        import importlib
+
+        module = importlib.import_module("pypaimon.ray.update_by_row_id")
+        aborted = []
+
+        class FakeCommit:
+            def commit(self, messages, commit_identifier):
+                raise RuntimeError("commit failed")
+
+            def close(self):
+                pass
+
+        class FakeBuilder:
+            def new_commit(self):
+                return FakeCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FakeBuilder()
+
+        committer = module._IncrementalUpdateCommitter(FakeTable(), 1)
+        with mock.patch.object(
+                module,
+                "_abort_pending_update_messages",
+                side_effect=lambda table, messages: aborted.append(list(messages))):
+            with self.assertRaisesRegex(RuntimeError, "commit failed"):
+                committer.add_group(["group-1"], 1, [])
+            committer.abort_pending()
+            committer.close()
+
+        self.assertEqual([], aborted)
+
     def test_pins_base_snapshot_for_conflict_detection(self):
         # The update pins its base snapshot and threads it to distributed_update_apply,
         # which uses it for commit-time conflict detection against concurrent writers.
@@ -182,6 +398,20 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual(recorder["commit_calls"], 1)
         self.assertEqual(recorder["abort_calls"], 0)
         self.assertEqual(recorder["close_calls"], 1)
+
+    def test_incremental_driver_commit_failure_is_not_unwrapped(self):
+        retry_error = ValueError("retry failed")
+        commit_error = RuntimeError("commit failed")
+        commit_error.__cause__ = retry_error
+
+        with self.assertRaises(RuntimeError) as raised:
+            self._run_with_fake_commit(
+                commit_error=commit_error,
+                incremental=True,
+            )
+
+        self.assertIs(commit_error, raised.exception)
+        self.assertIs(retry_error, raised.exception.__cause__)
 
     def test_close_failure_after_success_warns_and_returns_stats(self):
         close_error = RuntimeError("close failed")
@@ -324,8 +554,30 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             update_by_row_id(target, src, self.catalog_options, update_cols=[])
 
+    def test_rejects_invalid_max_groups_per_commit(self):
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
+        source = pa.table(
+            {"_ROW_ID": [0], "age": [9]},
+            schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
+        )
+
+        for value in [0, -1, True, 1.5, "2"]:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                        ValueError, "must be a positive integer"):
+                    update_by_row_id(
+                        target,
+                        source,
+                        self.catalog_options,
+                        update_cols=["age"],
+                        max_groups_per_commit=value,
+                    )
+
     def _run_with_fake_commit(self, *, recorder=None, new_commit_errors=None,
-                              commit_error=None, close_error=None):
+                              commit_error=None, close_error=None,
+                              incremental=False):
         import importlib
 
         m = importlib.import_module("pypaimon.ray.update_by_row_id")
@@ -354,7 +606,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                 return False
 
         class FakeCommit:
-            def commit(self, msgs):
+            def commit(self, msgs, *args):
                 recorder["commit_calls"] += 1
                 recorder["commit_msgs"] = list(msgs)
                 if recorder["commit_error"] is not None:
@@ -396,6 +648,9 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             def new_batch_write_builder(self):
                 return FakeWriteBuilder()
 
+            def new_stream_write_builder(self):
+                return FakeWriteBuilder()
+
         class FakeCatalog:
             def get_table(self, target):
                 return FakeTable()
@@ -410,6 +665,13 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         parser_path = (
             "pypaimon.schema.data_types.PyarrowFieldParser.from_paimon_schema"
         )
+
+        def fake_apply(*args, **kwargs):
+            if incremental:
+                kwargs["on_group_result"](recorder["msgs"], 3, [])
+                return [], 3, []
+            return recorder["msgs"], 3, []
+
         with mock.patch(
                 "pypaimon.catalog.catalog_factory.CatalogFactory.create",
                 return_value=FakeCatalog()), \
@@ -425,12 +687,13 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                                ("age", pa.int32()),
                            ])), \
                 mock.patch.object(m, "distributed_update_apply",
-                                  return_value=(recorder["msgs"], 3, [])):
+                                  side_effect=fake_apply):
             recorder["result"] = m.update_by_row_id(
                 "default.fake",
                 FakeSource(),
                 self.catalog_options,
                 update_cols=["age"],
+                max_groups_per_commit=1 if incremental else None,
             )
         return recorder
 
