@@ -53,7 +53,7 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
         options = CoreOptions(Options.from_none())
         self.assertIsNone(options.global_index_search_mode())
         self.assertEqual(
-            GlobalIndexSearchMode.FULL, options.scalar_index_search_mode())
+            GlobalIndexSearchMode.FAST, options.scalar_index_search_mode())
         self.assertEqual(
             GlobalIndexSearchMode.FAST, options.vector_index_search_mode())
         self.assertEqual(
@@ -88,7 +88,7 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
         full = coverage.unindexed_ranges(1, search_mode=GlobalIndexSearchMode.FULL)
         self.assertEqual([(100, 199)], [(r.from_, r.to) for r in full])
         self.assertEqual(
-            [(100, 199)],
+            [],
             [(r.from_, r.to) for r in coverage.unindexed_ranges(1)])
 
     def test_scanner_applies_passed_scalar_mode(self):
@@ -102,7 +102,7 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
         coverage = _coverage(CoreOptions(Options.from_none()))
         scanner = SimpleNamespace(_coverage=coverage, _fields=[1])
         result = DataEvolutionGlobalIndexScanner.unindexed_rows(scanner, None)
-        self.assertEqual([(100, 199)], _ranges(result))
+        self.assertEqual([], _ranges(result))
 
 
 if __name__ == "__main__":

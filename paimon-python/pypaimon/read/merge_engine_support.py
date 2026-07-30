@@ -69,6 +69,7 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "merge_map_with_keytime",
     "merge_map",
     "theta_sketch",
+    "rbm32",
 ])
 _FIELDS_PREFIX = "fields."
 _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"

@@ -76,7 +76,8 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
             Map<String, String> storageOptions) {
         this.filePath = path;
         RowType physicalReadRowType = physicalReadRowType(dataSchemaRowType, projectedRowType);
-        this.physicalFieldMapping = physicalFieldMapping(physicalReadRowType, projectedRowType);
+        this.physicalFieldMapping =
+                physicalFieldMapping(dataSchemaRowType, physicalReadRowType, projectedRowType);
         this.allocator =
                 ArrowAllocation.rootAllocator()
                         .newChildAllocator("vortex-reader", 0, Long.MAX_VALUE);
@@ -207,7 +208,7 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
 
     @VisibleForTesting
     static RowType physicalReadRowType(RowType dataSchemaRowType, RowType projectedRowType) {
-        if (!hasRowTrackingField(projectedRowType)) {
+        if (!hasSynthesizedRowTrackingField(dataSchemaRowType, projectedRowType)) {
             return projectedRowType;
         }
 
@@ -215,7 +216,7 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
         Set<Integer> selectedFieldIds = new HashSet<>();
         Set<String> selectedFieldNames = new HashSet<>();
         for (DataField projectedField : projectedRowType.getFields()) {
-            if (isRowTrackingField(projectedField)) {
+            if (isSynthesizedRowTrackingField(dataSchemaRowType, projectedField)) {
                 continue;
             }
 
@@ -234,15 +235,16 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
 
     @Nullable
     @VisibleForTesting
-    static int[] physicalFieldMapping(RowType physicalReadRowType, RowType projectedRowType) {
-        if (!hasRowTrackingField(projectedRowType)) {
+    static int[] physicalFieldMapping(
+            RowType dataSchemaRowType, RowType physicalReadRowType, RowType projectedRowType) {
+        if (!hasSynthesizedRowTrackingField(dataSchemaRowType, projectedRowType)) {
             return null;
         }
 
         int[] mapping = new int[projectedRowType.getFieldCount()];
         for (int i = 0; i < projectedRowType.getFieldCount(); i++) {
             DataField field = projectedRowType.getFields().get(i);
-            if (isRowTrackingField(field)) {
+            if (isSynthesizedRowTrackingField(dataSchemaRowType, field)) {
                 mapping[i] = -1;
             } else {
                 if (physicalReadRowType.containsField(field.id())) {
@@ -273,17 +275,30 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
         return null;
     }
 
-    private static boolean hasRowTrackingField(RowType rowType) {
+    private static boolean hasSynthesizedRowTrackingField(
+            RowType dataSchemaRowType, RowType rowType) {
         for (DataField field : rowType.getFields()) {
-            if (isRowTrackingField(field)) {
+            if (isSynthesizedRowTrackingField(dataSchemaRowType, field)) {
                 return true;
             }
         }
         return false;
     }
 
-    private static boolean isRowTrackingField(DataField field) {
-        return SpecialFields.ROW_ID.name().equals(field.name())
-                || SpecialFields.SEQUENCE_NUMBER.name().equals(field.name());
+    /**
+     * A row-tracking field is synthesized only when the file does not store it physically. {@code
+     * _SEQUENCE_NUMBER} doubles as the primary-key file format's physical sequence column: for
+     * key-value reads it must be read like any other data column, not mapped away for synthesis —
+     * doing so left its projection index at -1 and crashed every vortex read of a primary-key
+     * table.
+     */
+    private static boolean isSynthesizedRowTrackingField(
+            RowType dataSchemaRowType, DataField field) {
+        if (!SpecialFields.ROW_ID.name().equals(field.name())
+                && !SpecialFields.SEQUENCE_NUMBER.name().equals(field.name())) {
+            return false;
+        }
+        return !dataSchemaRowType.containsField(field.id())
+                && dataSchemaRowType.getFieldIndex(field.name()) < 0;
     }
 }

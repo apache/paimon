@@ -23,17 +23,21 @@ import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Comparator;
+
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.data.serializer.InternalRowSerializerTest.createArray;
 import static org.apache.paimon.data.serializer.InternalRowSerializerTest.createMap;
 import static org.apache.paimon.data.serializer.InternalRowSerializerTest.createRow;
 import static org.apache.paimon.data.serializer.InternalRowSerializerTest.deepEqualsInternalRow;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link RowCompactedSerializer}. */
@@ -199,6 +203,44 @@ abstract class RowCompactedSerializerTest extends SerializerTestInstance<Interna
 
         private static RowCompactedSerializer getRowSerializer() {
             return new RowCompactedSerializer(RowType.of(DataTypes.VARIANT(), DataTypes.VARIANT()));
+        }
+    }
+
+    static final class BinaryFieldTest extends RowCompactedSerializerTest {
+        public BinaryFieldTest() {
+            super(getRowSerializer(), getData());
+        }
+
+        private static InternalRow[] getData() {
+            return new GenericRow[] {
+                GenericRow.of(1, new byte[] {1, 2, 3}),
+                GenericRow.of(1, new byte[] {1, 2, 4}),
+                GenericRow.of(2, new byte[] {(byte) 0xFF})
+            };
+        }
+
+        private static RowCompactedSerializer getRowSerializer() {
+            return new RowCompactedSerializer(RowType.of(DataTypes.INT(), DataTypes.BYTES()));
+        }
+
+        @Test
+        public void testSliceComparatorOnBinaryFields() {
+            RowCompactedSerializer serializer = getRowSerializer();
+            Comparator<MemorySlice> comparator = serializer.createSliceComparator();
+            MemorySlice small =
+                    MemorySlice.wrap(
+                            serializer.serializeToBytes(GenericRow.of(1, new byte[] {1, 2, 3})));
+            MemorySlice large =
+                    MemorySlice.wrap(
+                            serializer.serializeToBytes(GenericRow.of(1, new byte[] {1, 2, 4})));
+            MemorySlice unsigned =
+                    MemorySlice.wrap(
+                            serializer.serializeToBytes(
+                                    GenericRow.of(1, new byte[] {(byte) 0xFF})));
+            assertThat(comparator.compare(small, large)).isLessThan(0);
+            assertThat(comparator.compare(large, small)).isGreaterThan(0);
+            assertThat(comparator.compare(small, small)).isEqualTo(0);
+            assertThat(comparator.compare(unsigned, small)).isGreaterThan(0);
         }
     }
 

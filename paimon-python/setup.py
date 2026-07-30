@@ -187,8 +187,8 @@ setup(
             'paimon-ftindex==0.1.0; python_version>="3.8"',
         ],
         'sql': [
-            'pypaimon-rust>=0.3.0,<0.4.0; python_version>="3.10"',
-            'datafusion>=52; python_version>="3.10"',
+            'pypaimon-rust>=0.3.0; python_version>="3.10"',
+            'datafusion>=54,<55; python_version>="3.10"',
         ],
         'hdfs': [
             'hdfs-native>=0.13,<1; python_version >= "3.10" and platform_system != "Windows"',

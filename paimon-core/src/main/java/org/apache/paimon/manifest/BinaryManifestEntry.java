@@ -22,10 +22,10 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.BinaryDataFileMeta;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
@@ -46,8 +46,9 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
  */
 public final class BinaryManifestEntry implements ManifestEntry {
 
-    private static final RowType MANIFEST_TYPE =
-            VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
+    private static final Projection FULL_PROJECTION =
+            Projection.create(ManifestEntry.MANIFEST_ROW_TYPE);
+    public static final Projection DELETE_ENTRY_PROJECTION = createDeleteEntryProjection();
 
     private final Projection projection;
     private final @Nullable BinaryDataFileMeta file;
@@ -64,6 +65,12 @@ public final class BinaryManifestEntry implements ManifestEntry {
     /** Replaces the backing row and returns this reusable view. */
     public BinaryManifestEntry replace(InternalRow row) {
         checkArgument(row != null, "Manifest row cannot be null.");
+        if (row.getFieldCount() != projection.projectedType.getFieldCount()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Manifest row field count %s does not match projected field count %s.",
+                            row.getFieldCount(), projection.projectedType.getFieldCount()));
+        }
         if (projection.filePosition >= 0) {
             InternalRow fileRow =
                     row.getRow(projection.filePosition, projection.projectedFileFieldCount);
@@ -72,6 +79,40 @@ public final class BinaryManifestEntry implements ManifestEntry {
         }
         this.row = row;
         return this;
+    }
+
+    /** Returns the backing row when this entry uses the complete versioned manifest schema. */
+    public InternalRow fullRow() {
+        checkState(
+                projection.fullProjection,
+                "The selected binary manifest projection is not the complete manifest schema.");
+        checkState(row != null, "Binary manifest entry is not backed by a row.");
+        return row;
+    }
+
+    /** Returns the reusable projection for the complete versioned manifest schema. */
+    public static Projection fullProjection() {
+        return FULL_PROJECTION;
+    }
+
+    private static Projection createDeleteEntryProjection() {
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
+        return Projection.create(
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                manifestType.getField(ManifestEntry.KIND),
+                                manifestType.getField(ManifestEntry.PARTITION),
+                                manifestType.getField(ManifestEntry.BUCKET),
+                                manifestType
+                                        .getField(ManifestEntry.FILE)
+                                        .newType(
+                                                DataFileMeta.SCHEMA.project(
+                                                        DataFileMeta.FILE_NAME,
+                                                        DataFileMeta.LEVEL,
+                                                        DataFileMeta.EXTRA_FILES,
+                                                        DataFileMeta.EMBEDDED_FILE_INDEX,
+                                                        DataFileMeta.EXTERNAL_PATH)))));
     }
 
     /** Drops references to the current row before its reader batch is released. */
@@ -241,6 +282,18 @@ public final class BinaryManifestEntry implements ManifestEntry {
         public ReusableIdentifier replace(BinaryManifestEntry entry) {
             checkArgument(entry != null, "Binary manifest entry cannot be null.");
             length = 0;
+            return appendEntryFields(entry);
+        }
+
+        /** Replaces this encoding with the entry's partition and identity fields. */
+        public ReusableIdentifier replaceWithPartition(BinaryManifestEntry entry) {
+            checkArgument(entry != null, "Binary manifest entry cannot be null.");
+            length = 0;
+            putBytes(entry.partitionBytes());
+            return appendEntryFields(entry);
+        }
+
+        private ReusableIdentifier appendEntryFields(BinaryManifestEntry entry) {
             putInt(entry.bucket());
             BinaryDataFileMeta file = entry.file();
             putInt(file.level());
@@ -331,6 +384,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
         private final int filePosition;
         private final int projectedFileFieldCount;
         private final @Nullable BinaryDataFileMeta.Projection fileProjection;
+        private final boolean fullProjection;
 
         private Projection(
                 RowType projectedType,
@@ -340,7 +394,8 @@ public final class BinaryManifestEntry implements ManifestEntry {
                 int totalBucketsPosition,
                 int filePosition,
                 int projectedFileFieldCount,
-                @Nullable BinaryDataFileMeta.Projection fileProjection) {
+                @Nullable BinaryDataFileMeta.Projection fileProjection,
+                boolean fullProjection) {
             this.projectedType = projectedType;
             this.kindPosition = kindPosition;
             this.partitionPosition = partitionPosition;
@@ -349,6 +404,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
             this.filePosition = filePosition;
             this.projectedFileFieldCount = projectedFileFieldCount;
             this.fileProjection = fileProjection;
+            this.fullProjection = fullProjection;
         }
 
         public static Projection create(RowType projectedType) {
@@ -373,17 +429,19 @@ public final class BinaryManifestEntry implements ManifestEntry {
                     projectedType.getFieldIndex(ManifestEntry.TOTAL_BUCKETS),
                     filePosition,
                     projectedFileFieldCount,
-                    fileProjection);
+                    fileProjection,
+                    projectedType.equals(ManifestEntry.MANIFEST_ROW_TYPE));
         }
 
         private static void validateProjection(RowType projectedType) {
             for (DataField projectedField : projectedType.getFields()) {
                 checkArgument(
-                        MANIFEST_TYPE.containsField(projectedField.id()),
+                        ManifestEntry.MANIFEST_ROW_TYPE.containsField(projectedField.id()),
                         "Unknown projected manifest field '%s' (id %s).",
                         projectedField.name(),
                         projectedField.id());
-                DataField manifestField = MANIFEST_TYPE.getField(projectedField.id());
+                DataField manifestField =
+                        ManifestEntry.MANIFEST_ROW_TYPE.getField(projectedField.id());
                 checkArgument(
                         projectedField.isPrunedFrom(manifestField),
                         "Projected manifest field '%s' does not match %s.",

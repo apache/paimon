@@ -1362,7 +1362,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         makeRowIdEntry(true, "survivor-row30", 0, 30, 5, 1)));
         input.add(
                 makeManifest(
-                        makeRowIdEntry(false, "base-row0", 0, 0, 5, 1),
+                        // A newer sequence makes this DELETE sort before its matching ADD unless
+                        // the minor-compaction key explicitly orders ADD first.
+                        makeRowIdEntry(false, "base-row0", 0, 0, 5, 2),
                         makeRowIdEntry(false, "old-row10", 0, 10, 5, 1),
                         makeRowIdEntry(true, "new-row20", 0, 20, 5, 2)));
 

@@ -1364,7 +1364,7 @@ For an internal format table in a REST catalog, it also makes the catalog own th
         </tr>
         <tr>
             <td><h5>scalar-index.search-mode</h5></td>
-            <td style="word-wrap: break-word;">full</td>
+            <td style="word-wrap: break-word;">fast</td>
             <td><p>Enum</p></td>
             <td>Search mode for scalar index queries.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
@@ -1739,7 +1739,7 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td><h5>target-file-row-num</h5></td>
             <td style="word-wrap: break-word;">9223372036854775807</td>
             <td>Long</td>
-            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction still produces a single file. Bounds per-file rows for wide columns to avoid data-evolution OOM. PyPaimon file-store writers do not support this option and fail fast when it is enabled. Disabled by default.</td>
+            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction still produces a single file. Bounds per-file rows for wide columns to avoid data-evolution OOM. PyPaimon supports this for data-evolution append tables; its primary-key, blob and vector writers still fail fast when it is enabled. Disabled by default.</td>
         </tr>
         <tr>
             <td><h5>target-file-size</h5></td>

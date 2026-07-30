@@ -48,11 +48,34 @@ public class VortexRecordsReaderTest {
         RowType physicalReadRowType =
                 VortexRecordsReader.physicalReadRowType(dataSchemaRowType, projectedRowType);
         int[] physicalFieldMapping =
-                VortexRecordsReader.physicalFieldMapping(physicalReadRowType, projectedRowType);
+                VortexRecordsReader.physicalFieldMapping(
+                        dataSchemaRowType, physicalReadRowType, projectedRowType);
 
         assertEquals(1, physicalReadRowType.getFieldCount());
         assertEquals("f_string", physicalReadRowType.getFields().get(0).name());
         assertArrayEquals(new int[] {0, -1}, physicalFieldMapping);
+    }
+
+    @Test
+    public void testPhysicalSequenceColumnIsReadNotSynthesized() {
+        // The primary-key file format stores _SEQUENCE_NUMBER as a physical column; it must map
+        // to its physical index, not be reserved for row-tracking synthesis.
+        RowType dataSchemaRowType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()),
+                        SpecialFields.SEQUENCE_NUMBER,
+                        SpecialFields.VALUE_KIND,
+                        new DataField(1, "v", DataTypes.BIGINT()));
+        RowType projectedRowType = dataSchemaRowType;
+
+        RowType physicalReadRowType =
+                VortexRecordsReader.physicalReadRowType(dataSchemaRowType, projectedRowType);
+        int[] physicalFieldMapping =
+                VortexRecordsReader.physicalFieldMapping(
+                        dataSchemaRowType, physicalReadRowType, projectedRowType);
+
+        assertEquals(dataSchemaRowType, physicalReadRowType);
+        assertEquals(null, physicalFieldMapping);
     }
 
     @Test
@@ -67,7 +90,8 @@ public class VortexRecordsReaderTest {
         RowType physicalReadRowType =
                 VortexRecordsReader.physicalReadRowType(dataSchemaRowType, projectedRowType);
         int[] physicalFieldMapping =
-                VortexRecordsReader.physicalFieldMapping(physicalReadRowType, projectedRowType);
+                VortexRecordsReader.physicalFieldMapping(
+                        dataSchemaRowType, physicalReadRowType, projectedRowType);
 
         assertEquals(1, physicalReadRowType.getFieldCount());
         assertEquals("old_name", physicalReadRowType.getFields().get(0).name());

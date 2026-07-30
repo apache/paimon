@@ -27,6 +27,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.BinaryManifestEntry;
 import org.apache.paimon.manifest.BinaryManifestEntry.Projection;
 import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
+import org.apache.paimon.manifest.DeletedIdentifierSet;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -38,10 +39,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ByteArrayKey;
 import org.apache.paimon.utils.ByteArrayLookupKey;
 import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.DeletedIdentifierSet;
 import org.apache.paimon.utils.PrimitiveRowRanges;
 import org.apache.paimon.utils.SerializationUtils;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
@@ -53,6 +52,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.append.dataevolution.LiveFileRowIdRangeCollector.FileRole.DEDICATED;
+import static org.apache.paimon.append.dataevolution.LiveFileRowIdRangeCollector.FileRole.NORMAL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -65,19 +66,11 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 final class DataEvolutionRowIdAssignmentPlanner {
 
     private static final int EXCLUDED_PARTITION_CACHE_SIZE = 1024;
-    private static final int MAX_INITIAL_CURRENT_ENTRIES = 1 << 24;
+    private static final int MAX_INITIAL_LIVE_FILE_RANGES = 1 << 24;
     private static final BinaryString ROW_ID_FIELD =
             BinaryString.fromString(SpecialFields.ROW_ID.name());
     private static final BinaryString BLOB_FILE_SUFFIX = BinaryString.fromString(".blob");
     private static final BinaryString VECTOR_FILE_MARKER = BinaryString.fromString(".vector.");
-    private static final Projection DELETE_PROJECTION =
-            manifestProjection(
-                    true,
-                    DataFileMeta.FILE_NAME,
-                    DataFileMeta.LEVEL,
-                    DataFileMeta.EXTRA_FILES,
-                    DataFileMeta.EMBEDDED_FILE_INDEX,
-                    DataFileMeta.EXTERNAL_PATH);
     private static final Projection ADD_IDENTIFIER_PROJECTION =
             manifestProjection(
                     true,
@@ -130,15 +123,14 @@ final class DataEvolutionRowIdAssignmentPlanner {
 
     private static Projection manifestProjection(
             boolean includeBucket, String... projectedFileFields) {
-        RowType manifestType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
         List<DataField> fields = new ArrayList<>();
-        fields.add(manifestType.getField(ManifestEntry.KIND));
-        fields.add(manifestType.getField(ManifestEntry.PARTITION));
+        fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.KIND));
+        fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.PARTITION));
         if (includeBucket) {
-            fields.add(manifestType.getField(ManifestEntry.BUCKET));
+            fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.BUCKET));
         }
         fields.add(
-                manifestType
+                ManifestEntry.MANIFEST_ROW_TYPE
                         .getField(ManifestEntry.FILE)
                         .newType(DataFileMeta.SCHEMA.project(projectedFileFields)));
         return Projection.create(new RowType(false, fields));
@@ -161,18 +153,18 @@ final class DataEvolutionRowIdAssignmentPlanner {
                         partitionPredicate,
                         EXCLUDED_PARTITION_CACHE_SIZE,
                         partitionPredicate == null
-                                ? initialCurrentEntryCapacity(manifestGroup)
+                                ? initialLiveFileRangeCapacity(manifestGroup)
                                 : 0);
         ReusableIdentifier identifier = new ReusableIdentifier();
         long[] rowRangeScratch = new long[2];
 
         collectDeletedIdentifiers(manifestGroup, group, identifier);
-        collectCurrentEntries(
+        collectLiveFileRanges(
                 manifestGroup, group, identifier, manifestGroupOrdinal, rowRangeScratch);
         identifier.release();
         group.releaseDeletedIdentifiers();
 
-        List<PartitionState> selections = group.finishAddPass();
+        List<PartitionState> selections = group.selectFragmentedPartitions();
         for (PartitionState selection : selections) {
             mergeSelectedPartition(selection);
         }
@@ -189,7 +181,9 @@ final class DataEvolutionRowIdAssignmentPlanner {
             }
             try (CloseableIterator<BinaryManifestEntry> entries =
                     manifestFile.scan(
-                            manifestMeta.fileName(), manifestMeta.fileSize(), DELETE_PROJECTION)) {
+                            manifestMeta.fileName(),
+                            manifestMeta.fileSize(),
+                            BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
                 while (entries.hasNext()) {
                     BinaryManifestEntry entry = entries.next();
                     if (!entry.isDelete()) {
@@ -200,8 +194,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
                         continue;
                     }
                     identifier.replace(entry);
-                    group.deletedIdentifiers.add(
-                            partition.id, identifier.bytes(), identifier.length());
+                    group.deletedIdentifiers.add(partition.id, identifier);
                 }
             } catch (Exception e) {
                 throw scanException(manifestMeta, e);
@@ -209,7 +202,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
         }
     }
 
-    private void collectCurrentEntries(
+    private void collectLiveFileRanges(
             List<ManifestFileMeta> manifestGroup,
             GroupState group,
             ReusableIdentifier identifier,
@@ -238,8 +231,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
                     }
                     if (!group.deletedIdentifiers.isEmpty()) {
                         identifier.replace(entry);
-                        if (group.deletedIdentifiers.contains(
-                                partition.id, identifier.bytes(), identifier.length())) {
+                        if (group.deletedIdentifiers.contains(partition.id, identifier)) {
                             continue;
                         }
                     }
@@ -262,9 +254,9 @@ final class DataEvolutionRowIdAssignmentPlanner {
                             maxSequenceNumber,
                             fileName,
                             retainedAddScanOrdinal);
-                    group.currentEntries.add(
+                    group.liveFileRanges.add(
                             partition.id,
-                            fileOrder != 0,
+                            fileOrder == 0 ? NORMAL : DEDICATED,
                             rowRangeScratch[0],
                             inclusiveRangeCount(rowRangeScratch[0], rowRangeScratch[1]));
                 }
@@ -427,7 +419,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
         return ordinal;
     }
 
-    private static int initialCurrentEntryCapacity(List<ManifestFileMeta> manifestGroup) {
+    private static int initialLiveFileRangeCapacity(List<ManifestFileMeta> manifestGroup) {
         long addedCount = 0L;
         long deletedCount = 0L;
         for (ManifestFileMeta manifestMeta : manifestGroup) {
@@ -437,17 +429,17 @@ final class DataEvolutionRowIdAssignmentPlanner {
             addedCount = Math.addExact(addedCount, manifestMeta.numAddedFiles());
             deletedCount = Math.addExact(deletedCount, manifestMeta.numDeletedFiles());
         }
-        return initialCurrentEntryCapacity(addedCount, deletedCount);
+        return initialLiveFileRangeCapacity(addedCount, deletedCount);
     }
 
-    static int initialCurrentEntryCapacity(long addedCount, long deletedCount) {
+    static int initialLiveFileRangeCapacity(long addedCount, long deletedCount) {
         checkArgument(addedCount >= 0, "Added entry count cannot be negative.");
         checkArgument(deletedCount >= 0, "Deleted entry count cannot be negative.");
         // Counts are only a sizing hint: DELETE entries may be duplicated or may not match an ADD
         // in this group. Estimate the live set, cap the eager allocation, and let
-        // CurrentRowIdEntries grow if the actual number of retained ADD entries is larger.
+        // LiveFileRowIdRangeCollector grow if the actual number of retained ADD entries is larger.
         long estimatedLiveCount = addedCount > deletedCount ? addedCount - deletedCount : 0L;
-        return (int) Math.min(estimatedLiveCount, MAX_INITIAL_CURRENT_ENTRIES);
+        return (int) Math.min(estimatedLiveCount, MAX_INITIAL_LIVE_FILE_RANGES);
     }
 
     private void validateGroups(List<List<ManifestFileMeta>> groups) {
@@ -508,17 +500,17 @@ final class DataEvolutionRowIdAssignmentPlanner {
 
         private final GroupPartitionDictionary partitions;
         private final DeletedIdentifierSet deletedIdentifiers = new DeletedIdentifierSet();
-        private final CurrentRowIdEntries currentEntries;
+        private final LiveFileRowIdRangeCollector liveFileRanges;
 
         private GroupState(
                 int partitionArity,
                 @Nullable PartitionPredicate partitionPredicate,
                 int excludedPartitionCacheSize,
-                int expectedAddEntryCount) {
+                int expectedLiveFileCount) {
             this.partitions =
                     new GroupPartitionDictionary(
                             partitionArity, partitionPredicate, excludedPartitionCacheSize);
-            this.currentEntries = new CurrentRowIdEntries(expectedAddEntryCount);
+            this.liveFileRanges = new LiveFileRowIdRangeCollector(expectedLiveFileCount);
         }
 
         private @Nullable PartitionState internPartition(byte[] serialized) {
@@ -529,31 +521,14 @@ final class DataEvolutionRowIdAssignmentPlanner {
             deletedIdentifiers.release();
         }
 
-        private List<PartitionState> finishAddPass() {
-            currentEntries.sort();
+        private List<PartitionState> selectFragmentedPartitions() {
             List<PartitionState> selections = new ArrayList<>();
-            long[] rangeScratch = new long[2];
-            int groupStart = 0;
-            while (groupStart < currentEntries.size()) {
-                int partitionId = currentEntries.partitionId(groupStart);
-                int groupEnd = groupStart + 1;
-                while (groupEnd < currentEntries.size()
-                        && currentEntries.partitionId(groupEnd) == partitionId) {
-                    groupEnd++;
-                }
-                int rangeScan =
-                        currentEntries.scanLogicalRanges(groupStart, groupEnd, rangeScratch);
-                if (rangeScan > 0) {
-                    PrimitiveRowRanges logicalRanges =
-                            currentEntries.materializeLogicalRanges(
-                                    groupStart, groupEnd, rangeScan, rangeScratch);
-                    PartitionState partition = partitions.partition(partitionId);
-                    partition.select(logicalRanges);
-                    selections.add(partition);
-                }
-                groupStart = groupEnd;
-            }
-            currentEntries.release();
+            liveFileRanges.finish(
+                    (partitionId, logicalRanges) -> {
+                        PartitionState partition = partitions.partition(partitionId);
+                        partition.select(logicalRanges);
+                        selections.add(partition);
+                    });
             return selections;
         }
     }
