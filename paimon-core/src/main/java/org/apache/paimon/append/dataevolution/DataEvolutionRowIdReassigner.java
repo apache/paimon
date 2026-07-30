@@ -26,6 +26,7 @@ import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.BinaryManifestEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -39,7 +40,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
-import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 
@@ -401,10 +402,15 @@ public class DataEvolutionRowIdReassigner {
                 previous.id(),
                 latest.id());
 
+        Set<String> previousManifestFiles = new HashSet<>();
+        for (ManifestFileMeta manifestMeta : manifestList.readDataManifests(previous)) {
+            previousManifestFiles.add(manifestMeta.fileName());
+        }
         Map<String, ManifestFileMeta> manifestMetasToRewrite = new LinkedHashMap<>();
         for (ManifestFileMeta manifestMeta : assignmentPlan.manifestMetasToRewrite) {
             manifestMetasToRewrite.put(manifestMeta.fileName(), manifestMeta);
         }
+        Map<String, Boolean> newManifestNeedsReassign = new HashMap<>();
         for (long id = previous.id() + 1; id <= latest.id(); id++) {
             Snapshot snapshot;
             try {
@@ -433,18 +439,10 @@ public class DataEvolutionRowIdReassigner {
                     snapshot.commitKind());
 
             for (ManifestFileMeta manifestMeta : manifestList.readDeltaManifests(snapshot)) {
-                boolean needsReassign = false;
-                for (ManifestEntry entry :
-                        readPlanningManifestEntries(manifestFile, manifestMeta)) {
-                    checkState(
-                            entry.kind() == FileKind.ADD,
-                            "APPEND snapshot %s contains non-ADD manifest entry %s.",
-                            snapshot.id(),
-                            entry);
-                    if (appendedEntryNeedsReassign(assignmentPlan, entry)) {
-                        needsReassign = true;
-                    }
-                }
+                boolean needsReassign =
+                        appendedManifestNeedsReassign(
+                                assignmentPlan, manifestFile, manifestMeta, snapshot.id());
+                newManifestNeedsReassign.put(manifestMeta.fileName(), needsReassign);
                 if (needsReassign) {
                     manifestMetasToRewrite.put(manifestMeta.fileName(), manifestMeta);
                 }
@@ -452,19 +450,88 @@ public class DataEvolutionRowIdReassigner {
         }
 
         List<ManifestFileMeta> latestManifestMetas = manifestList.readDataManifests(latest);
-        Set<String> latestManifestFiles = new HashSet<>();
+        Map<String, ManifestFileMeta> reboundManifestMetasToRewrite = new LinkedHashMap<>();
         for (ManifestFileMeta manifestMeta : latestManifestMetas) {
-            latestManifestFiles.add(manifestMeta.fileName());
+            String manifestFileName = manifestMeta.fileName();
+            boolean needsReassign = manifestMetasToRewrite.containsKey(manifestFileName);
+            if (!needsReassign && !previousManifestFiles.contains(manifestFileName)) {
+                Boolean cached = newManifestNeedsReassign.get(manifestFileName);
+                needsReassign =
+                        cached != null
+                                ? cached
+                                : manifestContainsMappedEntry(
+                                        assignmentPlan, manifestFile, manifestMeta);
+            }
+            if (needsReassign) {
+                reboundManifestMetasToRewrite.put(manifestFileName, manifestMeta);
+            }
         }
-        for (String plannedManifestFile : manifestMetasToRewrite.keySet()) {
-            checkState(
-                    latestManifestFiles.contains(plannedManifestFile),
-                    "Cannot advance row-id assignment because planned manifest %s no longer exists after APPEND manifest merge.",
-                    plannedManifestFile);
-        }
+        checkState(
+                !reboundManifestMetasToRewrite.isEmpty(),
+                "Cannot advance row-id assignment because no current manifest contains the planned row-id ranges.");
         return new AssignmentPlan(
-                new ArrayList<>(manifestMetasToRewrite.values()),
+                new ArrayList<>(reboundManifestMetasToRewrite.values()),
                 assignmentPlan.relativeRowIdMappings);
+    }
+
+    private boolean manifestContainsMappedEntry(
+            AssignmentPlan assignmentPlan,
+            ManifestFile manifestFile,
+            ManifestFileMeta manifestMeta) {
+        try (CloseableIterator<BinaryManifestEntry> entries =
+                manifestFile.scan(
+                        manifestMeta.fileName(),
+                        manifestMeta.fileSize(),
+                        BinaryManifestEntry.ROW_RANGE_PROJECTION)) {
+            while (entries.hasNext()) {
+                BinaryManifestEntry entry = entries.next();
+                RowRangeMappingIndex mapping =
+                        assignmentPlan.relativeRowIdMappings.mappings.get(entry.partition());
+                if (mapping != null && mapping.map(entry.file().nonNullRowIdRange()).isPresent()) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to scan manifest file " + manifestMeta.fileName(), e);
+        }
+    }
+
+    private boolean appendedManifestNeedsReassign(
+            AssignmentPlan assignmentPlan,
+            ManifestFile manifestFile,
+            ManifestFileMeta manifestMeta,
+            long appendSnapshotId) {
+        boolean needsReassign = false;
+        try (CloseableIterator<BinaryManifestEntry> entries =
+                manifestFile.scan(
+                        manifestMeta.fileName(),
+                        manifestMeta.fileSize(),
+                        BinaryManifestEntry.ROW_RANGE_PROJECTION)) {
+            while (entries.hasNext()) {
+                BinaryManifestEntry entry = entries.next();
+                if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {
+                    continue;
+                }
+                checkState(
+                        entry.isAdd(),
+                        "APPEND snapshot %s contains a non-ADD entry in manifest %s.",
+                        appendSnapshotId,
+                        manifestMeta.fileName());
+                if (appendedEntryNeedsReassign(assignmentPlan, entry)) {
+                    needsReassign = true;
+                }
+            }
+            return needsReassign;
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to scan manifest file " + manifestMeta.fileName(), e);
+        }
     }
 
     private boolean appendedEntryNeedsReassign(
@@ -620,18 +687,6 @@ public class DataEvolutionRowIdReassigner {
 
         return new RewrittenIndexManifest(
                 indexManifestFile.writeWithoutRolling(rewritten), globalIndexFileCount);
-    }
-
-    private List<ManifestEntry> readPlanningManifestEntries(
-            ManifestFile manifestFile, ManifestFileMeta manifestMeta) {
-        return manifestFile.read(
-                manifestMeta.fileName(),
-                manifestMeta.fileSize(),
-                partitionPredicate,
-                null,
-                Filter.alwaysTrue(),
-                entry -> partitionPredicate == null || partitionPredicate.test(entry.partition()),
-                ManifestEntry::copyWithoutStats);
     }
 
     private RecordComparator partitionComparator() {

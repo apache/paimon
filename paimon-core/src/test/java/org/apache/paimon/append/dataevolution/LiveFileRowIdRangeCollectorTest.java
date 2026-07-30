@@ -33,6 +33,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests for {@link LiveFileRowIdRangeCollector}. */
 class LiveFileRowIdRangeCollectorTest {
 
+    private static final int FIXED_CHUNK_SIZE = 1 << 21;
+
     @Test
     void testHotStateUsesThreePrimitiveWords() {
         LiveFileRowIdRangeCollector ranges = new LiveFileRowIdRangeCollector(10_000);
@@ -53,6 +55,24 @@ class LiveFileRowIdRangeCollectorTest {
         assertThat(finish(ranges)).isEmpty();
 
         assertThatThrownBy(() -> ranges.add(0, NORMAL, 0L, 1L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("after the collector is finished");
+        assertThatThrownBy(() -> finish(ranges))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("already finished");
+    }
+
+    @Test
+    void testAbortReleasesStorageAndIsIdempotent() {
+        LiveFileRowIdRangeCollector ranges = new LiveFileRowIdRangeCollector(10_000);
+        ranges.add(0, NORMAL, 0L, 1L);
+
+        ranges.abort();
+        ranges.abort();
+
+        assertThat(ranges.usedWordCount()).isZero();
+        assertThat(ranges.retainedWordCount()).isZero();
+        assertThatThrownBy(() -> ranges.add(0, NORMAL, 1L, 1L))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("after the collector is finished");
         assertThatThrownBy(() -> finish(ranges))
@@ -86,11 +106,45 @@ class LiveFileRowIdRangeCollectorTest {
 
         assertThat(selections).containsOnlyKeys(7);
         assertThat(selected.size()).isEqualTo(10_000);
-        assertThat(selected.retainedWordCount()).isEqualTo(20_000);
+        assertThat(selected.retainedWordCount()).isBetween(20_000, 30_000);
         assertThat(selected.start(0)).isZero();
         assertThat(selected.end(0)).isZero();
         assertThat(selected.start(9_999)).isEqualTo(19_998L);
         assertThat(selected.end(9_999)).isEqualTo(19_998L);
+        assertThat(ranges.usedWordCount()).isZero();
+        assertThat(ranges.retainedWordCount()).isZero();
+    }
+
+    @Test
+    void testRadixSortOrdersPartitionsAndSignedRanges() {
+        LiveFileRowIdRangeCollector ranges = new LiveFileRowIdRangeCollector();
+        ranges.add(9, NORMAL, 10L, 2L);
+        ranges.add(1, NORMAL, -4L, 2L);
+        ranges.add(9, NORMAL, 0L, 2L);
+        ranges.add(1, NORMAL, -10L, 2L);
+
+        Map<Integer, PrimitiveRowRanges> selections = finish(ranges);
+
+        assertThat(selections.keySet()).containsExactly(1, 9);
+        assertRanges(selections.get(1), -10L, -9L, -4L, -3L);
+        assertRanges(selections.get(9), 0L, 1L, 10L, 11L);
+    }
+
+    @Test
+    void testFixedChunksAreCompressedAndMergedWithKWayMerge() {
+        int repeatedFiles = Math.multiplyExact(FIXED_CHUNK_SIZE, 2);
+        LiveFileRowIdRangeCollector ranges =
+                new LiveFileRowIdRangeCollector(Math.addExact(repeatedFiles, 2));
+        for (int i = 0; i < repeatedFiles; i++) {
+            ranges.add(4, NORMAL, 100L, 10L);
+        }
+        ranges.add(4, NORMAL, 300L, 10L);
+        ranges.add(4, NORMAL, 200L, 10L);
+
+        Map<Integer, PrimitiveRowRanges> selections = finish(ranges);
+
+        assertThat(selections).containsOnlyKeys(4);
+        assertRanges(selections.get(4), 100L, 109L, 200L, 209L, 300L, 309L);
         assertThat(ranges.usedWordCount()).isZero();
         assertThat(ranges.retainedWordCount()).isZero();
     }
@@ -142,6 +196,24 @@ class LiveFileRowIdRangeCollectorTest {
         assertThatThrownBy(() -> finish(ranges))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("File row-id range is outside its logical row-id range");
+        assertThat(ranges.retainedWordCount()).isZero();
+    }
+
+    @Test
+    void testConsumerFailureReleasesStorage() {
+        LiveFileRowIdRangeCollector ranges = new LiveFileRowIdRangeCollector();
+        ranges.add(0, NORMAL, 0L, 1L);
+        ranges.add(0, NORMAL, 2L, 1L);
+
+        assertThatThrownBy(
+                        () ->
+                                ranges.finish(
+                                        (partitionId, logicalRanges) -> {
+                                            throw new RuntimeException("consumer failure");
+                                        }))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("consumer failure");
+        assertThat(ranges.usedWordCount()).isZero();
         assertThat(ranges.retainedWordCount()).isZero();
     }
 

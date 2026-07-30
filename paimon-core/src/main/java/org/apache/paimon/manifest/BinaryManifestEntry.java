@@ -49,6 +49,7 @@ public final class BinaryManifestEntry implements ManifestEntry {
     private static final Projection FULL_PROJECTION =
             Projection.create(ManifestEntry.MANIFEST_ROW_TYPE);
     public static final Projection DELETE_ENTRY_PROJECTION = createDeleteEntryProjection();
+    public static final Projection ROW_RANGE_PROJECTION = createRowRangeProjection();
 
     private final Projection projection;
     private final @Nullable BinaryDataFileMeta file;
@@ -113,6 +114,22 @@ public final class BinaryManifestEntry implements ManifestEntry {
                                                         DataFileMeta.EXTRA_FILES,
                                                         DataFileMeta.EMBEDDED_FILE_INDEX,
                                                         DataFileMeta.EXTERNAL_PATH)))));
+    }
+
+    private static Projection createRowRangeProjection() {
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
+        return Projection.create(
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                manifestType.getField(ManifestEntry.KIND),
+                                manifestType.getField(ManifestEntry.PARTITION),
+                                manifestType
+                                        .getField(ManifestEntry.FILE)
+                                        .newType(
+                                                DataFileMeta.SCHEMA.project(
+                                                        DataFileMeta.ROW_COUNT,
+                                                        DataFileMeta.FIRST_ROW_ID)))));
     }
 
     /** Drops references to the current row before its reader batch is released. */
