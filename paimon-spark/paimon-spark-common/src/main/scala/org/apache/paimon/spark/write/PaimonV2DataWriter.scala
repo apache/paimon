@@ -132,15 +132,18 @@ case class PaimonV2DataWriter(
 
   override def commitImpl(): Seq[CommitMessage] = {
     val result = scala.collection.mutable.ListBuffer[CommitMessage]()
-    write.prepareCommit((msg: CommitMessage) => {
-      registerPrepared(Seq(msg))
-      result += msg
-    })
-    plainWrite.foreach { plain =>
-      plain.prepareCommit((msg: CommitMessage) => {
+    write.prepareCommit(
+      (msg: CommitMessage) => {
         registerPrepared(Seq(msg))
         result += msg
       })
+    plainWrite.foreach {
+      plain =>
+        plain.prepareCommit(
+          (msg: CommitMessage) => {
+            registerPrepared(Seq(msg))
+            result += msg
+          })
     }
     result.toSeq
   }

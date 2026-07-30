@@ -224,7 +224,9 @@ final class SparkAttemptCleanup(
           // a successful winner attempt must never see its committed files deleted by a
           // false-positive thread interrupt. CloseFailed without interrupt: reclaim when
           // the caller never invokes abort()/close again.
-          if (current != State.Aborted && (context.isInterrupted() || current == State.CloseFailed)) {
+          if (
+            current != State.Aborted && (context.isInterrupted() || current == State.CloseFailed)
+          ) {
             abortIfNeeded("task completion listener")
           }
         })
@@ -333,10 +335,9 @@ object SparkAttemptCleanup {
 
   /**
    * Best-effort commit user for logging. {@link BatchWriteBuilder#commitUser()} is an optional
-   * extension point whose default implementation throws; builders that do not expose a commit
-   * user (e.g. format tables or custom implementations) must not break writer construction. The
-   * value is only used for abort logging — abort itself goes through {@link
-   * BatchWriteBuilder#newCommit()}.
+   * extension point whose default implementation throws; builders that do not expose a commit user
+   * (e.g. format tables or custom implementations) must not break writer construction. The value is
+   * only used for abort logging — abort itself goes through {@link BatchWriteBuilder#newCommit()}.
    */
   def commitUserOrUnknown(writeBuilder: BatchWriteBuilder): String = {
     try {

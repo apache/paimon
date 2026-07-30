@@ -670,8 +670,7 @@ public class CompactProcedure extends BaseProcedure {
                                                             new CommitMessageSerializer();
                                                     try {
                                                         while (taskIterator.hasNext()) {
-                                                            cleanup
-                                                                    .checkInterruptedPeriodically();
+                                                            cleanup.checkInterruptedPeriodically();
                                                             DataEvolutionCompactTask task =
                                                                     ser.deserialize(
                                                                             ser.getVersion(),

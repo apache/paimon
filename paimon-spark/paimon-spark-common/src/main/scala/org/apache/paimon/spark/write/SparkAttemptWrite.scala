@@ -65,15 +65,16 @@ object SparkAttemptWrite {
       writeBuilder: BatchWriteBuilder,
       closeUnprepared: Runnable,
       write: java.util.function.Consumer[SparkAttemptCleanup],
-      prepareCommit: java.util.function.Function[SparkAttemptCleanup, java.util.List[CommitMessage]],
+      prepareCommit: java.util.function.Function[
+        SparkAttemptCleanup,
+        java.util.List[CommitMessage]],
       toResult: java.util.function.Function[java.util.List[CommitMessage], R]): R = {
     run(
       table,
       writeBuilder,
       () => runUnchecked(closeUnprepared),
       cleanup => write.accept(cleanup),
-      cleanup =>
-        Option(prepareCommit.apply(cleanup)).map(_.asScala.toSeq).getOrElse(Seq.empty),
+      cleanup => Option(prepareCommit.apply(cleanup)).map(_.asScala.toSeq).getOrElse(Seq.empty),
       messages => toResult.apply(messages.asJava)
     )
   }

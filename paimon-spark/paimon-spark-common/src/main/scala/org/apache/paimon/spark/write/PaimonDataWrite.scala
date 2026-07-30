@@ -86,11 +86,12 @@ case class PaimonDataWrite(
 
   override def commitImpl(): Seq[CommitMessage] = {
     val messages = scala.collection.mutable.ListBuffer[CommitMessage]()
-    write.prepareCommit((msg: CommitMessage) => {
-      val transformed = transformCommitMessage(msg)
-      registerPrepared(Seq(transformed))
-      messages += transformed
-    })
+    write.prepareCommit(
+      (msg: CommitMessage) => {
+        val transformed = transformCommitMessage(msg)
+        registerPrepared(Seq(transformed))
+        messages += transformed
+      })
     messages.toSeq
   }
 
