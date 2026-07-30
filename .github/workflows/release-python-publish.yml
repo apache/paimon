@@ -35,7 +35,8 @@ jobs:
     if: >-
       github.repository == 'apache/paimon' &&
       startsWith(github.ref, 'refs/tags/')
-    environment: release
+    environment:
+      name: ${{ contains(github.ref_name, '-rc') && 'testpypi' || 'pypi' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -83,6 +84,5 @@ jobs:
         if: ${{ !contains(github.ref_name, '-rc') }}
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
         with:
-          skip-existing: true
           packages-dir: dist
           password: ${{ secrets.PYPI_API_TOKEN }}

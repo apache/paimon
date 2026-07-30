@@ -54,4 +54,3 @@ jobs:
       needs.python-package.result == 'success' &&
       (needs.java.result == 'success' || !contains(github.ref_name, '-rc'))
     uses: ./.github/workflows/release-python-publish.yml
-    secrets: inherit

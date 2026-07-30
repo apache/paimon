@@ -58,7 +58,7 @@ jobs:
           cache: maven
 
       - name: Set up Maven
-        uses: stCarolas/setup-maven@v5
+        uses: stCarolas/setup-maven@d6af6abeda15e98926a57b5aa970a96bb37f97d1 # v5
         with:
           maven-version: 3.8.8
 
@@ -100,52 +100,39 @@ jobs:
 
           mkdir -p release-java
           log="release-java/${LANE}.log"
-          artifact_dirs=()
+          install_log="release-java/${LANE}-install.log"
           case "${LANE}" in
             jdk8)
               mvn clean install -ntp -B \
                 -Papache-release,docs-and-source,spark3,flink1 \
-                -DskipTests -Dgpg.skip=true \
-                2>&1 | tee "${log}"
+                -DskipTests -Dgpg.skip=true -Dstyle.color=never \
+                2>&1 | tee "${log}" "${install_log}"
               ;;
             jdk11)
               mvn clean install -ntp -B \
                 -Pdocs-and-source,flink2 \
-                -DskipTests \
+                -DskipTests -Dstyle.color=never \
                 -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-iceberg \
                 -am \
                 2>&1 | tee "${log}"
-              mvn package -ntp -B \
+              mvn install -ntp -B \
                 -Papache-release,docs-and-source,flink2 \
-                -DskipTests -Dgpg.skip=true \
+                -DskipTests -Dgpg.skip=true -Dstyle.color=never \
                 -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg \
-                2>&1 | tee -a "${log}"
-              artifact_dirs=(
-                paimon-flink/paimon-flink-2.0
-                paimon-flink/paimon-flink-2.1
-                paimon-flink/paimon-flink-2.2
-                paimon-flink/paimon-flink2-common
-                paimon-iceberg
-              )
+                2>&1 | tee -a "${log}" "${install_log}"
               ;;
             jdk17)
               mvn clean install -ntp -B \
                 -Pdocs-and-source,spark4 \
-                -DskipTests \
+                -DskipTests -Dstyle.color=never \
                 -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1 \
                 -am \
                 2>&1 | tee "${log}"
-              mvn package -ntp -B \
+              mvn install -ntp -B \
                 -Papache-release,docs-and-source,spark4 \
-                -DskipTests -Dgpg.skip=true \
+                -DskipTests -Dgpg.skip=true -Dstyle.color=never \
                 -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13 \
-                2>&1 | tee -a "${log}"
-              artifact_dirs=(
-                paimon-spark/paimon-spark-common
-                paimon-spark/paimon-spark4-common
-                paimon-spark/paimon-spark-4.0
-                paimon-spark/paimon-spark-4.1
-              )
+                2>&1 | tee -a "${log}" "${install_log}"
               ;;
             *)
               echo "Unknown Java release lane: ${LANE}" >&2
@@ -154,18 +141,25 @@ jobs:
           esac
 
           files="release-java/${LANE}-files.txt"
-          if [[ "${#artifact_dirs[@]}" -eq 0 ]]; then
-            find . -type f -path '*/target/*.jar' -print \
-              | LC_ALL=C sort \
-              > "${files}"
-          else
-            for artifact_dir in "${artifact_dirs[@]}"; do
-              find "${artifact_dir}/target" \
-                -maxdepth 1 -type f -name '*.jar' -print
-            done | LC_ALL=C sort > "${files}"
-          fi
+          while IFS= read -r artifact; do
+            if [[ "${artifact}" == "${GITHUB_WORKSPACE}/"* ]]; then
+              artifact="./${artifact#"${GITHUB_WORKSPACE}/"}"
+            elif [[ "${artifact}" != ./* ]]; then
+              echo "Unexpected installed artifact path: ${artifact}" >&2
+              exit 1
+            fi
+            if [[ ! -f "${artifact}" ]]; then
+              echo "Installed artifact does not exist: ${artifact}" >&2
+              exit 1
+            fi
+            printf '%s\n' "${artifact}"
+          done < <(
+            sed -n \
+              's/^\[INFO\] Installing \(.*\.jar\) to .*$/\1/p' \
+              "${install_log}"
+          ) | LC_ALL=C sort -u > "${files}"
           if [[ ! -s "${files}" ]]; then
-            echo "No Java release artifacts were produced for ${LANE}" >&2
+            echo "No installed Java release artifacts were found for ${LANE}" >&2
             exit 1
           fi
 
@@ -187,6 +181,7 @@ jobs:
             echo "commit=${GITHUB_SHA}"
             echo "signed=false"
             echo "staged=false"
+            echo "artifact_source=maven-install-log"
           } > "release-java/${LANE}-manifest.txt"
 
       - name: Upload Java packages

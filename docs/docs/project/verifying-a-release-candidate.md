@@ -127,14 +127,14 @@ Check at least the following:
 - `paimon-python/setup.py` and PyPaimon package metadata use
   `PYPAIMON_VERSION` without `.dev`.
 
-Extract the candidates:
+Extract the Paimon candidate:
 
 ```shell
 tar xzf "${PAIMON_ARCHIVE}"
-tar xzf "${PYPAIMON_ARCHIVE}"
 ```
 
-Run the repository licensing checks from the extracted sources:
+Run the repository licensing checks. The PyPaimon checker temporarily extracts
+its source package and removes that temporary directory when it finishes:
 
 ```shell
 cd "paimon-${PAIMON_VERSION}"
@@ -146,6 +146,12 @@ SOURCE_PACKAGE="${PYPAIMON_ARCHIVE}" \
 ```
 
 Review the generated reports rather than relying only on the exit codes.
+After the licensing check, extract a fresh PyPaimon source tree for the build
+and test steps below:
+
+```shell
+tar xzf "${PYPAIMON_ARCHIVE}"
+```
 
 ## Build Java from the source archive
 
@@ -161,8 +167,8 @@ This lane covers the default reactor, Flink 1.x, and Spark 3.x:
 mvn -ntp clean verify -Pspark3,flink1
 ```
 
-If a full verification is not practical on your machine, at minimum build the
-same scope used for staging and state that tests were skipped:
+For supplementary or non-binding verification, you may build the same scope
+used for staging and state explicitly that tests were skipped:
 
 ```shell
 mvn -ntp clean install -DskipTests \
@@ -206,7 +212,11 @@ mvn -ntp clean install -DskipTests -Pdocs-and-source,spark4 \
 ```
 
 Investigate warnings and skipped modules. A successful compiler exit does not,
-by itself, establish that the candidate is suitable for release.
+by itself, establish that the candidate is suitable for release. The
+`-DskipTests` commands above do not by themselves satisfy the requirements for
+a binding `+1`. A binding voter must compile the signed source package and test
+the result on their own platform; run an appropriate test or smoke test against
+the artifacts produced by that source build and report the exact scope.
 
 ## Verify Java staging repositories
 
@@ -216,6 +226,8 @@ candidate.
 
 For every staging repository:
 
+- Confirm that its status is closed, so the candidate cannot change during the
+  vote.
 - Confirm that the version is `PAIMON_VERSION`, never a snapshot.
 - Confirm that each published module has its POM, main artifact, source JAR,
   Javadoc JAR, detached signatures, and checksums where applicable.
@@ -266,7 +278,10 @@ Inspect the generated sdist and wheel. They must contain the expected Python
 sources, `LICENSE`, `NOTICE`, README, and package metadata, with no tests,
 caches, credentials, or unrelated build output.
 
-The complete Python test suite lives in the Paimon source archive. Run it from
+This guide covers a combined Paimon and PyPaimon release. The complete Python
+test suite for the PyPaimon candidate is supplied in the signed Paimon source
+archive; the PyPaimon source distribution must not be used by itself for an
+independent release. Run the tests from
 `paimon-PAIMON_VERSION/paimon-python` on as many supported Python versions as
 your environment allows. The project CI selects Python 3.6, 3.7, 3.10, and
 3.11 for its main compatibility lanes:

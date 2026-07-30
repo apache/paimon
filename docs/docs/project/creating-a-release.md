@@ -49,8 +49,11 @@ their version numbers are equal.
 | PyPaimon source | `pypaimon-PYPAIMON_VERSION.tar.gz`, `.asc`, `.sha512` | ASF distribution |
 | Python convenience package | `pypaimon==PYPAIMON_VERSIONrcRC_NUMBER` for an RC | TestPyPI, then `pypaimon==PYPAIMON_VERSION` on PyPI |
 
-A combined release vote covers both signed source candidates. If PyPaimon is
-released separately, use the same Python steps and hold a separate vote.
+A combined release vote covers both signed source candidates. This guide does
+not define an independent PyPaimon release. Before releasing PyPaimon
+separately, the PMC must define a Python-only tag and workflow which do not
+depend on the Maven version or Java jobs, and must provide a signed source
+package which is independently sufficient to build and test the release.
 
 ### Java build matrix
 
@@ -86,12 +89,15 @@ The workflow has the following contract:
 
 The Java jobs use `-Dgpg.skip=true` and never receive Nexus credentials or a
 GPG private key. Their artifacts are build evidence, not the Maven staging
-repositories used for the vote. The Python RC job publishes
-`PYPAIMON_VERSIONrcRC_NUMBER` to TestPyPI.
+repositories used for the vote. The Python RC job uses the protected
+`testpypi` environment to publish `PYPAIMON_VERSIONrcRC_NUMBER` to TestPyPI.
+The final job uses the separate protected `pypi` environment.
 
-Configure the protected release environment with only the Python repository
-tokens (`TEST_PYPI_API_TOKEN` and `PYPI_API_TOKEN`). Require an RM approval for
-jobs that use publishing credentials.
+Configure both environments with an RM approval and a deployment policy which
+allows only the corresponding signed release tags. Store
+`TEST_PYPI_API_TOKEN` only in `testpypi` and `PYPI_API_TOKEN` only in `pypi`.
+Do not store either token as a repository or organization secret, and do not
+pass unrelated secrets to the reusable publishing workflow.
 
 ## One-time RM setup
 
@@ -107,9 +113,13 @@ Before managing the first release:
 4. Configure the local Maven server ID `apache.releases.https` with the RM's
    Apache Nexus credentials. Do not copy the GPG key or Nexus credentials into
    GitHub Actions.
-5. Confirm access to the ASF distribution SVN repository, Apache Nexus, GitHub
-   release environments, TestPyPI, and PyPI.
-6. Verify that the Python release secrets are configured without printing
+5. Confirm access to the ASF distribution SVN repository, Apache Nexus,
+   TestPyPI, and PyPI.
+6. Create the protected GitHub environments `testpypi` and `pypi`. Configure
+   required RM reviewers and release-tag deployment policies, store only the
+   matching token in each environment, and remove any repository- or
+   organization-level copies of those tokens.
+7. Verify that the Python release secrets are configured without printing
    their values in an Actions log.
 
 ```shell
@@ -262,9 +272,10 @@ On macOS, replace `sha512sum -c` with `shasum -a 512 -c`. A checksum mismatch
 between the CI package and the locally signed build is a release blocker.
 Maven signs the release artifacts with the RM's local GPG key and deploys them
 using the local `apache.releases.https` server credentials. After each command,
-record the `orgapachepaimon-XXXX` repository ID, confirm that it contains only
-the intended lane, and leave it staged for the vote. Do not close or release a
-repository before the vote passes.
+record the `orgapachepaimon-XXXX` repository ID and confirm that it contains
+only the intended lane. Close each repository and resolve every close-time rule
+failure before starting the vote. Closing freezes the candidate that voters
+inspect. Do not release a repository before the vote passes.
 
 ## Stage the source candidates
 
@@ -345,9 +356,11 @@ https://dist.apache.org/repos/dist/dev/paimon/paimon-${PAIMON_VERSION}-rc${RC_NU
 PyPaimon source candidate:
 https://dist.apache.org/repos/dist/dev/paimon/pypaimon-${PYPAIMON_VERSION}-rc${RC_NUMBER}/
 
-Signed Git tag and commit:
-https://github.com/apache/paimon/releases/tag/release-${PAIMON_VERSION}-rc${RC_NUMBER}
-<RC_COMMIT_SHA>
+Signed Git tag:
+release-${PAIMON_VERSION}-rc${RC_NUMBER}
+
+Commit:
+https://github.com/apache/paimon/commit/<RC_COMMIT_SHA>
 
 GitHub Actions release run:
 <WORKFLOW_RUN_URL>
@@ -355,7 +368,7 @@ GitHub Actions release run:
 KEYS:
 https://downloads.apache.org/paimon/KEYS
 
-Java staging repositories:
+Closed Java staging repositories:
 <JDK_8_NEXUS_URL>
 <JDK_11_NEXUS_URL>
 <JDK_17_NEXUS_URL>
@@ -416,11 +429,11 @@ svn mv -m "Release PyPaimon ${PYPAIMON_VERSION}" \
 
 ### Promote convenience artifacts
 
-1. In Nexus, close every recorded JDK 8, 11, and 17 staging repository. Inspect
-   all rule failures and artifact trees before continuing.
-2. Release those exact repositories to Maven Central. Do not run Maven deploy
-   again.
-3. Approve the protected PyPI promotion job for the final tag. It must build
+1. In Nexus, confirm that every recorded JDK 8, 11, and 17 staging repository
+   is still closed and has the exact artifact tree approved by the vote.
+2. Release those exact closed repositories to Maven Central. Do not run Maven
+   deploy again.
+3. Approve the protected `pypi` promotion job for the final tag. It must build
    `pypaimon==PYPAIMON_VERSION` from the approved tag commit and must not change
    project source.
 4. Verify Maven Central and PyPI before announcing the release.
