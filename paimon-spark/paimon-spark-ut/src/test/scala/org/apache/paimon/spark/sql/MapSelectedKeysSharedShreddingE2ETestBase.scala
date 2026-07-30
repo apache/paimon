@@ -64,6 +64,88 @@ abstract class MapSelectedKeysSharedShreddingE2ETestBase extends PaimonSparkTest
         }
       }
 
+      test(s"switch map storage layout in both directions for $format") {
+        withTable("T") {
+          sql(s"""
+                 |CREATE TABLE T (id INT, attrs MAP<STRING, BIGINT>)
+                 |TBLPROPERTIES (
+                 |  'bucket' = '-1',
+                 |  'file.format' = '$format'
+                 |)
+                 |""".stripMargin)
+          sql("""
+                |INSERT INTO T VALUES
+                |  (1, map('key1', CAST(10 AS BIGINT), 'key2', CAST(20 AS BIGINT)))
+                |""".stripMargin)
+
+          sql("""
+                |ALTER TABLE T SET TBLPROPERTIES (
+                |  'fields.attrs.map.storage-layout' = 'shared-shredding',
+                |  'fields.attrs.map.shared-shredding.max-columns' = '1'
+                |)
+                |""".stripMargin)
+          sql("""
+                |INSERT INTO T VALUES
+                |  (2, map('key2', CAST(30 AS BIGINT), 'cold', CAST(40 AS BIGINT)))
+                |""".stripMargin)
+
+          val firstSharedQuery =
+            sql("SELECT id, attrs['key1'], attrs['key2'] FROM T ORDER BY id")
+          assert(
+            pushedMapSelectedKeys(firstSharedQuery).contains("attrs"),
+            s"Expected selected-key pushdown after switching $format to shared-shredding")
+          checkAnswer(firstSharedQuery, Row(1, 10L, 20L) :: Row(2, null, 30L) :: Nil)
+
+          sql("""
+                |ALTER TABLE T SET TBLPROPERTIES (
+                |  'fields.attrs.map.storage-layout' = 'default'
+                |)
+                |""".stripMargin)
+          sql("""
+                |INSERT INTO T VALUES
+                |  (3, map('key1', CAST(50 AS BIGINT)))
+                |""".stripMargin)
+
+          val defaultQuery =
+            sql("SELECT id, attrs['key1'], attrs['key2'] FROM T ORDER BY id")
+          assert(
+            pushedMapSelectedKeys(defaultQuery).isEmpty,
+            s"Expected selected-key pushdown to be disabled after switching $format to default")
+          checkAnswer(
+            defaultQuery,
+            Row(1, 10L, 20L) :: Row(2, null, 30L) :: Row(3, 50L, null) :: Nil)
+
+          sql("""
+                |ALTER TABLE T SET TBLPROPERTIES (
+                |  'fields.attrs.map.storage-layout' = 'shared-shredding'
+                |)
+                |""".stripMargin)
+          sql("""
+                |INSERT INTO T VALUES
+                |  (4, map('key2', CAST(60 AS BIGINT)))
+                |""".stripMargin)
+
+          val secondSharedQuery =
+            sql("SELECT id, attrs['key1'], attrs['key2'] FROM T ORDER BY id")
+          assert(
+            pushedMapSelectedKeys(secondSharedQuery).contains("attrs"),
+            s"Expected selected-key pushdown after switching $format back to shared-shredding")
+          checkAnswer(
+            secondSharedQuery,
+            Row(1, 10L, 20L) ::
+              Row(2, null, 30L) ::
+              Row(3, 50L, null) ::
+              Row(4, null, 60L) :: Nil)
+          checkAnswer(
+            sql("SELECT id, attrs FROM T ORDER BY id"),
+            Row(1, Map("key1" -> 10L, "key2" -> 20L)) ::
+              Row(2, Map("key2" -> 30L, "cold" -> 40L)) ::
+              Row(3, Map("key1" -> 50L)) ::
+              Row(4, Map("key2" -> 60L)) :: Nil
+          )
+        }
+      }
+
       Seq(false, true).foreach {
         thinMode =>
           test(s"skip selected-key pushdown for merge_map from $format with thin mode $thinMode") {
@@ -211,5 +293,16 @@ abstract class MapSelectedKeysSharedShreddingE2ETestBase extends PaimonSparkTest
 
       checkAnswer(query, Row(1, 10L, 30L) :: Row(2, 50L, null) :: Nil)
     }
+  }
+
+  private def pushedMapSelectedKeys(
+      query: org.apache.spark.sql.DataFrame): Map[String, Seq[String]] = {
+    val sparkPlan = query.queryExecution.sparkPlan
+    sparkPlan
+      .collectFirst {
+        case scan: BatchScanExec if scan.scan.isInstanceOf[PaimonScan] =>
+          scan.scan.asInstanceOf[PaimonScan].pushedMapSelectedKeys
+      }
+      .getOrElse(fail(s"Expected a Paimon scan in physical plan:\n$sparkPlan"))
   }
 }
