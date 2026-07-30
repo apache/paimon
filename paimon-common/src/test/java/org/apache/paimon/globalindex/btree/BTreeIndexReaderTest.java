@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex.btree;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
@@ -103,6 +104,17 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
                 assertThat(comparator.compare(value, boundary)).isGreaterThanOrEqualTo(0);
             }
         }
+    }
+
+    @TestTemplate
+    public void testTopNOnlyDeserializesRemainingRowIds() {
+        MemorySliceOutput output = new MemorySliceOutput(16);
+        output.writeVarLenInt(3);
+        output.writeVarLenLong(10);
+        output.writeVarLenLong(20);
+
+        assertThat(BTreeIndexReader.deserializeRowIds(output.toSlice(), 2))
+                .containsExactly(10L, 20L);
     }
 
     private Object[] valuesByRowId() {

@@ -23,6 +23,7 @@ import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.KeyRowIds;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -210,7 +211,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
 
                 // Collect all entries from iterator
                 while (iter.hasNext()) {
-                    BTreeIndexReader.KeyRowIds entry = iter.next();
+                    KeyRowIds entry = iter.next();
                     Object key = entry.key();
                     long[] rowIds = entry.rowIds();
 
