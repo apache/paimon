@@ -90,7 +90,7 @@ public class SplitSerializer {
             ((IndexedSplit) split).serialize(out);
         } else if (split instanceof ChainSplit) {
             out.writeInt(CHAIN_SPLIT);
-            writeChainSplit((ChainSplit) split, out);
+            ((ChainSplit) split).serialize(out);
         } else if (split instanceof IncrementalSplit) {
             out.writeInt(INCREMENTAL_SPLIT);
             writeIncrementalSplit((IncrementalSplit) split, out);
@@ -126,7 +126,7 @@ public class SplitSerializer {
             case INDEXED_SPLIT:
                 return IndexedSplit.deserialize(in);
             case CHAIN_SPLIT:
-                return readChainSplit(in);
+                return ChainSplit.deserialize(in);
             case QUERY_AUTH_SPLIT:
                 return readQueryAuthSplit(in);
             case FALLBACK_DATA_SPLIT:
@@ -175,22 +175,6 @@ public class SplitSerializer {
                 afterFiles,
                 afterDeletionFiles,
                 isStreaming);
-    }
-
-    private static void writeChainSplit(ChainSplit split, DataOutputView out) throws IOException {
-        serializeBinaryRow(split.logicalPartition(), out);
-        writeDataFiles(split.dataFiles(), out);
-        writeStringMap(out, split.fileBucketPathMapping());
-        writeStringMap(out, split.fileBranchMapping());
-    }
-
-    private static ChainSplit readChainSplit(DataInputView in) throws IOException {
-        BinaryRow logicalPartition = deserializeBinaryRow(in);
-        List<DataFileMeta> dataFiles = readDataFiles(in);
-        Map<String, String> fileBucketPathMapping = readStringMap(in);
-        Map<String, String> fileBranchMapping = readStringMap(in);
-        return new ChainSplit(
-                logicalPartition, dataFiles, fileBranchMapping, fileBucketPathMapping);
     }
 
     private static void writeQueryAuthSplit(QueryAuthSplit split, DataOutputView out)
@@ -299,11 +283,6 @@ public class SplitSerializer {
             writeString(out, entry.getKey());
             writeString(out, entry.getValue());
         }
-    }
-
-    private static Map<String, String> readStringMap(DataInputView in) throws IOException {
-        Map<String, String> map = readNullableStringMap(in);
-        return map == null ? new HashMap<>() : map;
     }
 
     @Nullable

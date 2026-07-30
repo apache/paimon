@@ -103,4 +103,23 @@ public class SerializationUtils {
     public static BinaryRow deserializeBinaryRow(DataInputView input) throws IOException {
         return deserializeBinaryRow(deserializedBytes(input));
     }
+
+    /**
+     * Checks that the given version is within the supported range.
+     *
+     * @param version the version read from serialized bytes
+     * @param minVersion the minimum supported version (inclusive)
+     * @param maxVersion the maximum supported version (inclusive)
+     * @param context the context name included in the error message
+     * @throws IOException if the version is out of range
+     */
+    public static void checkVersion(int version, int minVersion, int maxVersion, String context)
+            throws IOException {
+        if (version < minVersion || version > maxVersion) {
+            throw new IOException(
+                    String.format(
+                            "Unsupported %s version: %d, expected between %d and %d",
+                            context, version, minVersion, maxVersion));
+        }
+    }
 }

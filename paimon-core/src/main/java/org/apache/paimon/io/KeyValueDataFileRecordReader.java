@@ -40,11 +40,6 @@ public class KeyValueDataFileRecordReader implements FileRecordReader<KeyValue> 
     private final long snapshotId;
 
     public KeyValueDataFileRecordReader(
-            FileRecordReader<InternalRow> reader, RowType keyType, RowType valueType, int level) {
-        this(reader, keyType, valueType, level, false, KeyValue.UNKNOWN_SEQUENCE);
-    }
-
-    public KeyValueDataFileRecordReader(
             FileRecordReader<InternalRow> reader,
             RowType keyType,
             RowType valueType,
