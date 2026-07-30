@@ -56,7 +56,6 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                     // checkpointing on by default for the JM-side committer; bounded sources will
                     // be handled by end-input support in a follow-up PR
                     true,
-                    true,
                     createCommitterFactory());
         }
         return createNoStateRowWriteOperatorFactory(table, writeProvider, commitUser);
@@ -83,15 +82,9 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                     StoreSinkWrite.Provider writeProvider,
                     String commitUser,
                     boolean streamingCheckpointEnabled,
-                    boolean failoverAfterRecovery,
                     Committer.Factory<Committable, ManifestCommittable> committerFactory) {
         return new CoordinatorCommittingFactory(
-                table,
-                writeProvider,
-                commitUser,
-                streamingCheckpointEnabled,
-                failoverAfterRecovery,
-                committerFactory);
+                table, writeProvider, commitUser, streamingCheckpointEnabled, committerFactory);
     }
 
     private static class CoordinatorCommittingFactory extends RowDataStoreWriteOperator.Factory
@@ -100,7 +93,6 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
         private static final long serialVersionUID = 1L;
 
         private final boolean streamingCheckpointEnabled;
-        private final boolean failoverAfterRecovery;
         private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
 
         CoordinatorCommittingFactory(
@@ -108,11 +100,9 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                 StoreSinkWrite.Provider storeSinkWriteProvider,
                 String initialCommitUser,
                 boolean streamingCheckpointEnabled,
-                boolean failoverAfterRecovery,
                 Committer.Factory<Committable, ManifestCommittable> committerFactory) {
             super(table, storeSinkWriteProvider, initialCommitUser);
             this.streamingCheckpointEnabled = streamingCheckpointEnabled;
-            this.failoverAfterRecovery = failoverAfterRecovery;
             this.committerFactory = committerFactory;
         }
 
@@ -120,11 +110,7 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
         public OperatorCoordinator.Provider getCoordinatorProvider(
                 String operatorName, OperatorID operatorID) {
             return new CommittingWriteOperatorCoordinator.Provider(
-                    operatorID,
-                    committerFactory,
-                    streamingCheckpointEnabled,
-                    initialCommitUser,
-                    failoverAfterRecovery);
+                    operatorID, committerFactory, streamingCheckpointEnabled, initialCommitUser);
         }
 
         @Override

@@ -91,8 +91,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
                                 new StoreCommitter(
                                         table, table.newCommit(context.commitUser()), context),
                         true,
-                        commitUser,
-                        false);
+                        commitUser);
         coordinator.start();
         coordinator.waitProcessAllActions();
 
