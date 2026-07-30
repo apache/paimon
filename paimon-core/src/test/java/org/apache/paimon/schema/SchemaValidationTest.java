@@ -1595,12 +1595,10 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testMergeOnReadRequiresDvEnabled() {
+    public void testMergeOnReadIgnoredWhenDvDisabled() {
         Map<String, String> options = new HashMap<>();
         options.put("deletion-vectors.merge-on-read", "true");
-        assertThatThrownBy(() -> validateTableSchemaExec(options))
-                .hasMessageContaining(
-                        "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
     }
 
     @Test

@@ -331,10 +331,6 @@ public class SchemaValidation {
 
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(options);
-        } else {
-            checkArgument(
-                    !options.deletionVectorsMergeOnRead(),
-                    "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true.");
         }
 
         if (options.snapshotSequenceOrdering()) {
@@ -976,7 +972,7 @@ public class SchemaValidation {
                 options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
                 "Primary-key vector index requires deletion-vectors.enabled = true.");
         checkArgument(
-                !options.deletionVectorsMergeOnRead(),
+                !options.deletionVectorsEnabled() || !options.deletionVectorsMergeOnRead(),
                 "Primary-key vector index with merge-engine = %s requires deletion-vectors.merge-on-read = false.",
                 options.mergeEngine());
         checkArgument(
@@ -1034,7 +1030,7 @@ public class SchemaValidation {
                 options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
                 "Primary-key full-text index requires deletion-vectors.enabled = true.");
         checkArgument(
-                !options.deletionVectorsMergeOnRead(),
+                !options.deletionVectorsEnabled() || !options.deletionVectorsMergeOnRead(),
                 "Primary-key full-text index requires deletion-vectors.merge-on-read = false.");
         checkArgument(
                 options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
