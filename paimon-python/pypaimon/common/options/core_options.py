@@ -659,6 +659,18 @@ class CoreOptions:
         .with_description("Whether to enable data evolution.")
     )
 
+    DATA_EVOLUTION_ROW_ID_CONFLICT_REWRITE_MAX_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("data-evolution.row-id-conflict-rewrite.max-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(256))
+        .with_description(
+            "Maximum total size of current data files whose row-id ranges "
+            "PyPaimon may automatically rebase staged updates against when "
+            "a concurrent compaction changes file boundaries. Set to 0 B "
+            "to disable."
+        )
+    )
+
     DATA_EVOLUTION_ROW_SIDECAR_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("data-evolution.row-sidecar.enabled")
         .boolean_type()
@@ -1260,6 +1272,13 @@ class CoreOptions:
 
     def data_evolution_enabled(self, default=None):
         return self.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, default)
+
+    def data_evolution_row_id_conflict_rewrite_max_size(self, default=None):
+        value = self.options.get(
+            CoreOptions.DATA_EVOLUTION_ROW_ID_CONFLICT_REWRITE_MAX_SIZE,
+            default,
+        )
+        return value.get_bytes()
 
     def data_evolution_row_sidecar_enabled(self, default=None):
         return self.options.get(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED, default)

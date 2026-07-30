@@ -24,8 +24,12 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_commit import FileStoreCommit
+from pypaimon.write.file_store_commit import (
+    FileStoreCommit,
+    RewriteResult,
+)
 
 
 @patch('pypaimon.write.file_store_commit.ManifestFileManager')
@@ -502,6 +506,38 @@ class TestFileStoreCommit(unittest.TestCase):
 
         result = file_store_commit._write_manifest_files(entries, "manifest-test")
         self.assertIsNotNone(result)
+
+    def test_row_id_rewrite_respects_commit_retry_limit(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        file_store_commit.commit_max_retries = 1
+        file_store_commit.commit_timeout = 10 ** 9
+        file_store_commit._commit_retry_wait = Mock()
+
+        latest_snapshot = Mock()
+        latest_snapshot.id = 7
+        file_store_commit.snapshot_manager.get_latest_snapshot.return_value = (
+            latest_snapshot
+        )
+
+        commit_entry = Mock()
+        rewrite = RewriteResult(RowIdRewriteResult([commit_entry], 1))
+        file_store_commit._try_commit_once = Mock(side_effect=[
+            rewrite,
+            rewrite,
+            AssertionError("rewrite retry budget was not enforced"),
+        ])
+
+        with self.assertRaises(RuntimeError) as ctx:
+            file_store_commit._try_commit(
+                commit_kind="APPEND",
+                commit_identifier=11,
+                commit_entries_plan=lambda snapshot: [commit_entry],
+            )
+
+        self.assertIn("with 1 retries", str(ctx.exception))
+        self.assertEqual(2, file_store_commit._try_commit_once.call_count)
+        file_store_commit._commit_retry_wait.assert_called_once_with(0)
 
     @staticmethod
     def _to_entries(commit_messages):
