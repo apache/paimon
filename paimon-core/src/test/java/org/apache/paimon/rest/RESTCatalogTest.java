@@ -80,6 +80,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
@@ -6000,6 +6001,39 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThatThrownBy(() -> new LocalTableQuery((FileStoreTable) table))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("query-auth table");
+    }
+
+    @Test
+    void testRowIdFilterOnDataEvolutionQueryAuthTable() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_de_rowid_filter");
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "f0", DataTypes.INT()));
+        fields.add(new DataField(1, "f1", DataTypes.STRING()));
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        Table table = createMaskingAuthTable(identifier, fields, options);
+
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            write.write(GenericRow.of(0, BinaryString.fromString("a0")));
+            write.write(GenericRow.of(1, BinaryString.fromString("a1")));
+            builder.newCommit().commit(write.prepareCommit());
+        }
+
+        // no masking rules at all -- a _ROW_ID predicate must still plan. Data-evolution
+        // statistics carry only logical columns, so the row-id part must not be pushed.
+        Predicate onRowId =
+                LeafPredicate.of(
+                        new FieldTransform(
+                                new FieldRef(
+                                        SpecialFields.ROW_ID.id(),
+                                        SpecialFields.ROW_ID.name(),
+                                        DataTypes.BIGINT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(0L));
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(onRowId);
+        assertThat(readBuilder.newScan().plan().splits()).isNotEmpty();
     }
 
     @Test
