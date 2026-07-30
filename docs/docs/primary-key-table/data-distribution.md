@@ -70,12 +70,27 @@ Postpone bucket mode is configured by `'bucket' = '-2'`.
 This mode aims to solve the difficulty to determine a fixed number of buckets
 and support different buckets for different partitions.
 
-When writing records into the table,
-all records will first be stored in the `bucket-postpone` directory of each partition
-and are not available to readers.
+By default, batch writes set `postpone.batch-write-fixed-bucket` to `true`
+and write records directly to real buckets.
+For a Spark batch write to a partition without real bucket files,
+Spark calculates the bucket number from the uncompressed Paimon `BinaryRow` serialized size.
+The target size is configured by `postpone.target-size-per-bucket` and defaults to `1 GB`.
+Existing postpone files do not record their uncompressed serialized size, so Spark estimates their
+size using their row count and the average serialized size of incoming rows in the same partition.
+You can instead configure `postpone.target-row-num-per-bucket` to calculate the bucket number
+from row counts; this option takes precedence over the target size.
+The calculated bucket number is at least `1` and is limited by
+`postpone.batch-write-fixed-bucket.max-parallelism`.
+The serialized size is measured before file encoding and compression, so it is not the exact
+ORC or Parquet size on storage.
+Inferring the data amount adds a statistics stage; Spark caches the batch so that inference and
+writing use the same input rows. Spark skips this stage for an unpartitioned table that already
+has real bucket files, or when `postpone.batch-write-fixed-bucket.max-parallelism` is `1`.
 
-To move the records into the correct bucket and make them readable,
-you need to run a compaction job.
+When `postpone.batch-write-fixed-bucket` is `false`,
+records are first stored in the `bucket-postpone` directory of each partition
+and are not available to readers.
+To move these records into the correct bucket and make them readable, run a compaction job.
 See `compact` [procedure](../flink/procedures).
 The bucket number for the partitions compacted for the first time
 is configured by the option `postpone.default-bucket-num`, whose default value is `1`.
@@ -105,7 +120,7 @@ Performance: For tables with a large amount of data, there will be a significant
 initialization takes a long time.
 
 If your upsert does not rely on too old data, you can consider configuring index TTL to reduce Index and initialization time:
-- `'cross-partition-upsert.index-ttl'`: The TTL in rocksdb index and initialization, this can avoid maintaining too many
+- `'cross-partition-upsert.index-ttl'`: The TTL in local index and initialization, this can avoid maintaining too many
   indexes and lead to worse and worse performance.
 
 You can also use Cross Partitions Upsert with bucket (N > 0) or bucket (-2), in these modes, there is no global index to

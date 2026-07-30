@@ -1046,14 +1046,13 @@ object MergeIntoPaimonDataEvolutionTable {
         val snapshotId = snapshot.id().toString
         if (
           configuredSnapshotId.contains(snapshotId) &&
-          fullSearchMode.equalsIgnoreCase(
-            table.options().get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key()))
+          table.coreOptions().scalarIndexSearchMode() == CoreOptions.GlobalIndexSearchMode.FULL
         ) {
           (v2Table, relation)
         } else {
           val dynamicOptions = new JHashMap[String, String]()
           timeTravelOptionKeys.foreach(dynamicOptions.put(_, null))
-          dynamicOptions.put(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), fullSearchMode)
+          dynamicOptions.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), fullSearchMode)
           dynamicOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshotId)
 
           val scanTable = SparkTable.of(table.copy(dynamicOptions))

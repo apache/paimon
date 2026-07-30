@@ -64,6 +64,12 @@ abstract class AbstractBlobElementReader implements BlobElementSerializer.Reader
     }
 
     protected final byte[] readInlineBlob(long position, long length) {
+        Preconditions.checkArgument(
+                length <= Integer.MAX_VALUE,
+                "Inline BLOB is too large to read into memory: %s bytes (max %s). "
+                        + "Use 'blob-as-descriptor' = true to read it as a descriptor.",
+                length,
+                Integer.MAX_VALUE);
         byte[] blobData = new byte[(int) length];
         SeekableInputStream in = inputStream();
         try {

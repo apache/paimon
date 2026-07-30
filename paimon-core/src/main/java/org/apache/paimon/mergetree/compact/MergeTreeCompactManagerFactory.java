@@ -72,7 +72,7 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
-import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
+import static org.apache.paimon.lookup.LookupStoreFactory.bloomFilterBuilderFactory;
 import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 
 /** Factory to create {@link MergeTreeCompactManager}. */
@@ -393,7 +393,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                                         localFilePrefix(partitionType, partition, bucket, file))
                                 .getPathFile(),
                 lookupStoreFactory,
-                bfGenerator(options),
+                bloomFilterBuilderFactory(options),
                 lookupFileCache);
     }
 

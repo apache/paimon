@@ -30,16 +30,18 @@ public class BlockIterator implements Iterator<Map.Entry<MemorySlice, MemorySlic
 
     private final BlockReader reader;
     private final MemorySliceInput input;
-    private BlockEntry polled;
+    private int polledPosition;
+    private boolean exhausted;
 
     public BlockIterator(BlockReader reader) {
         this.reader = reader;
         this.input = reader.blockInput();
+        this.polledPosition = -1;
     }
 
     @Override
     public boolean hasNext() {
-        return polled != null || input.isReadable();
+        return polledPosition >= 0 || (!exhausted && input.isReadable());
     }
 
     @Override
@@ -48,10 +50,9 @@ public class BlockIterator implements Iterator<Map.Entry<MemorySlice, MemorySlic
             throw new NoSuchElementException();
         }
 
-        if (polled != null) {
-            BlockEntry result = polled;
-            polled = null;
-            return result;
+        if (polledPosition >= 0) {
+            input.setPosition(reader.seekTo(polledPosition));
+            polledPosition = -1;
         }
 
         return readEntry();
@@ -65,27 +66,32 @@ public class BlockIterator implements Iterator<Map.Entry<MemorySlice, MemorySlic
     public boolean seekTo(MemorySlice targetKey) {
         int left = 0;
         int right = reader.recordCount() - 1;
+        polledPosition = -1;
+        exhausted = false;
 
         while (left <= right) {
             int mid = left + (right - left) / 2;
 
-            input.setPosition(reader.seekTo(mid));
-            BlockEntry midEntry = readEntry();
-            int compare = reader.comparator().compare(midEntry.getKey(), targetKey);
+            int compare = reader.comparator().compare(readKey(mid), targetKey);
 
             if (compare == 0) {
-                polled = midEntry;
+                polledPosition = mid;
                 return true;
             } else if (compare > 0) {
-                polled = midEntry;
+                polledPosition = mid;
                 right = mid - 1;
             } else {
-                polled = null;
                 left = mid + 1;
             }
         }
 
+        exhausted = polledPosition < 0;
         return false;
+    }
+
+    private MemorySlice readKey(int recordPosition) {
+        input.setPosition(reader.seekTo(recordPosition));
+        return input.readSlice(input.readVarLenInt());
     }
 
     private BlockEntry readEntry() {

@@ -84,6 +84,14 @@ public class BlockIteratorTest {
         keyOut.writeInt(ROW_NUM * 2 + 2);
         iterator.seekTo(keyOut.toSlice());
         Assertions.assertFalse(iterator.hasNext());
+
+        // 2.3 seek to an existing key after the iterator has been exhausted
+        keyOut.reset();
+        keyOut.writeInt(4);
+        Assertions.assertTrue(iterator.seekTo(keyOut.toSlice()));
+        Assertions.assertTrue(iterator.hasNext());
+        entry = iterator.next();
+        Assertions.assertEquals(4, entry.getKey().readInt(0));
     }
 
     private MemorySlice writeBlock(boolean aligned) throws IOException {

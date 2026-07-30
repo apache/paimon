@@ -314,6 +314,18 @@ public class CoreOptions implements Serializable {
                                     + "splits, which is lightweight but may not reflect cross-branch "
                                     + "deletes.");
 
+    public static final ConfigOption<Boolean> CHAIN_TABLE_KEY_RANGE_SPLIT_ENABLED =
+            key("chain-table.split.key-range-enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "If true, a batch chain-table scan splits each bucket's snapshot and "
+                                    + "delta files into multiple splits by key range to improve read "
+                                    + "parallelism. Files with intersecting key ranges always stay in "
+                                    + "the same split so that all versions of a key across the "
+                                    + "snapshot and delta branches are merged together. Set to false "
+                                    + "to fall back to one split per bucket.");
+
     public static final String FILE_FORMAT_ORC = "orc";
     public static final String FILE_FORMAT_AVRO = "avro";
     public static final String FILE_FORMAT_PARQUET = "parquet";
@@ -441,6 +453,17 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to automatically infer the shredding schema when writing Variant columns.");
 
+    public static final ConfigOption<VariantShreddingInferenceMode>
+            VARIANT_SHREDDING_INFERENCE_MODE =
+                    key("variant.shredding.inferenceMode")
+                            .enumType(VariantShreddingInferenceMode.class)
+                            .defaultValue(VariantShreddingInferenceMode.PER_FILE)
+                            .withDescription(
+                                    "The Variant shredding inference mode. PER_FILE infers each "
+                                            + "file independently. ADAPTIVE reuses bounded evidence "
+                                            + "within one rolling writer and samples a smaller "
+                                            + "prefix after the first file.");
+
     public static final ConfigOption<Integer> VARIANT_SHREDDING_MAX_SCHEMA_WIDTH =
             key("variant.shredding.maxSchemaWidth")
                     .intType()
@@ -468,6 +491,23 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(4096)
                     .withDescription("Maximum number of rows to buffer for schema inference.");
+
+    public static final ConfigOption<Integer> VARIANT_SHREDDING_ADAPTIVE_MAX_INFER_BUFFER_ROW =
+            key("variant.shredding.adaptive.maxInferBufferRow")
+                    .intType()
+                    .defaultValue(256)
+                    .withDescription(
+                            "Maximum number of prefix rows sampled after the first file in "
+                                    + "an adaptive Variant shredding inference session.");
+
+    public static final ConfigOption<Double> VARIANT_SHREDDING_ADAPTIVE_RETENTION_RATIO =
+            key("variant.shredding.adaptive.retentionRatio")
+                    .doubleType()
+                    .defaultValue(0.05)
+                    .withDescription(
+                            "Minimum combined presence ratio for retaining a Variant path selected "
+                                    + "in the previous file. This must not exceed "
+                                    + "'variant.shredding.minFieldCardinalityRatio'.");
 
     public static final ConfigOption<String> MANIFEST_FORMAT =
             key("manifest.format")
@@ -817,6 +857,22 @@ public class CoreOptions implements Serializable {
                                             text("primary key table: the default value is 128 MB."),
                                             text("append table: the default value is 256 MB."))
                                     .build());
+
+    public static final ConfigOption<Long> TARGET_FILE_ROW_NUM =
+            key("target-file-row-num")
+                    .longType()
+                    .defaultValue(Long.MAX_VALUE)
+                    .withDescription(
+                            "Target number of rows per newly written data file; a file rolls when "
+                                    + "this or target-file-size is reached, whichever comes first. "
+                                    + "Enforced at bundle granularity, so a bundled write may exceed it "
+                                    + "by up to one bundle. Only constrains files at write time: "
+                                    + "compaction is size-based and may merge into larger files, and "
+                                    + "data-evolution compaction still produces a single file. Bounds "
+                                    + "per-file rows for wide columns to avoid data-evolution OOM. "
+                                    + "PyPaimon supports this for data-evolution append tables; its "
+                                    + "primary-key, blob and vector writers still fail fast when it "
+                                    + "is enabled. Disabled by default.");
 
     public static final ConfigOption<Double> COMPACTION_SMALL_FILE_RATIO =
             key("compaction.small-file-ratio")
@@ -1215,6 +1271,14 @@ public class CoreOptions implements Serializable {
                                     + "Note: Scale-up this parameter will increase memory usage while scanning manifest files. "
                                     + "We can consider downsize it when we encounter an out of memory exception while scanning");
 
+    public static final ConfigOption<Integer> FORMAT_TABLE_SCAN_LIST_PARALLELISM =
+            key("format-table.scan.list-parallelism")
+                    .intType()
+                    .defaultValue(64)
+                    .withDescription(
+                            "The parallelism of listing partition files during split planning for "
+                                    + "a Format Table with catalog-managed partitions.");
+
     public static final ConfigOption<Duration> STREAMING_READ_SNAPSHOT_DELAY =
             key("streaming.read.snapshot.delay")
                     .durationType()
@@ -1434,6 +1498,19 @@ public class CoreOptions implements Serializable {
                     .floatType()
                     .defaultValue(0.75F)
                     .withDescription("The index load factor for lookup.");
+
+    public static final ConfigOption<Long> LOOKUP_CACHE_ROWS =
+            key("lookup.cache-rows")
+                    .longType()
+                    .defaultValue(10_000L)
+                    .withDescription("The maximum number of rows to store in the cache.");
+
+    public static final ConfigOption<Duration> LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL =
+            key("lookup.continuous.discovery-interval")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The discovery interval of lookup continuous reading. This is used as an SQL hint. If it's not configured, the lookup function will fallback to 'continuous.discovery-interval'.");
 
     public static final ConfigOption<Duration> LOOKUP_CACHE_FILE_RETENTION =
             key("lookup.cache-file-retention")
@@ -2005,7 +2082,7 @@ public class CoreOptions implements Serializable {
                     .durationType()
                     .noDefaultValue()
                     .withDescription(
-                            "The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), "
+                            "The TTL in local index for cross partition upsert (primary keys not contain all partition fields), "
                                     + "this can avoid maintaining too many indexes and lead to worse and worse performance, "
                                     + "but please note that this may also cause data duplication.");
 
@@ -2391,6 +2468,12 @@ public class CoreOptions implements Serializable {
                                     + "producing files that are internally ordered. "
                                     + "'local-sort' is cheaper and sufficient for Parquet lookup optimizations.");
 
+    public static final ConfigOption<MemorySize> LOCAL_KV_DB_BLOCK_SIZE =
+            key("local-kv-db.block-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("4 kb"))
+                    .withDescription("Block size of the local key-value database.");
+
     @Immutable
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
@@ -2413,6 +2496,15 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
+
+    public static final ConfigOption<Long> DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT =
+            key("data-evolution.reassign.skip-contiguous-row-count")
+                    .longType()
+                    .defaultValue(1_000_000_000L)
+                    .withDescription(
+                            "Strictly contiguous same-partition logical row-id runs containing "
+                                    + "more than this number of rows are excluded from row-id "
+                                    + "reassignment. Set to 0 to disable this filtering.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_ROW_SIDECAR_ENABLED =
             key("data-evolution.row-sidecar.enabled")
@@ -2638,6 +2730,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to write the data into fixed bucket for batch writing a postpone bucket table.");
 
+    public static final ConfigOption<Boolean> POSTPONE_MERGE_ON_READ =
+            key("postpone.merge-on-read")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to merge records in the postpone bucket with records in real buckets during batch reads. "
+                                    + "This requires an execution engine capable of routing and shuffling postpone records to their target real buckets.");
+
     public static final ConfigOption<Integer> POSTPONE_BATCH_WRITE_FIXED_BUCKET_MAX_PARALLELISM =
             key("postpone.batch-write-fixed-bucket.max-parallelism")
                     .intType()
@@ -2656,7 +2756,15 @@ public class CoreOptions implements Serializable {
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "Target row number per bucket for partitions compacted from postpone bucket files for the first time.");
+                            "Target row number per bucket when batch writing fixed buckets or compacting postpone bucket files for a partition without real bucket data.");
+
+    public static final ConfigOption<MemorySize> POSTPONE_TARGET_SIZE_PER_BUCKET =
+            key("postpone.target-size-per-bucket")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("1 gb"))
+                    .withDescription(
+                            "Target uncompressed serialized data size per bucket when Spark batch writes fixed buckets for a partition without real bucket data. "
+                                    + "This option is ignored when 'postpone.target-row-num-per-bucket' is configured.");
 
     public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
             key("global-index.row-count-per-shard")
@@ -2691,17 +2799,34 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<GlobalIndexSearchMode> GLOBAL_INDEX_SEARCH_MODE =
             key("global-index.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
+                    .noDefaultValue()
+                    .withDescription("Fallback search mode for global index queries.");
+
+    public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_SEARCH_MODE =
+            key("scalar-index.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
                     .defaultValue(GlobalIndexSearchMode.FAST)
-                    .withDescription(
-                            "Search mode for global index queries. "
-                                    + "Supported values are 'fast', 'full', and 'detail'.");
+                    .withDescription("Search mode for scalar index queries.");
+
+    public static final ConfigOption<GlobalIndexSearchMode> VECTOR_INDEX_SEARCH_MODE =
+            key("vector-index.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
+                    .defaultValue(GlobalIndexSearchMode.FAST)
+                    .withDescription("Search mode for vector index queries.");
+
+    public static final ConfigOption<GlobalIndexSearchMode> FULL_TEXT_INDEX_SEARCH_MODE =
+            key("full-text-index.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
+                    .defaultValue(GlobalIndexSearchMode.FAST)
+                    .withDescription("Search mode for full-text index queries.");
 
     public static final ConfigOption<Integer> GLOBAL_INDEX_THREAD_NUM =
             key("global-index.thread-num")
                     .intType()
                     .defaultValue(32)
                     .withDescription(
-                            "The maximum number of concurrent threads for global index I/O.");
+                            "The maximum number of concurrent threads for global index I/O. "
+                                    + "Must be greater than 0.");
 
     public static final ConfigOption<Boolean> OVERWRITE_UPGRADE =
             key("overwrite-upgrade")
@@ -2877,6 +3002,17 @@ public class CoreOptions implements Serializable {
 
     public boolean pkClusteringOverride() {
         return options.get(PK_CLUSTERING_OVERRIDE);
+    }
+
+    public int localKvDbBlockSize() {
+        long bytes = options.get(LOCAL_KV_DB_BLOCK_SIZE).getBytes();
+        checkArgument(
+                bytes > 0 && bytes <= Integer.MAX_VALUE,
+                "'%s' must be between 1 byte and %s bytes, but was %s bytes.",
+                LOCAL_KV_DB_BLOCK_SIZE.key(),
+                Integer.MAX_VALUE,
+                bytes);
+        return (int) bytes;
     }
 
     public String formatType() {
@@ -3325,6 +3461,10 @@ public class CoreOptions implements Serializable {
                 .getBytes();
     }
 
+    public long targetFileRowNum() {
+        return options.get(TARGET_FILE_ROW_NUM);
+    }
+
     public long blobTargetFileSize() {
         return options.getOptional(BLOB_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
@@ -3687,6 +3827,10 @@ public class CoreOptions implements Serializable {
 
     public Integer scanManifestParallelism() {
         return options.get(SCAN_MANIFEST_PARALLELISM);
+    }
+
+    public Integer formatTableScanListParallelism() {
+        return options.get(FORMAT_TABLE_SCAN_LIST_PARALLELISM);
     }
 
     public Integer scanBucket() {
@@ -4082,6 +4226,15 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_EVOLUTION_ENABLED);
     }
 
+    public long dataEvolutionReassignSkipContiguousRowCount() {
+        long threshold = options.get(DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT);
+        checkArgument(
+                threshold >= 0,
+                "The option %s cannot be negative.",
+                DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT.key());
+        return threshold;
+    }
+
     public boolean dataEvolutionRowSidecarEnabled() {
         return options.get(DATA_EVOLUTION_ROW_SIDECAR_ENABLED);
     }
@@ -4249,6 +4402,10 @@ public class CoreOptions implements Serializable {
         return options.get(CHAIN_TABLE_STREAMING_MERGE_SNAPSHOT);
     }
 
+    public boolean chainTableKeyRangeSplitEnabled() {
+        return options.get(CHAIN_TABLE_KEY_RANGE_SPLIT_ENABLED);
+    }
+
     public boolean formatTableImplementationIsPaimon() {
         return options.get(FORMAT_TABLE_IMPLEMENTATION) == FormatTableImplementation.PAIMON;
     }
@@ -4273,6 +4430,10 @@ public class CoreOptions implements Serializable {
         return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET);
     }
 
+    public boolean postponeMergeOnRead() {
+        return options.get(POSTPONE_MERGE_ON_READ);
+    }
+
     public int postponeBatchWriteFixedBucketMaxParallelism() {
         return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET_MAX_PARALLELISM);
     }
@@ -4285,6 +4446,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(POSTPONE_TARGET_ROW_NUM_PER_BUCKET);
     }
 
+    public long postponeTargetSizePerBucket() {
+        return options.get(POSTPONE_TARGET_SIZE_PER_BUCKET).getBytes();
+    }
+
     public long globalIndexRowCountPerShard() {
         return options.get(GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
     }
@@ -4293,8 +4458,30 @@ public class CoreOptions implements Serializable {
         return options.get(GLOBAL_INDEX_ENABLED);
     }
 
+    @Nullable
     public GlobalIndexSearchMode globalIndexSearchMode() {
         return options.get(GLOBAL_INDEX_SEARCH_MODE);
+    }
+
+    public GlobalIndexSearchMode scalarIndexSearchMode() {
+        return indexSearchMode(SCALAR_INDEX_SEARCH_MODE);
+    }
+
+    public GlobalIndexSearchMode vectorIndexSearchMode() {
+        return indexSearchMode(VECTOR_INDEX_SEARCH_MODE);
+    }
+
+    public GlobalIndexSearchMode fullTextIndexSearchMode() {
+        return indexSearchMode(FULL_TEXT_INDEX_SEARCH_MODE);
+    }
+
+    private GlobalIndexSearchMode indexSearchMode(
+            ConfigOption<GlobalIndexSearchMode> familySearchMode) {
+        if (options.contains(familySearchMode)) {
+            return options.get(familySearchMode);
+        }
+        return options.getOptional(GLOBAL_INDEX_SEARCH_MODE)
+                .orElseGet(() -> options.get(familySearchMode));
     }
 
     public Integer globalIndexThreadNum() {
@@ -5383,6 +5570,33 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         MapSharedShreddingColumnPlacementPolicy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Inference mode for Variant shredding schemas. */
+    public enum VariantShreddingInferenceMode implements DescribedEnum {
+        PER_FILE("per-file", "Infer every file independently from its own prefix rows."),
+        ADAPTIVE(
+                "adaptive",
+                "Reuse bounded inference evidence within one rolling writer and correct it with "
+                        + "a smaller prefix from each subsequent file.");
+
+        private final String value;
+        private final String description;
+
+        VariantShreddingInferenceMode(String value, String description) {
             this.value = value;
             this.description = description;
         }

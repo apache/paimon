@@ -313,7 +313,7 @@ public class PrimaryKeyVectorRead implements VectorRead, Serializable {
                         annSearcher,
                         searchOptions,
                         metric,
-                        table.coreOptions().globalIndexSearchMode());
+                        table.coreOptions().vectorIndexSearchMode());
         return bucketSearch
                 .searchBatchAsync(
                         state,

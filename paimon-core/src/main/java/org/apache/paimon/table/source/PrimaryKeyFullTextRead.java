@@ -69,7 +69,7 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
                 definition.fieldId() == textField.id(),
                 "Full-text definition does not match field %s.",
                 textField.name());
-        checkFastSearchMode(table.coreOptions().globalIndexSearchMode());
+        checkFastSearchMode(table.coreOptions().fullTextIndexSearchMode());
         ProductionSearch production =
                 new ProductionSearch(table, definition, textField, query, limit);
         this.limit = limit;
@@ -87,7 +87,7 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
     private static void checkFastSearchMode(GlobalIndexSearchMode searchMode) {
         if (searchMode != GlobalIndexSearchMode.FAST) {
             throw new UnsupportedOperationException(
-                    "Primary-key full-text search only supports the FAST global-index search mode; "
+                    "Primary-key full-text search only supports the FAST full-text-index search mode; "
                             + "FULL and DETAIL require merge-aware logical-row fallback.");
         }
     }

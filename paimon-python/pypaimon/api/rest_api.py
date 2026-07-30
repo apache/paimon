@@ -58,6 +58,7 @@ from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 
 class RESTApi:
     HEADER_PREFIX = "header."
+    READ_VIA_HEADER = "X-Paimon-Read-Via"
     MAX_RESULTS = "maxResults"
     PAGE_TOKEN = "pageToken"
     DATABASE_NAME_PATTERN = "databaseNamePattern"

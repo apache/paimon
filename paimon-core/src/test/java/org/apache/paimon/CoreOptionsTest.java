@@ -108,6 +108,39 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testIndexSearchModes() {
+        Options conf = new Options();
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.globalIndexSearchMode()).isNull();
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+        assertThat(options.vectorIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+        assertThat(options.fullTextIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+
+        conf.set(CoreOptions.GLOBAL_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.DETAIL);
+        options = new CoreOptions(conf);
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+        assertThat(options.vectorIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+        assertThat(options.fullTextIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+
+        conf.set(CoreOptions.SCALAR_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FAST);
+        conf.set(CoreOptions.VECTOR_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FULL);
+        conf.set(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FULL);
+        options = new CoreOptions(conf);
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+        assertThat(options.vectorIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+        assertThat(options.fullTextIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+    }
+
+    @Test
     public void testBlobSplitByFileSizeDefault() {
         Options conf = new Options();
         conf.set(CoreOptions.BLOB_SPLIT_BY_FILE_SIZE, false);
@@ -214,5 +247,24 @@ public class CoreOptionsTest {
         assertThatThrownBy(() -> new CoreOptions(conf).blobCopyBufferSize())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("blob.copy-buffer-size");
+    }
+
+    @Test
+    public void testLocalKvDbBlockSize() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).localKvDbBlockSize()).isEqualTo(4 * 1024);
+
+        conf.set(CoreOptions.LOCAL_KV_DB_BLOCK_SIZE, MemorySize.parse("8 kb"));
+        assertThat(new CoreOptions(conf).localKvDbBlockSize()).isEqualTo(8 * 1024);
+
+        conf.set(CoreOptions.LOCAL_KV_DB_BLOCK_SIZE, MemorySize.parse("0 bytes"));
+        assertThatThrownBy(() -> new CoreOptions(conf).localKvDbBlockSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("local-kv-db.block-size");
+
+        conf.set(CoreOptions.LOCAL_KV_DB_BLOCK_SIZE, MemorySize.parse("2 gb"));
+        assertThatThrownBy(() -> new CoreOptions(conf).localKvDbBlockSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("local-kv-db.block-size");
     }
 }

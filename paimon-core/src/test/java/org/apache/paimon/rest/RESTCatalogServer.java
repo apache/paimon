@@ -226,6 +226,7 @@ public class RESTCatalogServer {
     private final ResourcePaths resourcePaths;
 
     private final List<Map<String, String>> receivedHeaders = new ArrayList<>();
+    private final Map<String, List<Map<String, String>>> receivedHeadersByPath = new HashMap<>();
 
     private volatile boolean partitionListingSupported = true;
 
@@ -362,6 +363,9 @@ public class RESTCatalogServer {
                     receivedHeaders.add(new HashMap<>(headers));
                     String[] paths = request.getPath().split("\\?");
                     String resourcePath = paths[0];
+                    receivedHeadersByPath
+                            .computeIfAbsent(resourcePath, ignored -> new ArrayList<>())
+                            .add(new HashMap<>(headers));
                     Map<String, String> parameters =
                             paths.length == 2 ? getParameters(paths[1]) : Collections.emptyMap();
                     String data = request.getBody().readUtf8();
@@ -3102,7 +3106,12 @@ public class RESTCatalogServer {
         return receivedHeaders;
     }
 
+    public List<Map<String, String>> getReceivedHeaders(String resourcePath) {
+        return receivedHeadersByPath.getOrDefault(resourcePath, Collections.emptyList());
+    }
+
     public void clearReceivedHeaders() {
         receivedHeaders.clear();
+        receivedHeadersByPath.clear();
     }
 }

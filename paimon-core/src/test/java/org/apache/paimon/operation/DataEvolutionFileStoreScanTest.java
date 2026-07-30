@@ -313,6 +313,49 @@ public class DataEvolutionFileStoreScanTest {
     }
 
     @Test
+    public void testTypeChangedColumnMustNotPrunePreAlterFiles() {
+        Schema baseSchema = createSchema("f0", "f1");
+        schemas.put(0L, TableSchema.create(0L, baseSchema));
+
+        Schema evolvedSchema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.BIGINT())
+                        .column("f1", DataTypes.STRING())
+                        .build();
+        TableSchema evolvedTableSchema = TableSchema.create(1L, evolvedSchema);
+        schemas.put(1L, evolvedTableSchema);
+
+        ManifestEntry preAlterFile =
+                createManifestEntry(
+                        0L,
+                        createSimpleStats(
+                                GenericRow.of(10, BinaryString.fromString("a")),
+                                GenericRow.of(99, BinaryString.fromString("z")),
+                                createBinaryArray(new int[] {0, 0}),
+                                new int[] {0, 1}));
+
+        EvolutionStats result =
+                DataEvolutionFileStoreScan.evolutionStats(
+                        evolvedTableSchema,
+                        scanTableSchema,
+                        Collections.singletonList(preAlterFile));
+
+        Predicate onChangedColumn =
+                new PredicateBuilder(evolvedTableSchema.logicalRowType()).equal(0, 50L);
+
+        boolean keepFile =
+                onChangedColumn.test(
+                        result.rowCount(),
+                        result.minValues(),
+                        result.maxValues(),
+                        result.nullCounts());
+
+        assertThat(keepFile)
+                .as("pre-ALTER file must not be pruned by a predicate on a type-changed column")
+                .isTrue();
+    }
+
+    @Test
     public void testEvolutionStatsKeepDedicatedVectorFieldAsUnknown() {
         Schema schema = createSchema("f0", "f1", "f2");
         TableSchema tableSchema = TableSchema.create(0L, schema);

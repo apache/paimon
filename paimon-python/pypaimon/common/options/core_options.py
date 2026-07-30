@@ -390,6 +390,17 @@ class CoreOptions:
         .with_description("The target file size for data files.")
     )
 
+    TARGET_FILE_ROW_NUM: ConfigOption[int] = (
+        ConfigOptions.key("target-file-row-num")
+        .long_type()
+        .default_value((1 << 63) - 1)
+        .with_description(
+            "Target number of rows per newly written data file. PyPaimon format-table "
+            "and data-evolution append-table writers split files at this limit; "
+            "primary-key, blob and vector writers fail fast when this option is enabled."
+        )
+    )
+
     BLOB_TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("blob.target-file-size")
         .memory_type()
@@ -720,11 +731,29 @@ class CoreOptions:
     GLOBAL_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
         ConfigOptions.key("global-index.search-mode")
         .enum_type(GlobalIndexSearchMode)
+        .no_default_value()
+        .with_description("Fallback search mode for global index queries.")
+    )
+
+    SCALAR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("scalar-index.search-mode")
+        .enum_type(GlobalIndexSearchMode)
         .default_value(GlobalIndexSearchMode.FAST)
-        .with_description(
-            "Search mode for global index queries. "
-            "Supported values are 'fast', 'full', and 'detail'."
-        )
+        .with_description("Search mode for scalar index queries.")
+    )
+
+    VECTOR_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("vector-index.search-mode")
+        .enum_type(GlobalIndexSearchMode)
+        .default_value(GlobalIndexSearchMode.FAST)
+        .with_description("Search mode for vector index queries.")
+    )
+
+    FULL_TEXT_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("full-text-index.search-mode")
+        .enum_type(GlobalIndexSearchMode)
+        .default_value(GlobalIndexSearchMode.FAST)
+        .with_description("Search mode for full-text index queries.")
     )
 
     GLOBAL_INDEX_EXTERNAL_PATH: ConfigOption[str] = (
@@ -1117,6 +1146,9 @@ class CoreOptions:
                                     128 if has_primary_key else 256) if default is None else MemorySize.parse(
                                     default)).get_bytes()
 
+    def target_file_row_num(self):
+        return self.options.get(CoreOptions.TARGET_FILE_ROW_NUM)
+
     def blob_target_file_size(self, default=None):
         """
         Args:
@@ -1357,6 +1389,21 @@ class CoreOptions:
 
     def global_index_search_mode(self):
         return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
+
+    def scalar_index_search_mode(self):
+        return self._family_index_search_mode(CoreOptions.SCALAR_INDEX_SEARCH_MODE)
+
+    def vector_index_search_mode(self):
+        return self._family_index_search_mode(CoreOptions.VECTOR_INDEX_SEARCH_MODE)
+
+    def full_text_index_search_mode(self):
+        return self._family_index_search_mode(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE)
+
+    def _family_index_search_mode(self, option):
+        if self.options.contains(option):
+            return self.options.get(option)
+        global_mode = self.global_index_search_mode()
+        return global_mode if global_mode is not None else self.options.get(option)
 
     def global_index_external_path(self, default=None):
         value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)

@@ -225,19 +225,37 @@ class SplitRead(ABC):
             file_path = self._aligned_extra_file_path(file, row_sidecar_file)
             file_format = ROW_SIDECAR_FORMAT
 
-        # Convert global row_ranges (IndexedSplit) to local row_indices for native pushdown.
+        # Prepare file-local native row selection. Existing native formats
+        # consume row indices; Parquet keeps compact ranges to avoid expanding
+        # large selections into millions of Python integers.
         row_indices = None
+        parquet_row_ranges = None
         if effective_row_ranges is not None:
             row_index_formats = (CoreOptions.FILE_FORMAT_BLOB,
                                  CoreOptions.FILE_FORMAT_VORTEX,
                                  CoreOptions.FILE_FORMAT_LANCE,
                                  CoreOptions.FILE_FORMAT_ROW)
             if file_format in row_index_formats:
-                row_indices = []
-                for r in effective_row_ranges:
-                    start = r.from_ - file.first_row_id
-                    end = r.to - file.first_row_id
-                    row_indices.extend(range(start, end + 1))
+                row_indices = [
+                    row_id - file.first_row_id
+                    for row_range in effective_row_ranges
+                    for row_id in range(row_range.from_, row_range.to + 1)
+                ]
+            elif (file_format == CoreOptions.FILE_FORMAT_PARQUET
+                  and read_arrow_predicate is None):
+                parquet_row_ranges = []
+                merged_ranges = Range.sort_and_merge_overlap(
+                    effective_row_ranges, True)
+                for r in merged_ranges:
+                    start = max(0, r.from_ - file.first_row_id)
+                    end = min(
+                        file.row_count - 1,
+                        r.to - file.first_row_id,
+                    )
+                    if end >= start:
+                        parquet_row_ranges.append((start, end))
+                if not parquet_row_ranges:
+                    return EmptyRecordBatchReader()
 
         # Map nested paths into the order the format reader will see.
         nested_path_by_name = self._nested_path_by_name()
@@ -330,11 +348,16 @@ class SplitRead(ABC):
                 [nested_path_by_name[f.name] for f in ordered_read_fields]
                 if has_nested else None
             )
+            predicate_fields = (
+                predicate_field_names(self.push_down_predicate)
+                if self.push_down_predicate else set())
             format_reader = FormatPyArrowReader(
                 self.table.file_io, file_format, file_path,
                 ordered_read_fields, read_arrow_predicate, batch_size=batch_size,
                 options=self.table.options,
-                nested_name_paths=ordered_nested_paths)
+                nested_name_paths=ordered_nested_paths,
+                predicate_field_names=predicate_fields,
+                row_ranges=parquet_row_ranges)
         elif file_format == CoreOptions.FILE_FORMAT_ROW:
             if has_nested:
                 raise NotImplementedError(
@@ -390,6 +413,7 @@ class SplitRead(ABC):
                 system_fields,
                 file_io=self.table.file_io,
                 row_id_offsets=row_indices,
+                row_id_offset_ranges=parquet_row_ranges,
                 file_data_fields=file_read_fields,
                 target_data_fields=target_fields)
         else:
@@ -405,11 +429,14 @@ class SplitRead(ABC):
                 system_fields,
                 file_io=self.table.file_io,
                 row_id_offsets=row_indices,
+                row_id_offset_ranges=parquet_row_ranges,
                 file_data_fields=file_read_fields,
                 target_data_fields=target_fields)
 
         # For non-Vortex formats, wrap with RowIdFilterRecordBatchReader
-        if row_ranges is not None and row_indices is None:
+        if (row_ranges is not None
+                and row_indices is None
+                and parquet_row_ranges is None):
             reader = RowIdFilterRecordBatchReader(reader, file.first_row_id, effective_row_ranges)
 
         # For formats without native shard support, wrap with ShardBatchReader
@@ -764,6 +791,11 @@ class RawFileSplitRead(SplitRead):
                 row_tracking_enabled=True)
         dv = dv_factory() if dv_factory else None
         if dv:
+            if file.file_name in shard_file_idx_map:
+                dv = PositionMappedDeletionVector(
+                    dv,
+                    file_offset=start_pos,
+                )
             return ApplyDeletionVectorReader(RowPositionReader(file_batch_reader), dv)
         else:
             return file_batch_reader
@@ -1382,7 +1414,9 @@ class DataEvolutionSplitRead(SplitRead):
                 fields_files.append(DataBunch(file))
                 row_count = file.row_count
 
-        fields_files.extend(blob_bunch_map.values())
+        for bunch in blob_bunch_map.values():
+            bunch.finish()
+            fields_files.append(bunch)
         fields_files.extend(vector_bunch_map.values())
         return fields_files
 

@@ -94,13 +94,14 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         }, schema=self.pa_schema))
         return table
 
-    def _create_global_indexed_table_for_predicate_update(self):
+    def _create_global_indexed_table_for_predicate_update(self, extra_options=None):
         options = dict(self.table_options)
         options.update({
             'global-index.enabled': 'true',
             'bucket': '-1',
             'file.format': 'parquet',
         })
+        options.update(extra_options or {})
         table = self._create_table(options=options)
         self._write_arrow(table, pa.Table.from_pydict({
             'id': [1, 2],
@@ -329,7 +330,9 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         )
 
     def test_update_by_predicate_with_global_index_updates_unindexed_rows(self):
-        table = self._create_global_indexed_table_for_predicate_update()
+        table = self._create_global_indexed_table_for_predicate_update({
+            'scalar-index.search-mode': 'fast',
+        })
 
         pb = table.new_read_builder().new_predicate_builder()
         self._do_update_by_predicate(
@@ -344,6 +347,18 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             result['age'].to_pylist(),
         ))
         self.assertEqual({1: 10, 2: 15, 3: 21, 4: 30}, ages_by_id)
+
+    def test_delete_by_predicate_with_global_index_deletes_unindexed_rows(self):
+        table = self._create_global_indexed_table_for_predicate_update({
+            'deletion-vectors.enabled': 'true',
+            'scalar-index.search-mode': 'fast',
+        })
+
+        pb = table.new_read_builder().new_predicate_builder()
+        self._do_delete_by_predicate(table, pb.equal('name', 'new'))
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 2, 4], result['id'].to_pylist())
 
     def test_update_by_predicate_with_global_index_falls_back_to_full_scan(self):
         table = self._create_global_indexed_table_for_predicate_update()
@@ -945,8 +960,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         )
 
     def test_update_with_large_file(self):
-        """Even with a tiny ``target-file-size`` the update produces one
-        output file per first_row_id group (rolling is disabled internally)."""
+        """Updates disable both size- and row-based rolling."""
         from pypaimon.schema.schema_change import SetOption
 
         N = 5000
@@ -966,7 +980,10 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         }))
 
         self.catalog.alter_table(
-            table_identifier, [SetOption('target-file-size', '10kb')]
+            table_identifier, [
+                SetOption('target-file-size', '10kb'),
+                SetOption('target-file-row-num', '1'),
+            ]
         )
         table = self.catalog.get_table(table_identifier)
 

@@ -51,6 +51,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TagCallback;
@@ -60,7 +61,11 @@ import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.tag.Tag;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -77,6 +82,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -192,13 +198,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         IcebergOptions.StorageType storageType =
                 table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
 
-        if (!dbPath.getName().endsWith(dbSuffix)) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "Storage type %s can only be used on Paimon tables in a Paimon warehouse.",
-                            storageType.name()));
-        }
-
         IcebergOptions.StorageLocation storageLocation =
                 table.coreOptions()
                         .toConfiguration()
@@ -207,8 +206,23 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         switch (storageLocation) {
             case TABLE_LOCATION:
+                // Iceberg metadata is written beside the table, under the database's own location,
+                // so no warehouse (<db>.db) layout is required. This lets the table register in any
+                // catalog, including a database whose location is not a Paimon warehouse path (e.g.
+                // an externally-provisioned / cross-account catalog database).
                 return dbPath;
             case CATALOG_STORAGE:
+                // Catalog-storage derives a warehouse-relative iceberg/<db>/ path by stripping the
+                // ".db" suffix, so it only applies under the Paimon <db>.db warehouse layout.
+                if (!dbPath.getName().endsWith(dbSuffix)) {
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Storage type %s with catalog-location Iceberg metadata requires a "
+                                            + "Paimon warehouse database (a <db>.db location); set "
+                                            + "metadata.iceberg.storage-location=table-location for a "
+                                            + "database with a non-warehouse location.",
+                                    storageType.name()));
+                }
                 String dbName =
                         dbPath.getName()
                                 .substring(0, dbPath.getName().length() - dbSuffix.length());
@@ -545,6 +559,49 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             fieldId++;
         }
         return result;
+    }
+
+    /** VARIANT needs Iceberg row lineage, which Paimon Iceberg compatibility cannot publish. */
+    static void checkVariantNotPublishable(RowType rowType) {
+        Collection<String> variantFields = new LinkedHashSet<>();
+        for (DataField field : rowType.getFields()) {
+            collectVariantFields(field.name(), field.type(), variantFields);
+        }
+        Preconditions.checkArgument(
+                variantFields.isEmpty(),
+                "Columns %s use the VARIANT type, which Paimon Iceberg compatibility cannot "
+                        + "publish: it is an Iceberg format-version-3 type that requires row "
+                        + "lineage.",
+                variantFields);
+    }
+
+    private static void collectVariantFields(
+            String path, DataType type, Collection<String> variantFields) {
+        switch (type.getTypeRoot()) {
+            case VARIANT:
+                variantFields.add(path + ": " + type.asSQLString());
+                break;
+            case ARRAY:
+                collectVariantFields(
+                        path + ".element", ((ArrayType) type).getElementType(), variantFields);
+                break;
+            case MULTISET:
+                collectVariantFields(
+                        path + ".element", ((MultisetType) type).getElementType(), variantFields);
+                break;
+            case MAP:
+                collectVariantFields(path + ".key", ((MapType) type).getKeyType(), variantFields);
+                collectVariantFields(
+                        path + ".value", ((MapType) type).getValueType(), variantFields);
+                break;
+            case ROW:
+                for (DataField field : ((RowType) type).getFields()) {
+                    collectVariantFields(path + "." + field.name(), field.type(), variantFields);
+                }
+                break;
+            default:
+                break;
+        }
     }
 
     // -------------------------------------------------------------------------------------
@@ -1512,7 +1569,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         private IcebergSchema get(long schemaId) {
             return schemas.computeIfAbsent(
-                    schemaId, id -> IcebergSchema.create(schemaManager.schema(id)));
+                    schemaId,
+                    id -> {
+                        TableSchema schema = schemaManager.schema(id);
+                        // backstop: reject variant on each schema as it is emitted
+                        checkVariantNotPublishable(schema.logicalRowType());
+                        return IcebergSchema.create(schema);
+                    });
         }
 
         private long getLatestSchemaId() {

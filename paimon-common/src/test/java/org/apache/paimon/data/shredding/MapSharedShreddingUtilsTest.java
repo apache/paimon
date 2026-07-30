@@ -32,6 +32,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -184,6 +185,33 @@ class MapSharedShreddingUtilsTest {
 
         assertThat(MapSharedShreddingUtils.logicalToPhysicalSchema(logical, new HashMap<>()))
                 .isEqualTo(logical);
+    }
+
+    @Test
+    void testBuildSpecificPhysicalStructType() {
+        RowType physicalType =
+                MapSharedShreddingUtils.buildSpecificPhysicalStructType(
+                        DataTypes.BIGINT().notNull(),
+                        new TreeSet<Integer>(Arrays.asList(3, 1)),
+                        true);
+
+        assertThat(physicalType.getFieldNames())
+                .containsExactly("__field_mapping", "__col_1", "__col_3", "__overflow");
+        assertThat(physicalType.getFields()).extracting(DataField::id).containsExactly(0, 1, 2, 3);
+        assertThat(physicalType.getField("__col_1").type()).isEqualTo(DataTypes.BIGINT().notNull());
+        assertThat(physicalType.getField("__overflow").type())
+                .isEqualTo(DataTypes.MAP(DataTypes.INT(), DataTypes.BIGINT().notNull()));
+    }
+
+    @Test
+    void testBuildSpecificPhysicalStructTypeWithoutOverflow() {
+        RowType physicalType =
+                MapSharedShreddingUtils.buildSpecificPhysicalStructType(
+                        DataTypes.STRING(), new TreeSet<Integer>(Arrays.asList(3)), false);
+
+        assertThat(physicalType.getFieldNames()).containsExactly("__field_mapping", "__col_3");
+        assertThat(physicalType.getFields()).extracting(DataField::id).containsExactly(0, 1);
+        assertThat(physicalType.getField("__col_3").type()).isEqualTo(DataTypes.STRING());
     }
 
     @Test

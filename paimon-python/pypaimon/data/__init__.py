@@ -16,5 +16,6 @@
 # under the License.
 
 from pypaimon.data.timestamp import Timestamp
+from pypaimon.data.decimal import Decimal
 
-__all__ = ['Timestamp']
+__all__ = ['Timestamp', 'Decimal']

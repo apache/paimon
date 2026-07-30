@@ -91,13 +91,10 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
         for (DataFileMeta fileMeta : fileMetaList) {
             SimpleStats stats = getTableValueStats(fileMeta);
             assertThat(stats.minValues().getFieldCount()).isEqualTo(12);
-            for (int i = 0; i < 11; i++) {
+            for (int i = 0; i < 12; i++) {
                 assertThat(stats.minValues().isNullAt(i)).isFalse();
                 assertThat(stats.maxValues().isNullAt(i)).isFalse();
             }
-            // Min and max value of binary type is null
-            assertThat(stats.minValues().isNullAt(11)).isTrue();
-            assertThat(stats.maxValues().isNullAt(11)).isTrue();
         }
     }
 

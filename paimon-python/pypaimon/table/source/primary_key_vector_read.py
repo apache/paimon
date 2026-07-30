@@ -18,6 +18,7 @@
 from concurrent.futures import wait
 from heapq import nsmallest
 
+from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
 from pypaimon.table.source.primary_key_scored_result import (
     PrimaryKeyScoredResult, PrimaryKeySearchPosition, _partition_bytes)
@@ -87,7 +88,10 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
                 plan, indexed_candidates, index_type)
         else:
             indexed_candidates = _top_k(indexed_candidates, self._limit)
-        exact_candidates = _top_k(self._raw_candidates(plan), self._limit)
+        exact_candidates = []
+        if (self._table.options.vector_index_search_mode()
+                != GlobalIndexSearchMode.FAST):
+            exact_candidates = _top_k(self._raw_candidates(plan), self._limit)
         candidates = _top_k(
             (candidate
              for group in (indexed_candidates, exact_candidates)

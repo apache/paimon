@@ -45,6 +45,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.source.DynamicTableSource;
+import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
@@ -59,6 +60,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** Tests for {@link DataTableSource}. */
 class DataTableSourceTest {
@@ -97,6 +99,40 @@ class DataTableSourceTest {
         // The default parallelism is not 1
         assertThat(sourceStream2.getParallelism()).isNotEqualTo(1);
         assertThat(sourceStream2.getParallelism()).isEqualTo(sEnv2.getParallelism());
+    }
+
+    @Test
+    void testInferPostponeMergeParallelism() throws Exception {
+        FileStoreTable fileStoreTable = createPostponeTable(false);
+        writePostponeData(fileStoreTable);
+
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, false, null);
+        PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();
+        env.setParallelism(-1);
+
+        DataStream<RowData> sourceStream =
+                runtimeProvider.produceDataStream(s -> Optional.empty(), env);
+
+        assertThat(sourceStream.getParallelism()).isEqualTo(3);
+    }
+
+    @Test
+    void testPostponeMergeRejectsLookupAndDynamicFiltering() throws Exception {
+        FileStoreTable fileStoreTable = createPostponeTable(true);
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, false, null);
+
+        assertThat(tableSource.listAcceptedFilterFields()).isEqualTo(Collections.emptyList());
+        assertThatThrownBy(() -> tableSource.applyDynamicFiltering(Collections.singletonList("pt")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("postpone merge-on-read");
+        assertThatThrownBy(() -> tableSource.getLookupRuntimeProvider(lookupContext()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("not supported for lookup reads");
     }
 
     @Test
@@ -228,6 +264,29 @@ class DataTableSourceTest {
         return FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
     }
 
+    private FileStoreTable createPostponeTable(boolean partitioned) throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(path.toString());
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        Schema.Builder schemaBuilder =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.BIGINT())
+                        .primaryKey("pt", "a")
+                        .option("bucket", "-2")
+                        .option("postpone.merge-on-read", "true");
+        if (partitioned) {
+            schemaBuilder.partitionKeys("pt");
+        } else {
+            schemaBuilder
+                    .option("source.split.target-size", "1 B")
+                    .option("scan.infer-parallelism.max", "3");
+        }
+        TableSchema tableSchema = schemaManager.createTable(schemaBuilder.build());
+        return FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
+    }
+
     private void writeData(FileStoreTable table) throws Exception {
         InnerTableWrite writer = table.newWrite("test");
         TableCommitImpl commit = table.newCommit("test");
@@ -235,5 +294,45 @@ class DataTableSourceTest {
         commit.commit(writer.prepareCommit());
         commit.close();
         writer.close();
+    }
+
+    private void writePostponeData(FileStoreTable table) throws Exception {
+        InnerTableWrite writer = table.newWrite("test");
+        TableCommitImpl commit = table.newCommit("test");
+        writer.write(GenericRow.of(1, 1, 1L));
+        writer.write(GenericRow.of(1, 2, 2L));
+        writer.write(GenericRow.of(1, 3, 3L));
+        commit.commit(writer.prepareCommit());
+        commit.close();
+        writer.close();
+    }
+
+    private LookupTableSource.LookupContext lookupContext() {
+        return new LookupTableSource.LookupContext() {
+            @Override
+            public int[][] getKeys() {
+                return new int[][] {{1}};
+            }
+
+            @Override
+            public <T> TypeInformation<T> createTypeInformation(DataType dataType) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public <T> TypeInformation<T> createTypeInformation(LogicalType logicalType) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public DynamicTableSource.DataStructureConverter createDataStructureConverter(
+                    DataType dataType) {
+                throw new UnsupportedOperationException();
+            }
+
+            public boolean preferCustomShuffle() {
+                return false;
+            }
+        };
     }
 }

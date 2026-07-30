@@ -209,12 +209,14 @@ class DataEvolutionGlobalIndexScanner:
         """Scan the global index with the given predicate."""
         return self._evaluator.evaluate(predicate)
 
-    def unindexed_rows(self, predicate: Optional[Predicate]) -> GlobalIndexResult:
+    def unindexed_rows(self, predicate: Optional[Predicate],
+                       search_mode=None) -> GlobalIndexResult:
         """Return coarse row ids not covered by global indexes."""
         if self._coverage is None:
             return GlobalIndexResult.create_empty()
         return GlobalIndexResult.from_ranges(
-            self._coverage.unindexed_ranges(self._fields, predicate))
+            self._coverage.unindexed_ranges(
+                self._fields, predicate, search_mode=search_mode))
 
     def close(self):
         """Close the scanner and release resources."""

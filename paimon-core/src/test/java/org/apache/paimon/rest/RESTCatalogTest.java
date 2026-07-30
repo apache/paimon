@@ -3294,7 +3294,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Lists.newArrayList(
                                 new DataField(0, "pt", DataTypes.INT()),
                                 new DataField(1, "col1", DataTypes.STRING()),
-                                new DataField(2, "col2", DataTypes.STRING())),
+                                new DataField(2, "col2", DataTypes.STRING()),
+                                new DataField(3, "payload", DataTypes.VARIANT())),
                         Collections.singletonList("pt"),
                         Collections.emptyList(),
                         options,
@@ -3310,6 +3311,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(tables).containsExactlyInAnyOrder("table1");
         assertThat(table.uuid()).isNotEmpty();
         assertThat(table.uuid()).isNotEqualTo(table.fullName());
+        assertThat(table.rowType().getField("payload").type())
+                .isInstanceOf(org.apache.paimon.types.VariantType.class);
     }
 
     @Test

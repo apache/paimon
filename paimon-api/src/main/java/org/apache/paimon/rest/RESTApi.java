@@ -150,6 +150,15 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class RESTApi {
 
     public static final String HEADER_PREFIX = "header.";
+    /**
+     * Optional header carrying the URL-encoded {@link Identifier} JSON of the table which initiated
+     * a dependency read.
+     *
+     * <p>This header only provides request context. Servers must not treat it as authorization
+     * proof.
+     */
+    public static final String READ_VIA_HEADER = "X-Paimon-Read-Via";
+
     public static final String MAX_RESULTS = "maxResults";
     public static final String PAGE_TOKEN = "pageToken";
 

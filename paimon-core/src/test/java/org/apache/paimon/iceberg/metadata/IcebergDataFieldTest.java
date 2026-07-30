@@ -37,6 +37,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.junit.jupiter.api.DisplayName;
@@ -270,6 +271,19 @@ class IcebergDataFieldTest {
     }
 
     @Test
+    @DisplayName("Test array element-required follows the element, not the array")
+    void testArrayElementNullabilityIndependentOfArray() {
+        DataField arrayField =
+                new DataField(1, "array", new ArrayType(true, new VariantType(false)));
+        IcebergDataField icebergArray = new IcebergDataField(arrayField);
+
+        IcebergListType listType = (IcebergListType) icebergArray.type();
+        assertThat(listType.element()).isEqualTo("variant");
+        assertThat(listType.elementRequired()).isTrue();
+        assertThat(icebergArray.dataType()).isEqualTo(new ArrayType(true, new VariantType(false)));
+    }
+
+    @Test
     @DisplayName("Test map type conversion")
     void testMapTypeConversion() {
         DataField mapField =
@@ -459,6 +473,43 @@ class IcebergDataFieldTest {
         IcebergDataField timestamptzNsField =
                 new IcebergDataField(4, "timestamptz_ns", false, "timestamptz_ns", null, "doc");
         assertThat(timestamptzNsField.dataType()).isEqualTo(new LocalZonedTimestampType(true, 9));
+    }
+
+    @Test
+    @DisplayName("Test variant type conversion")
+    void testVariantTypeConversion() {
+        DataField variantField = new DataField(1, "variant", new VariantType(true));
+        IcebergDataField icebergVariant = new IcebergDataField(variantField);
+
+        assertThat(icebergVariant.type()).isEqualTo("variant");
+        assertThat(icebergVariant.required()).isFalse();
+        assertThat(icebergVariant.dataType()).isEqualTo(new VariantType(true));
+    }
+
+    @Test
+    @DisplayName("Test variant type parsing")
+    void testVariantTypeParsing() {
+        IcebergDataField optionalVariant =
+                new IcebergDataField(1, "variant", false, "variant", null, "doc");
+        assertThat(optionalVariant.dataType()).isEqualTo(new VariantType(true));
+
+        IcebergDataField requiredVariant =
+                new IcebergDataField(2, "variant", true, "variant", null, "doc");
+        assertThat(requiredVariant.dataType()).isEqualTo(new VariantType(false));
+    }
+
+    @Test
+    @DisplayName("Test variant type serialization round trip")
+    void testVariantTypeSerializationRoundTrip() {
+        DataField variantField = new DataField(1, "variant", new VariantType(true));
+        IcebergDataField originalField = new IcebergDataField(variantField);
+
+        String json = JsonSerdeUtil.toJson(originalField);
+        IcebergDataField deserializedField = JsonSerdeUtil.fromJson(json, IcebergDataField.class);
+
+        assertThat(deserializedField.type()).isEqualTo("variant");
+        assertThat(deserializedField.dataType()).isEqualTo(new VariantType(true));
+        assertThat(deserializedField.toDatafield()).isEqualTo(variantField);
     }
 
     @Test

@@ -71,7 +71,10 @@ case class WriteIntoPaimonTable(
           Snapshot.Operation.WRITE
         }
       }
-    val commitMessages = writer.write(replacedData)
+    val commitMessages =
+      writer.write(
+        replacedData,
+        overwriteExistingData = overwritePartition != null || dynamicPartitionOverwriteMode)
     writer.commit(commitMessages, operation)
 
     Seq.empty

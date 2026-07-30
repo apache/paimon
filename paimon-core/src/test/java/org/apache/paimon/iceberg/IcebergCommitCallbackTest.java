@@ -38,6 +38,7 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -162,6 +163,38 @@ public class IcebergCommitCallbackTest {
         Path result = IcebergCommitCallback.catalogDatabasePath(mockTable);
 
         assertThat(result.toString()).isEqualTo(expectedPath);
+    }
+
+    @Test
+    void testCatalogDatabasePathTableLocationAllowsNonWarehouseDatabase() {
+        // A database whose location is not a Paimon <db>.db warehouse path (e.g. an externally
+        // provisioned / cross-account catalog database).
+        when(mockTable.location()).thenReturn(new Path("s3://bucket/ingest/mydb/mytable"));
+        when(mockConfig.get(IcebergOptions.METADATA_ICEBERG_STORAGE))
+                .thenReturn(IcebergOptions.StorageType.REST_CATALOG);
+        when(mockConfig.getOptional(IcebergOptions.METADATA_ICEBERG_STORAGE_LOCATION))
+                .thenReturn(Optional.of(IcebergOptions.StorageLocation.TABLE_LOCATION));
+
+        // table-location writes Iceberg metadata beside the table, so the database path is used
+        // as-is with no <db>.db requirement.
+        assertThat(IcebergCommitCallback.catalogDatabasePath(mockTable).toString())
+                .isEqualTo("s3://bucket/ingest/mydb");
+    }
+
+    @Test
+    void testCatalogDatabasePathCatalogStorageRejectsNonWarehouseDatabase() {
+        when(mockTable.location()).thenReturn(new Path("s3://bucket/ingest/mydb/mytable"));
+        when(mockConfig.get(IcebergOptions.METADATA_ICEBERG_STORAGE))
+                .thenReturn(IcebergOptions.StorageType.REST_CATALOG);
+        when(mockConfig.getOptional(IcebergOptions.METADATA_ICEBERG_STORAGE_LOCATION))
+                .thenReturn(Optional.of(IcebergOptions.StorageLocation.CATALOG_STORAGE));
+
+        // catalog-storage derives a warehouse-relative iceberg/<db>/ path by stripping ".db", so a
+        // non-".db" database is still rejected (with a message pointing at the table-location fix).
+        assertThatThrownBy(() -> IcebergCommitCallback.catalogDatabasePath(mockTable))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("requires a Paimon warehouse database")
+                .hasMessageContaining("table-location");
     }
 
     private static Stream<Arguments> provideMetadataPathsWithStorageType() {

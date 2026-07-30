@@ -27,10 +27,9 @@ aggregation (sum / max / min / last_value / ...) per column.
 
 This is the **core merge semantics only**. Retract on DELETE /
 UPDATE_BEFORE rows (with ``aggregation.remove-record-on-delete`` and
-``fields.<field>.ignore-retract`` opt-ins) and ~14 additional
-aggregators (``product`` / ``listagg`` / ``collect`` / ``merge_map`` /
-``nested_update`` / ``theta_sketch`` / ``hll_sketch`` /
-``roaring_bitmap_*``) are intentionally deferred. Non-INSERT row
+``fields.<field>.ignore-retract`` opt-ins) and 2 additional
+aggregators (``hll_sketch`` / ``rbm64``)
+are intentionally deferred. Non-INSERT row
 kinds raise ``NotImplementedError`` at :meth:`add` time so we never
 silently corrupt data with a half-implemented contract, and
 out-of-scope aggregator identifiers / options are rejected up-front in
