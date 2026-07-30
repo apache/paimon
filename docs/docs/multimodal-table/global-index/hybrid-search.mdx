@@ -79,7 +79,7 @@ The second argument is an array of vector route configs created by `named_struct
 | `query_vector` | Yes | N/A | Query vector for this route. |
 | `limit` | No | Final limit | Top K results to retrieve from this vector column before ranking. |
 | `weight` | No | `1.0` | Weight for this route when ranking results. |
-| `options` | No | Empty map | Route-specific vector search options such as `ivf.nprobe` and `hnsw.ef_search`. |
+| `options` | No | Empty map | Route-specific vector search options such as `ivf.nprobe` and `diskann.l_search`. |
 
 The third argument is an array of full-text route configs created by `named_struct`:
 
