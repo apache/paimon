@@ -72,6 +72,63 @@ public class RenamingTwoPhaseOutputStreamTest {
     }
 
     @Test
+    void testCleanKeepsAStagingDirectoryHoldingAnotherWritersFile() throws IOException {
+        RenamingTwoPhaseOutputStream stream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        stream.write("Some data".getBytes());
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+
+        // A MapReduce-style writer with a task attempt still pending in the same directory.
+        Path otherWriterPending =
+                new Path(targetPath.getParent(), "_temporary/attempt_0001_m_000010_15/part-00010");
+        fileIO.writeFile(otherWriterPending, "concurrent", false);
+
+        committer.commit(fileIO);
+        committer.clean(fileIO);
+
+        assertThat(fileIO.exists(targetPath)).isTrue();
+        assertThat(fileIO.exists(otherWriterPending)).isTrue();
+        assertThat(fileIO.exists(new Path(targetPath.getParent(), "_temporary"))).isTrue();
+    }
+
+    @Test
+    void testCleanKeepsAStagingDirectoryThatIsEmpty() throws IOException {
+        RenamingTwoPhaseOutputStream stream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        stream.write("Some data".getBytes());
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+        Path stagingDir = new Path(targetPath.getParent(), "_temporary");
+
+        committer.commit(fileIO);
+        committer.clean(fileIO);
+
+        // Empty is not the same as unused: a writer that has just created '_temporary' has not
+        // staged its file in it yet, and removing the directory would fail that writer's open.
+        // exists(), not listStatus(): listStatus answers with no entries for a directory that is
+        // gone as much as for one that is empty, so it cannot tell the two apart.
+        assertThat(fileIO.exists(targetPath)).isTrue();
+        assertThat(fileIO.exists(stagingDir)).isTrue();
+        assertThat(fileIO.listStatus(stagingDir)).isEmpty();
+    }
+
+    @Test
+    void testCleanRemovesTheFileItStagedWhenThereWasNoCommit() throws IOException {
+        RenamingTwoPhaseOutputStream stream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        stream.write("Some data".getBytes());
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+
+        // No commit renamed it away, so clean() is what keeps the staged file from being left
+        // behind for good.
+        committer.clean(fileIO);
+
+        Path stagingDir = new Path(targetPath.getParent(), "_temporary");
+        assertThat(fileIO.exists(targetPath)).isFalse();
+        assertThat(fileIO.exists(stagingDir)).isTrue();
+        assertThat(fileIO.listStatus(stagingDir)).isEmpty();
+    }
+
+    @Test
     void testDiscard() throws IOException {
         RenamingTwoPhaseOutputStream stream =
                 new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
