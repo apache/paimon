@@ -80,12 +80,58 @@ public class BTreeTopNIndexFileSelectorTest {
     }
 
     @Test
+    public void testSingleFileCoversTopNAtEqualBoundary() {
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        file("top", 90, 100, false, 100),
+                        file("next", 80, 90, false, 100),
+                        file("lower", 70, 80, false, 100));
+
+        assertThat(fileNames(select(files, NULLS_LAST, 100))).containsExactly("top");
+    }
+
+    @Test
+    public void testDoesNotStopWhenSingleFileHasTooFewRows() {
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        file("top", 90, 100, false, 99),
+                        file("next", 80, 89, false, 100),
+                        file("lower", 70, 79, false, 100));
+
+        assertThat(fileNames(select(files, NULLS_LAST, 100))).containsExactly("top", "next");
+    }
+
+    @Test
+    public void testDoesNotStopAtOverlappingRange() {
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        file("top", 0, 100, false, 100),
+                        file("next", 90, 99, false, 99),
+                        file("lower", 80, 89, false, 99));
+
+        assertThat(fileNames(select(files, NULLS_LAST, 100)))
+                .containsExactly("top", "next", "lower");
+    }
+
+    @Test
+    public void testNullsLastPreventsWholeFileCoverage() {
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        file("top", 90, 100, true, 100),
+                        file("next", 80, 89, false, 100),
+                        file("lower", 70, 79, false, 100));
+
+        assertThat(fileNames(select(files, NULLS_LAST, 100))).containsExactly("top", "next");
+    }
+
+    @Test
     public void testLimitBoundaries() {
         List<IndexFileMeta> files =
                 Arrays.asList(file("max-10", 0, 10, false), file("max-20", 10, 20, false));
 
         assertThat(select(files, NULLS_LAST, 0)).isEmpty();
-        assertThat(select(files, NULLS_LAST, files.size())).containsExactlyElementsOf(files);
+        assertThat(fileNames(select(files, NULLS_LAST, files.size())))
+                .containsExactly("max-20", "max-10");
     }
 
     private List<IndexFileMeta> select(

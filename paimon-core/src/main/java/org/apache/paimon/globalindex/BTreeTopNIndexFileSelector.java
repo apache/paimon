@@ -36,7 +36,9 @@ import java.util.List;
  *
  * <p>Files without usable sorted metadata are always retained. For files with usable metadata,
  * retaining the first {@code N} files ordered by their best value is safe because every non-empty
- * BTree file contributes at least one row at that value.
+ * BTree file contributes at least one row at that value. Fewer files can be retained when one file
+ * alone contains at least {@code N} rows and its worst value is not worse than the best value of
+ * every remaining file.
  */
 class BTreeTopNIndexFileSelector {
 
@@ -55,9 +57,6 @@ class BTreeTopNIndexFileSelector {
         if (limit == 0) {
             return new ArrayList<>();
         }
-        if (limit >= files.size()) {
-            return new ArrayList<>(files);
-        }
 
         BTreeTopNIndexFileSelector selector = new BTreeTopNIndexFileSelector(field, topN);
         List<IndexFileMeta> selected = new ArrayList<>();
@@ -74,7 +73,15 @@ class BTreeTopNIndexFileSelector {
 
         rankedFiles.sort(selector::compare);
         for (int i = 0; i < Math.min(limit, rankedFiles.size()); i++) {
-            selected.add(rankedFiles.get(i).file);
+            RankedIndexFile current = rankedFiles.get(i);
+            selected.add(current.file);
+            if (i + 1 < rankedFiles.size()
+                    && current.file.rowCount() >= limit
+                    // Equal boundary keys are safe because this TopN has no secondary ordering or
+                    // WITH TIES semantics, and the current file alone supplies enough rows.
+                    && selector.compareWorstToBest(current, rankedFiles.get(i + 1)) <= 0) {
+                break;
+            }
         }
         return selected;
     }
@@ -89,35 +96,49 @@ class BTreeTopNIndexFileSelector {
         try {
             SortedIndexFileMeta sortedMeta =
                     SortedIndexFileMeta.deserialize(globalIndex.indexMeta());
+            byte[] firstKey = sortedMeta.firstKey();
             byte[] lastKey = sortedMeta.lastKey();
-            if (lastKey == null && !sortedMeta.hasNulls()) {
+            boolean hasNonNulls = lastKey != null;
+            if (hasNonNulls != (firstKey != null) || !hasNonNulls && !sortedMeta.hasNulls()) {
                 return null;
             }
 
-            boolean bestIsNull = nullsFirst ? sortedMeta.hasNulls() : lastKey == null;
+            boolean bestIsNull = nullsFirst ? sortedMeta.hasNulls() : !hasNonNulls;
             Object bestKey =
                     bestIsNull ? null : keySerializer.deserialize(MemorySlice.wrap(lastKey));
-            return new RankedIndexFile(file, bestIsNull, bestKey);
+            boolean worstIsNull = nullsFirst ? !hasNonNulls : sortedMeta.hasNulls();
+            Object worstKey =
+                    worstIsNull ? null : keySerializer.deserialize(MemorySlice.wrap(firstKey));
+            return new RankedIndexFile(file, bestIsNull, bestKey, worstIsNull, worstKey);
         } catch (RuntimeException e) {
             return null;
         }
     }
 
     private int compare(RankedIndexFile left, RankedIndexFile right) {
-        if (left.bestIsNull != right.bestIsNull) {
-            if (left.bestIsNull) {
+        int result = compareValues(left.bestIsNull, left.bestKey, right.bestIsNull, right.bestKey);
+        if (result != 0) {
+            return result;
+        }
+        return left.file.fileName().compareTo(right.file.fileName());
+    }
+
+    private int compareWorstToBest(RankedIndexFile current, RankedIndexFile next) {
+        return compareValues(current.worstIsNull, current.worstKey, next.bestIsNull, next.bestKey);
+    }
+
+    private int compareValues(
+            boolean leftIsNull,
+            @Nullable Object left,
+            boolean rightIsNull,
+            @Nullable Object right) {
+        if (leftIsNull != rightIsNull) {
+            if (leftIsNull) {
                 return nullsFirst ? -1 : 1;
             }
             return nullsFirst ? 1 : -1;
         }
-
-        if (!left.bestIsNull) {
-            int result = keyComparator.compare(right.bestKey, left.bestKey);
-            if (result != 0) {
-                return result;
-            }
-        }
-        return left.file.fileName().compareTo(right.file.fileName());
+        return leftIsNull ? 0 : keyComparator.compare(right, left);
     }
 
     private static class RankedIndexFile {
@@ -125,11 +146,20 @@ class BTreeTopNIndexFileSelector {
         private final IndexFileMeta file;
         private final boolean bestIsNull;
         @Nullable private final Object bestKey;
+        private final boolean worstIsNull;
+        @Nullable private final Object worstKey;
 
-        private RankedIndexFile(IndexFileMeta file, boolean bestIsNull, @Nullable Object bestKey) {
+        private RankedIndexFile(
+                IndexFileMeta file,
+                boolean bestIsNull,
+                @Nullable Object bestKey,
+                boolean worstIsNull,
+                @Nullable Object worstKey) {
             this.file = file;
             this.bestIsNull = bestIsNull;
             this.bestKey = bestKey;
+            this.worstIsNull = worstIsNull;
+            this.worstKey = worstKey;
         }
     }
 }
