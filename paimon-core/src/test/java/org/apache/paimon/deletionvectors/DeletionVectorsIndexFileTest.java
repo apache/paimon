@@ -406,8 +406,7 @@ public class DeletionVectorsIndexFileTest {
 
         Map<String, DeletionVector> deleteMap = new LinkedHashMap<>();
         deleteMap.put("file1.parquet", createEmptyDV(false));
-        deleteMap.put(
-                "file2.parquet", new FailingSerializeDeletionVector(createEmptyDV(false)));
+        deleteMap.put("file2.parquet", new FailingSerializeDeletionVector(createEmptyDV(false)));
 
         assertThatThrownBy(() -> deletionVectorsIndexFile.writeSingleFile(deleteMap))
                 .hasMessageContaining("Failed to write deletion vectors");
@@ -425,8 +424,7 @@ public class DeletionVectorsIndexFileTest {
         Map<String, DeletionVector> deleteMap = new LinkedHashMap<>();
         deleteMap.put("file1.parquet", createEmptyDV(false));
         deleteMap.put("file2.parquet", createEmptyDV(false));
-        deleteMap.put(
-                "file3.parquet", new FailingSerializeDeletionVector(createEmptyDV(false)));
+        deleteMap.put("file3.parquet", new FailingSerializeDeletionVector(createEmptyDV(false)));
 
         assertThatThrownBy(() -> deletionVectorsIndexFile.writeWithRolling(deleteMap))
                 .hasMessageContaining("Failed to write deletion vectors");

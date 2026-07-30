@@ -275,7 +275,9 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     public List<CommitMessage> prepareCommit(
-            boolean waitCompaction, long commitIdentifier, @Nullable Consumer<CommitMessage> onPrepared)
+            boolean waitCompaction,
+            long commitIdentifier,
+            @Nullable Consumer<CommitMessage> onPrepared)
             throws Exception {
         if (write instanceof AbstractFileStoreWrite) {
             return ((AbstractFileStoreWrite<?>) write)

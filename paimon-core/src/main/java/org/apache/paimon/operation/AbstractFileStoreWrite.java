@@ -239,8 +239,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     /**
      * Like {@link #prepareCommit(boolean, long)} but invokes {@code onPrepared} immediately after
-     * each bucket increment is drained, so callers can register or abort partial results before
-     * the whole prepare finishes.
+     * each bucket increment is drained, so callers can register or abort partial results before the
+     * whole prepare finishes.
      */
     public List<CommitMessage> prepareCommit(
             boolean waitCompaction,
