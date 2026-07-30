@@ -195,14 +195,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
 
     public static Optional<DataEvolutionGlobalIndexScanner> create(
             FileStoreTable table, Collection<IndexFileMeta> indexFiles) {
-        return create(table, null, indexFiles);
-    }
-
-    public static Optional<DataEvolutionGlobalIndexScanner> create(
-            FileStoreTable table,
-            @Nullable PartitionPredicate partitionFilter,
-            Collection<IndexFileMeta> indexFiles) {
-        return create(table, null, partitionFilter, indexFiles);
+        return create(table, null, null, indexFiles);
     }
 
     public static Optional<DataEvolutionGlobalIndexScanner> create(
