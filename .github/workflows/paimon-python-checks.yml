@@ -126,7 +126,7 @@ jobs:
             # ray/lance/daft/torch have no 3.7 wheels; those tests are importorskip-ed (as on 3.6.15).
             python -m pip install --upgrade pip
             python -m pip install -r paimon-python/dev/requirements.txt
-            python -m pip install flake8==4.0.1 'pytest~=7.0' py4j==0.10.9.9 parameterized==0.9.0
+            python -m pip install flake8==4.0.1 'pytest~=7.0' py4j==0.10.9.9 parameterized==0.9.0 datasketches==4.1.0
             python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
           else
             python -m pip install --upgrade pip
