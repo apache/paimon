@@ -97,7 +97,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
     }
 
     @TestTemplate
-    public void testTopNCandidatesFromEveryFile() throws Exception {
+    public void testGlobalTopNCandidatesAcrossFiles() throws Exception {
         int limit = 5;
         List<GlobalIndexIOMeta> written = writeData();
         FieldRef ref = new FieldRef(1, "testField", dataType);
@@ -106,7 +106,15 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
                 globalIndexer.createReader(fileReader, written, newDirectExecutorService())) {
             GlobalIndexResult result =
                     reader.visitTopN(new TopN(ref, DESCENDING, NULLS_LAST, limit)).join().get();
-            assertThat(result.results().getLongCardinality()).isEqualTo(written.size() * limit);
+            assertThat(result.results().getLongCardinality()).isEqualTo(limit);
+
+            Object boundary = data.get(dataNum - limit).getKey();
+            Object[] valuesByRowId = new Object[dataNum];
+            data.forEach(pair -> valuesByRowId[pair.getValue().intValue()] = pair.getKey());
+            for (long rowId : result.results()) {
+                assertThat(comparator.compare(valuesByRowId[(int) rowId], boundary))
+                        .isGreaterThanOrEqualTo(0);
+            }
         }
     }
 

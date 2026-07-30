@@ -170,15 +170,14 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                 table, PartitionPredicate.ALWAYS_TRUE, topN)
                         .orElseThrow(AssertionError::new)) {
             assertThat(scanner.scan(topN).orElseThrow(AssertionError::new).results().toRangeList())
-                    .containsExactly(new Range(95, 99), new Range(195, 199));
+                    .containsExactly(new Range(95, 99));
         }
 
         ReadBuilder readBuilder = table.newReadBuilder().withTopN(topN);
         TableScan.Plan plan = readBuilder.newScan().plan();
         assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
         assertThat(readF1(readBuilder, plan))
-                .containsExactlyInAnyOrder(
-                        "a95", "a96", "a97", "a98", "a99", "a195", "a196", "a197", "a198", "a199");
+                .containsExactlyInAnyOrder("a95", "a96", "a97", "a98", "a99");
     }
 
     @Test

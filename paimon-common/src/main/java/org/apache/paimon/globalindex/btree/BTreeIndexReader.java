@@ -24,6 +24,7 @@ import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedFileMetaSelector;
+import org.apache.paimon.globalindex.SortedGlobalIndexResult;
 import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
@@ -46,6 +47,7 @@ import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -348,7 +350,11 @@ public class BTreeIndexReader implements Closeable {
             return Optional.empty();
         }
         Preconditions.checkArgument(topN.limit() >= 0, "TopN limit must not be negative.");
-        return createResult(() -> topN(topN.limit(), orders.get(0).nullOrdering()));
+        try {
+            return Optional.of(topN(topN.limit(), orders.get(0).nullOrdering()));
+        } catch (IOException e) {
+            throw new RuntimeException("fail to read btree index file.", e);
+        }
     }
 
     private Optional<GlobalIndexResult> createResult(IOSupplier<RoaringNavigableMap64> supplier) {
@@ -374,11 +380,11 @@ public class BTreeIndexReader implements Closeable {
         return rangeQuery(minKey, maxKey, true, true);
     }
 
-    private RoaringNavigableMap64 topN(int limit, SortValue.NullOrdering nullOrdering)
+    private SortedGlobalIndexResult topN(int limit, SortValue.NullOrdering nullOrdering)
             throws IOException {
-        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        List<SortedGlobalIndexResult.Entry> result = new ArrayList<>(limit);
         if (limit == 0) {
-            return result;
+            return SortedGlobalIndexResult.create(result, comparator, nullOrdering, limit);
         }
 
         int remaining = limit;
@@ -391,12 +397,12 @@ public class BTreeIndexReader implements Closeable {
         if (remaining > 0 && nullOrdering == SortValue.NullOrdering.NULLS_LAST) {
             addNullRows(result, remaining);
         }
-        return result;
+        return SortedGlobalIndexResult.create(result, comparator, nullOrdering, limit);
     }
 
-    private int addNullRows(RoaringNavigableMap64 result, int remaining) {
+    private int addNullRows(List<SortedGlobalIndexResult.Entry> result, int remaining) {
         for (long rowId : nullBitmap.get()) {
-            result.add(rowId);
+            result.add(new SortedGlobalIndexResult.Entry(null, rowId));
             if (--remaining == 0) {
                 break;
             }
@@ -404,7 +410,7 @@ public class BTreeIndexReader implements Closeable {
         return remaining;
     }
 
-    private int addDescendingNonNullRows(RoaringNavigableMap64 result, int remaining)
+    private int addDescendingNonNullRows(List<SortedGlobalIndexResult.Entry> result, int remaining)
             throws IOException {
         if (maxKey == null) {
             return remaining;
@@ -415,8 +421,9 @@ public class BTreeIndexReader implements Closeable {
         while (remaining > 0 && (dataIterator = fileIterator.readBatch()) != null) {
             while (remaining > 0 && dataIterator.hasNext()) {
                 Map.Entry<MemorySlice, MemorySlice> entry = dataIterator.next();
+                Object key = keySerializer.deserialize(entry.getKey());
                 for (long rowId : deserializeRowIds(entry.getValue())) {
-                    result.add(rowId);
+                    result.add(new SortedGlobalIndexResult.Entry(key, rowId));
                     if (--remaining == 0) {
                         break;
                     }
