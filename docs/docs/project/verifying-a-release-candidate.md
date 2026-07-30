@@ -308,8 +308,9 @@ Open the workflow run linked in the vote email and confirm:
 - JDK 8, JDK 11, JDK 17, Python packaging, and Python publishing jobs all
   succeeded;
 - the logs show the expected JDK and Python versions;
-- the Nexus IDs in the three staging manifests and the TestPyPI version equal
-  those in the vote email;
+- each Java package artifact contains the expected manifest and SHA-512
+  checksums for its lane;
+- the TestPyPI version equals the version in the vote email;
 - no later rerun silently replaced a failed lane with artifacts from another
   commit.
 
@@ -333,7 +334,7 @@ Verified:
 - Java staging repositories and representative class-file targets
 - PyPaimon source build/tests on Python <versions>
 - TestPyPI installation and smoke test
-- GitHub Actions run provenance, Java staging manifests, and Python artifacts
+- GitHub Actions run provenance, Java package manifests, and Python artifacts
 ```
 
 For a `-1`, describe the failure precisely enough for the RM to reproduce it.

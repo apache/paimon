@@ -16,8 +16,8 @@
 #  limitations under the License.
 ################################################################################
 
-# Orchestrate Java staging and PyPaimon packaging. The signed ASF source
-# archives remain a Release Manager responsibility and are not rebuilt here.
+# Orchestrate Java and PyPaimon packaging. Java signing and Nexus staging, plus
+# the signed ASF source archives, remain Release Manager responsibilities.
 
 name: Release
 
@@ -38,9 +38,8 @@ permissions:
 
 jobs:
   java:
-    name: Java staging
+    name: Java packages
     uses: ./.github/workflows/release-java.yml
-    secrets: inherit
 
   python-package:
     name: PyPaimon package

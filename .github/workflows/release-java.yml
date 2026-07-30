@@ -30,28 +30,23 @@ permissions:
   contents: read
 
 jobs:
-  deploy-staging:
-    name: Stage ${{ matrix.lane }}
+  package:
+    name: Package ${{ matrix.lane }}
     if: >-
       github.repository == 'apache/paimon' &&
       startsWith(github.ref, 'refs/tags/') &&
       contains(github.ref_name, '-rc')
-    environment: release
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - lane: jdk8
             java_version: 8
-            script: tools/releasing/deploy_staging_jars.sh
           - lane: jdk11
             java_version: 11
-            script: tools/releasing/deploy_staging_jars_for_jdk11.sh
           - lane: jdk17
             java_version: 17
-            script: tools/releasing/deploy_staging_jars_for_jdk17.sh
     steps:
       - uses: actions/checkout@v6
 
@@ -61,11 +56,6 @@ jobs:
           java-version: ${{ matrix.java_version }}
           distribution: temurin
           cache: maven
-          server-id: apache.releases.https
-          server-username: MAVEN_USERNAME
-          server-password: MAVEN_PASSWORD
-          gpg-private-key: ${{ secrets.GPG_SECRET_KEY }}
-          gpg-passphrase: MAVEN_GPG_PASSPHRASE
 
       - name: Set up Maven
         uses: stCarolas/setup-maven@v5
@@ -94,99 +84,114 @@ jobs:
             exit 1
           fi
 
-          description="apache-paimon-${release_version}-rc${rc_number}-${{ matrix.lane }}-run-${GITHUB_RUN_ID}"
           echo "version=${release_version}" >> "${GITHUB_OUTPUT}"
           echo "rc_number=${rc_number}" >> "${GITHUB_OUTPUT}"
-          echo "description=${description}" >> "${GITHUB_OUTPUT}"
 
           java -version
           mvn -version
 
-      - name: Open Apache Nexus staging repository
-        id: staging
+      - name: Package Java release artifacts
         shell: bash
         env:
-          MAVEN_PASSWORD: ${{ secrets.NEXUS_PW }}
-          MAVEN_USERNAME: ${{ secrets.NEXUS_USER }}
-          STAGING_DESCRIPTION: ${{ steps.release.outputs.description }}
+          LANE: ${{ matrix.lane }}
+          MAVEN_OPTS: -Xmx4096m
         run: |
           set -euo pipefail
 
-          mkdir -p release-staging
-          profiles="${RUNNER_TEMP}/nexus-profiles.json"
-          curl --fail --silent --show-error \
-            --retry 3 \
-            --user "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" \
-            --header "Accept: application/json" \
-            https://repository.apache.org/service/local/staging/profiles \
-            > "${profiles}"
+          mkdir -p release-java
+          log="release-java/${LANE}.log"
+          artifact_dirs=()
+          case "${LANE}" in
+            jdk8)
+              mvn clean install -ntp -B \
+                -Papache-release,docs-and-source,spark3,flink1 \
+                -DskipTests -Dgpg.skip=true \
+                2>&1 | tee "${log}"
+              ;;
+            jdk11)
+              mvn clean install -ntp -B \
+                -Pdocs-and-source,flink2 \
+                -DskipTests \
+                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-iceberg \
+                -am \
+                2>&1 | tee "${log}"
+              mvn package -ntp -B \
+                -Papache-release,docs-and-source,flink2 \
+                -DskipTests -Dgpg.skip=true \
+                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg \
+                2>&1 | tee -a "${log}"
+              artifact_dirs=(
+                paimon-flink/paimon-flink-2.0
+                paimon-flink/paimon-flink-2.1
+                paimon-flink/paimon-flink-2.2
+                paimon-flink/paimon-flink2-common
+                paimon-iceberg
+              )
+              ;;
+            jdk17)
+              mvn clean install -ntp -B \
+                -Pdocs-and-source,spark4 \
+                -DskipTests \
+                -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1 \
+                -am \
+                2>&1 | tee "${log}"
+              mvn package -ntp -B \
+                -Papache-release,docs-and-source,spark4 \
+                -DskipTests -Dgpg.skip=true \
+                -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13 \
+                2>&1 | tee -a "${log}"
+              artifact_dirs=(
+                paimon-spark/paimon-spark-common
+                paimon-spark/paimon-spark4-common
+                paimon-spark/paimon-spark-4.0
+                paimon-spark/paimon-spark-4.1
+              )
+              ;;
+            *)
+              echo "Unknown Java release lane: ${LANE}" >&2
+              exit 1
+              ;;
+          esac
 
-          mapfile -t profile_ids < <(
-            jq -r \
-              '.data[]
-               | select(.name | ascii_downcase | contains("paimon"))
-               | .id' \
-              "${profiles}"
-          )
-          if [[ "${#profile_ids[@]}" -ne 1 ]]; then
-            echo "Expected one Apache Paimon staging profile, found ${#profile_ids[@]}" >&2
+          files="release-java/${LANE}-files.txt"
+          if [[ "${#artifact_dirs[@]}" -eq 0 ]]; then
+            find . -type f -path '*/target/*.jar' -print \
+              | LC_ALL=C sort \
+              > "${files}"
+          else
+            for artifact_dir in "${artifact_dirs[@]}"; do
+              find "${artifact_dir}/target" \
+                -maxdepth 1 -type f -name '*.jar' -print
+            done | LC_ALL=C sort > "${files}"
+          fi
+          if [[ ! -s "${files}" ]]; then
+            echo "No Java release artifacts were produced for ${LANE}" >&2
             exit 1
           fi
 
-          request="${RUNNER_TEMP}/nexus-open-request.json"
-          response="${RUNNER_TEMP}/nexus-open-response.json"
-          jq -n \
-            --arg description "${STAGING_DESCRIPTION}" \
-            '{data: {description: $description}}' \
-            > "${request}"
-          curl --fail --silent --show-error \
-            --user "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" \
-            --header "Accept: application/json" \
-            --header "Content-Type: application/json" \
-            --request POST \
-            --data "@${request}" \
-            "https://repository.apache.org/service/local/staging/profiles/${profile_ids[0]}/start" \
-            > "${response}"
+          while IFS= read -r artifact; do
+            sha512sum "${artifact}"
+          done < "${files}" \
+            > "release-java/${LANE}-sha512.txt"
 
-          repository_id="$(jq -r '.data.stagedRepositoryId // empty' "${response}")"
-          if [[ ! "${repository_id}" =~ ^orgapachepaimon- ]]; then
-            echo "Nexus returned an unexpected staging repository ID" >&2
-            exit 1
-          fi
-          echo "repository_id=${repository_id}" >> "${GITHUB_OUTPUT}"
+          tar -czf "release-java/${LANE}-packages.tar.gz" \
+            -T "${files}"
+          sha512sum "release-java/${LANE}-packages.tar.gz" \
+            > "release-java/${LANE}-packages.tar.gz.sha512"
 
-          manifest="release-staging/${{ matrix.lane }}-manifest.txt"
           {
-            echo "lane=${{ matrix.lane }}"
+            echo "lane=${LANE}"
             echo "jdk=${{ matrix.java_version }}"
             echo "version=${{ steps.release.outputs.version }}"
             echo "rc=${{ steps.release.outputs.rc_number }}"
             echo "commit=${GITHUB_SHA}"
-            echo "repository=${repository_id}"
-            echo "description=${STAGING_DESCRIPTION}"
-          } > "${manifest}"
-          cat "${manifest}"
+            echo "signed=false"
+            echo "staged=false"
+          } > "release-java/${LANE}-manifest.txt"
 
-      - name: Deploy signed artifacts to Apache Nexus staging
-        shell: bash
-        env:
-          CUSTOM_OPTIONS: >-
-            -B
-            -DaltDeploymentRepository=apache.releases.https::default::https://repository.apache.org/service/local/staging/deployByRepositoryId/${{ steps.staging.outputs.repository_id }}
-          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-          MAVEN_PASSWORD: ${{ secrets.NEXUS_PW }}
-          MAVEN_USERNAME: ${{ secrets.NEXUS_USER }}
-          MAVEN_OPTS: -Xmx4096m
-        run: |
-          set -euo pipefail
-          mkdir -p release-staging
-          bash "${{ matrix.script }}" 2>&1 \
-            | tee "release-staging/${{ matrix.lane }}.log"
-
-      - name: Upload staging evidence
-        if: always()
+      - name: Upload Java packages
         uses: actions/upload-artifact@v5
         with:
-          name: java-staging-${{ matrix.lane }}
-          path: release-staging/
-          if-no-files-found: warn
+          name: java-package-${{ matrix.lane }}
+          path: release-java/
+          if-no-files-found: error
