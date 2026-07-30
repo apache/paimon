@@ -61,7 +61,8 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             }
             null
           }
-        })
+        }
+      )
       .asInstanceOf[SnapshotReader]
 
     val partitions = CompactProcedure.getPartitionsToCompact(snapshotReader, null)
