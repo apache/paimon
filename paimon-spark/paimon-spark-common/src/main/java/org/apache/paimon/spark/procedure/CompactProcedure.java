@@ -381,11 +381,10 @@ public class CompactProcedure extends BaseProcedure {
 
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             CommitMessageSerializer serializer = new CommitMessageSerializer();
-            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
-            List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
-            for (byte[] serializedMessage : serializedMessages) {
-                messages.add(serializer.deserialize(serializer.getVersion(), serializedMessage));
-            }
+            List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
+            List<CommitMessage> messages =
+                    deserializeCommitMessagesAndReleaseSerializedBytes(
+                            serializer, serializedMessages);
             commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -480,13 +479,10 @@ public class CompactProcedure extends BaseProcedure {
 
         try (TableCommitImpl commit = table.newCommit(commitUser)) {
             CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
-            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
-            List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
-            for (byte[] serializedMessage : serializedMessages) {
-                messages.add(
-                        messageSerializerser.deserialize(
-                                messageSerializerser.getVersion(), serializedMessage));
-            }
+            List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
+            List<CommitMessage> messages =
+                    deserializeCommitMessagesAndReleaseSerializedBytes(
+                            messageSerializerser, serializedMessages);
             commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -578,14 +574,11 @@ public class CompactProcedure extends BaseProcedure {
                                                     return messagesBytes.iterator();
                                                 });
 
-                List<CommitMessage> messages = new ArrayList<>();
-                List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
+                List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
                 try (TableCommitImpl commit = table.newCommit(commitUser)) {
-                    for (byte[] serializedMessage : serializedMessages) {
-                        messages.add(
-                                messageSerializerser.deserialize(
-                                        messageSerializerser.getVersion(), serializedMessage));
-                    }
+                    List<CommitMessage> messages =
+                            deserializeCommitMessagesAndReleaseSerializedBytes(
+                                    messageSerializerser, serializedMessages);
                     messages.addAll(
                             new DataEvolutionCompactionCommitPreparation(table, snapshot)
                                     .prepare(messages));
@@ -597,6 +590,17 @@ public class CompactProcedure extends BaseProcedure {
         } catch (EndOfScanException e) {
             LOG.info("Catching EndOfScanException, the compact job is finishing.");
         }
+    }
+
+    private static List<CommitMessage> deserializeCommitMessagesAndReleaseSerializedBytes(
+            CommitMessageSerializer serializer, List<byte[]> serializedMessages)
+            throws IOException {
+        List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
+        for (int i = 0; i < serializedMessages.size(); i++) {
+            byte[] serializedMessage = serializedMessages.set(i, null);
+            messages.add(serializer.deserialize(serializer.getVersion(), serializedMessage));
+        }
+        return messages;
     }
 
     private Set<BinaryRow> getHistoryPartition(
