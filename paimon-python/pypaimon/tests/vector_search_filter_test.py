@@ -422,6 +422,69 @@ class GlobalIndexLiveRowFilterTest(unittest.TestCase):
         self.assertTrue(calls["new_scan"])
         self.assertEqual([10, 12, 14], rows.to_list())
 
+    def test_live_rows_does_not_readd_deleted_rows_across_overlapping_files(self):
+        from pypaimon.read.split import DataSplit
+        from pypaimon.table.source import global_index_live_row_filter
+        from pypaimon.table.source.deletion_file import DeletionFile
+
+        class _File:
+            first_row_id = 10
+            row_count = 5
+
+            def row_id_range(self_inner):
+                return Range(10, 14)
+
+        # Anchor file carries a DV; the overlapping partial-column sibling does
+        # not. Its range must not re-add the rows the anchor's DV removed.
+        deletion_file = DeletionFile("dv", 0, 1, cardinality=2)
+        split = DataSplit(
+            files=[_File(), _File()],
+            partition=None,
+            bucket=0,
+            data_deletion_files=[deletion_file],
+        )
+
+        class _Plan:
+            def splits(self_inner):
+                return [split]
+
+        class _Scan:
+            def plan(self_inner):
+                return _Plan()
+
+        class _Builder:
+            def with_partition_filter(self_inner, predicate):
+                return self_inner
+
+            def new_scan(self_inner):
+                return _Scan()
+
+        class _Options:
+            def deletion_vectors_enabled(self_inner, default=False):
+                return True
+
+        class _Table:
+            options = _Options()
+            file_io = object()
+
+            def new_read_builder(self_inner):
+                return _Builder()
+
+        class _DeletionVector:
+            def is_empty(self_inner):
+                return False
+
+            def bit_map(self_inner):
+                return [1, 3]
+
+        with mock.patch(
+                "pypaimon.table.source.global_index_live_row_filter."
+                "DeletionVector.read",
+                return_value=_DeletionVector()):
+            rows = global_index_live_row_filter.live_rows(_Table())
+
+        self.assertEqual([10, 12, 14], rows.to_list())
+
 
 class VectorReaderFactoryTest(unittest.TestCase):
     """Vector reader factory compatibility."""

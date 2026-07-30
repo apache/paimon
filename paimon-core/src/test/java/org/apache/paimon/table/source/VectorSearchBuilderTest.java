@@ -36,6 +36,7 @@ import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexer;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -216,6 +217,37 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         .executeLocal();
 
         assertThat(result.results().getLongCardinality()).isEqualTo(2);
+        assertThat(result.results()).contains(2L, 3L);
+        assertThat(result.results()).doesNotContain(0L, 1L);
+        assertThat(readIds(table, result)).containsExactly(2, 3);
+    }
+
+    @Test
+    public void testVectorSearchExcludesDeletedRowsAcrossOverlappingPartialColumnFiles()
+            throws Exception {
+        catalog.createTable(
+                identifier("vector_search_overlapping_partial_column"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_search_overlapping_partial_column"));
+
+        float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {3.0f, 0.0f}};
+        writeVectors(table, vectors);
+        // A partial-column file over the same [0,3] row-id range that carries no
+        // deletion vector; its range must not re-add the deleted rows.
+        writeOverlappingIdColumn(table, vectors.length);
+        buildAndCommitIndex(table, vectors);
+        commitDeletionVectors(table, 0L, 1L);
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(4)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
         assertThat(result.results()).contains(2L, 3L);
         assertThat(result.results()).doesNotContain(0L, 1L);
         assertThat(readIds(table, result)).containsExactly(2, 3);
@@ -1542,6 +1574,32 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     // ====================== Helper methods ======================
+
+    private void writeOverlappingIdColumn(FileStoreTable table, int count) throws Exception {
+        long firstRowId = table.snapshotManager().latestSnapshot().nextRowId() - count;
+        RowType idType = table.rowType().project(Collections.singletonList("id"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(idType)) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(i));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> messages = write.prepareCommit();
+            assignFirstRowId(messages, firstRowId);
+            commit.commit(messages);
+        }
+    }
+
+    private void assignFirstRowId(List<CommitMessage> messages, long firstRowId) {
+        for (CommitMessage message : messages) {
+            CommitMessageImpl impl = (CommitMessageImpl) message;
+            List<DataFileMeta> newFiles = new ArrayList<>(impl.newFilesIncrement().newFiles());
+            impl.newFilesIncrement().newFiles().clear();
+            for (DataFileMeta file : newFiles) {
+                impl.newFilesIncrement().newFiles().add(file.assignFirstRowId(firstRowId));
+            }
+        }
+    }
 
     private void writeVectors(FileStoreTable table, float[][] vectors) throws Exception {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
