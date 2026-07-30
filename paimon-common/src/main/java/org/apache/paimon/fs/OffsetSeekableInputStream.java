@@ -18,6 +18,8 @@
 
 package org.apache.paimon.fs;
 
+import org.apache.paimon.utils.IOUtils;
+
 import java.io.IOException;
 
 /**
@@ -36,7 +38,13 @@ public class OffsetSeekableInputStream extends SeekableInputStream {
         this.offset = offset;
         this.length = length;
         if (offset != 0) {
-            wrapped.seek(offset);
+            try {
+                wrapped.seek(offset);
+            } catch (IOException | RuntimeException | Error e) {
+                // Constructor failed: close the wrapped stream so it doesn't leak.
+                IOUtils.closeQuietly(wrapped);
+                throw e;
+            }
         }
     }
 
