@@ -43,9 +43,9 @@ trait DataWrite[T] extends AutoCloseable {
   protected def attemptCleanup: Option[SparkAttemptCleanup] = None
 
   /**
-   * Register prepared commit messages incrementally so a mid-attempt kill can abort already
-   * drained files. Call this immediately after each prepareCommit increment (per bucket / per
-   * writer) inside {@link #commitImpl()}.
+   * Register prepared commit messages incrementally so a mid-attempt kill can abort already drained
+   * files. Call this immediately after each prepareCommit increment (per bucket / per writer)
+   * inside {@link #commitImpl()}.
    */
   protected def registerPrepared(messages: Seq[CommitMessage]): Unit = {
     attemptCleanup.foreach(_.addPrepared(messages))
