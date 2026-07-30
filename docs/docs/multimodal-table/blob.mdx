@@ -79,7 +79,7 @@ Paimon supports three storage modes for BLOB fields, selected via **comment dire
    This mode supports `BLOB`, `ARRAY<BLOB>`, and `MAP<K, BLOB>` fields.
 
 2. **Descriptor-only storage** (`__BLOB_DESCRIPTOR_FIELD`)
-   Only serialized `BlobDescriptor` bytes are stored inline in data files. Paimon does not write `.blob` files for these fields, and writes must provide descriptor-based input.
+   Only serialized `BlobDescriptor` bytes are stored inline in data files. Paimon does not write `.blob` files for these fields, and non-null values must provide descriptor-based input.
 
 3. **Blob view storage** (`__BLOB_VIEW_FIELD`)
    Serialized `BlobViewStruct` bytes are stored inline. The struct points to a BLOB value in an upstream table by table identifier, BLOB field, and row id. The actual blob bytes are resolved from the upstream table at read time.
@@ -500,7 +500,7 @@ CREATE TABLE descriptor_table (
 );
 ```
 
-Paimon stores only serialized `BlobDescriptor` bytes in normal data files. Reading the blob follows the descriptor URI to access bytes, and writing requires descriptor input for those fields.
+Paimon stores only serialized `BlobDescriptor` bytes in normal data files. Reading the blob follows the descriptor URI to access bytes, and non-null values require descriptor input for those fields.
 
 ## Presigned URLs for OSS Blobs
 
@@ -674,7 +674,7 @@ For the Python equivalent, see [Blob Storage in pypaimon](../pypaimon/blob).
 
 ## Limitations
 
-1. **Primary Key Tables**: Managed BLOB storage in primary-key tables has additional requirements; see [Primary-Key BLOB Storage](../primary-key-table/blob-storage).
+1. **Primary Key Tables**: Managed BLOB storage in primary-key tables has additional requirements; see [Primary-Key BLOB Storage](../primary-key-table/blob-storage). Primary-key tables support `merge-engine=partial-update` with scalar `blob-descriptor-field`, managed `blob-field` (`changelog-producer=none`), and scalar `blob-view-field`; `ARRAY` / `MAP` descriptor or view fields are not supported.
 2. **No Predicate Pushdown**: Blob columns cannot be used in filter predicates.
 3. **No Statistics**: Statistics collection is not supported for blob columns.
 4. **Append Table Options**: For append tables, `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.

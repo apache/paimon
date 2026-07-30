@@ -103,6 +103,10 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         return predicate;
     }
 
+    protected boolean shouldExecuteFilter() {
+        return executeFilter;
+    }
+
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);

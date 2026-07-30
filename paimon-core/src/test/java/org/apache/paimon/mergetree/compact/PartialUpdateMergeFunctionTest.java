@@ -19,6 +19,7 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
@@ -94,6 +95,42 @@ public class PartialUpdateMergeFunctionTest {
         validate(func, 1, 4, 4, 4, 5, 5, 5);
         add(func, RowKind.DELETE, 1, 1, 1, 6, 1, 1, 6);
         validate(func, 1, null, null, 6, null, null, 6);
+    }
+
+    @Test
+    public void testSequenceGroupWithBlobField() {
+        Options options = new Options();
+        options.set("fields.f3.sequence-group", "f1,f2");
+        RowType rowType =
+                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.BLOB(), DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+        func.reset();
+
+        Blob first = Blob.fromData(new byte[] {1, 2, 3});
+        Blob second = Blob.fromData(new byte[] {4, 5, 6});
+        Blob third = Blob.fromData(new byte[] {7, 8, 9});
+
+        addBlobRow(func, RowKind.INSERT, 1, 10, first, 1);
+        addBlobRow(func, RowKind.INSERT, 1, 20, second, null);
+        // null sequence group should not overwrite f1/f2
+        assertBlobRow(func, 1, 10, first, 1);
+
+        addBlobRow(func, RowKind.INSERT, 1, 30, third, 2);
+        assertBlobRow(func, 1, 30, third, 2);
+
+        // equal sequence should overwrite the entire group
+        addBlobRow(func, RowKind.INSERT, 1, 40, second, 2);
+        assertBlobRow(func, 1, 40, second, 2);
+
+        // valid sequence should overwrite the entire group, including with null
+        addBlobRow(func, RowKind.INSERT, 1, 50, null, 3);
+        assertBlobRow(func, 1, 50, null, 3);
+
+        // older sequence should not overwrite
+        addBlobRow(func, RowKind.INSERT, 1, 60, first, 2);
+        assertBlobRow(func, 1, 50, null, 3);
     }
 
     @Test
@@ -1005,6 +1042,28 @@ public class PartialUpdateMergeFunctionTest {
     private void add(MergeFunction<KeyValue> function, RowKind rowKind, Integer... f) {
         function.add(
                 new KeyValue().replace(GenericRow.of(1), sequence++, rowKind, GenericRow.of(f)));
+    }
+
+    private void addBlobRow(
+            MergeFunction<KeyValue> function,
+            RowKind rowKind,
+            Integer pk,
+            Integer name,
+            Blob payload,
+            Integer ts) {
+        function.add(
+                new KeyValue()
+                        .replace(
+                                GenericRow.of(pk),
+                                sequence++,
+                                rowKind,
+                                GenericRow.of(pk, name, payload, ts)));
+    }
+
+    private void assertBlobRow(
+            MergeFunction<KeyValue> function, Integer pk, Integer name, Blob payload, Integer ts) {
+        GenericRow expected = GenericRow.of(pk, name, payload, ts);
+        assertThat(function.getResult().value()).isEqualTo(expected);
     }
 
     private void validate(MergeFunction<KeyValue> function, Integer... f) {
