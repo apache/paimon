@@ -34,6 +34,12 @@ public class LuminaVectorGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
+    public boolean supportsDeletionVectors() {
+        // Vector search filters DV-deleted rows at read time (live-row pre-filter).
+        return true;
+    }
+
+    @Override
     public GlobalIndexer create(DataField field, Options options) {
         Options fieldOptions = LuminaVectorIndexOptions.resolveFieldOptions(field.name(), options);
         return new LuminaVectorGlobalIndexer(field.type(), fieldOptions);

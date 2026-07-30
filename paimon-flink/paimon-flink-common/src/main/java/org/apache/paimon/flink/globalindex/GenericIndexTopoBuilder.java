@@ -298,6 +298,7 @@ public class GenericIndexTopoBuilder {
             boolean autoIncremental)
             throws Exception {
         GenericGlobalIndexBuilder indexBuilder = indexBuilderSupplier.get();
+        indexBuilder.withIndexType(indexType);
         if (partitionPredicate != null) {
             indexBuilder.withPartitionPredicate(partitionPredicate);
         }

@@ -37,6 +37,7 @@ import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -738,6 +739,31 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testMaterializeCompactionDropsGlobalIndexCommittedAfterPreparation()
+            throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        updateStructuredColumn(table);
+        commitDeletionVectors(table, DEFAULT_DV_SPECS);
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
+        FileStoreTable compactTable = table.copy(dynamicOptions);
+        List<CommitMessage> compactMessages = prepareDataEvolutionCompaction(compactTable, false);
+
+        String indexFile = "concurrent-global-index";
+        commitGlobalIndex(table, indexFile, FULL_RANGE);
+        assertThat(liveGlobalIndexFileNames(table)).containsExactly(indexFile);
+
+        commit(compactTable, compactMessages);
+
+        assertThat(liveGlobalIndexFileNames(table)).isEmpty();
+        assertThat(normalFileRowRanges(table)).containsExactly(new Range(15, 24));
+    }
+
+    @Test
     public void testMaterializeCompactionUsesRemainingSizeForLargeDeletedRange() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -1137,6 +1163,11 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
 
     private void compactDataEvolutionTable(FileStoreTable table, boolean compactBlob)
             throws Exception {
+        commit(table, prepareDataEvolutionCompaction(table, compactBlob));
+    }
+
+    private List<CommitMessage> prepareDataEvolutionCompaction(
+            FileStoreTable table, boolean compactBlob) throws Exception {
         Snapshot snapshot = table.latestSnapshot().get();
         DataEvolutionCompactCoordinator coordinator =
                 new DataEvolutionCompactCoordinator(table, compactBlob, false, snapshot);
@@ -1154,7 +1185,36 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         commitMessages.addAll(
                 new DataEvolutionCompactionCommitPreparation(table, snapshot)
                         .prepare(commitMessages));
-        commit(table, commitMessages);
+        return commitMessages;
+    }
+
+    private void commitGlobalIndex(FileStoreTable table, String fileName, Range rowRange)
+            throws Exception {
+        IndexFileMeta indexFile =
+                new IndexFileMeta(
+                        "test-global-index",
+                        fileName,
+                        1,
+                        rowRange.count(),
+                        new GlobalIndexMeta(rowRange.from, rowRange.to, 0, null, null),
+                        null);
+        commit(
+                table,
+                Collections.singletonList(
+                        new CommitMessageImpl(
+                                BinaryRow.EMPTY_ROW,
+                                UNAWARE_BUCKET,
+                                null,
+                                DataIncrement.indexIncrement(Collections.singletonList(indexFile)),
+                                CompactIncrement.emptyIncrement())));
+    }
+
+    private static List<String> liveGlobalIndexFileNames(FileStoreTable table) {
+        return table.store().newIndexFileHandler().scanEntries().stream()
+                .filter(entry -> entry.indexFile().globalIndexMeta() != null)
+                .map(entry -> entry.indexFile().fileName())
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     private void commitDeletionVectors(FileStoreTable table, List<DvSpec> deletionVectorSpecs)

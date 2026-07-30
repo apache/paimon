@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.globalindex;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -41,6 +42,7 @@ public class GenericGlobalIndexBuilder implements Serializable {
 
     @Nullable protected PartitionPredicate partitionPredicate;
     @Nullable private Snapshot scanSnapshot;
+    @Nullable private String indexType;
 
     public GenericGlobalIndexBuilder(FileStoreTable table) {
         this.table = table;
@@ -48,6 +50,11 @@ public class GenericGlobalIndexBuilder implements Serializable {
 
     public GenericGlobalIndexBuilder withPartitionPredicate(PartitionPredicate partitionPredicate) {
         this.partitionPredicate = partitionPredicate;
+        return this;
+    }
+
+    public GenericGlobalIndexBuilder withIndexType(String indexType) {
+        this.indexType = indexType;
         return this;
     }
 
@@ -67,11 +74,14 @@ public class GenericGlobalIndexBuilder implements Serializable {
                         + "but table '%s' has bucket = %d.",
                 table.name(),
                 table.coreOptions().bucket());
+        // Allow DV only for index types that opt in (read path filters DV-deleted
+        // rows via the live-row pre-filter, e.g. Lumina); reject all others.
         checkArgument(
-                !table.coreOptions().deletionVectorsEnabled(),
-                "Generic global index does not support tables with deletion vectors enabled. "
+                !table.coreOptions().deletionVectorsEnabled() || supportsDeletionVectors(),
+                "Global index type '%s' does not support tables with deletion vectors enabled. "
                         + "Table '%s' has 'deletion-vectors.enabled' = true, which may cause "
                         + "deleted rows to be indexed.",
+                indexType,
                 table.name());
 
         scanSnapshot = table.snapshotManager().latestSnapshot();
@@ -85,6 +95,11 @@ public class GenericGlobalIndexBuilder implements Serializable {
                 .withPartitionFilter(partitionPredicate)
                 .plan()
                 .files();
+    }
+
+    private boolean supportsDeletionVectors() {
+        return indexType != null
+                && GlobalIndexerFactoryUtils.load(indexType).supportsDeletionVectors();
     }
 
     @Nullable

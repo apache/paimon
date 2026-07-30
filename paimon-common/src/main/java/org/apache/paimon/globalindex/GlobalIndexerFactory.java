@@ -33,6 +33,13 @@ public interface GlobalIndexerFactory {
         return false;
     }
 
+    /**
+     * Whether the read path filters DV-deleted rows, so building over all physical rows is safe.
+     */
+    default boolean supportsDeletionVectors() {
+        return false;
+    }
+
     GlobalIndexer create(DataField indexField, Options options);
 
     /**

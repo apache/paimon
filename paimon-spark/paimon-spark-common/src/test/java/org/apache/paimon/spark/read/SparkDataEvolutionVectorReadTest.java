@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.read;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -78,17 +79,55 @@ public class SparkDataEvolutionVectorReadTest {
     @Test
     public void testRawSearchUsesSparkPath() {
         TestingSparkVectorRead read = new TestingSparkVectorRead();
+        Snapshot snapshot = snapshot(1L);
         RawVectorSearchSplit rawSplit =
                 new RawVectorSearchSplit(
                         Collections.singletonList(new Range(42, 42)),
                         Collections.emptyList(),
                         null);
-        VectorScan.Plan plan = () -> Collections.singletonList(rawSplit);
+        VectorScan.Plan plan =
+                new VectorScan.Plan() {
+                    @Override
+                    public List<VectorSearchSplit> splits() {
+                        return Collections.singletonList(rawSplit);
+                    }
+
+                    @Override
+                    public Snapshot snapshot() {
+                        return snapshot;
+                    }
+                };
 
         GlobalIndexResult result = read.read(plan);
 
         assertThat(read.rawSparkPathUsed).isTrue();
+        assertThat(read.plannedSnapshot()).isSameAs(snapshot);
         assertThat(result.results().contains(42L)).isTrue();
+    }
+
+    private static Snapshot snapshot(long id) {
+        return new Snapshot(
+                id,
+                0L,
+                "base-manifest-list",
+                null,
+                "delta-manifest-list",
+                null,
+                null,
+                null,
+                null,
+                "user",
+                0L,
+                Snapshot.CommitKind.APPEND,
+                0L,
+                0L,
+                0L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     @Test
@@ -175,6 +214,10 @@ public class SparkDataEvolutionVectorReadTest {
                     new DataField(0, "vec", new ArrayType(DataTypes.FLOAT())),
                     new float[] {1.0f},
                     null);
+        }
+
+        private Snapshot plannedSnapshot() {
+            return planSnapshot;
         }
 
         @Override

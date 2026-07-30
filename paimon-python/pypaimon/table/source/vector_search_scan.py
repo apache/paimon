@@ -25,7 +25,6 @@ from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolut
 from pypaimon.table.source.vector_search_split import (
     IndexVectorSearchSplit,
     RawVectorSearchSplit,
-    VectorSearchSplit,
 )
 from pypaimon.utils.range import Range
 
@@ -33,13 +32,17 @@ from pypaimon.utils.range import Range
 class VectorSearchScanPlan:
     """Plan of vector search scan."""
 
-    def __init__(self, splits):
-        # type: (List[VectorSearchSplit]) -> None
+    def __init__(self, splits, snapshot=None):
+        # type: (list, object) -> None
         self._splits = splits
+        self._snapshot = snapshot
 
     def splits(self):
-        # type: () -> List[VectorSearchSplit]
+        # type: () -> list
         return self._splits
+
+    def snapshot(self):
+        return self._snapshot
 
 
 class VectorSearchScan(ABC):
@@ -213,7 +216,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
                 )
             )
 
-        return VectorSearchScanPlan(splits)
+        return VectorSearchScanPlan(splits, snapshot)
 
 
 def _has_intersection(ranges, row_range):

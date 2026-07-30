@@ -41,6 +41,7 @@ class VectorSearchRead(ABC):
 
     def read_plan(self, plan):
         # type: (VectorSearchScanPlan) -> GlobalIndexResult
+        self._plan_snapshot = plan.snapshot()
         return self.read(plan.splits())
 
     @abstractmethod
@@ -54,6 +55,7 @@ class BatchVectorSearchRead(ABC):
 
     def read_batch_plan(self, plan):
         # type: (VectorSearchScanPlan) -> List[GlobalIndexResult]
+        self._plan_snapshot = plan.snapshot()
         return self.read_batch(plan.splits())
 
     @abstractmethod
@@ -80,6 +82,7 @@ class AbstractVectorSearchReadImpl:
         self._filter = filter_
         self._partition_filter = partition_filter
         self._options = dict(options or {})
+        self._plan_snapshot = None
 
     def _pre_filters(self, splits):
         # type: (list) -> List[RoaringBitmap64]
@@ -88,7 +91,7 @@ class AbstractVectorSearchReadImpl:
             return []
 
         live_rows = global_index_live_row_filter.live_rows(
-            self._table, self._partition_filter)
+            self._table, self._partition_filter, self._plan_snapshot)
         matched_rows = self._scalar_matched_rows(splits)
         if live_rows is None and matched_rows is None:
             return []
@@ -133,6 +136,7 @@ class AbstractVectorSearchReadImpl:
             self._table,
             index_files=scalar_files,
             partition_filter=self._partition_filter,
+            snapshot=self._plan_snapshot,
         )
         if scanner is None:
             return RoaringBitmap64()
@@ -180,6 +184,7 @@ class AbstractVectorSearchReadImpl:
             self._table,
             index_files=scalar_files,
             partition_filter=self._partition_filter,
+            snapshot=self._plan_snapshot,
         )
         if scanner is None:
             return None
@@ -304,7 +309,9 @@ class AbstractVectorSearchReadImpl:
         return raw_vectors
 
     def _read_raw_arrow(self, raw_row_ranges, include_filter):
-        read_builder = self._table.new_read_builder()
+        read_table = global_index_live_row_filter.table_at_snapshot(
+            self._table, self._plan_snapshot)
+        read_builder = read_table.new_read_builder()
         if self._partition_filter is not None:
             read_builder = read_builder.with_partition_filter(
                 self._partition_filter)

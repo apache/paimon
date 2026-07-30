@@ -58,6 +58,16 @@ public class NativeVectorGlobalIndexerFactoryTest {
     }
 
     @Test
+    public void testSupportsDeletionVectors() {
+        assertThat(new IvfFlatVectorGlobalIndexerFactory().supportsDeletionVectors()).isTrue();
+        assertThat(new IvfPqAlgorithmVectorGlobalIndexerFactory().supportsDeletionVectors())
+                .isTrue();
+        assertThat(new IvfSqVectorGlobalIndexerFactory().supportsDeletionVectors()).isTrue();
+        assertThat(new IvfRqVectorGlobalIndexerFactory().supportsDeletionVectors()).isTrue();
+        assertThat(new DiskAnnVectorGlobalIndexerFactory().supportsDeletionVectors()).isTrue();
+    }
+
+    @Test
     public void testNativeOptionsOnlyUsesIdentifierPrefix() {
         Options options = new Options();
         options.setString("bucket", "4");
