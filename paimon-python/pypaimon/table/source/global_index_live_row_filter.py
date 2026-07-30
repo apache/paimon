@@ -44,12 +44,15 @@ def live_rows(table, partition_filter=None) -> Optional[RoaringBitmap64]:
         read_builder = read_builder.with_partition_filter(partition_filter)
 
     rows = RoaringBitmap64()
+    deleted = RoaringBitmap64()
     scan = read_builder.new_scan()
     for split in scan.plan().splits():
         inner = split.split if isinstance(split, QueryAuthSplit) else split
         if isinstance(inner, DataSplit):
-            rows = _add_live_rows(table, rows, inner)
-    return rows
+            _add_live_rows(table, rows, deleted, inner)
+    # Subtract deleted ids once at the end: a DV-less partial-column file
+    # sharing a row-id range must not re-add rows a sibling's DV removed.
+    return RoaringBitmap64.remove_all(rows, deleted)
 
 
 def for_range(live_row_ids: Optional[RoaringBitmap64],
@@ -64,7 +67,8 @@ def for_range(live_row_ids: Optional[RoaringBitmap64],
     return None if include.cardinality() == row_range.count() else include
 
 
-def _add_live_rows(table, rows: RoaringBitmap64, split: DataSplit) -> RoaringBitmap64:
+def _add_live_rows(table, rows: RoaringBitmap64, deleted: RoaringBitmap64,
+                   split: DataSplit) -> None:
     deletion_files = split.data_deletion_files or []
     for i, data_file in enumerate(split.files):
         row_id_range = data_file.row_id_range()
@@ -80,9 +84,6 @@ def _add_live_rows(table, rows: RoaringBitmap64, split: DataSplit) -> RoaringBit
         if deletion_vector.is_empty():
             continue
 
-        deleted_rows = RoaringBitmap64()
         first_row_id = data_file.first_row_id
         for position in deletion_vector.bit_map():
-            deleted_rows.add(first_row_id + position)
-        rows = RoaringBitmap64.remove_all(rows, deleted_rows)
-    return rows
+            deleted.add(first_row_id + position)

@@ -67,11 +67,15 @@ class GlobalIndexLiveRowFilter {
         }
 
         RoaringNavigableMap64 liveRows = new RoaringNavigableMap64();
+        RoaringNavigableMap64 deletedRows = new RoaringNavigableMap64();
         for (Split split : snapshotReader.read().splits()) {
             if (split instanceof DataSplit) {
-                addLiveRows(table, liveRows, (DataSplit) split);
+                addLiveRows(table, liveRows, deletedRows, (DataSplit) split);
             }
         }
+        // Subtract deleted ids once at the end: a DV-less partial-column file
+        // sharing a row-id range must not re-add rows a sibling's DV removed.
+        liveRows.andNot(deletedRows);
         return liveRows;
     }
 
@@ -90,7 +94,10 @@ class GlobalIndexLiveRowFilter {
     }
 
     private static void addLiveRows(
-            FileStoreTable table, RoaringNavigableMap64 liveRows, DataSplit split) {
+            FileStoreTable table,
+            RoaringNavigableMap64 liveRows,
+            RoaringNavigableMap64 deletedRows,
+            DataSplit split) {
         List<DataFileMeta> files = split.dataFiles();
         List<DeletionFile> deletionFiles = split.deletionFiles().orElse(null);
         DeletionVector.Factory deletionVectorFactory =
@@ -113,11 +120,9 @@ class GlobalIndexLiveRowFilter {
                 continue;
             }
 
-            RoaringNavigableMap64 deletedRows = new RoaringNavigableMap64();
             deletionVector
                     .get()
                     .forEachDeletedPosition(position -> deletedRows.add(firstRowId + position));
-            liveRows.andNot(deletedRows);
         }
     }
 
