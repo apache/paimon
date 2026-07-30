@@ -16,7 +16,7 @@
 # under the License.
 
 import logging
-from typing import List
+from typing import List, Optional
 
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.common.identifier import Identifier
@@ -43,11 +43,17 @@ class CatalogSnapshotCommit(SnapshotCommit):
         self.identifier = identifier
         self.uuid = uuid
 
-    def commit(self, snapshot: Snapshot, statistics: List[PartitionStatistics]) -> bool:
+    def commit(
+            self,
+            base_snapshot_uuid: Optional[str],
+            snapshot: Snapshot,
+            statistics: List[PartitionStatistics],
+    ) -> bool:
         """
         Commit the snapshot using the catalog.
 
         Args:
+            base_snapshot_uuid: UUID of the snapshot on which the commit is based
             snapshot: The snapshot to commit
             statistics: List of partition statistics
 
@@ -59,7 +65,13 @@ class CatalogSnapshotCommit(SnapshotCommit):
         """
         # Call catalog's commit_snapshot method
         if hasattr(self.catalog, 'commit_snapshot'):
-            success = self.catalog.commit_snapshot(self.identifier, self.uuid, snapshot, statistics)
+            success = self.catalog.commit_snapshot(
+                self.identifier,
+                self.uuid,
+                base_snapshot_uuid,
+                snapshot,
+                statistics,
+            )
             if success:
                 logger.info("Catalog snapshot commit succeeded for %s, snapshot id %d", self.identifier, snapshot.id)
             return success

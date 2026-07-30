@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import uuid as uuid_module
 from dataclasses import dataclass
 from typing import Optional
 
@@ -48,3 +49,11 @@ class Snapshot:
     statistics: Optional[str] = optional_json_field("statistics", "non_null")
     next_row_id: Optional[int] = optional_json_field("nextRowId", "non_null")
     properties: Optional[dict] = optional_json_field("properties", "non_null")
+    uuid: Optional[str] = json_field(
+        "uuid",
+        default_factory=lambda: str(uuid_module.uuid4()),
+        metadata={
+            "json_include": "non_null",
+            "json_missing_default": None,
+        },
+    )

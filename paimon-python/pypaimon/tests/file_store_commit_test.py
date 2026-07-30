@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+import uuid
 from datetime import datetime
 from unittest.mock import MagicMock, Mock, patch
 
@@ -425,6 +426,7 @@ class TestFileStoreCommit(unittest.TestCase):
 
         latest_snapshot = Mock()
         latest_snapshot.id = 3
+        latest_snapshot.uuid = "base-snapshot-uuid"
         latest_snapshot.total_record_count = 10
         latest_snapshot.index_manifest = "index-manifest-existing"
 
@@ -444,9 +446,15 @@ class TestFileStoreCommit(unittest.TestCase):
 
         self.assertTrue(result.is_success())
         self.assertEqual(
-            "index-manifest-existing",
-            snapshot_commit.commit.call_args[0][0].index_manifest
+            "base-snapshot-uuid",
+            snapshot_commit.commit.call_args[0][0],
         )
+        committed_snapshot = snapshot_commit.commit.call_args[0][1]
+        self.assertEqual(
+            "index-manifest-existing",
+            committed_snapshot.index_manifest
+        )
+        self.assertEqual(str(uuid.UUID(committed_snapshot.uuid)), committed_snapshot.uuid)
 
     def test_null_partition_value(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
