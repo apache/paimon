@@ -24,7 +24,9 @@ import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.VarCharType;
@@ -89,6 +91,9 @@ public class PaimonObjectInspectorFactory {
             case MAP:
                 MapType mapType = (MapType) logicalType;
                 return new PaimonMapObjectInspector(mapType.getKeyType(), mapType.getValueType());
+            case MULTISET:
+                MultisetType multisetType = (MultisetType) logicalType;
+                return new PaimonMapObjectInspector(multisetType.getElementType(), new IntType());
             case ROW:
                 List<String> fieldComments =
                         ((RowType) logicalType)
