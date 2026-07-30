@@ -25,7 +25,9 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.FileType;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,7 +38,11 @@ import java.time.Duration;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_ENABLED;
+import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_WHITELIST;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -52,6 +58,7 @@ class CachingFileIOTest {
     @BeforeEach
     void setUp() {
         cacheDir = tempDir.resolve("cache").toString();
+        MockFileIO.resetGlobalInputStreamCalls();
     }
 
     @Test
@@ -137,6 +144,65 @@ class CachingFileIOTest {
                 cachingIO.newInputStream(new Path("global-index-uuid.index"))) {
             assertThat(readAll(s, data.length)).isEqualTo(data);
         }
+    }
+
+    @Test
+    void testCacheIsRecreatedAfterSerialization() throws Exception {
+        byte[] data = "index data".getBytes();
+        MockFileIO delegate = new MockFileIO();
+        delegate.addFile("global-index-uuid.index", data);
+
+        CatalogContext context = localCacheContext();
+        CachingFileIO cachingIO = newCatalogCachingFileIO(delegate, context);
+
+        CachingFileIO restored = InstantiationUtil.clone(cachingIO);
+
+        try (SeekableInputStream stream =
+                restored.newInputStream(new Path("global-index-uuid.index"))) {
+            assertThat(stream).isInstanceOf(CachingSeekableInputStream.class);
+            assertThat(readAll(stream, data.length)).isEqualTo(data);
+        }
+    }
+
+    @Test
+    void testDeserializedWrappersShareCacheInSameJvm() throws Exception {
+        byte[] data = "shared index data".getBytes();
+        String fileName = "global-index-shared-uuid.index";
+
+        CatalogContext context = localCacheContext();
+
+        MockFileIO firstDelegate = new MockFileIO();
+        firstDelegate.addFile(fileName, data);
+        CachingFileIO first =
+                InstantiationUtil.clone(newCatalogCachingFileIO(firstDelegate, context));
+
+        MockFileIO secondDelegate = new MockFileIO();
+        secondDelegate.addFile(fileName, data);
+        CachingFileIO second =
+                InstantiationUtil.clone(newCatalogCachingFileIO(secondDelegate, context));
+
+        try (SeekableInputStream stream = first.newInputStream(new Path(fileName))) {
+            assertThat(readAll(stream, data.length)).isEqualTo(data);
+        }
+        assertThat(MockFileIO.globalInputStreamCallCount(fileName)).isEqualTo(1);
+
+        try (SeekableInputStream stream = second.newInputStream(new Path(fileName))) {
+            assertThat(readAll(stream, data.length)).isEqualTo(data);
+        }
+        assertThat(MockFileIO.globalInputStreamCallCount(fileName)).isEqualTo(1);
+    }
+
+    private CatalogContext localCacheContext() {
+        Options options = new Options();
+        options.set(LOCAL_CACHE_ENABLED, true);
+        options.set(LOCAL_CACHE_WHITELIST, "global-index");
+        return CatalogContext.create(options);
+    }
+
+    private CachingFileIO newCatalogCachingFileIO(FileIO delegate, CatalogContext context) {
+        return (CachingFileIO)
+                CachingFileIO.wrapWithCachingIfNeeded(
+                        delegate, context, CachingFileIO.createCacheManager(context));
     }
 
     @Test
@@ -352,9 +418,21 @@ class CachingFileIOTest {
     /** Simple in-memory FileIO for testing. */
     private static class MockFileIO implements FileIO {
 
+        private static final Map<String, AtomicInteger> GLOBAL_INPUT_STREAM_CALLS =
+                new ConcurrentHashMap<>();
+
         private final Map<String, byte[]> files = new HashMap<>();
         private final Map<String, Integer> fileStatusCalls = new HashMap<>();
         private final Map<String, Integer> newInputStreamCalls = new HashMap<>();
+
+        static void resetGlobalInputStreamCalls() {
+            GLOBAL_INPUT_STREAM_CALLS.clear();
+        }
+
+        static int globalInputStreamCallCount(String name) {
+            AtomicInteger count = GLOBAL_INPUT_STREAM_CALLS.get(name);
+            return count == null ? 0 : count.get();
+        }
 
         void addFile(String name, byte[] data) {
             files.put(name, data);
@@ -372,6 +450,9 @@ class CachingFileIOTest {
         public SeekableInputStream newInputStream(Path path) throws IOException {
             String name = path.getName();
             newInputStreamCalls.merge(name, 1, Integer::sum);
+            GLOBAL_INPUT_STREAM_CALLS
+                    .computeIfAbsent(name, ignored -> new AtomicInteger())
+                    .incrementAndGet();
             byte[] data = files.get(name);
             if (data == null) {
                 throw new IOException("File not found: " + name);

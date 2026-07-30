@@ -33,31 +33,48 @@ import org.apache.paimon.utils.FileType;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.time.Duration;
 import java.util.EnumSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A {@link FileIO} wrapper that caches reads at block granularity.
  *
  * <p>Only file types in the whitelist are cached. Others are read directly from the delegate.
  *
- * <p>After deserialization, the cache is null and reads fall through to the delegate directly.
+ * <p>After deserialization, catalog-created wrappers lazily reuse a JVM-local cache manager.
  */
 public class CachingFileIO implements FileIO {
 
     private static final long serialVersionUID = 1L;
 
+    // Sharing keeps the configured size limit JVM-wide instead of allocating one cache per task.
+    private static final Map<LocalCacheConfiguration, LocalCacheManager>
+            DESERIALIZED_CACHE_MANAGERS = new ConcurrentHashMap<>();
+
     private final FileIO delegate;
     private final Set<FileType> whitelist;
+    @Nullable private final LocalCacheConfiguration cacheConfiguration;
 
     private transient volatile LocalCacheManager cache;
 
     public CachingFileIO(FileIO delegate, LocalCacheManager cache, Set<FileType> whitelist) {
+        this(delegate, cache, whitelist, null);
+    }
+
+    private CachingFileIO(
+            FileIO delegate,
+            LocalCacheManager cache,
+            Set<FileType> whitelist,
+            @Nullable LocalCacheConfiguration cacheConfiguration) {
         this.delegate = delegate;
         this.cache = cache;
         this.whitelist = EnumSet.copyOf(whitelist);
+        this.cacheConfiguration = cacheConfiguration;
     }
 
     /**
@@ -82,7 +99,7 @@ public class CachingFileIO implements FileIO {
         if (whitelist.isEmpty()) {
             return fileIO;
         }
-        return new CachingFileIO(fileIO, cache, whitelist);
+        return new CachingFileIO(fileIO, cache, whitelist, LocalCacheConfiguration.from(context));
     }
 
     /**
@@ -91,28 +108,18 @@ public class CachingFileIO implements FileIO {
      */
     @Nullable
     public static LocalCacheManager createCacheManager(CatalogContext context) {
-        Options options = context.options();
-        if (!options.get(CatalogOptions.LOCAL_CACHE_ENABLED)) {
-            return null;
-        }
-
-        MemorySize maxSizeOpt = options.get(CatalogOptions.LOCAL_CACHE_MAX_SIZE);
-        long maxSize = maxSizeOpt == null ? Long.MAX_VALUE : maxSizeOpt.getBytes();
-        int blockSize = (int) options.get(CatalogOptions.LOCAL_CACHE_BLOCK_SIZE).getBytes();
-
-        String cacheDir = options.get(CatalogOptions.LOCAL_CACHE_DIR);
-        if (cacheDir != null) {
-            return new LocalDiskCacheManager(cacheDir, maxSize, blockSize);
-        } else {
-            return new LocalMemoryCacheManager(maxSize, blockSize);
-        }
+        LocalCacheConfiguration configuration = LocalCacheConfiguration.from(context);
+        return configuration == null ? null : configuration.createCacheManager();
     }
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
-        LocalCacheManager c = cache;
         FileType fileType = FileType.classify(path);
-        if (c == null || !whitelist.contains(fileType) || FileType.isMutable(path)) {
+        if (!whitelist.contains(fileType) || FileType.isMutable(path)) {
+            return delegate.newInputStream(path);
+        }
+        LocalCacheManager c = getOrCreateCacheManager();
+        if (c == null) {
             return delegate.newInputStream(path);
         }
         return new CachingSeekableInputStream(delegate, path, c);
@@ -177,5 +184,78 @@ public class CachingFileIO implements FileIO {
     @Override
     public void close() throws IOException {
         delegate.close();
+    }
+
+    @Nullable
+    private LocalCacheManager getOrCreateCacheManager() {
+        LocalCacheManager current = cache;
+        if (current == null && cacheConfiguration != null) {
+            synchronized (this) {
+                current = cache;
+                if (current == null) {
+                    current =
+                            DESERIALIZED_CACHE_MANAGERS.computeIfAbsent(
+                                    cacheConfiguration,
+                                    LocalCacheConfiguration::createCacheManager);
+                    cache = current;
+                }
+            }
+        }
+        return current;
+    }
+
+    private static class LocalCacheConfiguration implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        @Nullable private final String cacheDir;
+        private final long maxSize;
+        private final int blockSize;
+
+        private LocalCacheConfiguration(@Nullable String cacheDir, long maxSize, int blockSize) {
+            this.cacheDir = cacheDir;
+            this.maxSize = maxSize;
+            this.blockSize = blockSize;
+        }
+
+        @Nullable
+        private static LocalCacheConfiguration from(CatalogContext context) {
+            Options options = context.options();
+            if (!options.get(CatalogOptions.LOCAL_CACHE_ENABLED)) {
+                return null;
+            }
+
+            MemorySize maxSizeOption = options.get(CatalogOptions.LOCAL_CACHE_MAX_SIZE);
+            long maxSize = maxSizeOption == null ? Long.MAX_VALUE : maxSizeOption.getBytes();
+            int blockSize = (int) options.get(CatalogOptions.LOCAL_CACHE_BLOCK_SIZE).getBytes();
+            return new LocalCacheConfiguration(
+                    options.get(CatalogOptions.LOCAL_CACHE_DIR), maxSize, blockSize);
+        }
+
+        private LocalCacheManager createCacheManager() {
+            if (cacheDir == null) {
+                return new LocalMemoryCacheManager(maxSize, blockSize);
+            }
+            return new LocalDiskCacheManager(cacheDir, maxSize, blockSize);
+        }
+
+        @Override
+        public boolean equals(Object object) {
+            if (this == object) {
+                return true;
+            }
+            if (!(object instanceof LocalCacheConfiguration)) {
+                return false;
+            }
+            LocalCacheConfiguration that = (LocalCacheConfiguration) object;
+            return maxSize == that.maxSize
+                    && blockSize == that.blockSize
+                    && Objects.equals(cacheDir, that.cacheDir);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(cacheDir, maxSize, blockSize);
+        }
     }
 }
