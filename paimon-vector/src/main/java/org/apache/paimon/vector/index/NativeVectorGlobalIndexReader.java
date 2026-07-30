@@ -65,6 +65,7 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
 
     private static final String NPROBE_PARAMETER = "ivf.nprobe";
     private static final String L_SEARCH_PARAMETER = "diskann.l_search";
+    private static final String IVF_PQ_BATCH_TABLE_REUSE_PARAMETER = "ivf_pq.batch_table_reuse";
     private static final int VECTOR_INDEX_MIN_SEEK_FOR_VECTOR_READS = 16 * 1024;
     private static final int VECTOR_INDEX_PARALLELISM_FOR_VECTOR_READS = 32;
 
@@ -151,6 +152,8 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
         if (scope == null) {
             return emptyResults(n);
         }
+        VectorSearchParams searchParams =
+                batchSearchParams(batchVectorSearch.options(), scope.effectiveK);
 
         // Flatten query vectors into one contiguous array for a single native call.
         float[] queries = new float[n * dim];
@@ -160,15 +163,8 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
 
         VectorSearchBatchResult batchResult =
                 scope.filterBytes != null
-                        ? vectorReader.searchBatch(
-                                queries,
-                                n,
-                                searchParams(batchVectorSearch.options(), scope.effectiveK),
-                                scope.filterBytes)
-                        : vectorReader.searchBatch(
-                                queries,
-                                n,
-                                searchParams(batchVectorSearch.options(), scope.effectiveK));
+                        ? vectorReader.searchBatch(queries, n, searchParams, scope.filterBytes)
+                        : vectorReader.searchBatch(queries, n, searchParams);
 
         // result i corresponds to vectors[i], matching input order.
         List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
@@ -298,6 +294,12 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
             return VectorSearchParams.diskAnn(topK, lSearch);
         }
         return VectorSearchParams.automatic(topK);
+    }
+
+    static VectorSearchParams batchSearchParams(Map<String, String> parameters, int topK) {
+        VectorSearchParams searchParams = searchParams(parameters, topK);
+        String reuseMode = parameters.get(IVF_PQ_BATCH_TABLE_REUSE_PARAMETER);
+        return reuseMode == null ? searchParams : searchParams.withIvfPqBatchTableReuse(reuseMode);
     }
 
     private static Integer intParameter(Map<String, String> parameters, String key) {

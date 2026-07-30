@@ -27,6 +27,7 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.vector.IvfPqBatchTableReuseMode;
 import org.apache.paimon.index.vector.VectorSearchParams;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.BatchVectorSearch;
@@ -253,6 +254,15 @@ public class NativeVectorGlobalIndexTest {
                 NativeVectorGlobalIndexReader.searchParams(
                         Collections.singletonMap("diskann.l_search", "80"), 10);
         assertThat(diskAnnParams.topK()).isEqualTo(10);
+    }
+
+    @Test
+    public void testIvfPqBatchTableReuseIsPropagatedToBatchSearchParams() {
+        VectorSearchParams params =
+                NativeVectorGlobalIndexReader.batchSearchParams(
+                        Collections.singletonMap("ivf_pq.batch_table_reuse", "on"), 10);
+
+        assertThat(params.ivfPqBatchTableReuse()).isEqualTo(IvfPqBatchTableReuseMode.ON);
     }
 
     @Test
