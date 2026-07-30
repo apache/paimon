@@ -621,7 +621,8 @@ class DynamicBucketTest(unittest.TestCase):
             original_snapshot_commit = commit.file_store_commit.snapshot_commit
             calls = 0
 
-            def lose_first_compare_and_set(snapshot, statistics):
+            def lose_first_compare_and_set(
+                    base_snapshot_uuid, snapshot, statistics):
                 nonlocal calls
                 calls += 1
                 concurrent_writer, concurrent_commit, concurrent_messages = (
