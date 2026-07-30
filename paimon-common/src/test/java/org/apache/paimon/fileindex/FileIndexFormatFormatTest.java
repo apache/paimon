@@ -27,8 +27,11 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
@@ -104,5 +107,102 @@ public class FileIndexFormatFormatTest {
         Assertions.assertThat(fileIndexFormatList.size()).isEqualTo(1);
         Assertions.assertThat(new ArrayList<>(fileIndexFormatList).get(0))
                 .isEqualTo(EmptyFileIndexReader.INSTANCE);
+    }
+
+    @Test
+    public void testReaderClosesStreamOnBadMagic() throws IOException {
+        byte[] indexBytes = validIndexBytes();
+        // overwrite the magic
+        ByteBuffer.wrap(indexBytes).putLong(0, 0L);
+        CloseTrackingSeekableStream stream = new CloseTrackingSeekableStream(indexBytes);
+
+        Assertions.assertThatThrownBy(() -> createReader(stream))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("This file is not file index file.");
+        Assertions.assertThat(stream.closeCount()).isEqualTo(1);
+    }
+
+    @Test
+    public void testReaderClosesStreamOnUnsupportedVersion() throws IOException {
+        byte[] indexBytes = validIndexBytes();
+        // overwrite the version, which follows the 8 bytes long magic
+        ByteBuffer.wrap(indexBytes).putInt(8, 2);
+        CloseTrackingSeekableStream stream = new CloseTrackingSeekableStream(indexBytes);
+
+        Assertions.assertThatThrownBy(() -> createReader(stream))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("This index file is version of 2");
+        Assertions.assertThat(stream.closeCount()).isEqualTo(1);
+    }
+
+    @Test
+    public void testReaderClosesStreamOnCorruptedHeadLength() throws IOException {
+        byte[] indexBytes = validIndexBytes();
+        // overwrite the head length, which follows the magic and the version
+        ByteBuffer.wrap(indexBytes).putInt(12, 0);
+        CloseTrackingSeekableStream stream = new CloseTrackingSeekableStream(indexBytes);
+
+        // a corrupted head length fails outside the IOException path
+        Assertions.assertThatThrownBy(() -> createReader(stream))
+                .isInstanceOf(NegativeArraySizeException.class);
+        Assertions.assertThat(stream.closeCount()).isEqualTo(1);
+    }
+
+    @Test
+    public void testReaderClosesStreamOnTruncatedHead() throws IOException {
+        byte[] indexBytes = validIndexBytes();
+        Assertions.assertThat(indexBytes.length).isGreaterThan(20);
+        CloseTrackingSeekableStream stream =
+                new CloseTrackingSeekableStream(Arrays.copyOf(indexBytes, 20));
+
+        Assertions.assertThatThrownBy(() -> createReader(stream))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Exception happens while construct file index reader.")
+                .hasCauseInstanceOf(EOFException.class);
+        Assertions.assertThat(stream.closeCount()).isEqualTo(1);
+    }
+
+    @Test
+    public void testReaderKeepsStreamOpenOnSuccess() throws IOException {
+        CloseTrackingSeekableStream stream = new CloseTrackingSeekableStream(validIndexBytes());
+
+        FileIndexFormat.Reader reader = createReader(stream);
+        Assertions.assertThat(stream.closeCount()).isEqualTo(0);
+
+        reader.close();
+        Assertions.assertThat(stream.closeCount()).isEqualTo(1);
+    }
+
+    private static FileIndexFormat.Reader createReader(CloseTrackingSeekableStream stream) {
+        return FileIndexFormat.createReader(stream, RowType.builder().build());
+    }
+
+    private static byte[] validIndexBytes() throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        Map<String, Map<String, byte[]>> indexes = new HashMap<>();
+        indexes.computeIfAbsent("a", a -> new HashMap<>()).put("bloom", randomBytes(64));
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos)) {
+            writer.writeColumnIndexes(indexes);
+        }
+        return baos.toByteArray();
+    }
+
+    private static class CloseTrackingSeekableStream extends ByteArraySeekableStream {
+
+        private int closeCount;
+
+        private CloseTrackingSeekableStream(byte[] buf) {
+            super(buf);
+        }
+
+        private int closeCount() {
+            return closeCount;
+        }
+
+        @Override
+        public void close() throws IOException {
+            closeCount++;
+            super.close();
+        }
     }
 }

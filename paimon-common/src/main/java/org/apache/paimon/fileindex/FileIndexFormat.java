@@ -243,8 +243,10 @@ public final class FileIndexFormat {
         public Reader(SeekableInputStream seekableInputStream, RowType fileRowType) {
             this.seekableInputStream = seekableInputStream;
             DataInputStream dataInputStream = new DataInputStream(seekableInputStream);
-            fileRowType.getFields().forEach(field -> this.fields.put(field.name(), field));
+            boolean success = false;
             try {
+                fileRowType.getFields().forEach(field -> this.fields.put(field.name(), field));
+
                 long magic = dataInputStream.readLong();
                 if (magic != MAGIC) {
                     throw new RuntimeException("This file is not file index file.");
@@ -279,10 +281,15 @@ public final class FileIndexFormat {
                         }
                     }
                 }
+                success = true;
             } catch (IOException e) {
-                IOUtils.closeQuietly(seekableInputStream);
                 throw new RuntimeException(
                         "Exception happens while construct file index reader.", e);
+            } finally {
+                // a throwing constructor hands out no reference to close
+                if (!success) {
+                    IOUtils.closeQuietly(seekableInputStream);
+                }
             }
         }
 
