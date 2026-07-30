@@ -33,7 +33,6 @@ import org.apache.paimon.utils.FunctionWithIOException;
 import javax.annotation.Nullable;
 
 import java.io.ByteArrayOutputStream;
-import java.io.EOFException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -42,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
+import static org.apache.paimon.utils.SerializationUtils.checkVersion;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
@@ -55,7 +55,8 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 public class SplitSerializer {
 
     private static final long MAGIC = 0x53504C49545F5631L; // "SPLIT_V1"
-    private static final int VERSION = 1;
+    private static final int VERSION_1 = 1;
+    private static final int VERSION = 2;
 
     private static final int DATA_SPLIT = 1;
     private static final int INCREMENTAL_SPLIT = 2;
@@ -91,7 +92,7 @@ public class SplitSerializer {
             ((IndexedSplit) split).serialize(out);
         } else if (split instanceof ChainSplit) {
             out.writeInt(CHAIN_SPLIT);
-            writeChainSplit((ChainSplit) split, out);
+            ((ChainSplit) split).serialize(out);
         } else if (split instanceof IncrementalSplit) {
             out.writeInt(INCREMENTAL_SPLIT);
             writeIncrementalSplit((IncrementalSplit) split, out);
@@ -114,9 +115,7 @@ public class SplitSerializer {
         }
 
         int version = in.readInt();
-        if (version != VERSION) {
-            throw new IOException("Unsupported split serializer version: " + version);
-        }
+        checkVersion(version, VERSION_1, VERSION, "split serializer");
 
         int type = in.readInt();
         switch (type) {
@@ -127,7 +126,11 @@ public class SplitSerializer {
             case INDEXED_SPLIT:
                 return IndexedSplit.deserialize(in);
             case CHAIN_SPLIT:
-                return readChainSplit(in);
+                if (version == VERSION_1) {
+                    return readChainSplitV1(in);
+                } else {
+                    return ChainSplit.deserialize(in);
+                }
             case QUERY_AUTH_SPLIT:
                 return readQueryAuthSplit(in);
             case FALLBACK_DATA_SPLIT:
@@ -178,31 +181,13 @@ public class SplitSerializer {
                 isStreaming);
     }
 
-    private static void writeChainSplit(ChainSplit split, DataOutputView out) throws IOException {
-        serializeBinaryRow(split.logicalPartition(), out);
-        writeDataFiles(split.dataFiles(), out);
-        writeStringMap(out, split.fileBucketPathMapping());
-        writeStringMap(out, split.fileBranchMapping());
-        DeletionFile.serializeList(out, split.deletionFiles().orElse(null));
-    }
-
-    private static ChainSplit readChainSplit(DataInputView in) throws IOException {
+    private static ChainSplit readChainSplitV1(DataInputView in) throws IOException {
         BinaryRow logicalPartition = deserializeBinaryRow(in);
         List<DataFileMeta> dataFiles = readDataFiles(in);
         Map<String, String> fileBucketPathMapping = readStringMap(in);
         Map<String, String> fileBranchMapping = readStringMap(in);
-        List<DeletionFile> deletionFiles = null;
-        try {
-            deletionFiles = DeletionFile.deserializeList(in, DeletionFile::deserialize);
-        } catch (EOFException e) {
-            // old format, no deletion files
-        }
         return new ChainSplit(
-                logicalPartition,
-                dataFiles,
-                fileBranchMapping,
-                fileBucketPathMapping,
-                deletionFiles);
+                logicalPartition, dataFiles, fileBranchMapping, fileBucketPathMapping, null);
     }
 
     private static void writeQueryAuthSplit(QueryAuthSplit split, DataOutputView out)
