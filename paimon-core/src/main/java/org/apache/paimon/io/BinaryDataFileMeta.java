@@ -282,6 +282,11 @@ public final class BinaryDataFileMeta implements DataFileMeta {
     }
 
     @Override
+    public DataFileMeta assignFileSource(FileSource fileSource) {
+        throw unsupportedOperation("assignFileSource(FileSource)");
+    }
+
+    @Override
     public DataFileMeta assignFirstRowId(long firstRowId) {
         throw unsupportedOperation("assignFirstRowId(long)");
     }
