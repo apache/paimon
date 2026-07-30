@@ -101,10 +101,6 @@ public class FormatTableScan implements InnerTableScan {
         throw new UnsupportedOperationException("Filter is not supported for FormatTable.");
     }
 
-    public static boolean isDataFileName(String fileName) {
-        return fileName != null && !PartitionPathUtils.isHiddenName(fileName);
-    }
-
     /**
      * Lists the data files under {@code listedRoot}, skipping committer staging trees ({@code
      * _temporary/}, {@code __magic_job-<id>/}, {@code .hive-staging_*}) without descending into
@@ -120,16 +116,54 @@ public class FormatTableScan implements InnerTableScan {
      *     disappears further down is skipped instead, leaving the rest of the listing complete
      */
     static List<FileStatus> listDataFiles(FileIO fileIO, Path listedRoot) throws IOException {
+        return listDataFiles(fileIO, listedRoot, 0, false, null);
+    }
+
+    /**
+     * As {@link #listDataFiles(FileIO, Path)}, for a root that still has partition directories
+     * below it: an {@code INSERT OVERWRITE} naming only the leading partition keys clears such a
+     * prefix.
+     *
+     * <p>Being at a partition level does not exempt a directory from the {@code '_'} / {@code '.'}
+     * rule. A job writing the same prefix with the trailing keys dynamic stages exactly there, so
+     * {@code year=2025/_temporary} holds that job's own month directories, not this table's. One
+     * hidden name is table content: the default partition name in the value-only layout, where a
+     * partition directory is the bare value. That is the exemption {@link
+     * PartitionPathUtils#searchPartSpecAndPaths} already makes on the scan side.
+     *
+     * @param partitionLevels how many directory levels below {@code listedRoot} hold partition
+     *     directories rather than table content
+     * @param onlyValueInPath whether a partition directory is named by its value alone ({@code
+     *     2025/}) instead of {@code key=value} ({@code year=2025/})
+     * @param defaultPartName the directory name standing for a null partition value
+     */
+    static List<FileStatus> listDataFiles(
+            FileIO fileIO,
+            Path listedRoot,
+            int partitionLevels,
+            boolean onlyValueInPath,
+            @Nullable String defaultPartName)
+            throws IOException {
+        String partitionDirExemptFromHiding = onlyValueInPath ? defaultPartName : null;
         List<FileStatus> dataFiles = new ArrayList<>();
         List<Path> level = new ArrayList<>();
         // A missing root is the caller's signal, e.g. a partition that the catalog knows but whose
         // directory is gone, so let it surface.
-        collectDataFiles(fileIO.listStatus(listedRoot), dataFiles, level);
-        while (!level.isEmpty()) {
+        collectDataFiles(
+                fileIO.listStatus(listedRoot),
+                partitionLevels >= 1 ? partitionDirExemptFromHiding : null,
+                dataFiles,
+                level);
+        for (int depth = 1; !level.isEmpty(); depth++) {
+            boolean childrenArePartitions = partitionLevels >= depth + 1;
             List<Path> next = new ArrayList<>();
             for (Path directory : level) {
                 try {
-                    collectDataFiles(fileIO.listStatus(directory), dataFiles, next);
+                    collectDataFiles(
+                            fileIO.listStatus(directory),
+                            childrenArePartitions ? partitionDirExemptFromHiding : null,
+                            dataFiles,
+                            next);
                 } catch (FileNotFoundException e) {
                     // The directory vanished after its parent listed it; the rest of the listing
                     // is still complete.
@@ -140,18 +174,26 @@ public class FormatTableScan implements InnerTableScan {
         return dataFiles;
     }
 
+    /**
+     * @param exemptFromHiding the one hidden directory name that holds table content here, or null
+     *     when every hidden directory is a staging tree
+     */
     private static void collectDataFiles(
-            @Nullable FileStatus[] children, List<FileStatus> dataFiles, List<Path> directories) {
+            @Nullable FileStatus[] children,
+            @Nullable String exemptFromHiding,
+            List<FileStatus> dataFiles,
+            List<Path> directories) {
         if (children == null) {
             return;
         }
         for (FileStatus child : children) {
-            if (PartitionPathUtils.isHiddenName(child.getPath().getName())) {
-                continue;
-            }
+            String name = child.getPath().getName();
+            boolean hidden = PartitionPathUtils.isHiddenName(name);
             if (child.isDir()) {
-                directories.add(child.getPath());
-            } else {
+                if (!hidden || name.equals(exemptFromHiding)) {
+                    directories.add(child.getPath());
+                }
+            } else if (!hidden) {
                 dataFiles.add(child);
             }
         }

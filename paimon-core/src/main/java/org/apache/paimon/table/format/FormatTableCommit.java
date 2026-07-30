@@ -56,6 +56,7 @@ public class FormatTableCommit implements BatchTableCommit {
 
     private String location;
     private final boolean formatTablePartitionOnlyValueInPath;
+    private final String defaultPartName;
     private FileIO fileIO;
     private List<String> partitionKeys;
     protected Map<String, String> staticPartitions;
@@ -69,6 +70,7 @@ public class FormatTableCommit implements BatchTableCommit {
             List<String> partitionKeys,
             FileIO fileIO,
             boolean formatTablePartitionOnlyValueInPath,
+            String defaultPartName,
             boolean overwrite,
             Identifier tableIdentifier,
             @Nullable Map<String, String> staticPartitions,
@@ -78,6 +80,7 @@ public class FormatTableCommit implements BatchTableCommit {
         this.location = location;
         this.fileIO = fileIO;
         this.formatTablePartitionOnlyValueInPath = formatTablePartitionOnlyValueInPath;
+        this.defaultPartName = defaultPartName;
         validateStaticPartition(staticPartitions, partitionKeys);
         this.staticPartitions = staticPartitions;
         this.overwrite = overwrite;
@@ -128,7 +131,10 @@ public class FormatTableCommit implements BatchTableCommit {
                     partitionSpecs.add(staticPartitions);
                 }
                 if (overwrite) {
-                    deletePreviousDataFile(partitionPath);
+                    // A static partition may name only the leading keys, in which case the path
+                    // is a prefix and the partition directories of the remaining keys sit below.
+                    deletePreviousDataFile(
+                            partitionPath, partitionKeys.size() - staticPartitions.size());
                 }
                 if (!fileIO.exists(partitionPath)) {
                     fileIO.mkdirs(partitionPath);
@@ -139,7 +145,10 @@ public class FormatTableCommit implements BatchTableCommit {
                     partitionPaths.add(c.targetPath().getParent());
                 }
                 for (Path p : partitionPaths) {
-                    deletePreviousDataFile(p);
+                    // The parent of a written file is a complete partition directory - the table
+                    // directory itself when the table is unpartitioned - so there is no partition
+                    // level below it to descend.
+                    deletePreviousDataFile(p, 0);
                 }
             }
 
@@ -267,17 +276,23 @@ public class FormatTableCommit implements BatchTableCommit {
     @Override
     public void close() throws Exception {}
 
-    private void deletePreviousDataFile(Path partitionPath) throws IOException {
+    private void deletePreviousDataFile(Path partitionPath, int partitionLevels)
+            throws IOException {
         if (fileIO.exists(partitionPath)) {
-            FileStatus[] files = fileIO.listFiles(partitionPath, true);
-            for (FileStatus file : files) {
-                if (FormatTableScan.isDataFileName(file.getPath().getName())) {
-                    try {
-                        fileIO.delete(file.getPath(), false);
-                    } catch (FileNotFoundException ignore) {
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
+            // Committed data files only: what sits under a staging directory is another writer's
+            // uncommitted output, whatever its name looks like.
+            for (FileStatus file :
+                    FormatTableScan.listDataFiles(
+                            fileIO,
+                            partitionPath,
+                            partitionLevels,
+                            formatTablePartitionOnlyValueInPath,
+                            defaultPartName)) {
+                try {
+                    fileIO.delete(file.getPath(), false);
+                } catch (FileNotFoundException ignore) {
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
                 }
             }
         }

@@ -67,7 +67,6 @@ import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
 import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link FormatTableScan}. */
@@ -97,32 +96,6 @@ public class FormatTableScanTest {
     public static List<Object[]> parameters() {
         return Arrays.asList(
                 new Object[] {false, "/year=2023/month=2"}, new Object[] {true, "/2023/2"});
-    }
-
-    @TestTemplate
-    void testValidDataFileNames() {
-        // Test valid data file names
-        String[] fileNames = {"File.txt", "file.txt", "123file.txt", "data", "Test_file.log"};
-        for (String fileName : fileNames) {
-            assertTrue(
-                    FormatTableScan.isDataFileName(fileName),
-                    "Filename '" + fileName + "' should be valid");
-        }
-    }
-
-    @TestTemplate
-    void testInvalidDataFileNames() {
-        String[] fileNames = {".hidden", "_file.txt"};
-        for (String fileName : fileNames) {
-            assertFalse(
-                    FormatTableScan.isDataFileName(fileName),
-                    "Filename '" + fileName + "' should be invalid");
-        }
-    }
-
-    @TestTemplate
-    void testNullInput() {
-        assertFalse(FormatTableScan.isDataFileName(null), "Null input should return false");
     }
 
     @TestTemplate
