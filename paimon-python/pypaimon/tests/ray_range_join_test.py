@@ -365,7 +365,7 @@ class RayRangeJoinTest(unittest.TestCase):
                                 len(rjmod._bounded_ranges(wide, wide, 4)))
 
     def test_split_key_range_reads_stats(self):
-        # The planner reads a file's min/max for the range column from the parquet footer.
+        # With default metadata.stats-mode=none, the planner falls back to the footer.
         loc = pa.schema([("k", pa.int64()), ("row_id", pa.int64())])
         self._table("default.rj_stats", loc, [
             pa.Table.from_pydict({"k": [10, 20, 15], "row_id": [1, 2, 3]}, schema=loc)])
@@ -376,6 +376,60 @@ class RayRangeJoinTest(unittest.TestCase):
         his = [hi for _, _, hi in ranged if hi is not None]
         self.assertEqual(min(los), 10)
         self.assertEqual(max(his), 20)
+
+    def test_manifest_stats_avoid_footer_reads(self):
+        schema = pa.schema([("k", pa.int64()), ("v", pa.string())])
+        self._table("default.rj_manifest", schema, [
+            pa.Table.from_pydict({"k": [10, 20, 15], "v": ["a", "b", "c"]}, schema=schema)
+        ], options={"metadata.stats-mode": "full"})
+
+        with mock.patch("pyarrow.parquet.read_metadata",
+                        side_effect=AssertionError("footer should not be read")):
+            ranged, _ = rjmod._plan_ranged_splits(
+                "default.rj_manifest", self.catalog_options, None, "k")
+        self.assertEqual([(lo, hi) for _, lo, hi in ranged], [(10, 20)])
+
+    def test_key_stats_avoid_footer_reads(self):
+        schema = pa.schema([("k", pa.int64()), ("v", pa.string())])
+        self._table("default.rj_key_stats", schema, [
+            pa.Table.from_pydict({"k": [10, 20, 15], "v": ["a", "b", "c"]}, schema=schema)
+        ], primary_keys=["k"], options={"bucket": "1"})
+
+        with mock.patch("pyarrow.parquet.read_metadata",
+                        side_effect=AssertionError("footer should not be read")):
+            ranged, _ = rjmod._plan_ranged_splits(
+                "default.rj_key_stats", self.catalog_options, None, "k")
+        self.assertEqual([(lo, hi) for _, lo, hi in ranged], [(10, 20)])
+
+    def test_manifest_stats_follow_field_id_after_rename(self):
+        from pypaimon.schema.schema_change import SchemaChange
+
+        schema = pa.schema([("k", pa.int64()), ("v", pa.string())])
+        name = "default.rj_manifest_rename"
+        self._table(name, schema, [
+            pa.Table.from_pydict({"k": [3, 9, 6], "v": ["a", "b", "c"]}, schema=schema)
+        ], options={"metadata.stats-mode": "full"})
+        self.catalog.alter_table(
+            name, [SchemaChange.rename_column("k", "renamed")], False)
+
+        with mock.patch("pyarrow.parquet.read_metadata",
+                        side_effect=AssertionError("footer should not be read")):
+            ranged, _ = rjmod._plan_ranged_splits(
+                name, self.catalog_options, None, "renamed")
+        self.assertEqual([(lo, hi) for _, lo, hi in ranged], [(3, 9)])
+
+    def test_footer_failure_degrades_to_unknown(self):
+        schema = pa.schema([("k", pa.int64())])
+        self._table("default.rj_footer_failure", schema, [
+            pa.Table.from_pydict({"k": [1, 2, 3]}, schema=schema)])
+
+        with self.assertLogs(rjmod._LOG, level="WARNING"):
+            with mock.patch("pyarrow.parquet.read_metadata",
+                            side_effect=OSError("not seekable")):
+                ranged, _ = rjmod._plan_ranged_splits(
+                    "default.rj_footer_failure", self.catalog_options, None, "k")
+        self.assertTrue(ranged)
+        self.assertTrue(all(lo is None and hi is None for _, lo, hi in ranged))
 
     def test_stats_mode_none_still_correct(self):
         # metadata.stats-mode=none only drops manifest stats; the parquet footer still
@@ -426,6 +480,22 @@ class RayRangeJoinTest(unittest.TestCase):
             "default.rj_agg", self.catalog_options, None, "g")
         self.assertTrue(ranged)
         self.assertTrue(all(lo is None and hi is None for _, lo, hi in ranged))
+
+    def test_masked_range_col_untrusted(self):
+        from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+        from pypaimon.read.query_auth_split import QueryAuthSplit
+
+        schema = pa.schema([("k", pa.int64())])
+        name = "default.rj_masked"
+        self._table(name, schema, [
+            pa.Table.from_pydict({"k": [1, 2, 3]}, schema=schema)])
+        table = self.catalog.get_table(name)
+        splits = list(table.new_read_builder().new_scan().plan().splits())
+        auth = TableQueryAuthResult(
+            None, {"k": "CAST(0 AS BIGINT)"})
+        masked = [QueryAuthSplit(split, auth) for split in splits]
+
+        self.assertFalse(rjmod._range_stats_trusted(table, masked, "k"))
 
     def test_partition_key_validation(self):
         loc = pa.schema([("k", pa.int64()), ("v", pa.string())])

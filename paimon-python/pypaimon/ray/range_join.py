@@ -15,17 +15,10 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-"""Range-aligned join on Ray for two Paimon tables sorted/clustered by the join key.
+"""Shuffle-free Ray join for tables clustered by the first join key.
 
-The driver cuts the key space into ranges from each file's parquet-footer min/max (the
-manifest value stats are empty for pypaimon-written tables); each range is read and
-joined in its own Ray task, with no global shuffle. Only beneficial when both sides are
-clustered by the first join key: a poorly clustered (wide) split overlaps many ranges and
-is read in each, so on unclustered input this can cost more than a shuffle.
-
-Correctness never depends on stats: a split whose min/max is missing (or is wide) joins
-every range it overlaps and is clipped in memory. The range count is reduced until that
-total re-read stays within a couple of full scans (all-unknown collapses to one range).
+Ranges use manifest/key stats with a Parquet-footer fallback. Missing stats are
+safe: affected splits join every overlapping range and are filtered in memory.
 """
 
 import logging
@@ -48,6 +41,71 @@ _LOG = logging.getLogger(__name__)
 _MAX_RANGES = 512
 # Cap total re-read to this many full scans of the read bytes (see _bounded_ranges).
 _REREAD_BUDGET = 2
+
+
+def _stats_range(stats, field_id, key_type):
+    """Read matching field-id/type bounds from manifest stats."""
+    from pypaimon.schema.data_types import PyarrowFieldParser
+
+    min_row, max_row = stats.min_values, stats.max_values
+    min_fields = getattr(min_row, "fields", []) or []
+    max_fields = getattr(max_row, "fields", []) or []
+    idx = next((i for i, field in enumerate(min_fields) if field.id == field_id), None)
+    if idx is None or idx >= len(max_fields) or max_fields[idx].id != field_id:
+        return None
+    try:
+        stored_type = PyarrowFieldParser.from_paimon_type(min_fields[idx].type)
+        max_type = PyarrowFieldParser.from_paimon_type(max_fields[idx].type)
+        if stored_type != key_type or max_type != key_type:
+            return None
+        lo, hi = min_row.get_field(idx), max_row.get_field(idx)
+    except Exception:
+        return None
+    return None if lo is None or hi is None else (lo, hi)
+
+
+def _file_stats_range(file, field_id, key_type):
+    """Prefer key stats, then value stats."""
+    return (_stats_range(file.key_stats, field_id, key_type)
+            or _stats_range(file.value_stats, field_id, key_type))
+
+
+def _file_identity(file):
+    # External paths disambiguate imported files.
+    return file.external_path or file.file_name
+
+
+def _manifest_stats_by_file(table, field_id, key_type, snapshot_id):
+    """Read active-file stats for the pinned snapshot."""
+    from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+    from pypaimon.manifest.manifest_list_manager import ManifestListManager
+
+    try:
+        snapshot = table.snapshot_manager().get_snapshot_by_id(snapshot_id)
+        manifests = ManifestListManager(table).read_all(snapshot)
+        entries = ManifestFileManager(table).read_entries_parallel(
+            manifests, drop_stats=False)
+    except Exception as e:
+        # Stats are optional.
+        _LOG.warning(
+            "range_join: manifest stats read failed (%s); falling back to file footers", e)
+        return {}
+
+    by_file, ambiguous = {}, set()
+    for entry in entries:
+        file = entry.file
+        rng = _file_stats_range(file, field_id, key_type)
+        if rng is None:
+            continue
+        identity = _file_identity(file)
+        previous = by_file.get(identity)
+        if previous is not None and previous != rng:
+            ambiguous.add(identity)
+        else:
+            by_file[identity] = rng
+    for identity in ambiguous:
+        by_file.pop(identity, None)
+    return by_file
 
 
 def _parquet_col_range(metadata, col):
@@ -76,16 +134,18 @@ def _footer_col_type(metadata, col):
         return None
 
 
-def _split_key_range(split, name_for_schema, key_type, file_io):
-    """Min/max of the range key over the split's parquet footers; (None, None) -> the
-    split joins every range. ``name_for_schema`` maps a file's schema id to the key's
-    physical name by field id, so a renamed/swapped column reads its own stats. Unknown
-    when the key is absent in that schema, its footer type differs from the current key
-    type (order-incompatible evolution), or stats are missing. Footer, not manifest:
-    pypaimon writes empty manifest stats."""
+def _split_key_range(
+        split, name_for_schema, field_id, key_type, file_io, manifest_stats):
+    """Split bounds from key/manifest stats, then Parquet footers."""
     import pyarrow.parquet as pq
     lo, hi = None, None
     for f in split.files:
+        rng = (_file_stats_range(f, field_id, key_type)
+               or manifest_stats.get(_file_identity(f)))
+        if rng is not None:
+            lo = rng[0] if lo is None else min(lo, rng[0])
+            hi = rng[1] if hi is None else max(hi, rng[1])
+            continue
         col = name_for_schema(f.schema_id)
         if col is None:
             return None, None
@@ -116,18 +176,27 @@ def _split_key_range(split, name_for_schema, key_type, file_io):
     return lo, hi
 
 
+def _range_stats_trusted(table, splits, range_col):
+    """Whether stored bounds still enclose the read value."""
+    from pypaimon.read.query_auth_split import QueryAuthSplit
+
+    masked = any(isinstance(s, QueryAuthSplit) and s.auth_result.column_masking
+                 and range_col in s.auth_result.column_masking for s in splits)
+    # Merge engines may rewrite non-PK values.
+    return not masked and not (
+        table.primary_keys and range_col not in table.primary_keys)
+
+
 def _plan_ranged_splits(table_id, catalog_options, projection, range_col, partitions=None):
-    """Plan driver-side; returns ``(ranged_splits, schema_id)`` where ranged_splits is
-    a list of (split, lo, hi). Ranges come from each file's parquet footer (read in
-    parallel); the splits sent to workers carry no stats. ``partitions`` (a {column:
-    value} dict on partition columns) prunes to those partitions before planning."""
+    """Plan ``(split, min, max)`` entries on the driver."""
     import os
     from concurrent.futures import ThreadPoolExecutor
     from pypaimon.common.predicate_builder import PredicateBuilder
     from pypaimon.schema.data_types import PyarrowFieldParser
     table = get_table(table_id, catalog_options, None, "range_join")
     schema_id = table.table_schema.id
-    if pin_latest_snapshot(table) is None:
+    snapshot_id = pin_latest_snapshot(table)
+    if snapshot_id is None:
         return [], schema_id
     file_io = table.file_io
     key_type = PyarrowFieldParser.from_paimon_schema(
@@ -162,19 +231,17 @@ def _plan_ranged_splits(table_id, catalog_options, projection, range_col, partit
     if projection is not None:
         rb = rb.with_projection(projection)
     splits = list(rb.new_scan().plan().splits())
-    # Footer min/max bounds the key only if the read can't move it out of range. Untrust
-    # (join every range, clip in memory) when it can: (1) a PK table's non-PK key, which
-    # merge (aggregation/partial-update) may rewrite; (2) a key under auth column-masking,
-    # rewritten at read time so raw footer stats no longer bound it.
-    from pypaimon.read.query_auth_split import QueryAuthSplit
-    masked = any(isinstance(s, QueryAuthSplit) and s.auth_result.column_masking
-                 and range_col in s.auth_result.column_masking for s in splits)
-    if masked or (table.primary_keys and range_col not in table.primary_keys):
+    # Merges or masking can move values beyond stored bounds.
+    if not _range_stats_trusted(table, splits, range_col):
         return [(s, None, None) for s in splits], schema_id
+    manifest_stats = _manifest_stats_by_file(
+        table, key_field_id, key_type, snapshot_id)
     workers = min(16, (os.cpu_count() or 4) * 4, len(splits) or 1)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         bounds = pool.map(
-            lambda s: _split_key_range(s, name_for_schema, key_type, file_io), splits)
+            lambda s: _split_key_range(
+                s, name_for_schema, key_field_id, key_type, file_io, manifest_stats),
+            splits)
     return [(s, lo, hi) for s, (lo, hi) in zip(splits, bounds)], schema_id
 
 
