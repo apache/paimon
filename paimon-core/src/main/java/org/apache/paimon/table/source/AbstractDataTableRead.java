@@ -261,17 +261,18 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         if (maskedPart == null) {
             return reader;
         }
-        int[] projection = schema.logicalRowType().getFieldIndices(outputType.getFieldNames());
-        Optional<Predicate> remapped =
-                maskedPart.visit(PredicateProjectionConverter.fromProjection(projection));
-        if (!remapped.isPresent()) {
+        // by name against the emitted schema: it may carry system fields the table schema lacks
+        Predicate filter;
+        try {
+            filter = TableQueryAuthResult.remapPredicate(maskedPart, outputType);
+        } catch (RuntimeException e) {
             throw new IllegalStateException(
                     "Filter on masked columns "
                             + maskedFilterFields
                             + " cannot be evaluated on read schema "
-                            + outputType.getFieldNames());
+                            + outputType.getFieldNames(),
+                    e);
         }
-        Predicate filter = remapped.get();
         return reader.filter(filter::test);
     }
 

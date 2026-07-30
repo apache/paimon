@@ -97,9 +97,12 @@ public class DataEvolutionBatchScan implements DataTableScan {
         this.filter = predicate;
 
         if (queryAuthEnabled()) {
-            // let the wrapped scan defer the filter: a conjunct on a masked column must not
-            // reach raw statistics or the global index
-            batchScan.withFilter(predicate);
+            // the wrapped scan defers the filter but strips only masked columns; row ids must
+            // go here, since data-evolution statistics carry logical columns only
+            Predicate residual = rowIdSafeResidualFilter(predicate);
+            if (residual != null) {
+                batchScan.withFilter(residual);
+            }
             return this;
         }
         batchScan.snapshotReader().withFilter(predicate, rowIdSafeResidualFilter(predicate));
