@@ -202,6 +202,14 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             FileStoreTable table,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles) {
+        return create(table, null, partitionFilter, indexFiles);
+    }
+
+    public static Optional<DataEvolutionGlobalIndexScanner> create(
+            FileStoreTable table,
+            @Nullable Snapshot pinnedSnapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            Collection<IndexFileMeta> indexFiles) {
         List<IndexFileMeta> globalIndexFiles = globalIndexFiles(indexFiles);
         if (globalIndexFiles.isEmpty()) {
             return Optional.empty();
@@ -209,7 +217,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return Optional.of(
                 new DataEvolutionGlobalIndexScanner(
                         table,
-                        tryTravelOrLatest(table),
+                        pinnedSnapshot != null ? pinnedSnapshot : tryTravelOrLatest(table),
                         partitionFilter,
                         table.coreOptions().toConfiguration(),
                         table.rowType(),

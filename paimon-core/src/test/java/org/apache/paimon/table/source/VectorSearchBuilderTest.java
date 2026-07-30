@@ -254,6 +254,35 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testVectorSearchPinsLiveRowFilterToPlanSnapshot() throws Exception {
+        catalog.createTable(
+                identifier("vector_search_pinned_snapshot"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_search_pinned_snapshot"));
+
+        float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {3.0f, 0.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(4)
+                        .withVectorColumn(VECTOR_FIELD_NAME);
+        VectorScan.Plan plan = builder.newVectorScan().scan();
+
+        // Delete row 0 after planning. The read stays pinned to the plan's
+        // snapshot, so row 0 (live when planned) is still returned.
+        commitDeletionVectors(table, 0L);
+
+        GlobalIndexResult result = builder.newVectorRead().read(plan);
+        assertThat(result.results()).contains(0L);
+    }
+
+    @Test
     public void testVectorLiveRowPlanningSkipsUnindexedDeletionVectors() throws Exception {
         catalog.createTable(
                 identifier("vector_search_unindexed_deletion_vector"),

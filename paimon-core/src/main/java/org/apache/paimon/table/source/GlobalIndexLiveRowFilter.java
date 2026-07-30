@@ -40,19 +40,23 @@ class GlobalIndexLiveRowFilter {
     @Nullable
     static RoaringNavigableMap64 liveRows(
             @Nullable FileStoreTable table, @Nullable PartitionPredicate partitionFilter) {
-        return liveRows(table, partitionFilter, null);
+        return liveRows(table, null, partitionFilter, null);
     }
 
     @Nullable
     static RoaringNavigableMap64 liveRows(
             @Nullable FileStoreTable table,
+            @Nullable Snapshot pinnedSnapshot,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable List<Range> rowRanges) {
         if (table == null || !table.coreOptions().deletionVectorsEnabled()) {
             return null;
         }
 
-        @Nullable Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(table);
+        // Pin to the index scan's snapshot so row-ids and live rows agree.
+        @Nullable
+        Snapshot snapshot =
+                pinnedSnapshot != null ? pinnedSnapshot : TimeTravelUtil.tryTravelOrLatest(table);
         if (snapshot == null) {
             return null;
         }

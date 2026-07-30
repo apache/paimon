@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
@@ -82,6 +83,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     protected final DataField vectorColumn;
     protected final Map<String, String> options;
 
+    /** Snapshot the plan was built against; pins live-row filtering to it. */
+    @Nullable protected transient Snapshot planSnapshot;
+
     private static final Comparator<long[]> WEAKEST_SCORE_FIRST =
             Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
                     .thenComparing((a, b) -> Long.compare(b[0], a[0]));
@@ -133,7 +137,8 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
 
         RoaringNavigableMap64 liveRows =
-                GlobalIndexLiveRowFilter.liveRows(table, partitionFilter, indexedRowRanges);
+                GlobalIndexLiveRowFilter.liveRows(
+                        table, planSnapshot, partitionFilter, indexedRowRanges);
         RoaringNavigableMap64 matchedRows = scalarMatchedRows(splits);
 
         List<RoaringNavigableMap64> includeRowIds = new ArrayList<>(splits.size());
@@ -173,7 +178,8 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
 
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(table, partitionFilter, scalarIndexFiles);
+                DataEvolutionGlobalIndexScanner.create(
+                        table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return new RoaringNavigableMap64();
         }
@@ -206,7 +212,8 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             scalarIndexFiles.addAll(split.scalarIndexFiles());
         }
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(table, partitionFilter, scalarIndexFiles);
+                DataEvolutionGlobalIndexScanner.create(
+                        table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return null;
         }
