@@ -225,7 +225,7 @@ schema validation.
 | Option | Default | Description |
 |---|---|---|
 | `pk-vector.index.columns` | Not set | Vector column to index. Exactly one vector column is currently supported. |
-| `fields.<column>.pk-vector.index.type` | Required | ANN implementation, such as `ivf-flat`, `ivf-pq`, `ivf-hnsw-flat`, `ivf-hnsw-sq`, or `lumina`. |
+| `fields.<column>.pk-vector.index.type` | Required | ANN implementation, such as `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, or `diskann`. |
 | `fields.<column>.pk-vector.distance.metric` | `inner_product` | Distance metric: `l2`, `cosine`, or `inner_product`. |
 | `fields.<column>.pk-vector.index.options` | Not set | JSON object containing build options for the selected ANN implementation. |
 | `pk-full-text.index.columns` | Not set | Character column to index. Exactly one full-text column is currently supported. |

@@ -31,6 +31,7 @@ import org.apache.paimon.index.vector.VectorIndexInput;
 import org.apache.paimon.index.vector.VectorIndexMetadata;
 import org.apache.paimon.index.vector.VectorIndexReader;
 import org.apache.paimon.index.vector.VectorSearchBatchResult;
+import org.apache.paimon.index.vector.VectorSearchParams;
 import org.apache.paimon.index.vector.VectorSearchResult;
 import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.FieldRef;
@@ -63,9 +64,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
 
     private static final String NPROBE_PARAMETER = "ivf.nprobe";
-    private static final String EF_SEARCH_PARAMETER = "hnsw.ef_search";
-    private static final int DEFAULT_NPROBE = 16;
-    private static final int DEFAULT_EF_SEARCH = 0;
+    private static final String L_SEARCH_PARAMETER = "diskann.l_search";
     private static final int VECTOR_INDEX_MIN_SEEK_FOR_VECTOR_READS = 16 * 1024;
     private static final int VECTOR_INDEX_PARALLELISM_FOR_VECTOR_READS = 32;
 
@@ -145,8 +144,6 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
             validateSearchVector(vector);
         }
         int dim = nativeMeta.dimension();
-        int nprobe = nprobe(batchVectorSearch.options());
-        int efSearch = efSearch(batchVectorSearch.options());
         String metric = nativeMeta.metric();
 
         SearchScope scope =
@@ -164,8 +161,14 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
         VectorSearchBatchResult batchResult =
                 scope.filterBytes != null
                         ? vectorReader.searchBatch(
-                                queries, n, scope.effectiveK, nprobe, efSearch, scope.filterBytes)
-                        : vectorReader.searchBatch(queries, n, scope.effectiveK, nprobe, efSearch);
+                                queries,
+                                n,
+                                searchParams(batchVectorSearch.options(), scope.effectiveK),
+                                scope.filterBytes)
+                        : vectorReader.searchBatch(
+                                queries,
+                                n,
+                                searchParams(batchVectorSearch.options(), scope.effectiveK));
 
         // result i corresponds to vectors[i], matching input order.
         List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
@@ -181,8 +184,6 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
         validateSearchVector(vectorSearch.vector());
         float[] queryVector = vectorSearch.vector().clone();
         int limit = vectorSearch.limit();
-        int nprobe = nprobe(vectorSearch.options());
-        int efSearch = efSearch(vectorSearch.options());
         String metric = nativeMeta.metric();
 
         SearchScope scope = resolveScope(vectorSearch.includeRowIds(), limit);
@@ -192,8 +193,12 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
         VectorSearchResult result =
                 scope.filterBytes != null
                         ? vectorReader.search(
-                                queryVector, scope.effectiveK, nprobe, efSearch, scope.filterBytes)
-                        : vectorReader.search(queryVector, scope.effectiveK, nprobe, efSearch);
+                                queryVector,
+                                searchParams(vectorSearch.options(), scope.effectiveK),
+                                scope.filterBytes)
+                        : vectorReader.search(
+                                queryVector,
+                                searchParams(vectorSearch.options(), scope.effectiveK));
 
         return buildScoredResult(result.ids(), result.distances(), metric).orElse(null);
     }
@@ -279,18 +284,26 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
         throw new IllegalArgumentException("Unknown metric: " + metric);
     }
 
-    static int nprobe(Map<String, String> parameters) {
-        return intParameter(parameters, NPROBE_PARAMETER, DEFAULT_NPROBE);
+    static VectorSearchParams searchParams(Map<String, String> parameters, int topK) {
+        Integer nprobe = intParameter(parameters, NPROBE_PARAMETER);
+        Integer lSearch = intParameter(parameters, L_SEARCH_PARAMETER);
+        if (nprobe != null && lSearch != null) {
+            throw new IllegalArgumentException(
+                    "Cannot set both '" + NPROBE_PARAMETER + "' and '" + L_SEARCH_PARAMETER + "'.");
+        }
+        if (nprobe != null) {
+            return VectorSearchParams.ivf(topK, nprobe);
+        }
+        if (lSearch != null) {
+            return VectorSearchParams.diskAnn(topK, lSearch);
+        }
+        return VectorSearchParams.automatic(topK);
     }
 
-    static int efSearch(Map<String, String> parameters) {
-        return intParameter(parameters, EF_SEARCH_PARAMETER, DEFAULT_EF_SEARCH);
-    }
-
-    private static int intParameter(Map<String, String> parameters, String key, int defaultValue) {
+    private static Integer intParameter(Map<String, String> parameters, String key) {
         String value = parameters.get(key);
         if (value == null) {
-            return defaultValue;
+            return null;
         }
         try {
             return Integer.parseInt(value);
@@ -330,14 +343,21 @@ public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
             synchronized (this) {
                 if (vectorReader == null) {
                     SeekableInputStream in = fileReader.getInputStream(ioMeta);
+                    VectorIndexReader reader = null;
                     try {
-                        NativeVectorIndexLoader.loadJni();
-                        VectorIndexReader reader =
-                                new VectorIndexReader(new SeekableStreamVectorIndexInput(in));
+                        reader = new VectorIndexReader(new SeekableStreamVectorIndexInput(in));
                         nativeMeta = reader.metadata();
+                        reader.optimizeForSearch();
                         vectorReader = reader;
                         openStream = in;
                     } catch (Exception e) {
+                        if (reader != null) {
+                            try {
+                                reader.close();
+                            } catch (Exception closeException) {
+                                e.addSuppressed(closeException);
+                            }
+                        }
                         IOUtils.closeQuietly(in);
                         throw e;
                     }

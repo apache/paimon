@@ -34,7 +34,7 @@ import java.util.concurrent.ExecutorService;
 /** Native vector global indexer backed by paimon-vector-index-java. */
 public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
 
-    private static final String DEFAULT_METRIC = "inner_product";
+    static final String DEFAULT_METRIC = "inner_product";
 
     private final DataType fieldType;
     private final Map<String, String> options;

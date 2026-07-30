@@ -18,10 +18,10 @@
 
 package org.apache.paimon.vector.index;
 
-/** Factory for the {@code ivf-hnsw-sq} vector index identifier. */
-public class IvfHnswSqVectorGlobalIndexerFactory extends NativeVectorGlobalIndexerFactory {
+/** Factory for the {@code ivf-rq} vector index identifier. */
+public class IvfRqVectorGlobalIndexerFactory extends NativeVectorGlobalIndexerFactory {
 
-    public static final String IDENTIFIER = "ivf-hnsw-sq";
+    public static final String IDENTIFIER = "ivf-rq";
 
     @Override
     public String identifier() {
