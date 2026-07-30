@@ -22,13 +22,14 @@ Each class registers itself with the global registry at import time
 via :func:`register_aggregator`, so importing
 ``pypaimon.read.reader.aggregate`` makes all of them discoverable.
 
-This module ships 10 aggregators — the primary-key placeholder plus
-the 9 most commonly-used value aggregators: ``primary_key`` /
+This module ships 19 aggregators — the primary-key placeholder plus
+the 18 most commonly-used value aggregators: ``primary_key`` /
 ``last_value`` / ``last_non_null_value`` / ``first_value`` /
 ``first_non_null_value`` / ``sum`` / ``max`` / ``min`` / ``bool_or``
-/ ``bool_and``. Other aggregators (``product`` / ``listagg`` /
-``collect`` / ``merge_map`` / ``nested_update`` / ``theta_sketch`` /
-``hll_sketch`` / ``roaring_bitmap_*``) are intentionally deferred —
+/ ``bool_and`` / ``product`` / ``listagg`` / ``collect`` /
+``merge_map`` / ``merge_map_with_keytime`` / ``nested_update`` /
+``nested_partial_update`` / ``theta_sketch`` / ``rbm32``. Other
+aggregators (``hll_sketch`` / ``rbm64``) are intentionally deferred —
 the registry will report them as unsupported so users see a clear
 error rather than a silent fallback.
 """

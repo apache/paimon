@@ -295,9 +295,7 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
 
     def test_out_of_scope_field_aggregator_rejected(self):
         # hll_sketch is one of the aggregator identifiers this engine
-        # doesn't support yet. collect is now supported by the Python
-        # aggregation engine, so use hll_sketch instead.
-        # The guard must reject the config rather
+        # doesn't support yet. The guard must reject the config rather
         # than let the per-field factory build a (silently wrong)
         # fallback.
         self._create_and_expect_unsupported(
