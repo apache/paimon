@@ -281,6 +281,8 @@ def _build_datasets(
     # snapshot the caller observed; otherwise concurrent commits in between
     # would mix data from different snapshots.
     base_snapshot_id = base_snapshot.id if base_snapshot is not None else None
+    target_empty = (
+        base_snapshot is None or base_snapshot.total_record_count == 0)
 
     update_ds = None
     delete_ds = None
@@ -317,7 +319,7 @@ def _build_datasets(
     # Mirror Spark: matched/not-matched run as two independent joins
     # (inner / left_anti). One unified left_outer join would force
     # joined.materialize() to feed both branches, which can OOM on large merges.
-    if matched_specs and base_snapshot is not None:
+    if matched_specs and not target_empty:
         update_cols_union = _union_update_cols(matched_specs)
         if update_cols_union:
             update_ds = build_matched_update_ds(
@@ -362,7 +364,7 @@ def _build_datasets(
             catalog_options=ctx.catalog_options,
             num_partitions=num_partitions,
             snapshot_id=base_snapshot_id,
-            target_empty=base_snapshot is None,
+            target_empty=target_empty,
             ray_remote_args=ray_remote_args,
         )
 

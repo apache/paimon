@@ -505,6 +505,39 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['name'], ['a', 'b', 'c'])
         self.assertEqual(out['age'], [10, 20, 30])
 
+    def test_update_and_insert_into_existing_empty_snapshot(self):
+        target = self._create_table()
+        self._write(target, self._source(ids=(1,)))
+        write_builder = (
+            self.catalog.get_table(target).new_batch_write_builder().overwrite())
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict(
+            {
+                'id': pa.array([], type=pa.int32()),
+                'name': pa.array([], type=pa.string()),
+                'age': pa.array([], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        ))
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        metrics = merge_into(
+            target=target,
+            source=self._source(ids=(1, 2)),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*')],
+            when_not_matched=[WhenNotMatched(insert='*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual([1, 2], self._read_sorted(target)['id'])
+        self.assertEqual(
+            {'num_matched': 0, 'num_inserted': 2, 'num_unchanged': 0},
+            metrics,
+        )
+
     def test_multi_source_match_raises_by_default(self):
         # One target row matched by several source rows: the winning value is
         # undefined (Spark DE's checkCardinality=false), so we refuse by default.
