@@ -226,6 +226,7 @@ public class RESTCatalogServer {
     private final ResourcePaths resourcePaths;
 
     private final List<Map<String, String>> receivedHeaders = new ArrayList<>();
+    private final Map<String, List<Map<String, String>>> receivedHeadersByPath = new HashMap<>();
 
     private volatile boolean partitionListingSupported = true;
 
@@ -362,6 +363,9 @@ public class RESTCatalogServer {
                     receivedHeaders.add(new HashMap<>(headers));
                     String[] paths = request.getPath().split("\\?");
                     String resourcePath = paths[0];
+                    receivedHeadersByPath
+                            .computeIfAbsent(resourcePath, ignored -> new ArrayList<>())
+                            .add(new HashMap<>(headers));
                     Map<String, String> parameters =
                             paths.length == 2 ? getParameters(paths[1]) : Collections.emptyMap();
                     String data = request.getBody().readUtf8();
@@ -1046,6 +1050,7 @@ public class RESTCatalogServer {
         return commitSnapshot(
                 identifier,
                 requestBody.getTableId(),
+                requestBody.getBaseSnapshotUuid(),
                 requestBody.getSnapshot(),
                 requestBody.getStatistics());
     }
@@ -2752,9 +2757,10 @@ public class RESTCatalogServer {
 
     public static volatile boolean commitSuccessThrowException = false;
 
-    private MockResponse commitSnapshot(
+    private synchronized MockResponse commitSnapshot(
             Identifier identifier,
             String tableId,
+            @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws Catalog.TableNotExistException {
@@ -2773,6 +2779,12 @@ public class RESTCatalogServer {
         if (!tableId.equals(table.catalogEnvironment().uuid())) {
             throw new Catalog.TableNotExistException(identifier);
         }
+        TableSnapshot currentSnapshot = tableLatestSnapshotStore.get(identifier.getFullName());
+        String currentSnapshotUuid =
+                currentSnapshot == null ? null : currentSnapshot.snapshot().uuid();
+        if (!Objects.equals(currentSnapshotUuid, baseSnapshotUuid)) {
+            return mockResponse(new CommitTableResponse(false), 200);
+        }
         RenamingSnapshotCommit commit =
                 new RenamingSnapshotCommit(table.snapshotManager(), Lock.empty());
         String branchName = identifier.getBranchName();
@@ -2781,7 +2793,8 @@ public class RESTCatalogServer {
         }
         TableSnapshot tableSnapshot;
         try {
-            boolean success = commit.commit(snapshot, branchName, Collections.emptyList());
+            boolean success =
+                    commit.commit(baseSnapshotUuid, snapshot, branchName, Collections.emptyList());
             if (!success) {
                 return mockResponse(new CommitTableResponse(success), 200);
             }
@@ -3102,7 +3115,12 @@ public class RESTCatalogServer {
         return receivedHeaders;
     }
 
+    public List<Map<String, String>> getReceivedHeaders(String resourcePath) {
+        return receivedHeadersByPath.getOrDefault(resourcePath, Collections.emptyList());
+    }
+
     public void clearReceivedHeaders() {
         receivedHeaders.clear();
+        receivedHeadersByPath.clear();
     }
 }

@@ -90,6 +90,24 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testDeletionVectorsMergeOnRead() {
+        Options conf = new Options();
+        conf.set(CoreOptions.DELETION_VECTORS_MERGE_ON_READ, true);
+        CoreOptions options = new CoreOptions(conf);
+
+        assertThat(options.deletionVectorsMergeOnRead()).isTrue();
+        assertThat(options.batchScanSkipLevel0()).isFalse();
+
+        conf.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        assertThat(options.deletionVectorsMergeOnRead()).isTrue();
+        assertThat(options.batchScanSkipLevel0()).isFalse();
+
+        conf.set(CoreOptions.DELETION_VECTORS_MERGE_ON_READ, false);
+        assertThat(options.deletionVectorsMergeOnRead()).isFalse();
+        assertThat(options.batchScanSkipLevel0()).isTrue();
+    }
+
+    @Test
     public void testSequenceFieldTrim() {
         Options conf = new Options();
         conf.set(CoreOptions.SEQUENCE_FIELD, " f1 ,f2 ,  f3  ");
@@ -105,6 +123,39 @@ public class CoreOptionsTest {
 
         assertThat(new CoreOptions(conf).globalIndexColumnUpdateAction())
                 .isEqualTo(CoreOptions.GlobalIndexColumnUpdateAction.IGNORE);
+    }
+
+    @Test
+    public void testIndexSearchModes() {
+        Options conf = new Options();
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.globalIndexSearchMode()).isNull();
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+        assertThat(options.vectorIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+        assertThat(options.fullTextIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+
+        conf.set(CoreOptions.GLOBAL_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.DETAIL);
+        options = new CoreOptions(conf);
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+        assertThat(options.vectorIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+        assertThat(options.fullTextIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.DETAIL);
+
+        conf.set(CoreOptions.SCALAR_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FAST);
+        conf.set(CoreOptions.VECTOR_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FULL);
+        conf.set(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE, CoreOptions.GlobalIndexSearchMode.FULL);
+        options = new CoreOptions(conf);
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
+        assertThat(options.vectorIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+        assertThat(options.fullTextIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
     }
 
     @Test
@@ -214,5 +265,24 @@ public class CoreOptionsTest {
         assertThatThrownBy(() -> new CoreOptions(conf).blobCopyBufferSize())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("blob.copy-buffer-size");
+    }
+
+    @Test
+    public void testLocalKvDbBlockSize() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).localKvDbBlockSize()).isEqualTo(4 * 1024);
+
+        conf.set(CoreOptions.LOCAL_KV_DB_BLOCK_SIZE, MemorySize.parse("8 kb"));
+        assertThat(new CoreOptions(conf).localKvDbBlockSize()).isEqualTo(8 * 1024);
+
+        conf.set(CoreOptions.LOCAL_KV_DB_BLOCK_SIZE, MemorySize.parse("0 bytes"));
+        assertThatThrownBy(() -> new CoreOptions(conf).localKvDbBlockSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("local-kv-db.block-size");
+
+        conf.set(CoreOptions.LOCAL_KV_DB_BLOCK_SIZE, MemorySize.parse("2 gb"));
+        assertThatThrownBy(() -> new CoreOptions(conf).localKvDbBlockSize())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("local-kv-db.block-size");
     }
 }

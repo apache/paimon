@@ -331,10 +331,6 @@ public class SchemaValidation {
 
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(options);
-        } else {
-            checkArgument(
-                    !options.deletionVectorsMergeOnRead(),
-                    "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true.");
         }
 
         if (options.snapshotSequenceOrdering()) {
@@ -367,6 +363,7 @@ public class SchemaValidation {
         validateMergeFunctionFactory(schema);
 
         validateMapStorageLayout(schema, options);
+        validateVariantShreddingInferenceOptions(options);
 
         validateFileIndex(schema);
 
@@ -695,6 +692,44 @@ public class SchemaValidation {
         }
     }
 
+    private static void validateVariantShreddingInferenceOptions(CoreOptions options) {
+        int coldSampleRows =
+                options.toConfiguration().get(CoreOptions.VARIANT_SHREDDING_MAX_INFER_BUFFER_ROW);
+        checkArgument(
+                coldSampleRows > 0,
+                "%s must be positive.",
+                CoreOptions.VARIANT_SHREDDING_MAX_INFER_BUFFER_ROW.key());
+
+        double admissionRatio =
+                options.toConfiguration()
+                        .get(CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO);
+        checkArgument(
+                admissionRatio >= 0 && admissionRatio <= 1,
+                "%s must be between 0 and 1.",
+                CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO.key());
+
+        if (options.toConfiguration().get(CoreOptions.VARIANT_SHREDDING_INFERENCE_MODE)
+                != CoreOptions.VariantShreddingInferenceMode.ADAPTIVE) {
+            return;
+        }
+
+        int warmSampleRows =
+                options.toConfiguration()
+                        .get(CoreOptions.VARIANT_SHREDDING_ADAPTIVE_MAX_INFER_BUFFER_ROW);
+        checkArgument(
+                warmSampleRows > 0,
+                "%s must be positive.",
+                CoreOptions.VARIANT_SHREDDING_ADAPTIVE_MAX_INFER_BUFFER_ROW.key());
+        double retentionRatio =
+                options.toConfiguration()
+                        .get(CoreOptions.VARIANT_SHREDDING_ADAPTIVE_RETENTION_RATIO);
+        checkArgument(
+                retentionRatio >= 0 && retentionRatio <= admissionRatio,
+                "%s must be between 0 and %s.",
+                CoreOptions.VARIANT_SHREDDING_ADAPTIVE_RETENTION_RATIO.key(),
+                CoreOptions.VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO.key());
+    }
+
     private static void validateUnsupportedTypesWithMapSharedShredding(
             TableSchema schema, CoreOptions options) {
         RowType rowType = new RowType(schema.fields());
@@ -937,7 +972,7 @@ public class SchemaValidation {
                 options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
                 "Primary-key vector index requires deletion-vectors.enabled = true.");
         checkArgument(
-                !options.deletionVectorsMergeOnRead(),
+                !options.deletionVectorsEnabled() || !options.deletionVectorsMergeOnRead(),
                 "Primary-key vector index with merge-engine = %s requires deletion-vectors.merge-on-read = false.",
                 options.mergeEngine());
         checkArgument(
@@ -995,7 +1030,7 @@ public class SchemaValidation {
                 options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
                 "Primary-key full-text index requires deletion-vectors.enabled = true.");
         checkArgument(
-                !options.deletionVectorsMergeOnRead(),
+                !options.deletionVectorsEnabled() || !options.deletionVectorsMergeOnRead(),
                 "Primary-key full-text index requires deletion-vectors.merge-on-read = false.");
         checkArgument(
                 options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,

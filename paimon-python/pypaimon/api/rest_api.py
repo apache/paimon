@@ -59,6 +59,7 @@ from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 class RESTApi:
     HEADER_PREFIX = "header."
     USER_AGENT_HEADER = "User-Agent"
+    READ_VIA_HEADER = "X-Paimon-Read-Via"
     MAX_RESULTS = "maxResults"
     PAGE_TOKEN = "pageToken"
     DATABASE_NAME_PATTERN = "databaseNamePattern"
@@ -373,6 +374,7 @@ class RESTApi:
             self,
             identifier: Identifier,
             table_uuid: Optional[str],
+            base_snapshot_uuid: Optional[str],
             snapshot: Snapshot,
             statistics: List[PartitionStatistics]
     ) -> bool:
@@ -382,6 +384,7 @@ class RESTApi:
         Args:
             identifier: Database name and table name
             table_uuid: UUID of the table to avoid wrong commit
+            base_snapshot_uuid: UUID of the snapshot on which the commit is based
             snapshot: Snapshot for committing
             statistics: Statistics for this snapshot incremental
 
@@ -398,7 +401,12 @@ class RESTApi:
         if statistics is None:
             raise ValueError("Statistics cannot be None")
 
-        request = CommitTableRequest(table_uuid, snapshot, statistics)
+        request = CommitTableRequest(
+            table_id=table_uuid,
+            snapshot=snapshot,
+            statistics=statistics,
+            base_snapshot_uuid=base_snapshot_uuid,
+        )
         response = self.client.post_with_response_type(
             self.resource_paths.commit_table(
                 database_name, table_name),

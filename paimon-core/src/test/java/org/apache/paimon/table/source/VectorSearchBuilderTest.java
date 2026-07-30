@@ -36,6 +36,7 @@ import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexer;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -222,6 +223,37 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testVectorSearchExcludesDeletedRowsAcrossOverlappingPartialColumnFiles()
+            throws Exception {
+        catalog.createTable(
+                identifier("vector_search_overlapping_partial_column"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_search_overlapping_partial_column"));
+
+        float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {3.0f, 0.0f}};
+        writeVectors(table, vectors);
+        // A partial-column file over the same [0,3] row-id range that carries no
+        // deletion vector; its range must not re-add the deleted rows.
+        writeOverlappingIdColumn(table, vectors.length);
+        buildAndCommitIndex(table, vectors);
+        commitDeletionVectors(table, 0L, 1L);
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(4)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
+        assertThat(result.results()).contains(2L, 3L);
+        assertThat(result.results()).doesNotContain(0L, 1L);
+        assertThat(readIds(table, result)).containsExactly(2, 3);
+    }
+
+    @Test
     public void testVectorLiveRowPlanningSkipsUnindexedDeletionVectors() throws Exception {
         catalog.createTable(
                 identifier("vector_search_unindexed_deletion_vector"),
@@ -366,7 +398,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         catalog.createTable(
                 identifier("full_search_raw_only_cosine_table"),
                 vectorSchemaBuilder(VECTOR_FIELD_NAME)
-                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .option(CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "full")
                         .option("test.vector.metric", "cosine")
                         .build(),
                 false);
@@ -1065,14 +1097,14 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testPartialScalarPreFilterMustNotDropUnindexedScalarRows() throws Exception {
+    public void testPartialScalarPreFilterDropsUnindexedRowsInFastMode() throws Exception {
+        // Default fast scalar mode drops unindexed rows: the btree covers ids
+        // 3-7, so id>=8 (rows 8,9 unindexed) yields an empty pre-filter.
         catalog.createTable(
-                identifier("full_search_partial_scalar_unindexed_table"),
-                vectorSchemaBuilder(VECTOR_FIELD_NAME)
-                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
-                        .build(),
+                identifier("default_scalar_fast_partial_index_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME).build(),
                 false);
-        FileStoreTable table = getTable(identifier("full_search_partial_scalar_unindexed_table"));
+        FileStoreTable table = getTable(identifier("default_scalar_fast_partial_index_table"));
 
         float[][] vectors = new float[10][];
         for (int i = 0; i < vectors.length; i++) {
@@ -1093,7 +1125,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
         VectorScan.Plan vectorPlan = searchBuilder.newVectorScan().scan();
         GlobalIndexResult result = searchBuilder.newVectorRead().read(vectorPlan);
-        assertThat(result.results()).contains(8L);
+        assertThat(result.results().isEmpty()).isTrue();
 
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(idFilter);
         TableScan.Plan readPlan = readBuilder.newScan().withGlobalIndexResult(result).plan();
@@ -1101,7 +1133,42 @@ public class VectorSearchBuilderTest extends TableTestBase {
         try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(readPlan)) {
             reader.forEachRemaining(row -> ids.add(row.getInt(0)));
         }
-        assertThat(ids).containsExactly(8);
+        assertThat(ids).isEmpty();
+    }
+
+    @Test
+    public void testFastVectorModeLimitsScalarFallbackToVectorCoverage() throws Exception {
+        catalog.createTable(
+                identifier("fast_vector_partial_coverage_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "fast")
+                        .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("fast_vector_partial_coverage_table"));
+
+        float[][] vectors = new float[10][];
+        for (int i = 0; i < vectors.length; i++) {
+            vectors[i] = new float[] {Math.abs(i - 8), 0.0f};
+        }
+        writeVectors(table, vectors);
+
+        buildAndCommitVectorIndex(table, Arrays.copyOf(vectors, 5), new Range(0, 4));
+        buildAndCommitBTreeIndex(table, new int[] {2, 3, 4}, new Range(2, 4));
+
+        Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 5);
+        VectorScan.Plan plan =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(rawVectorSearchSplits(plan.splits())).hasSize(1);
+        assertThat(rawVectorSearchSplits(plan.splits()).get(0).rowRanges())
+                .containsExactly(new Range(0, 1));
     }
 
     @Test
@@ -1144,9 +1211,14 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testFastModePartialScalarPreFilterOnlyUsesIndexedRows() throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
+    public void testFastScalarModePartialPreFilterOnlyUsesIndexedRows() throws Exception {
+        catalog.createTable(
+                identifier("fast_scalar_partial_index_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "fast")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("fast_scalar_partial_index_table"));
 
         float[][] vectors = new float[10][];
         for (int i = 0; i < vectors.length; i++) {
@@ -1502,6 +1574,32 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     // ====================== Helper methods ======================
+
+    private void writeOverlappingIdColumn(FileStoreTable table, int count) throws Exception {
+        long firstRowId = table.snapshotManager().latestSnapshot().nextRowId() - count;
+        RowType idType = table.rowType().project(Collections.singletonList("id"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(idType)) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(i));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> messages = write.prepareCommit();
+            assignFirstRowId(messages, firstRowId);
+            commit.commit(messages);
+        }
+    }
+
+    private void assignFirstRowId(List<CommitMessage> messages, long firstRowId) {
+        for (CommitMessage message : messages) {
+            CommitMessageImpl impl = (CommitMessageImpl) message;
+            List<DataFileMeta> newFiles = new ArrayList<>(impl.newFilesIncrement().newFiles());
+            impl.newFilesIncrement().newFiles().clear();
+            for (DataFileMeta file : newFiles) {
+                impl.newFilesIncrement().newFiles().add(file.assignFirstRowId(firstRowId));
+            }
+        }
+    }
 
     private void writeVectors(FileStoreTable table, float[][] vectors) throws Exception {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();

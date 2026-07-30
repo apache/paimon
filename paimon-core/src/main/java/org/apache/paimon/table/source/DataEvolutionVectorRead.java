@@ -111,13 +111,14 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-        ScoredGlobalIndexResult merged = ScoredGlobalIndexResult.createEmpty();
+        List<ScoredGlobalIndexResult> results = new ArrayList<>(futures.size());
         for (CompletableFuture<Optional<ScoredGlobalIndexResult>> future : futures) {
             Optional<ScoredGlobalIndexResult> splitResult = future.join();
             if (splitResult.isPresent()) {
-                merged = merged.or(splitResult.get());
+                results.add(splitResult.get());
             }
         }
-        return maybeRerankIndexedResult(merged, indexType, globalIndexer, vector);
+        return maybeRerankIndexedResult(
+                ScoredGlobalIndexResult.merge(results), indexType, globalIndexer, vector);
     }
 }

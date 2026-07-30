@@ -406,6 +406,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         restCatalog.commitSnapshot(
                                 identifier,
                                 "",
+                                null,
                                 createSnapshotWithMillis(1L, System.currentTimeMillis()),
                                 new ArrayList<PartitionStatistics>()));
     }
@@ -2237,6 +2238,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         restCatalog.commitSnapshot(
                                 hasSnapshotTableIdentifier,
                                 "",
+                                null,
                                 createSnapshotWithMillis(1L, System.currentTimeMillis()),
                                 new ArrayList<>()));
 
@@ -2248,6 +2250,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         restCatalog.commitSnapshot(
                                 hasSnapshotTableIdentifier,
                                 "unknown_id",
+                                null,
                                 createSnapshotWithMillis(1L, System.currentTimeMillis()),
                                 new ArrayList<>()));
 
@@ -2281,6 +2284,39 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         createTable(noSnapshotTableIdentifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         snapshot = catalog.loadSnapshot(noSnapshotTableIdentifier);
         assertThat(snapshot).isEmpty();
+    }
+
+    @Test
+    void testCommitSnapshotChecksBaseUuid() throws Exception {
+        RESTCatalogServer.commitSuccessThrowException = false;
+        Identifier identifier = Identifier.create("test_db_a", "snapshot_uuid_commit");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        Table table = catalog.getTable(identifier);
+
+        Snapshot first = createSnapshotWithMillis(1L, System.currentTimeMillis());
+        assertThat(
+                        restCatalog.commitSnapshot(
+                                identifier, table.uuid(), null, first, Collections.emptyList()))
+                .isTrue();
+
+        Snapshot second = createSnapshotWithMillis(2L, System.currentTimeMillis());
+        assertThat(
+                        restCatalog.commitSnapshot(
+                                identifier,
+                                table.uuid(),
+                                "wrong-base-snapshot-uuid",
+                                second,
+                                Collections.emptyList()))
+                .isFalse();
+        assertThat(
+                        restCatalog.commitSnapshot(
+                                identifier,
+                                table.uuid(),
+                                first.uuid(),
+                                second,
+                                Collections.emptyList()))
+                .isTrue();
+        assertThat(restCatalog.loadSnapshot(identifier).get().snapshot()).isEqualTo(second);
     }
 
     @Test
@@ -3294,7 +3330,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Lists.newArrayList(
                                 new DataField(0, "pt", DataTypes.INT()),
                                 new DataField(1, "col1", DataTypes.STRING()),
-                                new DataField(2, "col2", DataTypes.STRING())),
+                                new DataField(2, "col2", DataTypes.STRING()),
+                                new DataField(3, "payload", DataTypes.VARIANT())),
                         Collections.singletonList("pt"),
                         Collections.emptyList(),
                         options,
@@ -3310,6 +3347,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(tables).containsExactlyInAnyOrder("table1");
         assertThat(table.uuid()).isNotEmpty();
         assertThat(table.uuid()).isNotEqualTo(table.fullName());
+        assertThat(table.rowType().getField("payload").type())
+                .isInstanceOf(org.apache.paimon.types.VariantType.class);
     }
 
     @Test

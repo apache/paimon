@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.operation.FileSystemWriteRestore
@@ -30,6 +29,7 @@ import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_C
 import org.apache.paimon.spark.util.{ScanPlanHelper, SparkRowUtils}
 import org.apache.paimon.spark.write.{PaimonDataWrite, WriteTaskResult}
 import org.apache.paimon.table.{BlobDescriptorReaderFactory, BucketMode, FileStoreTable, PostponeUtils}
+import org.apache.paimon.table.PostponeUtils.PostponeBucketAssigner
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.utils.{SerializationUtils, UriReaderFactory}
 
@@ -58,34 +58,17 @@ case class SparkPostponeCompactProcedure(
     @transient relation: DataSourceV2Relation) {
   private val LOG = LoggerFactory.getLogger(getClass)
 
-  private def createPostponePartitionBucketComputer(snapshotId: Long) = {
-    val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table, snapshotId)
-    val targetRowNumPerBucket: Option[java.lang.Long] =
-      table.coreOptions.postponeTargetRowNumPerBucket
-    val postponeRowCounts =
-      if (targetRowNumPerBucket.isDefined) {
-        PostponeUtils.getPostponeRowCounts(table, snapshotId)
-      } else {
-        Collections.emptyMap[BinaryRow, java.lang.Long]()
-      }
-    val defaultBucketNum =
-      if (table.coreOptions.toConfiguration.contains(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM)) {
-        table.coreOptions.postponeDefaultBucketNum
-      } else {
-        spark.sparkContext.defaultParallelism
-      }
-
-    SparkPostponeCompactProcedure.PostponePartitionBucketComputer(
-      knownNumBuckets,
-      targetRowNumPerBucket,
-      postponeRowCounts,
-      defaultBucketNum)
+  private def createPostponeBucketAssigner(snapshotId: Long) = {
+    PostponeUtils.createPostponeBucketAssigner(
+      table,
+      snapshotId,
+      spark.sparkContext.defaultParallelism)
   }
 
   private def newDataWrite(
       realTable: FileStoreTable,
       rowKindColIdx: Int,
-      postponePartitionBucketComputer: SparkPostponeCompactProcedure.PostponePartitionBucketComputer,
+      bucketAssigner: PostponeBucketAssigner,
       uriReaderFactoryForBlobDescriptor: UriReaderFactory): PaimonDataWrite = {
     val rowType = table.rowType()
     val coreOptions = table.coreOptions()
@@ -98,7 +81,7 @@ case class SparkPostponeCompactProcedure(
       Option.apply(coreOptions.fullCompactionDeltaCommits()),
       None,
       uriReaderFactoryForBlobDescriptor,
-      Some(postponePartitionBucketComputer)
+      Some(partition => bucketAssigner.assign(partition))
     )
     dataWrite
   }
@@ -124,8 +107,7 @@ case class SparkPostponeCompactProcedure(
       return
     }
     val snapshotId = snapshot.id()
-    val postponePartitionBucketComputer =
-      createPostponePartitionBucketComputer(snapshotId)
+    val bucketAssigner = createPostponeBucketAssigner(snapshotId)
     val realTable = PostponeUtils.tableForPostponeCompact(table, 1, snapshotId)
 
     // Read data splits from the POSTPONE_BUCKET (-2)
@@ -165,7 +147,7 @@ case class SparkPostponeCompactProcedure(
           table,
           bucketColIdx,
           encoderGroupWithBucketCol,
-          postponePartitionBucketComputer
+          partition => bucketAssigner.assign(partition)
         )
         val dataFrame = withInitBucketCol
           .mapPartitions(processor.processPartition)(encoderGroupWithBucketCol.encoder)
@@ -223,11 +205,7 @@ case class SparkPostponeCompactProcedure(
           Iterator.empty
         } else {
           val dataWrite =
-            newDataWrite(
-              realTable,
-              rowWorkAndKind._2,
-              postponePartitionBucketComputer,
-              uriReaderFactory)
+            newDataWrite(realTable, rowWorkAndKind._2, bucketAssigner, uriReaderFactory)
           dataWrite.write.withWriteRestore(
             new FileSystemWriteRestore(
               realTable.coreOptions(),
@@ -329,21 +307,4 @@ object SparkPostponeCompactProcedure {
   private[procedure] case class PostponeCompactKey(partition: IndexedSeq[Byte], bucket: Int)
     extends Serializable
 
-  private[procedure] case class PostponePartitionBucketComputer(
-      knownNumBuckets: java.util.Map[BinaryRow, Integer],
-      targetRowNumPerBucket: Option[java.lang.Long],
-      postponeRowCounts: java.util.Map[BinaryRow, java.lang.Long],
-      defaultBucketNum: Int)
-    extends (BinaryRow => Integer)
-    with Serializable {
-
-    override def apply(p: BinaryRow): Integer = {
-      PostponeUtils.determineBucketNum(
-        p,
-        knownNumBuckets,
-        targetRowNumPerBucket.orNull,
-        postponeRowCounts,
-        defaultBucketNum)
-    }
-  }
 }

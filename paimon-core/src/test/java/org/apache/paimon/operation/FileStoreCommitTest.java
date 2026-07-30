@@ -84,6 +84,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -1962,12 +1964,13 @@ public class FileStoreCommitTest {
 
         @Override
         public boolean commit(
+                @Nullable String baseSnapshotUuid,
                 Snapshot snapshot,
                 String branch,
                 List<org.apache.paimon.partition.PartitionStatistics> statistics)
                 throws Exception {
             if (commitAttempt >= conflictDeltaFilesByAttempt.size()) {
-                return delegate.commit(snapshot, branch, statistics);
+                return delegate.commit(baseSnapshotUuid, snapshot, branch, statistics);
             }
 
             List<ManifestEntry> conflictDeltaFiles = conflictDeltaFilesByAttempt.get(commitAttempt);
@@ -2042,8 +2045,15 @@ public class FileStoreCommitTest {
                             previousSnapshot == null ? null : previousSnapshot.watermark(),
                             previousSnapshot == null ? null : previousSnapshot.statistics(),
                             previousSnapshot == null ? null : previousSnapshot.properties(),
-                            previousSnapshot == null ? null : previousSnapshot.nextRowId());
-            assertThat(delegate.commit(conflictSnapshot, branch, Collections.emptyList())).isTrue();
+                            previousSnapshot == null ? null : previousSnapshot.nextRowId(),
+                            null);
+            assertThat(
+                            delegate.commit(
+                                    baseSnapshotUuid,
+                                    conflictSnapshot,
+                                    branch,
+                                    Collections.emptyList()))
+                    .isTrue();
             return false;
         }
 
@@ -2100,11 +2110,12 @@ public class FileStoreCommitTest {
 
         @Override
         public boolean commit(
+                @Nullable String baseSnapshotUuid,
                 Snapshot snapshot,
                 String branch,
                 List<org.apache.paimon.partition.PartitionStatistics> statistics)
                 throws Exception {
-            boolean committed = delegate.commit(snapshot, branch, statistics);
+            boolean committed = delegate.commit(baseSnapshotUuid, snapshot, branch, statistics);
             if (firstCommit) {
                 firstCommit = false;
                 assertThat(committed).isTrue();

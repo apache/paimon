@@ -132,10 +132,11 @@ class PrimaryKeyVectorIndexValidationTest {
     }
 
     @Test
-    void testSupportsFirstRowWithoutDeletionVectors() {
+    void testIgnoresMergeOnReadForFirstRowWithoutDeletionVectors() {
         Map<String, String> options = enabledOptions();
         options.put(CoreOptions.MERGE_ENGINE.key(), "first-row");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "false");
+        options.put(CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(), "true");
 
         assertThatCode(() -> validateTableSchema(schema(options))).doesNotThrowAnyException();
     }

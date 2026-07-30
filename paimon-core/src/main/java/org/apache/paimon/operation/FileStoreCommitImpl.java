@@ -1201,7 +1201,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 callback ->
                         callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
         try {
-            success = commitSnapshotImpl(newSnapshot, deltaStatistics);
+            success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaStatistics);
         } catch (Exception e) {
             // commit exception, not sure about the situation and should not clean up the files
             LOG.warn("Retry commit for exception.", e);
@@ -1336,7 +1336,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         nextRowId,
                         null);
 
-        return commitSnapshotImpl(newSnapshot, emptyList());
+        return commitSnapshotImpl(latest, newSnapshot, emptyList());
     }
 
     @Override
@@ -1418,7 +1418,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         targetSnapshot.watermark(),
                         targetSnapshot.statistics(),
                         targetSnapshot.properties(),
-                        nextRowId);
+                        nextRowId,
+                        null);
 
         // The rollback is an overwrite from the previous latest to the target, so the base files,
         // delta files and index changes describe the transition the callbacks need. These are
@@ -1435,7 +1436,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 callback -> callback.call(baseFiles, deltaFiles, indexChanges, newSnapshot));
 
         boolean success =
-                commitSnapshotImpl(newSnapshot, new ArrayList<>(PartitionEntry.merge(deltaFiles)));
+                commitSnapshotImpl(
+                        latest, newSnapshot, new ArrayList<>(PartitionEntry.merge(deltaFiles)));
         if (success) {
             // Notify the post-commit callbacks so external views stay in sync with the rolled-back
             // state (e.g. Iceberg compatibility metadata and chain-table overwrite handling).
@@ -1571,16 +1573,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.nextRowId(),
                         null);
 
-        return commitSnapshotImpl(newSnapshot, emptyList());
+        return commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList());
     }
 
-    private boolean commitSnapshotImpl(Snapshot newSnapshot, List<PartitionEntry> deltaStatistics) {
+    private boolean commitSnapshotImpl(
+            @Nullable Snapshot baseSnapshot,
+            Snapshot newSnapshot,
+            List<PartitionEntry> deltaStatistics) {
         try {
             List<PartitionStatistics> statistics = new ArrayList<>(deltaStatistics.size());
             for (PartitionEntry entry : deltaStatistics) {
                 statistics.add(entry.toPartitionStatistics(partitionComputer));
             }
-            return snapshotCommit.commit(newSnapshot, options.branch(), statistics);
+            return snapshotCommit.commit(
+                    baseSnapshot == null ? null : baseSnapshot.uuid(),
+                    newSnapshot,
+                    options.branch(),
+                    statistics);
         } catch (Throwable e) {
             // exception when performing the atomic rename,
             // we cannot clean up because we can't determine the success

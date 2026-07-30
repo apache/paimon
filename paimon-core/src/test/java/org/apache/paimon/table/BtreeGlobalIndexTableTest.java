@@ -238,8 +238,11 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                         BinaryString.fromString("a100"),
                                         BinaryString.fromString("a700")));
 
+        // Default scalar-index.search-mode is 'fast': only indexed rows are
+        // returned, so the unindexed a700 is dropped.
         assertThat(readF1(table, predicate)).containsExactly("a100");
 
+        assertThat(readF1(tableWithSearchMode(table, "fast"), predicate)).containsExactly("a100");
         assertThat(readF1(tableWithSearchMode(table, "full"), predicate))
                 .containsExactly("a100", "a700");
         assertThat(readF1(tableWithSearchMode(table, "detail"), predicate))
@@ -251,7 +254,9 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         builder.equal(1, BinaryString.fromString("a700")),
                         builder.equal(2, BinaryString.fromString("b700")));
 
+        // Default 'fast': a700 lives in the unindexed range, so it is dropped.
         assertThat(readF1(table, andWithUnindexedField)).isEmpty();
+        assertThat(readF1(tableWithSearchMode(table, "fast"), andWithUnindexedField)).isEmpty();
         assertThat(readF1(tableWithSearchMode(table, "full"), andWithUnindexedField))
                 .containsExactly("a700");
         assertThat(readF1(tableWithSearchMode(table, "detail"), andWithUnindexedField))
@@ -310,7 +315,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         table,
                         snapshot,
                         PartitionPredicate.ALWAYS_TRUE,
-                        Collections.singletonList(sourceBacked));
+                        Collections.singletonList(sourceBacked),
+                        table.coreOptions().scalarIndexSearchMode());
         assertThat(coverage.unindexedRanges(1)).isEmpty();
     }
 
@@ -340,7 +346,11 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         DataEvolutionGlobalIndexCoverage coverage =
                 new DataEvolutionGlobalIndexCoverage(
-                        table, snapshot, PartitionPredicate.ALWAYS_TRUE, mixedIndexes);
+                        table,
+                        snapshot,
+                        PartitionPredicate.ALWAYS_TRUE,
+                        mixedIndexes,
+                        table.coreOptions().scalarIndexSearchMode());
         assertThat(coverage.unindexedRanges(1)).isEmpty();
     }
 
@@ -358,7 +368,9 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         builder.equal(1, BinaryString.fromString("a700")),
                         builder.equal(2, BinaryString.fromString("b700")));
 
+        // Default 'fast': a700 is in the unindexed range, so it is dropped.
         assertThat(readF1(table, andPredicate)).isEmpty();
+        assertThat(readF1(tableWithSearchMode(table, "fast"), andPredicate)).isEmpty();
         assertThat(readF1(tableWithSearchMode(table, "full"), andPredicate))
                 .containsExactly("a700");
         assertThat(readF1(tableWithSearchMode(table, "detail"), andPredicate))
@@ -369,7 +381,9 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         builder.equal(1, BinaryString.fromString("a700")),
                         builder.equal(2, BinaryString.fromString("b701")));
 
+        // Default 'fast': a700 is unindexed and dropped; a701 (f2 indexed) stays.
         assertThat(readF1(table, orPredicate)).containsExactly("a701");
+        assertThat(readF1(tableWithSearchMode(table, "fast"), orPredicate)).containsExactly("a701");
         assertThat(readF1(tableWithSearchMode(table, "full"), orPredicate))
                 .containsExactly("a700", "a701");
         assertThat(readF1(tableWithSearchMode(table, "detail"), orPredicate))

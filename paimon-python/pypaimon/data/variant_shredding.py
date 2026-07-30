@@ -182,7 +182,7 @@ def _parse_typed_value_field(schema: VariantSchema, tv_type: pa.DataType) -> Var
     if pa.types.is_struct(tv_type):
         object_fields: List[ObjectField] = []
         for j in range(tv_type.num_fields):
-            sub_f = tv_type.field(j)
+            sub_f = tv_type[j]
             if pa.types.is_struct(sub_f.type):
                 sub_schema = build_variant_schema(sub_f.type)
             else:

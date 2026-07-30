@@ -32,6 +32,13 @@ import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
 import static java.util.Collections.singletonList;
@@ -140,6 +147,66 @@ public class ParallelExecutionTest {
                 .hasMessageContaining(
                         "Current page size 2 bytes is too small, one record cannot fit into a single page."
                                 + " Please increase the 'page-size' table option.");
+    }
+
+    @Test
+    public void testCloseWaitsForReaderClose() throws Exception {
+        CountDownLatch readerCloseStarted = new CountDownLatch(1);
+        CountDownLatch readerClosed = new CountDownLatch(1);
+        Semaphore allowReaderClose = new Semaphore(0);
+        RecordReader<Integer> reader =
+                new RecordReader<Integer>() {
+                    @Nullable
+                    @Override
+                    public RecordIterator<Integer> readBatch() {
+                        return null;
+                    }
+
+                    @Override
+                    public void close() throws IOException {
+                        readerCloseStarted.countDown();
+                        try {
+                            allowReaderClose.acquire();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new IOException("Reader close was interrupted.", e);
+                        }
+                        readerClosed.countDown();
+                    }
+                };
+
+        ParallelExecution<Integer, Integer> execution =
+                new ParallelExecution<>(
+                        new IntSerializer(), 1024, 1, singletonList(() -> Pair.of(reader, 1)));
+        ExecutorService closeExecutor = Executors.newSingleThreadExecutor();
+
+        try {
+            assertThat(readerCloseStarted.await(10, TimeUnit.SECONDS)).isTrue();
+
+            CountDownLatch executionCloseStarted = new CountDownLatch(1);
+            Future<Void> closeFuture =
+                    closeExecutor.submit(
+                            () -> {
+                                executionCloseStarted.countDown();
+                                execution.close();
+                                return null;
+                            });
+            assertThat(executionCloseStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> closeFuture.get(1, TimeUnit.SECONDS))
+                    .isInstanceOf(TimeoutException.class);
+
+            allowReaderClose.release();
+            closeFuture.get(10, TimeUnit.SECONDS);
+            assertThat(readerClosed.await(10, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            allowReaderClose.release();
+            try {
+                execution.close();
+                readerClosed.await(10, TimeUnit.SECONDS);
+            } finally {
+                closeExecutor.shutdownNow();
+            }
+        }
     }
 
     private RecordReader<Integer> create(Queue<List<Integer>> queue) {

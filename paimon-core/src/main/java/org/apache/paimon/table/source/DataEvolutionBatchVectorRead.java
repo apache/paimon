@@ -126,18 +126,23 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-        ScoredGlobalIndexResult[] merged = new ScoredGlobalIndexResult[n];
+        List<List<ScoredGlobalIndexResult>> resultsByQuery = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
-            merged[i] = ScoredGlobalIndexResult.createEmpty();
+            resultsByQuery.add(new ArrayList<>());
         }
-
         for (CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> future : futures) {
             List<Optional<ScoredGlobalIndexResult>> splitResults = future.join();
             for (int i = 0; i < n; i++) {
-                if (splitResults.get(i).isPresent()) {
-                    merged[i] = merged[i].or(splitResults.get(i).get());
+                Optional<ScoredGlobalIndexResult> splitResult = splitResults.get(i);
+                if (splitResult.isPresent()) {
+                    resultsByQuery.get(i).add(splitResult.get());
                 }
             }
+        }
+
+        ScoredGlobalIndexResult[] merged = new ScoredGlobalIndexResult[n];
+        for (int i = 0; i < n; i++) {
+            merged[i] = ScoredGlobalIndexResult.merge(resultsByQuery.get(i));
         }
         return maybeRerankIndexedBatchResults(merged, indexType, globalIndexer);
     }

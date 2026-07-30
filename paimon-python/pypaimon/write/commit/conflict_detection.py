@@ -149,6 +149,27 @@ class _WriteRange:
         self.field_ids = field_ids
 
 
+class CommitConflictError(RuntimeError):
+    """A deterministic pre-snapshot conflict which is safe to abort."""
+
+
+class RowIdExistenceConflict(RuntimeError):
+    """A staged row-id file no longer matches the current base-file layout."""
+
+    def __init__(self, entry):
+        self.entry = entry
+        super().__init__(
+            "Row ID existence conflict: file '{}' references "
+            "firstRowId={}, rowCount={} in bucket {}, "
+            "but no matching file exists in the current snapshot. "
+            "The referenced file may have been rewritten by a "
+            "concurrent compaction or removed by an overwrite.".format(
+                entry.file.file_name,
+                entry.file.first_row_id,
+                entry.file.row_count,
+                entry.bucket))
+
+
 class ConflictDetection:
     """Detects conflicts between base and delta files during commit."""
 
@@ -176,6 +197,13 @@ class ConflictDetection:
     @staticmethod
     def has_global_index_additions(index_entries=None):
         return bool(ConflictDetection.global_index_file_additions(index_entries))
+
+    @staticmethod
+    def has_hash_index_changes(index_entries=None):
+        return any(
+            entry.index_file.index_type == IndexManifestFile.HASH_INDEX
+            for entry in (index_entries or [])
+        )
 
     def check_conflicts(
             self,
@@ -214,6 +242,11 @@ class ConflictDetection:
         if conflict is not None:
             return conflict
 
+        conflict = self.check_hash_index_conflicts(
+            latest_snapshot, delta_index_entries)
+        if conflict is not None:
+            return conflict
+
         if commit_kind != "COMPACT":
             next_row_id = latest_snapshot.next_row_id if latest_snapshot else None
             conflict = self.check_row_id_existence(
@@ -231,6 +264,78 @@ class ConflictDetection:
             return conflict
 
         return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
+
+    def check_hash_index_conflicts(
+            self, latest_snapshot, delta_index_entries=None):
+        """Detect stale full-file replacements of dynamic-bucket HASH indexes."""
+        hash_entries = [
+            entry for entry in (delta_index_entries or [])
+            if entry.index_file.index_type == IndexManifestFile.HASH_INDEX
+        ]
+        if not hash_entries:
+            return None
+
+        delete_entries = [entry for entry in hash_entries if entry.kind == 1]
+        add_entries = [entry for entry in hash_entries if entry.kind == 0]
+        delete_names = {
+            entry.index_file.file_name for entry in delete_entries
+        }
+
+        current_entries = []
+        if latest_snapshot is not None and latest_snapshot.index_manifest is not None:
+            current_entries = [
+                entry for entry in IndexManifestFile(self.table).read(
+                    latest_snapshot.index_manifest)
+                if entry.kind == 0
+                and entry.index_file.index_type == IndexManifestFile.HASH_INDEX
+            ]
+
+        current_names = {
+            entry.index_file.file_name for entry in current_entries
+        }
+        for delete in delete_entries:
+            if delete.index_file.file_name not in current_names:
+                return RuntimeError(
+                    "HASH index conflict detected: index file {} is not "
+                    "present in the latest snapshot.".format(
+                        delete.index_file.file_name
+                    )
+                )
+
+        additions_by_bucket = {}
+        for add in add_entries:
+            key = (tuple(add.partition.values), add.bucket)
+            previous_add = additions_by_bucket.get(key)
+            if previous_add is not None:
+                return RuntimeError(
+                    "HASH index conflict detected: multiple index files {} "
+                    "and {} were added for partition {}, bucket {} in one "
+                    "commit.".format(
+                        previous_add.index_file.file_name,
+                        add.index_file.file_name,
+                        key[0],
+                        key[1],
+                    )
+                )
+            additions_by_bucket[key] = add
+
+            retained = [
+                entry for entry in current_entries
+                if entry.index_file.file_name not in delete_names
+                and tuple(entry.partition.values) == key[0]
+                and entry.bucket == key[1]
+            ]
+            if retained:
+                return RuntimeError(
+                    "HASH index conflict detected: partition {}, bucket {} "
+                    "already has newer index file {}.".format(
+                        key[0],
+                        key[1],
+                        retained[0].index_file.file_name,
+                    )
+                )
+
+        return None
 
     def check_deletion_vector_index_conflicts(self,
                                               latest_snapshot,
@@ -424,16 +529,7 @@ class ConflictDetection:
             key = (entry.partition, entry.bucket,
                    entry.file.first_row_id, entry.file.row_count)
             if key not in existing_index:
-                return RuntimeError(
-                    "Row ID existence conflict: file '{}' references "
-                    "firstRowId={}, rowCount={} in bucket {}, "
-                    "but no matching file exists in the current snapshot. "
-                    "The referenced file may have been rewritten by a "
-                    "concurrent compaction or removed by an overwrite.".format(
-                        entry.file.file_name,
-                        entry.file.first_row_id,
-                        entry.file.row_count,
-                        entry.bucket))
+                return RowIdExistenceConflict(entry)
 
         return None
 
@@ -547,7 +643,8 @@ class ConflictDetection:
             count=entry.file.row_count,
         )
 
-    def check_row_id_from_snapshot(self, latest_snapshot, commit_entries):
+    def check_row_id_from_snapshot(
+            self, latest_snapshot, commit_entries, check_compaction=True):
         if not self.data_evolution_enabled:
             return None
         if self._row_id_check_from_snapshot is None:
@@ -584,10 +681,11 @@ class ConflictDetection:
                 continue
 
             if snapshot.commit_kind == "COMPACT":
-                err = self._compact_conflicts_with_delta(
-                    snapshot, delta_signatures, column_checker, commit_entries)
-                if err is not None:
-                    return err
+                if check_compaction:
+                    err = self._compact_conflicts_with_delta(
+                        snapshot, delta_signatures, column_checker, commit_entries)
+                    if err is not None:
+                        return err
                 continue
 
             incremental_entries = self.commit_scanner.read_incremental_entries_from_changed_partitions(

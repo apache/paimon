@@ -100,6 +100,7 @@ class RESTCatalog(Catalog):
             self,
             identifier: Identifier,
             table_uuid: Optional[str],
+            base_snapshot_uuid: Optional[str],
             snapshot: Snapshot,
             statistics: List[PartitionStatistics]
     ) -> bool:
@@ -109,6 +110,7 @@ class RESTCatalog(Catalog):
         Args:
             identifier: Path of the table
             table_uuid: UUID of the table to avoid wrong commit
+            base_snapshot_uuid: UUID of the snapshot on which the commit is based
             snapshot: Snapshot to be committed
             statistics: Statistics information of this change
 
@@ -120,7 +122,13 @@ class RESTCatalog(Catalog):
             TableNoPermissionException: If no permission to access this table
         """
         try:
-            return self.rest_api.commit_snapshot(identifier, table_uuid, snapshot, statistics)
+            return self.rest_api.commit_snapshot(
+                identifier,
+                table_uuid,
+                base_snapshot_uuid,
+                snapshot,
+                statistics,
+            )
         except NoSuchResourceException as e:
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:

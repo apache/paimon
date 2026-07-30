@@ -25,7 +25,7 @@ import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.function.Function;
 
-/** Cache interface in paimon which supports caffeine and guava caches. */
+/** Cache interface in Paimon. */
 public interface Cache {
     @Nullable
     CacheValue get(CacheKey key, Function<CacheKey, CacheValue> supplier);
@@ -48,11 +48,5 @@ public interface Cache {
             this.segment = segment;
             this.callback = callback;
         }
-    }
-
-    /** Type for cache. */
-    enum CacheType {
-        CAFFEINE,
-        GUAVA;
     }
 }

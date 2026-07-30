@@ -36,6 +36,26 @@ class _FakeMetadata:
     total_vectors = 100
 
 
+class _FakeSearchParams:
+
+    def __init__(self, kind, top_k, width):
+        self.kind = kind
+        self.top_k = top_k
+        self.width = width
+
+    @classmethod
+    def automatic(cls, top_k):
+        return cls("automatic", top_k, 0)
+
+    @classmethod
+    def ivf(cls, top_k, nprobe):
+        return cls("ivf", top_k, nprobe)
+
+    @classmethod
+    def diskann(cls, top_k, l_search):
+        return cls("diskann", top_k, l_search)
+
+
 class _FakeVectorIndexReader:
     instances = []
 
@@ -49,20 +69,22 @@ class _FakeVectorIndexReader:
     def metadata(self):
         return _FakeMetadata()
 
-    def search(self, query, effective_k, nprobe, ef_search, filter_bytes=None):
-        self.search_calls.append(
-            (list(query), effective_k, nprobe, ef_search, filter_bytes))
-        return list(range(10, 10 + effective_k)), [float(i) for i in range(effective_k)]
+    def optimize_for_search(self):
+        pass
 
-    def search_batch(
-        self, queries, top_k, nprobe, ef_search=0, filter_bytes=None
-    ):
+    def search(self, query, params, filter_bytes=None):
+        self.search_calls.append(
+            (list(query), params, filter_bytes))
+        return (
+            list(range(10, 10 + params.top_k)),
+            [float(i) for i in range(params.top_k)],
+        )
+
+    def search_batch(self, queries, params, filter_bytes=None):
         self.batch_calls.append(
             {
                 "queries": queries,
-                "top_k": top_k,
-                "nprobe": nprobe,
-                "ef_search": ef_search,
+                "params": params,
                 "filter_bytes": filter_bytes,
             }
         )
@@ -71,7 +93,7 @@ class _FakeVectorIndexReader:
         query_count = queries.shape[0]
         for query_index in range(query_count):
             base_id = (query_index + 1) * 10
-            for rank in range(top_k):
+            for rank in range(params.top_k):
                 ids.append(base_id + rank)
                 distances.append(float(rank))
         return ids, distances
@@ -111,6 +133,7 @@ class VindexVectorIndexTest(unittest.TestCase):
     def test_batch_search_uses_native_batch_api(self):
         old_module = sys.modules.get("paimon_vindex")
         sys.modules["paimon_vindex"] = types.SimpleNamespace(
+            SearchParams=_FakeSearchParams,
             VectorIndexReader=_FakeVectorIndexReader)
         _FakeVectorIndexReader.instances = []
 
@@ -130,7 +153,7 @@ class VindexVectorIndexTest(unittest.TestCase):
                     vectors=[[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]],
                     limit=3,
                     field_name="embedding",
-                    options={"ivf.nprobe": "7", "hnsw.ef_search": "11"},
+                    options={"ivf.nprobe": "7"},
                 ).with_include_row_ids(include_ids)
             ).result()
 
@@ -140,9 +163,9 @@ class VindexVectorIndexTest(unittest.TestCase):
 
             call = fake_reader.batch_calls[0]
             self.assertEqual((3, 2), call["queries"].shape)
-            self.assertEqual(2, call["top_k"])
-            self.assertEqual(7, call["nprobe"])
-            self.assertEqual(11, call["ef_search"])
+            self.assertEqual(2, call["params"].top_k)
+            self.assertEqual("ivf", call["params"].kind)
+            self.assertEqual(7, call["params"].width)
             self.assertIsNotNone(call["filter_bytes"])
 
             self.assertEqual(3, len(results))

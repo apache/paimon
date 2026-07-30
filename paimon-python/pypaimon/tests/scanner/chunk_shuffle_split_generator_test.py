@@ -26,19 +26,22 @@ import os
 import shutil
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.scanner.chunk_shuffle_split_generator import (
     AppendChunkShuffleSplitGenerator,
     DataEvolutionChunkShuffleSplitGenerator,
+    _LiveRowRangeSlicer,
 )
 from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.read.split import DataSplit
+from pypaimon.table.source.deletion_file import DeletionFile
 from pypaimon.utils.range import Range
 
 
@@ -63,33 +66,41 @@ def _mock_entry(partition_values, bucket, file_name, row_count, file_size=1024):
     return entry
 
 
-def _make_generator(seed, chunk_size, table=None):
+def _make_generator(seed, chunk_size, table=None, deletion_files_map=None):
     if table is None:
         table = _mock_table()
     return AppendChunkShuffleSplitGenerator(
         table,
         target_split_size=128 * 1024 * 1024,
         open_file_cost=4 * 1024 * 1024,
-        deletion_files_map=None,
+        deletion_files_map=deletion_files_map,
         seed=seed,
         chunk_size=chunk_size,
     )
 
 
-def _make_de_generator(seed, chunk_size, table=None):
+def _make_de_generator(seed, chunk_size, table=None, deletion_files_map=None):
     if table is None:
         table = _mock_table()
     return DataEvolutionChunkShuffleSplitGenerator(
         table,
         target_split_size=128 * 1024 * 1024,
         open_file_cost=4 * 1024 * 1024,
-        deletion_files_map=None,
+        deletion_files_map=deletion_files_map,
         seed=seed,
         chunk_size=chunk_size,
     )
 
 
-def _mock_de_entry(partition_values, bucket, file_name, first_row_id, row_count, file_size=1024):
+def _mock_de_entry(
+    partition_values,
+    bucket,
+    file_name,
+    first_row_id,
+    row_count,
+    file_size=1024,
+    max_sequence_number=0,
+):
     """A DE-flavoured mock entry: file carries first_row_id and a real
     Range so :meth:`row_id_range` and ``Range.overlaps`` work."""
     entry = Mock()
@@ -101,6 +112,7 @@ def _mock_de_entry(partition_values, bucket, file_name, first_row_id, row_count,
     file.file_size = file_size
     file.row_count = row_count
     file.first_row_id = first_row_id
+    file.max_sequence_number = max_sequence_number
     file.row_id_range = lambda f=first_row_id, c=row_count: Range(f, f + c - 1)
     file.set_file_path = Mock()
     entry.file = file
@@ -137,6 +149,65 @@ def _split_signature(split):
 def _split_rows(split):
     """Effective row count this split actually exposes."""
     return split.row_count
+
+
+def _bitmap_deletion_vector(*positions):
+    deletion_vector = BitmapDeletionVector()
+    for position in positions:
+        deletion_vector.delete(position)
+    return deletion_vector
+
+
+class LiveRowRangeSlicerTest(unittest.TestCase):
+
+    def test_slices_by_live_rows_and_absorbs_deletion_runs(self):
+        slicer = _LiveRowRangeSlicer(10, iter([0, 3, 4, 9]))
+
+        first = slicer.take(3)
+        second = slicer.take(3)
+
+        self.assertEqual(
+            (
+                first.start_inclusive,
+                first.end_exclusive,
+                first.live_row_count,
+            ),
+            (0, 6, 3),
+        )
+        self.assertEqual(
+            (
+                second.start_inclusive,
+                second.end_exclusive,
+                second.live_row_count,
+            ),
+            (6, 10, 3),
+        )
+        self.assertEqual(first.to_closed_row_id_range(100), Range(100, 105))
+        self.assertIsNone(slicer.take(3))
+
+    def test_returns_smaller_tail_and_skips_fully_deleted_source(self):
+        tail_slicer = _LiveRowRangeSlicer(6, iter([1, 4]))
+        tail = tail_slicer.take(10)
+        self.assertEqual(
+            (
+                tail.start_inclusive,
+                tail.end_exclusive,
+                tail.live_row_count,
+            ),
+            (0, 6, 4),
+        )
+        self.assertIsNone(tail_slicer.take(1))
+
+        deleted_slicer = _LiveRowRangeSlicer(3, iter([0, 1, 2]))
+        self.assertIsNone(deleted_slicer.take(1))
+
+    def test_rejects_invalid_deletion_positions(self):
+        with self.assertRaisesRegex(ValueError, "outside physical row range"):
+            _LiveRowRangeSlicer(3, iter([-1]))
+
+        slicer = _LiveRowRangeSlicer(3, iter([0, 0]))
+        with self.assertRaisesRegex(ValueError, "strictly increasing"):
+            slicer.take(1)
 
 
 class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
@@ -199,6 +270,133 @@ class ChunkShuffleSplitGeneratorAlgoTest(unittest.TestCase):
         # No truncation — full files inside one chunk → DataSplit not SlicedSplit
         self.assertIsInstance(splits[0], DataSplit)
         self.assertEqual(_split_rows(splits[0]), 60)
+
+    def test_deletion_vector_slices_by_live_rows_and_is_attached(self):
+        entry = _mock_entry([], 0, 'f1', 10)
+        deletion_file = DeletionFile('dv.index', 10, 20, cardinality=4)
+        deletion_files_map = {((), 0): {'f1': deletion_file}}
+        deletion_vector = _bitmap_deletion_vector(0, 3, 4, 9)
+        gen = _make_generator(
+            seed=1,
+            chunk_size=3,
+            deletion_files_map=deletion_files_map,
+        )
+
+        with patch(
+            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            return_value=deletion_vector,
+        ) as read:
+            splits = gen.create_splits([entry])
+
+        self.assertEqual(
+            sorted(s.shard_file_idx_map()['f1'] for s in splits),
+            [(0, 6), (6, 10)],
+        )
+        self.assertEqual(
+            sorted(s.merged_row_count() for s in splits),
+            [3, 3],
+        )
+        for split in splits:
+            self.assertEqual(
+                split.data_split().data_deletion_files,
+                [deletion_file],
+            )
+        read.assert_called_once_with(gen.table.file_io, deletion_file)
+
+    def test_whole_file_unknown_dv_cardinality_preserves_live_row_count(self):
+        entry = _mock_entry([], 0, 'f1', 10)
+        deletion_file = DeletionFile('dv.index', 10, 20, cardinality=None)
+        gen = _make_generator(
+            seed=1,
+            chunk_size=6,
+            deletion_files_map={((), 0): {'f1': deletion_file}},
+        )
+
+        with patch(
+            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            return_value=_bitmap_deletion_vector(0, 3, 4, 9),
+        ) as read:
+            splits = gen.create_splits([entry])
+
+        self.assertEqual(len(splits), 1)
+        self.assertIsInstance(splits[0], SlicedSplit)
+        self.assertEqual(splits[0].shard_file_idx_map(), {})
+        self.assertEqual(splits[0].row_count, 10)
+        self.assertEqual(splits[0].merged_row_count(), 6)
+        read.assert_called_once_with(gen.table.file_io, deletion_file)
+
+    def test_two_deletion_vector_files_share_one_live_row_chunk(self):
+        # Each file contributes 5 - 2 = 3 live rows, so both should fit
+        # exactly in one six-row chunk.
+        entries = [
+            _mock_entry([], 0, 'f1', 5),
+            _mock_entry([], 0, 'f2', 5),
+        ]
+        first_deletion_file = DeletionFile(
+            'dv.index',
+            10,
+            20,
+            cardinality=2,
+        )
+        second_deletion_file = DeletionFile(
+            'dv.index',
+            30,
+            20,
+            cardinality=2,
+        )
+        deletion_files_map = {
+            ((), 0): {
+                'f1': first_deletion_file,
+                'f2': second_deletion_file,
+            }
+        }
+        deletion_vectors = {
+            first_deletion_file: _bitmap_deletion_vector(1, 3),
+            second_deletion_file: _bitmap_deletion_vector(0, 4),
+        }
+        gen = _make_generator(
+            seed=1,
+            chunk_size=6,
+            deletion_files_map=deletion_files_map,
+        )
+
+        with patch(
+            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            side_effect=lambda _, deletion_file: deletion_vectors[deletion_file],
+        ) as read:
+            splits = gen.create_splits(entries)
+
+        self.assertEqual(len(splits), 1)
+        self.assertIsInstance(splits[0], DataSplit)
+        self.assertEqual(
+            [file.file_name for file in splits[0].files],
+            ['f1', 'f2'],
+        )
+        self.assertEqual(
+            splits[0].data_deletion_files,
+            [first_deletion_file, second_deletion_file],
+        )
+        self.assertEqual(read.call_count, 2)
+        self.assertEqual(
+            {mock_call.args[1] for mock_call in read.call_args_list},
+            {first_deletion_file, second_deletion_file},
+        )
+
+    def test_fully_deleted_file_does_not_create_a_segment(self):
+        entry = _mock_entry([], 0, 'f1', 5)
+        deletion_file = DeletionFile('dv.index', 10, 20, cardinality=5)
+        gen = _make_generator(
+            seed=1,
+            chunk_size=2,
+            deletion_files_map={((), 0): {'f1': deletion_file}},
+        )
+
+        with patch(
+            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+        ) as read:
+            self.assertEqual(gen.create_splits([entry]), [])
+
+        read.assert_not_called()
 
     def test_deterministic_same_seed_same_order(self):
         entries = [_mock_entry([], 0, f'f{i}', 100) for i in range(20)]
@@ -453,12 +651,11 @@ class ChunkShuffleCompatibilityTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "only supports append tables"):
             scan.plan()
 
-    def test_dv_table_rejected(self):
+    def test_dv_table_supported(self):
         table = self._append_table('cs_dv', options={'deletion-vectors.enabled': 'true'})
         scan = table.new_read_builder().new_scan()
         scan.with_chunk_shuffle(seed=1, chunk_size=100)
-        with self.assertRaisesRegex(ValueError, "deletion vectors"):
-            scan.plan()
+        self.assertEqual(scan.plan().splits(), [])
 
     def test_with_slice_then_chunk_shuffle_rejected(self):
         table = self._append_table('cs_slice')
@@ -616,6 +813,125 @@ class DataEvolutionChunkShuffleAlgoTest(unittest.TestCase):
             files = sorted(f.file_name for f in s.files)
             self.assertEqual(files, ['g0.blob', 'g0.parquet'])
 
+    def test_deletion_vector_uses_anchor_and_slices_by_live_rows(self):
+        anchor = _mock_de_entry(
+            [],
+            0,
+            'anchor.parquet',
+            100,
+            10,
+            max_sequence_number=1,
+        )
+        blob = _mock_de_entry(
+            [],
+            0,
+            'field.blob',
+            100,
+            10,
+            max_sequence_number=2,
+        )
+        deletion_file = DeletionFile('dv.index', 10, 20, cardinality=4)
+        deletion_files_map = {((), 0): {'anchor.parquet': deletion_file}}
+        gen = _make_de_generator(
+            seed=1,
+            chunk_size=3,
+            deletion_files_map=deletion_files_map,
+        )
+
+        with patch(
+            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            return_value=_bitmap_deletion_vector(1, 2, 7, 9),
+        ) as read:
+            splits = gen.create_splits([blob, anchor])
+
+        ranges = sorted(
+            (row_range.from_, row_range.to)
+            for split in splits
+            for row_range in split.row_ranges()
+        )
+        self.assertEqual(ranges, [(100, 104), (105, 109)])
+        self.assertEqual(
+            sorted(split.merged_row_count() for split in splits),
+            [3, 3],
+        )
+        for split in splits:
+            self.assertEqual(
+                sorted(f.file_name for f in split.files),
+                ['anchor.parquet', 'field.blob'],
+            )
+            deletion_by_name = dict(
+                (file.file_name, dv)
+                for file, dv in zip(split.files, split.data_deletion_files)
+            )
+            self.assertEqual(deletion_by_name['anchor.parquet'], deletion_file)
+            self.assertIsNone(deletion_by_name['field.blob'])
+        read.assert_called_once_with(gen.table.file_io, deletion_file)
+
+    def test_multiple_deletion_vector_groups_share_one_live_row_chunk(self):
+        # The groups contribute 3 live rows each despite spanning 5 and 6
+        # physical rows, so both should become segments of the same chunk.
+        entries = [
+            _mock_de_entry([], 0, 'g0.parquet', 100, 5),
+            _mock_de_entry([], 0, 'g1.parquet', 200, 6),
+        ]
+        first_deletion_file = DeletionFile(
+            'dv.index',
+            10,
+            20,
+            cardinality=2,
+        )
+        second_deletion_file = DeletionFile(
+            'dv.index',
+            30,
+            20,
+            cardinality=3,
+        )
+        deletion_files_map = {
+            ((), 0): {
+                'g0.parquet': first_deletion_file,
+                'g1.parquet': second_deletion_file,
+            }
+        }
+        deletion_vectors = {
+            first_deletion_file: _bitmap_deletion_vector(1, 3),
+            second_deletion_file: _bitmap_deletion_vector(0, 2, 5),
+        }
+        gen = _make_de_generator(
+            seed=1,
+            chunk_size=6,
+            deletion_files_map=deletion_files_map,
+        )
+
+        with patch(
+            'pypaimon.read.scanner.chunk_shuffle_split_generator.DeletionVector.read',
+            side_effect=lambda _, deletion_file: deletion_vectors[deletion_file],
+        ) as read:
+            splits = gen.create_splits(entries)
+
+        self.assertEqual(len(splits), 1)
+        self.assertIsInstance(splits[0], IndexedSplit)
+        self.assertEqual(
+            [
+                (row_range.from_, row_range.to)
+                for row_range in splits[0].row_ranges()
+            ],
+            [(100, 104), (200, 205)],
+        )
+        self.assertEqual(
+            [file.file_name for file in splits[0].files],
+            ['g0.parquet', 'g1.parquet'],
+        )
+        self.assertEqual(
+            splits[0].data_deletion_files,
+            [first_deletion_file, second_deletion_file],
+        )
+        self.assertEqual(splits[0].merged_row_count(), 6)
+        self.assertEqual(read.call_count, 2)
+        self.assertEqual(
+            {mock_call.args[1] for mock_call in read.call_args_list},
+            {first_deletion_file, second_deletion_file},
+        )
+
     def test_deterministic_same_seed(self):
         entries = [_mock_de_entry([], 0, f'g{i:02d}.parquet', i * 100, 100) for i in range(20)]
         gen1 = _make_de_generator(seed=42, chunk_size=100)
@@ -705,19 +1021,22 @@ class DataEvolutionChunkShuffleEndToEndTest(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def _create_de_table(self, name):
+    def _create_de_table(self, name, deletion_vectors_enabled=False):
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('value', pa.string()),
             ('payload', pa.large_binary()),
         ])
+        options = {
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'blob.target-file-size': '1 b',
+        }
+        if deletion_vectors_enabled:
+            options['deletion-vectors.enabled'] = 'true'
         schema = Schema.from_pyarrow_schema(
             pa_schema,
-            options={
-                'row-tracking.enabled': 'true',
-                'data-evolution.enabled': 'true',
-                'blob.target-file-size': '1 b',
-            },
+            options=options,
         )
         identifier = f'default.{name}'
         self.catalog.create_table(identifier, schema, False)
@@ -743,6 +1062,14 @@ class DataEvolutionChunkShuffleEndToEndTest(unittest.TestCase):
         tw.close()
         tc.close()
         return commit_messages
+
+    @staticmethod
+    def _delete_by_row_id(table, row_ids):
+        write_builder = table.new_batch_write_builder()
+        commit_messages = write_builder.new_update().delete_by_row_id(row_ids)
+        table_commit = write_builder.new_commit()
+        table_commit.commit(commit_messages)
+        table_commit.close()
 
     def _assert_commit_has_main_and_multiple_blob_files(self, commit_messages):
         all_files = [f for msg in commit_messages for f in msg.new_files]
@@ -815,6 +1142,41 @@ class DataEvolutionChunkShuffleEndToEndTest(unittest.TestCase):
 
         for worker in range(4):
             self.assertEqual(plan_sigs(worker), plan_sigs(worker))
+
+    def test_python_delete_then_chunk_shuffle_read(self):
+        table, pa_schema = self._create_de_table(
+            'cs_de_python_delete',
+            deletion_vectors_enabled=True,
+        )
+        commit_messages = self._commit_full_rows(
+            table,
+            pa_schema,
+            list(range(12)),
+        )
+        self._assert_commit_has_main_and_multiple_blob_files(commit_messages)
+        self._delete_by_row_id(table, [0, 2, 3, 7, 11])
+
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan() \
+            .with_chunk_shuffle(seed=42, chunk_size=3) \
+            .plan() \
+            .splits()
+        self._assert_splits_include_blob_files(splits)
+
+        table_read = read_builder.new_read()
+        rows_per_split = [
+            table_read.to_arrow([split]).num_rows
+            for split in splits
+        ]
+        self.assertEqual(sorted(rows_per_split), [1, 3, 3])
+
+        actual = table_read.to_arrow(splits).sort_by('id')
+        expected_ids = [1, 4, 5, 6, 8, 9, 10]
+        self.assertEqual(actual.column('id').to_pylist(), expected_ids)
+        self.assertEqual(
+            actual.column('payload').to_pylist(),
+            self._payloads(expected_ids),
+        )
 
 
 if __name__ == '__main__':

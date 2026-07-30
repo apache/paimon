@@ -99,7 +99,7 @@ You can use `update_by_predicate` for SQL-like `UPDATE ... SET ... WHERE ...`
 operations. The `Predicate` identifies rows to update, and the assignment map
 contains literal values for updated columns.
 When global indexes are available, `update_by_predicate` discovers matching
-`_ROW_ID` values with `global-index.search-mode=full` on the configured
+`_ROW_ID` values with `scalar-index.search-mode=full` on the configured
 point-in-time scan snapshot or, if none is configured, the latest snapshot.
 
 ```python
@@ -576,6 +576,33 @@ commit.close()
 - **Row order matters**: the batches you write must have the **same number of rows** as the batches you read, in the
   same order for that shard.
 - **Parallelism**: run multiple shards by calling `new_shard_updator(shard_idx, num_shards)` for each shard.
+
+## Concurrent Compaction Recovery
+
+A partial-column update records the row-ID boundary of each data file it read.
+If compaction merges those files before `commit`, PyPaimon automatically
+rebases regular (non-BLOB and non-VECTOR) staged update files onto the latest
+file boundaries and retries the commit.
+
+The recovery is bounded by the total size of the current data files whose
+row-ID ranges are affected:
+
+```python
+options = {
+    'row-tracking.enabled': 'true',
+    'data-evolution.enabled': 'true',
+    'data-evolution.row-id-conflict-rewrite.max-size': '256 MB',
+}
+```
+
+The default is `256 MB`. Set the option to `0 B` to disable automatic
+rewriting. If the affected files exceed the configured size, or if the row IDs
+were removed by an overwrite, the commit keeps the normal
+`Row ID existence conflict` behavior. Logical concurrent updates are still
+checked and are never hidden by compaction recovery.
+
+Recovery is not attempted when deletion vectors are enabled, or when the same
+commit contains existing-row BLOB or VECTOR staged files.
 
 ## Stream Mode
 

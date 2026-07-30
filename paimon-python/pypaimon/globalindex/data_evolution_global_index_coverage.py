@@ -55,6 +55,7 @@ class DataEvolutionGlobalIndexCoverage:
         self,
         fields_or_field_id: Union[List[DataField], Collection[int], int],
         predicate: Optional[Predicate] = None,
+        search_mode: Optional[GlobalIndexSearchMode] = None,
     ) -> List[Range]:
         if isinstance(fields_or_field_id, int):
             field_ids = {fields_or_field_id}
@@ -67,7 +68,7 @@ class DataEvolutionGlobalIndexCoverage:
                 field = field_by_name.get(name)
                 if field is not None:
                     field_ids.add(field.id)
-        return self._unindexed_ranges(field_ids)
+        return self._unindexed_ranges(field_ids, search_mode)
 
     def _add_coverage(self, field_id: int, row_range: Range) -> None:
         self._coverage_by_field.setdefault(field_id, []).append(row_range)
@@ -84,8 +85,13 @@ class DataEvolutionGlobalIndexCoverage:
             return []
         return Range.sort_and_merge_overlap(ranges, True)
 
-    def _unindexed_ranges(self, field_ids: Collection[int]) -> List[Range]:
-        search_mode = _global_index_search_mode(self._table)
+    def _unindexed_ranges(
+        self,
+        field_ids: Collection[int],
+        search_mode: Optional[GlobalIndexSearchMode] = None,
+    ) -> List[Range]:
+        if search_mode is None:
+            search_mode = _scalar_index_search_mode(self._table)
         if search_mode == GlobalIndexSearchMode.FAST:
             return []
         next_row_id = getattr(self._snapshot, "next_row_id", None)
@@ -138,13 +144,13 @@ class DataEvolutionGlobalIndexCoverage:
         return self._partition_filter.test(entry.partition)
 
 
-def _global_index_search_mode(table):
+def _scalar_index_search_mode(table):
     options = getattr(table, "options", None)
     if options is None:
-        return GlobalIndexSearchMode.FAST
-    if hasattr(options, "global_index_search_mode"):
-        return options.global_index_search_mode()
-    return CoreOptions(Options.from_none()).global_index_search_mode()
+        return GlobalIndexSearchMode.FULL
+    if hasattr(options, "scalar_index_search_mode"):
+        return options.scalar_index_search_mode()
+    return CoreOptions(Options.from_none()).scalar_index_search_mode()
 
 
 def _is_field_id_collection(fields_or_field_id):

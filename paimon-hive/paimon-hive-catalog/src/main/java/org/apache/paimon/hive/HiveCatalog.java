@@ -595,47 +595,109 @@ public class HiveCatalog extends AbstractCatalog {
     public List<org.apache.paimon.partition.Partition> listPartitions(Identifier identifier)
             throws TableNotExistException {
         FileStoreTable table = (FileStoreTable) getTable(identifier);
-        String tagToPartitionField = table.coreOptions().tagToPartitionField();
+        CoreOptions coreOptions = table.coreOptions();
+        String tagToPartitionField = coreOptions.tagToPartitionField();
+        List<org.apache.paimon.partition.Partition> partitions;
         if (tagToPartitionField != null) {
             try {
-                List<Partition> partitions = listPartitionsFromHms(identifier);
-                return partitions.stream()
-                        .map(
-                                part -> {
-                                    Map<String, String> parameters = part.getParameters();
-                                    long recordCount =
-                                            Long.parseLong(
-                                                    parameters.getOrDefault(NUM_ROWS_PROP, "1"));
-                                    long fileSizeInBytes =
-                                            Long.parseLong(
-                                                    parameters.getOrDefault(TOTAL_SIZE_PROP, "1"));
-                                    long fileCount =
-                                            Long.parseLong(
-                                                    parameters.getOrDefault(NUM_FILES_PROP, "1"));
-                                    long lastFileCreationTime =
-                                            Long.parseLong(
-                                                    parameters.getOrDefault(
-                                                            LAST_UPDATE_TIME_PROP,
-                                                            System.currentTimeMillis() + ""));
-                                    int totalBuckets =
-                                            Integer.parseInt(
-                                                    parameters.getOrDefault(TOTAL_BUCKETS, "0"));
-                                    return new org.apache.paimon.partition.Partition(
-                                            Collections.singletonMap(
-                                                    tagToPartitionField, part.getValues().get(0)),
-                                            recordCount,
-                                            fileSizeInBytes,
-                                            fileCount,
-                                            lastFileCreationTime,
-                                            totalBuckets,
-                                            false);
-                                })
-                        .collect(Collectors.toList());
+                List<Partition> hivePartitions = listPartitionsFromHms(identifier);
+                partitions =
+                        hivePartitions.stream()
+                                .map(
+                                        part -> {
+                                            Map<String, String> parameters = part.getParameters();
+                                            long recordCount =
+                                                    Long.parseLong(
+                                                            parameters.getOrDefault(
+                                                                    NUM_ROWS_PROP, "1"));
+                                            long fileSizeInBytes =
+                                                    Long.parseLong(
+                                                            parameters.getOrDefault(
+                                                                    TOTAL_SIZE_PROP, "1"));
+                                            long fileCount =
+                                                    Long.parseLong(
+                                                            parameters.getOrDefault(
+                                                                    NUM_FILES_PROP, "1"));
+                                            long lastFileCreationTime =
+                                                    Long.parseLong(
+                                                            parameters.getOrDefault(
+                                                                    LAST_UPDATE_TIME_PROP,
+                                                                    System.currentTimeMillis()
+                                                                            + ""));
+                                            int totalBuckets =
+                                                    Integer.parseInt(
+                                                            parameters.getOrDefault(
+                                                                    TOTAL_BUCKETS, "0"));
+                                            return new org.apache.paimon.partition.Partition(
+                                                    Collections.singletonMap(
+                                                            tagToPartitionField,
+                                                            part.getValues().get(0)),
+                                                    recordCount,
+                                                    fileSizeInBytes,
+                                                    fileCount,
+                                                    lastFileCreationTime,
+                                                    totalBuckets,
+                                                    false);
+                                        })
+                                .collect(Collectors.toList());
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
+        } else {
+            partitions = listPartitionsFromFileSystem(table);
         }
-        return listPartitionsFromFileSystem(table);
+
+        if (coreOptions.partitionedTableInMetastore()
+                && coreOptions
+                        .partitionMarkDoneActions()
+                        .contains(CoreOptions.PartitionMarkDoneAction.MARK_EVENT)) {
+            return withDoneStatus(identifier, partitions);
+        }
+        return partitions;
+    }
+
+    private List<org.apache.paimon.partition.Partition> withDoneStatus(
+            Identifier identifier, List<org.apache.paimon.partition.Partition> partitions)
+            throws TableNotExistException {
+        try {
+            return clients()
+                    .run(
+                            client -> {
+                                List<org.apache.paimon.partition.Partition> result =
+                                        new ArrayList<>(partitions.size());
+                                for (org.apache.paimon.partition.Partition partition : partitions) {
+                                    boolean done =
+                                            client.isPartitionMarkedForEvent(
+                                                    identifier.getDatabaseName(),
+                                                    identifier.getTableName(),
+                                                    partition.spec(),
+                                                    PartitionEventType.LOAD_DONE);
+                                    result.add(copyWithDone(partition, done));
+                                }
+                                return result;
+                            });
+        } catch (UnknownTableException e) {
+            throw new TableNotExistException(identifier);
+        } catch (TException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private org.apache.paimon.partition.Partition copyWithDone(
+            org.apache.paimon.partition.Partition partition, boolean done) {
+        return new org.apache.paimon.partition.Partition(
+                partition.spec(),
+                partition.recordCount(),
+                partition.fileSizeInBytes(),
+                partition.fileCount(),
+                partition.lastFileCreationTime(),
+                partition.totalBuckets(),
+                done,
+                partition.createdAt(),
+                partition.createdBy(),
+                partition.updatedAt(),
+                partition.updatedBy(),
+                partition.options());
     }
 
     @VisibleForTesting

@@ -304,11 +304,13 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
             // _ROW_ID is the first field of joined table.
             query =
                     String.format(
-                            "SELECT %s, %s FROM %s INNER JOIN %s AS RT ON %s",
+                            "SELECT %s, %s FROM %s INNER JOIN %s "
+                                    + "/*+ OPTIONS('%s'='full') */ AS RT ON %s",
                             "`RT`.`_ROW_ID` as `_ROW_ID`",
                             String.join(",", project),
                             escapedSourceName(),
                             escapedRowTrackingTargetName(),
+                            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(),
                             rewriteMergeCondition(mergeCondition));
         }
 

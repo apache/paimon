@@ -208,12 +208,12 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                     valueLengths[i] = NULL_VALUE_LENGTH;
                     continue;
                 }
-                SeekableInputStream in = openBlobInputStream(blob);
-                if (in == null) {
+                BlobCopySource source = prepareBlobSource(blob);
+                if (source == null) {
                     valueLengths[i] = NULL_VALUE_LENGTH;
                     continue;
                 }
-                BlobDescriptor descriptor = writeBlobData(in);
+                BlobDescriptor descriptor = writeBlobData(source);
                 valueLengths[i] = descriptor.length();
                 flush |= accept(descriptor);
                 recordSuccess(descriptor.length());

@@ -498,7 +498,9 @@ class FileScanner:
                 result = scanner.scan(self.predicate)
                 if result is None:
                     return None
-                return result.or_(scanner.unindexed_rows(self.predicate))
+                scalar_mode = self.table.options.scalar_index_search_mode()
+                return result.or_(
+                    scanner.unindexed_rows(self.predicate, search_mode=scalar_mode))
         except Exception:
             return None
 
@@ -612,8 +614,6 @@ class FileScanner:
     def _validate_chunk_shuffle_compat(self) -> None:
         if self.table.is_primary_key_table:
             raise ValueError("chunk_shuffle only supports append tables")
-        if self.deletion_vectors_enabled:
-            raise ValueError("chunk_shuffle not supported with deletion vectors")
         if self.start_pos_of_this_subtask is not None:
             raise ValueError("chunk_shuffle cannot combine with with_slice")
         if self.limit is not None:

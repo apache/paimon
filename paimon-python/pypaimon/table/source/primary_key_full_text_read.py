@@ -40,11 +40,11 @@ class PrimaryKeyFullTextRead(DataEvolutionFullTextRead):
                  partition_filter=None):
         mode = CoreOptions(
             Options(dict(table.table_schema.options))
-        ).global_index_search_mode()
+        ).full_text_index_search_mode()
         if mode != GlobalIndexSearchMode.FAST:
             raise NotImplementedError(
                 "Primary-key full-text search only supports the FAST "
-                "global-index search mode; FULL and DETAIL require "
+                "full-text index search mode; FULL and DETAIL require "
                 "merge-aware logical-row fallback.")
         self._definition = definition
         super().__init__(table, limit, text_column, query, partition_filter)

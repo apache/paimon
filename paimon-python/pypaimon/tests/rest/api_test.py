@@ -330,17 +330,17 @@ class ApiTest(unittest.TestCase):
 
         # Test commit_snapshot with None identifier
         with self.assertRaises(ValueError) as context:
-            rest_api.commit_snapshot(None, "uuid", Mock(), [])
+            rest_api.commit_snapshot(None, "uuid", None, Mock(), [])
         self.assertIn("Identifier cannot be None", str(context.exception))
 
         # Test commit_snapshot with None snapshot
         with self.assertRaises(ValueError) as context:
-            rest_api.commit_snapshot(Mock(), "uuid", None, [])
+            rest_api.commit_snapshot(Mock(), "uuid", None, None, [])
         self.assertIn("Snapshot cannot be None", str(context.exception))
 
         # Test commit_snapshot with None statistics
         with self.assertRaises(ValueError) as context:
-            rest_api.commit_snapshot(Mock(), "uuid", Mock(), None)
+            rest_api.commit_snapshot(Mock(), "uuid", None, Mock(), None)
         self.assertIn("Statistics cannot be None", str(context.exception))
 
     def test_list_tables_paged_with_table_type_param(self):

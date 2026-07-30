@@ -62,6 +62,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
@@ -168,6 +169,48 @@ public class AppendOnlyWriterTest {
         assertThat(meta.level()).isEqualTo(DataFileMeta.DUMMY_LEVEL);
         assertThat(meta.fileName().substring(meta.fileName().lastIndexOf(".") + 1))
                 .isEqualTo(CoreOptions.FILE_FORMAT_AVRO);
+    }
+
+    @Test
+    public void testBinaryColumnStatsRoundTrip() throws Exception {
+        RowType binarySchema =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {new IntType(), new VarBinaryType()},
+                                new String[] {"id", "data"})
+                        .build();
+        Map<String, String> options = new HashMap<>();
+        options.put("metadata.stats-mode", "full");
+
+        AppendOnlyWriter writer =
+                createWriterBase(
+                                1024 * 1024L,
+                                null,
+                                binarySchema,
+                                false,
+                                true,
+                                true,
+                                true,
+                                Collections.emptyList(),
+                                compactBefore -> Collections.emptyList(),
+                                options)
+                        .getKey();
+
+        writer.write(GenericRow.of(1, new byte[] {1, 2, 3}));
+        writer.write(GenericRow.of(2, new byte[] {(byte) 200}));
+        writer.write(GenericRow.of(3, new byte[] {0}));
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
+        assertThat(LocalFileIO.create().exists(pathFactory.toPath(meta))).isTrue();
+
+        assertThat(meta.valueStats().minValues().isNullAt(1))
+                .as("binary column min must be present in file stats")
+                .isFalse();
+        assertThat(meta.valueStats().minValues().getBinary(1)).isEqualTo(new byte[] {0});
+        assertThat(meta.valueStats().maxValues().getBinary(1)).isEqualTo(new byte[] {(byte) 200});
+        assertThat(meta.valueStats().nullCounts().getLong(1)).isEqualTo(0L);
     }
 
     @Test
@@ -509,7 +552,7 @@ public class AppendOnlyWriterTest {
                                 nameToId("a", 0, "b", 1),
                                 fieldToColumns(0, columns(0), 1, columns(0)),
                                 overflowFields(),
-                                1,
+                                3,
                                 1));
     }
 
@@ -528,7 +571,7 @@ public class AppendOnlyWriterTest {
 
         assertThat(readSharedShreddingFieldMeta(context, file, "tags"))
                 .isEqualTo(
-                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 1, 0));
+                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 3, 0));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -557,17 +600,18 @@ public class AppendOnlyWriterTest {
 
         assertThat(readSharedShreddingFieldMeta(context, nullFile, "tags"))
                 .isEqualTo(
-                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 1, 0));
+                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 3, 0));
         assertThat(readSharedShreddingFieldMeta(context, emptyFile, "tags"))
                 .isEqualTo(
-                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 1, 0));
+                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 3, 0));
         assertThat(readSharedShreddingFieldMeta(context, valuesFile, "tags"))
                 .isEqualTo(
                         sharedShreddingMeta(
                                 nameToId("a", 0, "b", 1, "c", 2, "d", 3),
-                                fieldToColumns(0, columns(0), 1, columns(0), 2, columns(0)),
-                                overflowFields(3),
-                                1,
+                                fieldToColumns(
+                                        0, columns(0), 1, columns(0), 2, columns(0), 3, columns(1)),
+                                overflowFields(),
+                                3,
                                 2));
     }
 
@@ -613,9 +657,9 @@ public class AppendOnlyWriterTest {
                 .isEqualTo(
                         sharedShreddingMeta(
                                 nameToId("a", 0, "b", 1, "c", 2),
-                                fieldToColumns(0, columns(0), 1, columns(1)),
-                                overflowFields(2),
-                                2,
+                                fieldToColumns(0, columns(0), 1, columns(1), 2, columns(2)),
+                                overflowFields(),
+                                3,
                                 3));
     }
 
@@ -658,7 +702,7 @@ public class AppendOnlyWriterTest {
                                 nameToId("a", 0),
                                 fieldToColumns(0, columns(0)),
                                 overflowFields(),
-                                1,
+                                3,
                                 1));
     }
 

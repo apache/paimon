@@ -117,7 +117,11 @@ public class DataEvolutionFullTextScan implements FullTextScan {
         if (!allIndexFiles.isEmpty()) {
             List<Range> rawRowRanges =
                     new DataEvolutionGlobalIndexCoverage(
-                                    table, snapshot, partitionFilter, allIndexFiles)
+                                    table,
+                                    snapshot,
+                                    partitionFilter,
+                                    allIndexFiles,
+                                    table.coreOptions().fullTextIndexSearchMode())
                             .unindexedRanges(textColumnIds);
             if (!rawRowRanges.isEmpty()) {
                 splits.add(new RawFullTextSearchSplit(rawRowRanges));

@@ -155,7 +155,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
                 && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn.name());
     }
 
-    VectorSearchBuilderImpl withSnapshot(Snapshot snapshot) {
+    public VectorSearchBuilderImpl withSnapshot(Snapshot snapshot) {
         this.pinnedSnapshot = snapshot;
         return this;
     }

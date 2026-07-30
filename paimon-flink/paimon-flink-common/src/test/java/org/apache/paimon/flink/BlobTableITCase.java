@@ -84,6 +84,42 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testDedicatedSplitGenerationWithBlobProjection() {
+        tEnv.executeSql(
+                "CREATE TABLE dedicated_blob_table (id INT, data STRING, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='picture')");
+        batchSql(
+                "INSERT INTO dedicated_blob_table VALUES"
+                        + " (1, 'paimon', X'48656C6C6F'),"
+                        + " (2, 'flink', X'5945')");
+
+        assertThat(
+                        batchSql(
+                                "SELECT picture, id FROM dedicated_blob_table"
+                                        + " /*+ OPTIONS('scan.dedicated-split-generation'='true') */"
+                                        + " ORDER BY id"))
+                .containsExactly(
+                        Row.of(new byte[] {72, 101, 108, 108, 111}, 1),
+                        Row.of(new byte[] {89, 69}, 2));
+
+        batchSql("ALTER TABLE dedicated_blob_table SET ('blob-as-descriptor'='true')");
+        List<Row> descriptorRows =
+                batchSql(
+                        "SELECT picture, id FROM dedicated_blob_table"
+                                + " /*+ OPTIONS('scan.dedicated-split-generation'='true') */"
+                                + " ORDER BY id");
+        assertThat(descriptorRows).hasSize(2);
+        assertThat(BlobDescriptor.deserialize((byte[]) descriptorRows.get(0).getField(0)).length())
+                .isEqualTo(5);
+        assertThat(descriptorRows.get(0).getField(1)).isEqualTo(1);
+        assertThat(BlobDescriptor.deserialize((byte[]) descriptorRows.get(1).getField(0)).length())
+                .isEqualTo(2);
+        assertThat(descriptorRows.get(1).getField(1)).isEqualTo(2);
+    }
+
+    @Test
     public void testMultipleBlobs() {
         batchSql("SELECT * FROM multiple_blob_table");
         batchSql("INSERT INTO multiple_blob_table VALUES (1, 'paimon', X'48656C6C6F', X'5945')");
@@ -620,6 +656,38 @@ public class BlobTableITCase extends CatalogITCaseBase {
         batchSql("ALTER TABLE blob_table_descriptor SET ('blob-as-descriptor'='false')");
         assertThat(batchSql("SELECT * FROM blob_table_descriptor"))
                 .containsExactlyInAnyOrder(Row.of(1, "paimon", blobData));
+    }
+
+    @Test
+    public void testDescriptorToPresignedUrlBuiltInFunctions() {
+        assertThat(batchSql("SHOW FUNCTIONS IN sys"))
+                .contains(
+                        Row.of("descriptor_to_presigned_url"),
+                        Row.of("try_descriptor_to_presigned_url"));
+
+        assertThat(
+                        batchSql(
+                                "SELECT sys.descriptor_to_presigned_url("
+                                        + "'default.blob_table_descriptor', "
+                                        + "CAST(NULL AS BYTES), INTERVAL '1' HOUR)"))
+                .containsExactly(Row.of((Object) null));
+        assertThat(
+                        batchSql(
+                                "SELECT sys.try_descriptor_to_presigned_url("
+                                        + "'default.blob_table_descriptor', "
+                                        + "sys.path_to_descriptor('file:///tmp/blob'), "
+                                        + "INTERVAL '1' HOUR)"))
+                .containsExactly(Row.of((Object) null));
+
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "SELECT sys.descriptor_to_presigned_url("
+                                                + "'default.blob_table_descriptor', "
+                                                + "sys.path_to_descriptor('file:///tmp/blob'), "
+                                                + "INTERVAL '1' HOUR)"))
+                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
+                .hasStackTraceContaining("does not support creating blob presigned URLs");
     }
 
     @Test
