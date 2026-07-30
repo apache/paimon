@@ -172,41 +172,52 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testCannotChangeMapStorageLayoutForExistingField() throws Exception {
+    public void testChangeMapStorageLayoutForExistingField() throws Exception {
         retryArtificialException(() -> manager.createTable(mapStorageLayoutSchema("default")));
 
-        assertThatThrownBy(
-                        () ->
-                                retryArtificialException(
-                                        () ->
-                                                manager.commitChanges(
-                                                        SchemaChange.setOption(
-                                                                "fields.metrics.map.storage-layout",
-                                                                "shared-shredding"))))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining(
-                        "Cannot change map storage layout for field id 1 ('metrics' -> 'metrics') from 'default' to 'shared-shredding'.");
+        retryArtificialException(
+                () ->
+                        manager.commitChanges(
+                                SchemaChange.setOption(
+                                        "fields.metrics.map.storage-layout", "shared-shredding")));
+        Optional<TableSchema> sharedShredding = retryArtificialException(() -> manager.latest());
+        assertThat(sharedShredding).isPresent();
+        assertThat(sharedShredding.get().options())
+                .containsEntry("fields.metrics.map.storage-layout", "shared-shredding")
+                .containsEntry("fields.metrics.map.shared-shredding.max-columns", "2");
+
+        retryArtificialException(
+                () ->
+                        manager.commitChanges(
+                                SchemaChange.setOption(
+                                        "fields.metrics.map.storage-layout", "default")));
+        Optional<TableSchema> defaultLayout = retryArtificialException(() -> manager.latest());
+        assertThat(defaultLayout).isPresent();
+        assertThat(defaultLayout.get().options())
+                .containsEntry("fields.metrics.map.storage-layout", "default")
+                .containsEntry("fields.metrics.map.shared-shredding.max-columns", "2");
     }
 
     @Test
-    public void testCannotChangeMapStorageLayoutByRenameColumn() throws Exception {
+    public void testChangeMapStorageLayoutByRenameColumn() throws Exception {
         retryArtificialException(() -> manager.createTable(mapStorageLayoutSchema(null)));
 
-        assertThatThrownBy(
-                        () ->
-                                retryArtificialException(
-                                        () ->
-                                                manager.commitChanges(
-                                                        Arrays.asList(
-                                                                SchemaChange.renameColumn(
-                                                                        "metrics",
-                                                                        "renamed_metrics"),
-                                                                SchemaChange.setOption(
-                                                                        "fields.renamed_metrics.map.storage-layout",
-                                                                        "shared-shredding")))))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining(
-                        "Cannot change map storage layout for field id 1 ('metrics' -> 'renamed_metrics') from 'default' to 'shared-shredding'.");
+        retryArtificialException(
+                () ->
+                        manager.commitChanges(
+                                Arrays.asList(
+                                        SchemaChange.renameColumn("metrics", "renamed_metrics"),
+                                        SchemaChange.setOption(
+                                                "fields.renamed_metrics.map.storage-layout",
+                                                "shared-shredding"))));
+
+        Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
+        assertThat(latest).isPresent();
+        assertThat(latest.get().fields().get(1).id()).isEqualTo(1);
+        assertThat(latest.get().fields().get(1).name()).isEqualTo("renamed_metrics");
+        assertThat(latest.get().options())
+                .doesNotContainKey("fields.metrics.map.storage-layout")
+                .containsEntry("fields.renamed_metrics.map.storage-layout", "shared-shredding");
     }
 
     @ParameterizedTest
