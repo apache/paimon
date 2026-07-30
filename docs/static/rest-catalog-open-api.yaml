@@ -3203,6 +3203,9 @@ components:
       properties:
         tableId:
           type: string
+        baseSnapshotUuid:
+          type: string
+          nullable: true
         snapshot:
           $ref: '#/components/schemas/Snapshot'
         statistics:
@@ -3267,6 +3270,9 @@ components:
         version:
           type: integer
           format: int32
+          nullable: true
+        uuid:
+          type: string
           nullable: true
         id:
           type: integer

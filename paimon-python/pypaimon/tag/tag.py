@@ -62,6 +62,7 @@ class Tag(Snapshot):
         """
         return Tag(
             version=snapshot.version,
+            uuid=snapshot.uuid,
             id=snapshot.id,
             schema_id=snapshot.schema_id,
             base_manifest_list=snapshot.base_manifest_list,
@@ -90,6 +91,7 @@ class Tag(Snapshot):
         """Convert this Tag to a Snapshot"""
         return Snapshot(
             version=self.version,
+            uuid=self.uuid,
             id=self.id,
             schema_id=self.schema_id,
             base_manifest_list=self.base_manifest_list,

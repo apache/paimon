@@ -44,6 +44,7 @@ public class Changelog extends Snapshot {
     public Changelog(Snapshot snapshot) {
         this(
                 snapshot.version(),
+                snapshot.uuid(),
                 snapshot.id(),
                 snapshot.schemaId(),
                 snapshot.baseManifestList(),
@@ -70,6 +71,7 @@ public class Changelog extends Snapshot {
     @JsonCreator
     public Changelog(
             @JsonProperty(FIELD_VERSION) int version,
+            @JsonProperty(FIELD_UUID) @Nullable String uuid,
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
@@ -94,6 +96,7 @@ public class Changelog extends Snapshot {
             @JsonProperty(FIELD_OPERATION) @Nullable Operation operation) {
         super(
                 version,
+                uuid,
                 id,
                 schemaId,
                 baseManifestList,

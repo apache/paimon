@@ -466,11 +466,13 @@ public class RESTCatalog implements Catalog {
     public boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,
+            @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws TableNotExistException {
         try {
-            return api.commitSnapshot(identifier, tableUuid, snapshot, statistics);
+            return api.commitSnapshot(
+                    identifier, tableUuid, baseSnapshotUuid, snapshot, statistics);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier, e);
         } catch (ForbiddenException e) {

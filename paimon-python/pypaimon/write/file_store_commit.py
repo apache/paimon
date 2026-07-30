@@ -615,7 +615,11 @@ class FileStoreCommit:
         # Use SnapshotCommit for atomic commit
         try:
             with self.snapshot_commit:
-                success = self.snapshot_commit.commit(snapshot_data, statistics)
+                success = self.snapshot_commit.commit(
+                    latest_snapshot.uuid if latest_snapshot else None,
+                    snapshot_data,
+                    statistics,
+                )
                 if not success:
                     commit_time_s = (int(time.time() * 1000) - start_millis) / 1000
                     logger.warning(

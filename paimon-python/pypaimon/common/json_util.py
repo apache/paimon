@@ -24,7 +24,8 @@ T = TypeVar("T")
 
 def json_field(json_name: str, **kwargs):
     """Create a field with custom JSON name"""
-    return field(metadata={"json_name": json_name}, **kwargs)
+    metadata = kwargs.pop("metadata", {})
+    return field(metadata={"json_name": json_name, **metadata}, **kwargs)
 
 
 def optional_json_field(json_name: str, json_include: str):
@@ -163,5 +164,15 @@ class JSON:
                         kwargs[field_name] = JSON.__from_dict(value, type_mapping[json_name])
                 else:
                     kwargs[field_name] = value
+
+        for field_info in fields(target_class):
+            json_name = field_info.metadata.get("json_name", field_info.name)
+            if (
+                json_name not in data
+                and "json_missing_default" in field_info.metadata
+            ):
+                kwargs[field_info.name] = field_info.metadata[
+                    "json_missing_default"
+                ]
 
         return target_class(**kwargs)
