@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.FileType;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -32,6 +33,8 @@ import org.apache.paimon.utils.InstantiationUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -41,7 +44,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_DIR;
 import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_ENABLED;
+import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_MAX_SIZE;
 import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_WHITELIST;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -110,7 +115,7 @@ class CachingFileIOTest {
             assertThat(result).isEqualTo(data);
         }
 
-        assertThat(delegate.getFileStatusCallCount("snapshot-1")).isEqualTo(1);
+        assertThat(delegate.getFileStatusCallCount("snapshot-1")).isEqualTo(2);
     }
 
     @Test
@@ -162,24 +167,21 @@ class CachingFileIOTest {
             assertThat(stream).isInstanceOf(CachingSeekableInputStream.class);
             assertThat(readAll(stream, data.length)).isEqualTo(data);
         }
+        restored.close();
     }
 
     @Test
-    void testDeserializedWrappersShareCacheInSameJvm() throws Exception {
+    void testDeserializedCopiesOfSameWrapperShareCacheInSameJvm() throws Exception {
         byte[] data = "shared index data".getBytes();
         String fileName = "global-index-shared-uuid.index";
 
         CatalogContext context = localCacheContext();
 
-        MockFileIO firstDelegate = new MockFileIO();
-        firstDelegate.addFile(fileName, data);
-        CachingFileIO first =
-                InstantiationUtil.clone(newCatalogCachingFileIO(firstDelegate, context));
-
-        MockFileIO secondDelegate = new MockFileIO();
-        secondDelegate.addFile(fileName, data);
-        CachingFileIO second =
-                InstantiationUtil.clone(newCatalogCachingFileIO(secondDelegate, context));
+        MockFileIO delegate = new MockFileIO();
+        delegate.addFile(fileName, data);
+        CachingFileIO original = newCatalogCachingFileIO(delegate, context);
+        CachingFileIO first = InstantiationUtil.clone(original);
+        CachingFileIO second = InstantiationUtil.clone(original);
 
         try (SeekableInputStream stream = first.newInputStream(new Path(fileName))) {
             assertThat(readAll(stream, data.length)).isEqualTo(data);
@@ -190,11 +192,182 @@ class CachingFileIOTest {
             assertThat(readAll(stream, data.length)).isEqualTo(data);
         }
         assertThat(MockFileIO.globalInputStreamCallCount(fileName)).isEqualTo(1);
+
+        first.close();
+        second.close();
+    }
+
+    @Test
+    void testDeserializedWrappersFromDifferentManagersDoNotShareCache() throws Exception {
+        byte[] firstData = "first catalog data".getBytes();
+        byte[] secondData = "other catalog data".getBytes();
+        String fileName = "global-index-isolated-uuid.index";
+
+        CatalogContext context = localCacheContext();
+
+        MockFileIO firstDelegate = new MockFileIO();
+        firstDelegate.addFile(fileName, firstData);
+        CachingFileIO first =
+                InstantiationUtil.clone(newCatalogCachingFileIO(firstDelegate, context));
+
+        MockFileIO secondDelegate = new MockFileIO();
+        secondDelegate.addFile(fileName, secondData);
+        CachingFileIO second =
+                InstantiationUtil.clone(newCatalogCachingFileIO(secondDelegate, context));
+
+        try (SeekableInputStream stream = first.newInputStream(new Path(fileName))) {
+            assertThat(readAll(stream, firstData.length)).isEqualTo(firstData);
+        }
+
+        try (SeekableInputStream stream = second.newInputStream(new Path(fileName))) {
+            assertThat(readAll(stream, secondData.length)).isEqualTo(secondData);
+        }
+        assertThat(MockFileIO.globalInputStreamCallCount(fileName)).isEqualTo(2);
+
+        first.close();
+        second.close();
+    }
+
+    @Test
+    void testWrappersWithSameManagerUseDifferentSecurityScopes() throws Exception {
+        byte[] firstData = "first security data".getBytes();
+        byte[] secondData = "other security data".getBytes();
+        String fileName = "global-index-security-scope-uuid.index";
+        CatalogContext context = localCacheContext();
+        LocalCacheManager cache = CachingFileIO.createCacheManager(context);
+
+        MockFileIO firstDelegate = new MockFileIO();
+        firstDelegate.addFile(fileName, firstData);
+        CachingFileIO first =
+                InstantiationUtil.clone(
+                        (CachingFileIO)
+                                CachingFileIO.wrapWithCachingIfNeeded(
+                                        firstDelegate, context, cache));
+
+        MockFileIO secondDelegate = new MockFileIO();
+        secondDelegate.addFile(fileName, secondData);
+        CachingFileIO second =
+                InstantiationUtil.clone(
+                        (CachingFileIO)
+                                CachingFileIO.wrapWithCachingIfNeeded(
+                                        secondDelegate, context, cache));
+
+        try (SeekableInputStream stream = first.newInputStream(new Path(fileName))) {
+            assertThat(readAll(stream, firstData.length)).isEqualTo(firstData);
+        }
+        try (SeekableInputStream stream = second.newInputStream(new Path(fileName))) {
+            assertThat(readAll(stream, secondData.length)).isEqualTo(secondData);
+        }
+
+        first.close();
+        second.close();
+    }
+
+    @Test
+    void testDeserializedWrappersShareConfiguredMemoryLimit() throws Exception {
+        byte[] firstData = "first-cache-block".getBytes();
+        byte[] secondData = "second-cache-data".getBytes();
+        String firstFile = "global-index-limit-first.index";
+        String secondFile = "global-index-limit-second.index";
+        CatalogContext context = localCacheContext(firstData.length);
+
+        MockFileIO firstDelegate = new MockFileIO();
+        firstDelegate.addFile(firstFile, firstData);
+        CachingFileIO first =
+                InstantiationUtil.clone(newCatalogCachingFileIO(firstDelegate, context));
+
+        MockFileIO secondDelegate = new MockFileIO();
+        secondDelegate.addFile(secondFile, secondData);
+        CachingFileIO second =
+                InstantiationUtil.clone(newCatalogCachingFileIO(secondDelegate, context));
+
+        try (SeekableInputStream stream = first.newInputStream(new Path(firstFile))) {
+            assertThat(readAll(stream, firstData.length)).isEqualTo(firstData);
+        }
+        try (SeekableInputStream stream = second.newInputStream(new Path(secondFile))) {
+            assertThat(readAll(stream, secondData.length)).isEqualTo(secondData);
+        }
+        try (SeekableInputStream stream = first.newInputStream(new Path(firstFile))) {
+            assertThat(readAll(stream, firstData.length)).isEqualTo(firstData);
+        }
+
+        assertThat(MockFileIO.globalInputStreamCallCount(firstFile)).isEqualTo(2);
+        first.close();
+        second.close();
+    }
+
+    @Test
+    void testDeserializedCacheIsReleasedAfterAllExistingWrappersClose() throws Exception {
+        byte[] data = "released cache data".getBytes();
+        String fileName = "global-index-released-uuid.index";
+
+        MockFileIO delegate = new MockFileIO();
+        delegate.addFile(fileName, data);
+        CachingFileIO original = newCatalogCachingFileIO(delegate, localCacheContext());
+
+        CachingFileIO first = InstantiationUtil.clone(original);
+        CachingFileIO second = InstantiationUtil.clone(original);
+        try (SeekableInputStream stream = first.newInputStream(new Path(fileName))) {
+            assertThat(readAll(stream, data.length)).isEqualTo(data);
+        }
+        first.close();
+
+        try (SeekableInputStream stream = second.newInputStream(new Path(fileName))) {
+            assertThat(readAll(stream, data.length)).isEqualTo(data);
+        }
+        assertThat(MockFileIO.globalInputStreamCallCount(fileName)).isEqualTo(1);
+        second.close();
+
+        CachingFileIO third = InstantiationUtil.clone(original);
+        try (SeekableInputStream stream = third.newInputStream(new Path(fileName))) {
+            assertThat(readAll(stream, data.length)).isEqualTo(data);
+        }
+        assertThat(MockFileIO.globalInputStreamCallCount(fileName)).isEqualTo(2);
+        third.close();
+    }
+
+    @Test
+    void testDiskCacheIsReusedAfterManagerRecreation() throws Exception {
+        byte[] data = "persistent disk cache data".getBytes();
+        String fileName = "global-index-persistent-uuid.index";
+        CatalogContext context = localDiskCacheContext();
+
+        MockFileIO firstDelegate = new MockFileIO();
+        firstDelegate.addFile(fileName, data);
+        CachingFileIO first = newCatalogCachingFileIO(firstDelegate, context);
+        try (SeekableInputStream stream = first.newInputStream(new Path(fileName))) {
+            assertThat(readAll(stream, data.length)).isEqualTo(data);
+        }
+        first.close();
+
+        MockFileIO secondDelegate = new MockFileIO();
+        secondDelegate.addFile(fileName, data);
+        CachingFileIO second = newCatalogCachingFileIO(secondDelegate, context);
+        try (SeekableInputStream stream = second.newInputStream(new Path(fileName))) {
+            assertThat(readAll(stream, data.length)).isEqualTo(data);
+        }
+        assertThat(MockFileIO.globalInputStreamCallCount(fileName)).isEqualTo(1);
+        second.close();
     }
 
     private CatalogContext localCacheContext() {
+        return localCacheContext(null);
+    }
+
+    private CatalogContext localCacheContext(@Nullable Integer maxSize) {
         Options options = new Options();
         options.set(LOCAL_CACHE_ENABLED, true);
+        options.set(LOCAL_CACHE_WHITELIST, "global-index");
+        if (maxSize != null) {
+            options.set(LOCAL_CACHE_MAX_SIZE, MemorySize.ofBytes(maxSize));
+        }
+        return CatalogContext.create(options);
+    }
+
+    private CatalogContext localDiskCacheContext() {
+        Options options = new Options();
+        options.set(LOCAL_CACHE_ENABLED, true);
+        options.set(LOCAL_CACHE_DIR, cacheDir);
         options.set(LOCAL_CACHE_WHITELIST, "global-index");
         return CatalogContext.create(options);
     }
