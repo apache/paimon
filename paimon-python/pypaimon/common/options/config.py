@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options.config_options import ConfigOptions
 
 
@@ -78,6 +79,16 @@ class CatalogOptions:
     METASTORE = ConfigOptions.key("metastore").string_type().default_value("filesystem").with_description(
         "Metastore type")
     WAREHOUSE = ConfigOptions.key("warehouse").string_type().no_default_value().with_description("Warehouse path")
+    FILE_FORMAT_METADATA_CACHE_MAX_SIZE = (
+        ConfigOptions.key("file-format.metadata-cache.max-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(50))
+        .with_description(
+            "Maximum estimated size of reusable PyArrow Dataset metadata "
+            "cached in the current process. Set to 0 to disable and clear "
+            "the cache."
+        )
+    )
     TOKEN_PROVIDER = ConfigOptions.key("token.provider").string_type().no_default_value().with_description(
         "Token provider")
     TOKEN = ConfigOptions.key("token").string_type().no_default_value().with_description("Authentication token")
