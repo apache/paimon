@@ -79,23 +79,6 @@ public class SplitSerializerTest {
     }
 
     @Test
-    public void testV1Compatibility() throws IOException {
-        List<String> v1CompatibleFileNames =
-                Arrays.asList(
-                        "split-v1-data",
-                        "split-v1-incremental",
-                        "split-v1-indexed",
-                        "split-v1-query-auth",
-                        "split-v1-fallback-data",
-                        "split-v1-chain",
-                        "split-v1-fallback");
-
-        for (String fileName : v1CompatibleFileNames) {
-            assertThat(SplitSerializer.deserialize(readGoldenFile(fileName))).isNotNull();
-        }
-    }
-
-    @Test
     public void testFallbackSplitImplSerializeAndDeserialize() throws IOException {
         FallbackReadFileStoreTable.FallbackSplitImpl split = fallbackSplit();
 
@@ -140,13 +123,13 @@ public class SplitSerializerTest {
                         FallbackReadFileStoreTable.toFallbackSplit(dataSplit, true);
         FallbackReadFileStoreTable.FallbackSplitImpl fallbackSplit = fallbackSplit();
 
-        cases.add(new GoldenCase("split-v2-data", dataSplit));
-        cases.add(new GoldenCase("split-v2-incremental", incrementalSplit));
-        cases.add(new GoldenCase("split-v2-indexed", indexedSplit));
-        cases.add(new GoldenCase("split-v2-chain", chainSplit));
-        cases.add(new GoldenCase("split-v2-query-auth", queryAuthSplit));
-        cases.add(new GoldenCase("split-v2-fallback-data", fallbackDataSplit));
-        cases.add(new GoldenCase("split-v2-fallback", fallbackSplit));
+        cases.add(new GoldenCase("split-v1-data", dataSplit));
+        cases.add(new GoldenCase("split-v1-incremental", incrementalSplit));
+        cases.add(new GoldenCase("split-v1-indexed", indexedSplit));
+        cases.add(new GoldenCase("split-v1-chain", chainSplit));
+        cases.add(new GoldenCase("split-v1-query-auth", queryAuthSplit));
+        cases.add(new GoldenCase("split-v1-fallback-data", fallbackDataSplit));
+        cases.add(new GoldenCase("split-v1-fallback", fallbackSplit));
         return cases;
     }
 
