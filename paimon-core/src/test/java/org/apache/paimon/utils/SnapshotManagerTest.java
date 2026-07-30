@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 
 import javax.annotation.Nullable;
 
@@ -158,6 +159,24 @@ public class SnapshotManagerTest {
         assertThatThrownBy(() -> snapshotManager.repairEarliestSnapshot(3))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Snapshot 4 does not exist");
+    }
+
+    @Test
+    public void testRepairEarliestSnapshotListsSnapshots() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        for (long snapshotId : new long[] {1, 3, 4, 5, 6}) {
+            fileIO.tryToWriteAtomic(
+                    snapshotManager.snapshotPath(snapshotId),
+                    createSnapshotWithMillis(snapshotId, snapshotId * 1000).toJson());
+        }
+        snapshotManager.commitEarliestHint(1);
+        snapshotManager.commitLatestHint(6);
+        Mockito.clearInvocations(fileIO);
+
+        assertThat(snapshotManager.repairEarliestSnapshot(3)).isEqualTo(1);
+        Mockito.verify(fileIO).listStatus(snapshotManager.snapshotDirectory());
+        Mockito.verify(fileIO, Mockito.never()).exists(snapshotManager.snapshotPath(4));
     }
 
     @Test

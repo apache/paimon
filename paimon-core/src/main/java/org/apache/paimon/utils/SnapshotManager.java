@@ -294,8 +294,18 @@ public class SnapshotManager implements Serializable {
                 "Snapshot %s must not be later than latest snapshot %s.",
                 snapshotId,
                 latest);
+        Set<Long> snapshotIds;
+        try {
+            snapshotIds =
+                    snapshotIdStream()
+                            .filter(id -> id >= snapshotId && id <= latest)
+                            .collect(Collectors.toSet());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
         for (long id = snapshotId; ; id++) {
-            Preconditions.checkArgument(snapshotExists(id), "Snapshot %s does not exist.", id);
+            Preconditions.checkArgument(
+                    snapshotIds.contains(id), "Snapshot %s does not exist.", id);
             if (id == latest) {
                 break;
             }
