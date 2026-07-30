@@ -100,6 +100,15 @@ class TableUpdateByRowId:
 
         self.commit_messages: List[CommitMessage] = []
 
+    def _snapshot_files_info(self) -> _FilesInfo:
+        """Return the already loaded snapshot file index for broadcast."""
+        return _FilesInfo(
+            snapshot_id=self.snapshot_id,
+            first_row_ids=self.first_row_ids,
+            first_row_id_index=self._first_row_id_index,
+            valid_row_id_ranges=self.valid_row_id_ranges,
+        )
+
     def _load_existing_files_info(self) -> _FilesInfo:
         """Scan the latest snapshot once and index files by ``first_row_id``.
 
