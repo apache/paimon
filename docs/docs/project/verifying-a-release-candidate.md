@@ -88,9 +88,6 @@ shasum -a 512 -c "${PAIMON_ARCHIVE}.sha512"
 shasum -a 512 -c "${PYPAIMON_ARCHIVE}.sha512"
 ```
 
-Also compare the two archive digests with the release manifest attached to the
-GitHub Actions run.
-
 ## Verify Git provenance
 
 ```shell
@@ -308,10 +305,11 @@ Open the workflow run linked in the vote email and confirm:
 
 - it was triggered from the signed `RC_TAG`;
 - `head_sha` equals the announced commit;
-- source, JDK 8, JDK 11, JDK 17, Python, and manifest jobs all succeeded;
+- JDK 8, JDK 11, JDK 17, Python packaging, and Python publishing jobs all
+  succeeded;
 - the logs show the expected JDK and Python versions;
-- the source archive hashes equal the files in ASF dist dev;
-- the Nexus IDs and TestPyPI version equal those in the vote email;
+- the Nexus IDs in the three staging manifests and the TestPyPI version equal
+  those in the vote email;
 - no later rerun silently replaced a failed lane with artifacts from another
   commit.
 
@@ -335,7 +333,7 @@ Verified:
 - Java staging repositories and representative class-file targets
 - PyPaimon source build/tests on Python <versions>
 - TestPyPI installation and smoke test
-- GitHub Actions run provenance and artifact manifest
+- GitHub Actions run provenance, Java staging manifests, and Python artifacts
 ```
 
 For a `-1`, describe the failure precisely enough for the RM to reproduce it.

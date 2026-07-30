@@ -68,23 +68,21 @@ compiler target is not a substitute for running the JDK 8 and JDK 11 lanes.
 
 ## GitHub Actions release workflow
 
-The release process uses a **Release** workflow in
-[GitHub Actions](https://github.com/apache/paimon/actions) to package every
-candidate from its signed RC tag. Before cutting an RC, confirm that this
-workflow is present and enabled on the release branch. It must record the tag,
-commit SHA, inputs, tool versions, artifact checksums, and Nexus staging
-repository IDs.
+The release process uses the
+[Release workflow](https://github.com/apache/paimon/actions/workflows/release.yml)
+to stage Java and package PyPaimon from every signed RC tag. The RM creates and
+signs the two ASF source archives locally from the same tag; they are not
+rebuilt by GitHub Actions.
 
 The workflow has the following contract:
 
 | Job | Required behavior |
 | --- | --- |
-| Source | Run `tools/releasing/create_source_release.sh`, and upload the Paimon archive, signature, and checksum without changing them |
-| Java 8 | Use Temurin 8 and `tools/releasing/deploy_staging_jars.sh` |
-| Java 11 | Use Temurin 11 and `tools/releasing/deploy_staging_jars_for_jdk11.sh` |
-| Java 17 | Use Temurin 17 and `tools/releasing/deploy_staging_jars_for_jdk17.sh` |
-| Python | Build the PyPaimon source distribution, sign and checksum it, run the supported Python test matrix, and publish the RC package to TestPyPI |
-| Manifest | Collect the SHA-512 digest of every workflow artifact and all Nexus staging repository IDs in one release manifest |
+| Java 8 | Use Temurin 8 and `tools/releasing/deploy_staging_jars.sh`, then upload the staging manifest and log |
+| Java 11 | Use Temurin 11 and `tools/releasing/deploy_staging_jars_for_jdk11.sh`, then upload the staging manifest and log |
+| Java 17 | Use Temurin 17 and `tools/releasing/deploy_staging_jars_for_jdk17.sh`, then upload the staging manifest and log |
+| Python package | Build and validate the PyPaimon source distribution and universal wheel, then upload them as workflow artifacts |
+| Python publish | Publish an RC to TestPyPI only after all Java and Python packaging jobs pass; publish a final tag to PyPI |
 
 The Java jobs deploy signed artifacts to Nexus staging but must not close or
 release those repositories. The Python RC job publishes
@@ -93,8 +91,9 @@ promotion steps remain disabled until the vote passes.
 
 Configure the protected release environment with the Nexus credentials already
 used by the snapshot workflows (`NEXUS_USER` and `NEXUS_PW`), the release GPG
-private key and passphrase, and TestPyPI/PyPI credentials. Require an RM approval
-for jobs that use publishing credentials.
+private key and passphrase (`GPG_SECRET_KEY` and `GPG_PASSPHRASE`), and the
+Python repository tokens (`TEST_PYPI_API_TOKEN` and `PYPI_API_TOKEN`). Require
+an RM approval for jobs that use publishing credentials.
 
 ## One-time RM setup
 
@@ -139,7 +138,7 @@ RELEASE_TAG="release-${PAIMON_VERSION}"
 ```
 
 Use these exact values in the branch, tag, workflow inputs, SVN directories,
-vote email, and release manifest.
+vote email, and Java staging manifests.
 
 ### Work from a clean clone
 
@@ -209,12 +208,12 @@ git push origin \
   "refs/tags/${RC_REF}:refs/tags/${RC_REF}"
 ```
 
-Pushing the signed tag starts the Release workflow. Wait for every source,
-Java, Python, and manifest job to succeed. Record:
+Pushing the signed tag starts the Release workflow. Wait for every Java and
+Python job to succeed. Record:
 
 - the workflow run URL and `head_sha`;
-- the Paimon and PyPaimon source artifact SHA-512 digests;
-- all JDK 8, 11, and 17 Nexus staging repository IDs;
+- all JDK 8, 11, and 17 Nexus staging repository IDs from the uploaded
+  manifests;
 - the TestPyPI project/version URL.
 
 Do not start the vote when a required lane is missing or has been rerun from a
@@ -222,19 +221,47 @@ different commit.
 
 ## Stage the source candidates
 
-Download the source artifacts from the successful workflow run and verify their
-manifest before uploading them to ASF dist dev.
+Create both source candidates locally from the exact signed tag in a fresh
+clone. The Paimon helper creates, signs, and checksums the main source archive.
+Build the PyPaimon source distribution separately and sign it with the same RM
+key:
+
+```shell
+git checkout --detach "refs/tags/${RC_REF}"
+
+RELEASE_VERSION="${PAIMON_VERSION}" \
+  ./tools/releasing/create_source_release.sh
+
+cd paimon-python
+python3 setup.py sdist
+gpg --armor --detach-sig \
+  "dist/pypaimon-${PYPAIMON_VERSION}.tar.gz"
+
+if command -v sha512sum >/dev/null 2>&1; then
+  sha512sum "dist/pypaimon-${PYPAIMON_VERSION}.tar.gz" \
+    > "dist/pypaimon-${PYPAIMON_VERSION}.tar.gz.sha512"
+else
+  shasum -a 512 "dist/pypaimon-${PYPAIMON_VERSION}.tar.gz" \
+    > "dist/pypaimon-${PYPAIMON_VERSION}.tar.gz.sha512"
+fi
+
+cp "dist/pypaimon-${PYPAIMON_VERSION}.tar.gz"* ../release/
+cd ..
+```
+
+Verify both signatures and checksum files locally before uploading them to ASF
+dist dev.
 
 ```shell
 svn checkout --depth=immediates \
   https://dist.apache.org/repos/dist/dev/paimon/ paimon-dist-dev
 
 mkdir "paimon-dist-dev/paimon-${PAIMON_VERSION}-rc${RC_NUMBER}"
-cp "apache-paimon-${PAIMON_VERSION}-src.tgz"* \
+cp "release/apache-paimon-${PAIMON_VERSION}-src.tgz"* \
   "paimon-dist-dev/paimon-${PAIMON_VERSION}-rc${RC_NUMBER}/"
 
 mkdir "paimon-dist-dev/pypaimon-${PYPAIMON_VERSION}-rc${RC_NUMBER}"
-cp "pypaimon-${PYPAIMON_VERSION}.tar.gz"* \
+cp "release/pypaimon-${PYPAIMON_VERSION}.tar.gz"* \
   "paimon-dist-dev/pypaimon-${PYPAIMON_VERSION}-rc${RC_NUMBER}/"
 
 svn add \

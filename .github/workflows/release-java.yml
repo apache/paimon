@@ -1,0 +1,192 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+################################################################################
+
+name: Release Java
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: release-java-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-staging:
+    name: Stage ${{ matrix.lane }}
+    if: >-
+      github.repository == 'apache/paimon' &&
+      startsWith(github.ref, 'refs/tags/') &&
+      contains(github.ref_name, '-rc')
+    environment: release
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - lane: jdk8
+            java_version: 8
+            script: tools/releasing/deploy_staging_jars.sh
+          - lane: jdk11
+            java_version: 11
+            script: tools/releasing/deploy_staging_jars_for_jdk11.sh
+          - lane: jdk17
+            java_version: 17
+            script: tools/releasing/deploy_staging_jars_for_jdk17.sh
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up JDK ${{ matrix.java_version }}
+        uses: actions/setup-java@v5
+        with:
+          java-version: ${{ matrix.java_version }}
+          distribution: temurin
+          cache: maven
+          server-id: apache.releases.https
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_SECRET_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      - name: Set up Maven
+        uses: stCarolas/setup-maven@v5
+        with:
+          maven-version: 3.8.8
+
+      - name: Validate release tag and version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_version="$(
+            mvn -q -DforceStdout help:evaluate \
+              -Dexpression=project.version
+          )"
+          rc_number="${GITHUB_REF_NAME##*-rc}"
+          expected_tag="release-${release_version}-rc${rc_number}"
+
+          if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match Maven version ${release_version}" >&2
+            exit 1
+          fi
+          if [[ "${release_version}" == *-SNAPSHOT ]]; then
+            echo "Release version must not contain -SNAPSHOT" >&2
+            exit 1
+          fi
+
+          description="apache-paimon-${release_version}-rc${rc_number}-${{ matrix.lane }}-run-${GITHUB_RUN_ID}"
+          echo "version=${release_version}" >> "${GITHUB_OUTPUT}"
+          echo "rc_number=${rc_number}" >> "${GITHUB_OUTPUT}"
+          echo "description=${description}" >> "${GITHUB_OUTPUT}"
+
+          java -version
+          mvn -version
+
+      - name: Open Apache Nexus staging repository
+        id: staging
+        shell: bash
+        env:
+          MAVEN_PASSWORD: ${{ secrets.NEXUS_PW }}
+          MAVEN_USERNAME: ${{ secrets.NEXUS_USER }}
+          STAGING_DESCRIPTION: ${{ steps.release.outputs.description }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p release-staging
+          profiles="${RUNNER_TEMP}/nexus-profiles.json"
+          curl --fail --silent --show-error \
+            --retry 3 \
+            --user "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" \
+            --header "Accept: application/json" \
+            https://repository.apache.org/service/local/staging/profiles \
+            > "${profiles}"
+
+          mapfile -t profile_ids < <(
+            jq -r \
+              '.data[]
+               | select(.name | ascii_downcase | contains("paimon"))
+               | .id' \
+              "${profiles}"
+          )
+          if [[ "${#profile_ids[@]}" -ne 1 ]]; then
+            echo "Expected one Apache Paimon staging profile, found ${#profile_ids[@]}" >&2
+            exit 1
+          fi
+
+          request="${RUNNER_TEMP}/nexus-open-request.json"
+          response="${RUNNER_TEMP}/nexus-open-response.json"
+          jq -n \
+            --arg description "${STAGING_DESCRIPTION}" \
+            '{data: {description: $description}}' \
+            > "${request}"
+          curl --fail --silent --show-error \
+            --user "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" \
+            --header "Accept: application/json" \
+            --header "Content-Type: application/json" \
+            --request POST \
+            --data "@${request}" \
+            "https://repository.apache.org/service/local/staging/profiles/${profile_ids[0]}/start" \
+            > "${response}"
+
+          repository_id="$(jq -r '.data.stagedRepositoryId // empty' "${response}")"
+          if [[ ! "${repository_id}" =~ ^orgapachepaimon- ]]; then
+            echo "Nexus returned an unexpected staging repository ID" >&2
+            exit 1
+          fi
+          echo "repository_id=${repository_id}" >> "${GITHUB_OUTPUT}"
+
+          manifest="release-staging/${{ matrix.lane }}-manifest.txt"
+          {
+            echo "lane=${{ matrix.lane }}"
+            echo "jdk=${{ matrix.java_version }}"
+            echo "version=${{ steps.release.outputs.version }}"
+            echo "rc=${{ steps.release.outputs.rc_number }}"
+            echo "commit=${GITHUB_SHA}"
+            echo "repository=${repository_id}"
+            echo "description=${STAGING_DESCRIPTION}"
+          } > "${manifest}"
+          cat "${manifest}"
+
+      - name: Deploy signed artifacts to Apache Nexus staging
+        shell: bash
+        env:
+          CUSTOM_OPTIONS: >-
+            -B
+            -DaltDeploymentRepository=apache.releases.https::default::https://repository.apache.org/service/local/staging/deployByRepositoryId/${{ steps.staging.outputs.repository_id }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          MAVEN_PASSWORD: ${{ secrets.NEXUS_PW }}
+          MAVEN_USERNAME: ${{ secrets.NEXUS_USER }}
+          MAVEN_OPTS: -Xmx4096m
+        run: |
+          set -euo pipefail
+          mkdir -p release-staging
+          bash "${{ matrix.script }}" 2>&1 \
+            | tee "release-staging/${{ matrix.lane }}.log"
+
+      - name: Upload staging evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: java-staging-${{ matrix.lane }}
+          path: release-staging/
+          if-no-files-found: warn
