@@ -29,6 +29,7 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -372,13 +373,7 @@ public class GlobalIndexBuilderUtils {
         }
 
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> entriesByPartitionAndBucket =
-                new LinkedHashMap<>();
-        for (ManifestEntry entry : entries) {
-            entriesByPartitionAndBucket
-                    .computeIfAbsent(entry.partition(), key -> new LinkedHashMap<>())
-                    .computeIfAbsent(entry.bucket(), key -> new ArrayList<>())
-                    .add(entry);
-        }
+                FileStoreScan.Plan.groupByPartFiles(entries);
 
         List<IndexedSplit> result = new ArrayList<>();
         for (Map.Entry<BinaryRow, Map<Integer, List<ManifestEntry>>> partitionEntry :
