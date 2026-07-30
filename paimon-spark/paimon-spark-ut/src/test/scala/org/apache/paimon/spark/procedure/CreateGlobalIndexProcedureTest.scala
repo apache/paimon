@@ -70,6 +70,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
             entry =>
               s"${entry.indexFile().globalIndexMeta().rowRangeStart()}:" +
                 s"${entry.indexFile().globalIndexMeta().rowRangeEnd()}")
+          .map { case (range, entries) => range -> entries.toList }
       }
 
       def fileNames(entries: Seq[IndexManifestEntry]): Set[String] =
