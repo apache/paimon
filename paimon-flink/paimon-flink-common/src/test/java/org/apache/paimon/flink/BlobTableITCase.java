@@ -23,11 +23,15 @@ import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.BlobViewStruct;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.TestHttpWebServer;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.UriReader;
@@ -688,6 +692,55 @@ public class BlobTableITCase extends CatalogITCaseBase {
                                                 + "INTERVAL '1' HOUR)"))
                 .hasRootCauseInstanceOf(UnsupportedOperationException.class)
                 .hasStackTraceContaining("does not support creating blob presigned URLs");
+    }
+
+    @Test
+    public void testWriteBlobWithUnicodeAndSpaceInPath() throws Exception {
+        byte[] blobData = "image-content".getBytes();
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + warehouse + "/\u4ed5\u5e9c\u516c\u9986 (2).jpg";
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(blobData);
+        }
+
+        batchSql(
+                "INSERT INTO blob_table_descriptor VALUES"
+                        + " (1, 'paimon', sys.path_to_descriptor('"
+                        + uri
+                        + "'))");
+        batchSql("ALTER TABLE blob_table_descriptor SET ('blob-as-descriptor'='false')");
+
+        assertThat(batchSql("SELECT picture FROM blob_table_descriptor"))
+                .containsExactly(Row.of(blobData));
+    }
+
+    @Test
+    public void testReadDescriptorBlobWithUnicodeAndSpaceInPath() throws Exception {
+        byte[] blobData = "image-content".getBytes();
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + warehouse + "/\u4ed5\u5e9c\u516c\u9986 (2).jpg";
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(blobData);
+        }
+
+        tEnv.executeSql(
+                "CREATE TABLE external_blob_source (id INT, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-descriptor-field'='picture')");
+        FileStoreTable table = paimonTable("external_blob_source");
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            BlobDescriptor descriptor = new BlobDescriptor(uri, 0, blobData.length);
+            write.write(GenericRow.of(1, new BlobRef(UriReader.fromFile(fileIO), descriptor)));
+            commit.commit(write.prepareCommit());
+        }
+
+        assertThat(batchSql("SELECT picture FROM external_blob_source"))
+                .containsExactly(Row.of(blobData));
     }
 
     @Test

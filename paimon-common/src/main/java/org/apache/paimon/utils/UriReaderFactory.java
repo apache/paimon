@@ -60,6 +60,15 @@ public class UriReaderFactory implements Serializable {
         try {
             return URI.create(input);
         } catch (IllegalArgumentException e) {
+            // File paths may contain unescaped characters accepted by Path.
+            try {
+                URI pathUri = new Path(input).toUri();
+                if (!isHttp(pathUri)) {
+                    return pathUri;
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Throw the sanitized exception below.
+            }
             throw SensitiveConfigUtils.invalidUri(input);
         }
     }
@@ -94,7 +103,8 @@ public class UriReaderFactory implements Serializable {
     }
 
     private static boolean isHttp(URI uri) {
-        return "http".equals(uri.getScheme()) || "https".equals(uri.getScheme());
+        return "http".equalsIgnoreCase(uri.getScheme())
+                || "https".equalsIgnoreCase(uri.getScheme());
     }
 
     private static final class ProvidedFileIOUriReaderFactory extends UriReaderFactory {
