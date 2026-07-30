@@ -1114,7 +1114,8 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
                         rowRange,
                         Arrays.asList(vectorField, idField),
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        null);
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =

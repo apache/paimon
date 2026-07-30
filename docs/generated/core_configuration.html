@@ -801,6 +801,12 @@ under the License.
             <td>Defines the action to take when an update modifies columns that are covered by a global index. IGNORE leaves existing index files unchanged and may make the index stale.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li><li>"IGNORE"</li></ul></td>
         </tr>
         <tr>
+            <td><h5>global-index.detect-datafile-change</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether incremental global index builds inspect active data files to detect changes in already indexed row ranges.</td>
+        </tr>
+        <tr>
             <td><h5>global-index.enabled</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
@@ -811,6 +817,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Global index root directory, if not set, the global index files will be stored under the &lt;table-root-directory&gt;/index.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.ignore-missing-delete</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore deleting a global index file which does not exist in the previous index manifest.</td>
         </tr>
         <tr>
             <td><h5>global-index.row-count-per-shard</h5></td>

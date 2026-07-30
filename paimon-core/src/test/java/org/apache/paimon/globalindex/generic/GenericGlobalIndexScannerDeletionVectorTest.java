@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.globalindex;
+package org.apache.paimon.globalindex.generic;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.table.FileStoreTable;
@@ -28,8 +28,8 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/** Tests deletion-vector table support in {@link GenericGlobalIndexBuilder}. */
-class GenericGlobalIndexBuilderDeletionVectorTest {
+/** Tests deletion-vector table support in {@link GenericGlobalIndexScanner}. */
+class GenericGlobalIndexScannerDeletionVectorTest {
 
     private static FileStoreTable table(boolean deletionVectorsEnabled) {
         FileStoreTable table = mock(FileStoreTable.class);
@@ -46,13 +46,13 @@ class GenericGlobalIndexBuilderDeletionVectorTest {
 
     @Test
     void testGlobalIndexAllowedOnDeletionVectorTable() {
-        assertThatCode(() -> new GenericGlobalIndexBuilder(table(true)).scan())
+        assertThatCode(() -> new GenericGlobalIndexScanner(table(true)).scan())
                 .doesNotThrowAnyException();
     }
 
     @Test
     void testGlobalIndexAllowedWithoutDeletionVectors() {
-        assertThatCode(() -> new GenericGlobalIndexBuilder(table(false)).scan())
+        assertThatCode(() -> new GenericGlobalIndexScanner(table(false)).scan())
                 .doesNotThrowAnyException();
     }
 }

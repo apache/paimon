@@ -19,12 +19,18 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.IntType;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,6 +38,76 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link DataEvolutionUtils}. */
 public class DataEvolutionUtilsTest {
+
+    @Test
+    public void testFileFieldIdsIgnoresSystemFields() {
+        TableSchema schema =
+                new TableSchema(
+                        1L,
+                        Arrays.asList(
+                                new DataField(1, "indexed", new IntType()),
+                                new DataField(2, "other", new IntType())),
+                        2,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+
+        assertThat(
+                        DataEvolutionUtils.fileFieldIds(
+                                ignored -> schema,
+                                dataFile(
+                                        "mixed.parquet",
+                                        1,
+                                        Arrays.asList(
+                                                SpecialFields.ROW_ID.name(),
+                                                "indexed",
+                                                SpecialFields.SEQUENCE_NUMBER.name()))))
+                .containsExactly(1);
+        assertThat(
+                        DataEvolutionUtils.fileFieldIds(
+                                ignored -> schema,
+                                dataFile(
+                                        "system-only.parquet",
+                                        1,
+                                        Arrays.asList(
+                                                SpecialFields.ROW_ID.name(),
+                                                SpecialFields.SEQUENCE_NUMBER.name()))))
+                .isEmpty();
+    }
+
+    @Test
+    public void testFileFieldIdsHandlesFullEmptyAndUnrelatedWrites() {
+        TableSchema schema =
+                new TableSchema(
+                        1L,
+                        Arrays.asList(
+                                new DataField(1, "indexed", new IntType()),
+                                new DataField(2, "other", new IntType())),
+                        2,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+
+        assertThat(
+                        DataEvolutionUtils.fileFieldIds(
+                                ignored -> schema, dataFile("full.parquet", 1, null)))
+                .containsExactlyInAnyOrder(1, 2);
+        assertThat(
+                        DataEvolutionUtils.fileFieldIds(
+                                ignored -> schema,
+                                dataFile("empty.parquet", 1, Collections.emptyList())))
+                .isEmpty();
+        assertThat(
+                        DataEvolutionUtils.fileFieldIds(
+                                ignored -> schema,
+                                dataFile(
+                                        "unrelated.parquet",
+                                        1,
+                                        Collections.singletonList("other"))))
+                .containsExactly(2);
+    }
 
     @Test
     public void testRetrieveAnchorFileSkipsSpecialFiles() {
@@ -74,6 +150,11 @@ public class DataEvolutionUtilsTest {
     }
 
     private static DataFileMeta dataFile(String fileName, long maxSequenceNumber) {
+        return dataFile(fileName, maxSequenceNumber, Collections.emptyList());
+    }
+
+    private static DataFileMeta dataFile(
+            String fileName, long maxSequenceNumber, List<String> writeCols) {
         return DataFileMeta.forAppend(
                 fileName,
                 1L,
@@ -88,6 +169,6 @@ public class DataEvolutionUtilsTest {
                 null,
                 null,
                 0L,
-                Collections.emptyList());
+                writeCols);
     }
 }

@@ -19,7 +19,10 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.pkfulltext.PkFullTextIndexFile;
+import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
@@ -33,6 +36,86 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link FullTextSearchProcedure}. */
 public class FullTextSearchProcedureITCase extends CatalogITCaseBase {
+
+    @Test
+    public void testGenericFullTextRefreshesUpdatedDataEvolutionRange() throws Exception {
+        sql(
+                "CREATE TABLE T_DE (id INT, content STRING) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'global-index.detect-datafile-change' = 'true', "
+                        + "'global-index.column-update-action' = 'IGNORE'"
+                        + ")");
+        sql("INSERT INTO T_DE VALUES (1, 'apache paimon'), (2, 'lake format')");
+
+        FileStoreTable table = paimonTable("T_DE");
+        long scanSnapshotId = table.snapshotManager().latestSnapshot().id();
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        buildFullTextIndex("T_DE");
+
+        List<IndexManifestEntry> entries = table.store().newIndexFileHandler().scan("full-text");
+        assertThat(entries).isNotEmpty();
+        assertThat(entries)
+                .allSatisfy(
+                        entry ->
+                                assertThat(
+                                                DataEvolutionIndexSourceMeta.fromIndexFile(
+                                                                entry.indexFile())
+                                                        .scanSnapshotId())
+                                        .isEqualTo(scanSnapshotId));
+        List<String> initialFiles =
+                entries.stream()
+                        .map(entry -> entry.indexFile().fileName())
+                        .collect(Collectors.toList());
+
+        sql("CREATE TABLE S_DE (id INT, content STRING)");
+        sql("INSERT INTO S_DE VALUES (1, 'refreshed content')");
+        sql(
+                "CALL sys.data_evolution_merge_into("
+                        + "'default.T_DE', '', '', 'S_DE', "
+                        + "'T_DE.id=S_DE.id', 'content=S_DE.content', 2)");
+        table = paimonTable("T_DE");
+        long updateSnapshotId = table.snapshotManager().latestSnapshot().id();
+
+        buildFullTextIndex("T_DE");
+
+        table = paimonTable("T_DE");
+        entries = table.store().newIndexFileHandler().scan("full-text");
+        assertThat(entries).isNotEmpty();
+        assertThat(
+                        entries.stream()
+                                .map(entry -> entry.indexFile().fileName())
+                                .collect(Collectors.toList()))
+                .doesNotContainAnyElementsOf(initialFiles);
+        assertThat(entries)
+                .allSatisfy(
+                        entry ->
+                                assertThat(
+                                                DataEvolutionIndexSourceMeta.fromIndexFile(
+                                                                entry.indexFile())
+                                                        .scanSnapshotId())
+                                        .isEqualTo(updateSnapshotId));
+
+        List<String> rows =
+                sql(
+                                "CALL sys.full_text_search("
+                                        + "`table` => 'default.T_DE', "
+                                        + "`column` => 'content', "
+                                        + "query => '{\"match\":{\"column\":\"content\",\"terms\":\"refreshed\"}}', "
+                                        + "top_k => 10, "
+                                        + "projection => 'id,content')")
+                        .stream()
+                        .map(row -> row.getField(0).toString())
+                        .collect(Collectors.toList());
+        assertThat(rows)
+                .singleElement()
+                .satisfies(
+                        row ->
+                                assertThat(row)
+                                        .contains("\"id\":\"1\"")
+                                        .contains("\"content\":\"refreshed content\""));
+    }
 
     @Test
     public void testPrimaryKeyFullTextSearchWithScoreProjection() throws Exception {
@@ -130,6 +213,15 @@ public class FullTextSearchProcedureITCase extends CatalogITCaseBase {
                         + "top_k => %d, "
                         + "projection => '%s')",
                 table, query, topK, projection);
+    }
+
+    private void buildFullTextIndex(String table) {
+        sql(
+                "CALL sys.create_global_index("
+                        + "`table` => 'default.%s', "
+                        + "index_column => 'content', "
+                        + "index_type => 'full-text')",
+                table);
     }
 
     private void createPrimaryKeyFullTextTable(String tableName) {

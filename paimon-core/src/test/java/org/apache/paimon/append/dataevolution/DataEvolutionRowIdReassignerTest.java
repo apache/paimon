@@ -27,8 +27,12 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
+import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
-import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -1628,6 +1632,27 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     }
 
     @Test
+    public void testReassignPreservesGlobalIndexSourceMeta() throws Exception {
+        FileStoreTable table = createTableWithInterleavedPartitions();
+        createBTreeIndex(table);
+        long scanSnapshotId = table.snapshotManager().latestSnapshot().id();
+        setGlobalIndexSourceMeta(table, scanSnapshotId);
+
+        new DataEvolutionRowIdReassigner(table).reassign("test-preserve-index-source-meta");
+
+        List<IndexManifestEntry> entries = table.store().newIndexFileHandler().scanEntries();
+        assertThat(entries).isNotEmpty();
+        assertThat(entries)
+                .allSatisfy(
+                        entry ->
+                                assertThat(
+                                                DataEvolutionIndexSourceMeta.fromIndexFile(
+                                                                entry.indexFile())
+                                                        .scanSnapshotId())
+                                        .isEqualTo(scanSnapshotId));
+    }
+
+    @Test
     public void testReassignKeepsConcurrentDisjointGlobalIndexRange() throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
         createBTreeIndex(table);
@@ -2763,22 +2788,58 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     }
 
     private void createBTreeIndex(FileStoreTable table) throws Exception {
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree").withIndexField("id");
-        List<DataSplit> dataSplits =
+        SortedGlobalIndexScanner builder =
+                new SortedGlobalIndexScanner(table, "btree").withIndexField("id");
+        ScanResult<DataSplit> scanResult =
                 builder.scan()
-                        .map(Pair::getRight)
                         .orElseThrow(
                                 () ->
                                         new IllegalStateException(
                                                 "Expected scan result when building index."));
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (DataSplit dataSplit : SortedGlobalIndexBuilder.splitByContiguousRowRange(dataSplits)) {
-            commitMessages.addAll(builder.build(dataSplit, ioManager));
+        for (DataSplit dataSplit :
+                GlobalIndexBuilderUtils.splitByContiguousRowRange(scanResult.entries())) {
+            commitMessages.addAll(
+                    SortedGlobalIndexTestUtils.buildIndex(
+                            table, "btree", "id", dataSplit, scanResult.scanSnapshotId()));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);
         }
+    }
+
+    private void setGlobalIndexSourceMeta(FileStoreTable table, long scanSnapshotId)
+            throws Exception {
+        Snapshot latest = table.snapshotManager().latestSnapshot();
+        IndexManifestFile indexManifestFile = table.store().indexManifestFileFactory().create();
+        byte[] sourceMeta = new DataEvolutionIndexSourceMeta(scanSnapshotId).serialize();
+        List<IndexManifestEntry> rewritten = new ArrayList<>();
+        for (IndexManifestEntry entry : indexManifestFile.read(latest.indexManifest())) {
+            IndexFileMeta indexFile = entry.indexFile();
+            GlobalIndexMeta globalIndex = indexFile.globalIndexMeta();
+            assertThat(globalIndex).isNotNull();
+            rewritten.add(
+                    new IndexManifestEntry(
+                            entry.kind(),
+                            entry.partition(),
+                            entry.bucket(),
+                            new IndexFileMeta(
+                                    indexFile.indexType(),
+                                    indexFile.fileName(),
+                                    indexFile.fileSize(),
+                                    indexFile.rowCount(),
+                                    indexFile.dvRanges(),
+                                    indexFile.externalPath(),
+                                    new GlobalIndexMeta(
+                                            globalIndex.rowRangeStart(),
+                                            globalIndex.rowRangeEnd(),
+                                            globalIndex.indexFieldId(),
+                                            globalIndex.extraFieldIds(),
+                                            globalIndex.indexMeta(),
+                                            sourceMeta))));
+        }
+        replaceLatestSnapshotIndexManifest(
+                table, latest, indexManifestFile.writeWithoutRolling(rewritten));
     }
 
     private void replaceGlobalIndexRangesWithPartitionSpanningRanges(FileStoreTable table)

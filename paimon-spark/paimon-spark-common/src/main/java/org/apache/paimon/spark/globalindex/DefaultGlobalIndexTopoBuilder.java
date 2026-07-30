@@ -22,15 +22,20 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexRefreshPlanner;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
@@ -55,6 +60,7 @@ import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_BUILD_MAX_PARALLELISM;
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_DETECT_DATA_FILE_CHANGE;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -102,6 +108,22 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
         if (snapshot == null) {
             return Collections.emptyList();
         }
+        List<DataField> indexFields = new ArrayList<>();
+        indexFields.add(indexField);
+        indexFields.addAll(extraFields);
+        List<IndexManifestEntry> currentIndexes =
+                GlobalIndexBuilderUtils.currentIndexEntries(
+                        table, snapshot, indexType, indexFields, partitionPredicate);
+        List<Range> rowRangesToBuild =
+                new ArrayList<>(
+                        GlobalIndexBuilderUtils.unindexedRowRanges(snapshot, currentIndexes));
+        byte[] sourceMeta = new DataEvolutionIndexSourceMeta(snapshot.id()).serialize();
+        boolean detectDataFileChange =
+                new Options(table.options(), options.toMap())
+                        .get(GLOBAL_INDEX_DETECT_DATA_FILE_CHANGE);
+        if (rowRangesToBuild.isEmpty() && !detectDataFileChange) {
+            return Collections.emptyList();
+        }
         List<ManifestEntry> entries =
                 table.store()
                         .newScan()
@@ -109,19 +131,16 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                         .withPartitionFilter(partitionPredicate)
                         .plan()
                         .files();
-        List<DataField> indexFields = new ArrayList<>();
-        indexFields.add(indexField);
-        indexFields.addAll(extraFields);
-        List<String> indexColumns =
-                indexFields.stream().map(DataField::name).collect(Collectors.toList());
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
-        long boundaryRowId =
-                GlobalIndexBuilderUtils.findMinNonIndexableRowId(
-                        schemaManager, entries, indexColumns);
-        entries = GlobalIndexBuilderUtils.filterEntriesBefore(entries, boundaryRowId);
-        List<Range> rowRangesToBuild =
-                GlobalIndexBuilderUtils.unindexedRowRanges(
-                        table, snapshot, indexType, indexFields, partitionPredicate);
+        List<IndexManifestEntry> indexesToRefresh = Collections.emptyList();
+        if (detectDataFileChange) {
+            indexesToRefresh =
+                    DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
+                            table.schemaManager(), entries, currentIndexes, indexFields);
+            for (IndexManifestEntry index : indexesToRefresh) {
+                rowRangesToBuild.add(index.indexFile().globalIndexMeta().rowRange());
+            }
+        }
+        rowRangesToBuild = Range.sortAndMergeOverlap(rowRangesToBuild, true);
         if (rowRangesToBuild.isEmpty()) {
             return Collections.emptyList();
         }
@@ -145,23 +164,34 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                             extraFields,
                             indexType,
                             indexedSplit.rowRanges().get(0),
-                            options);
+                            options,
+                            sourceMeta);
             byte[] builderBytes = InstantiationUtil.serializeObject(builder);
             byte[] splitBytes = InstantiationUtil.serializeObject(indexedSplit);
             taskList.add(Pair.of(builderBytes, splitBytes));
         }
 
-        if (taskList.isEmpty()) {
-            return Collections.emptyList();
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        if (!taskList.isEmpty()) {
+            int parallelism = parallelism(taskList.size(), options);
+            List<byte[]> commitMessageBytes =
+                    javaSparkContext
+                            .parallelize(taskList, parallelism)
+                            .map(DefaultGlobalIndexTopoBuilder::buildIndex)
+                            .collect();
+            commitMessages.addAll(CommitMessageSerializer.deserializeAll(commitMessageBytes));
         }
-
-        int parallelism = parallelism(taskList.size(), options);
-        List<byte[]> commitMessageBytes =
-                javaSparkContext
-                        .parallelize(taskList, parallelism)
-                        .map(DefaultGlobalIndexTopoBuilder::buildIndex)
-                        .collect();
-        return CommitMessageSerializer.deserializeAll(commitMessageBytes);
+        for (IndexManifestEntry index : indexesToRefresh) {
+            commitMessages.add(
+                    new CommitMessageImpl(
+                            index.partition(),
+                            index.bucket(),
+                            null,
+                            DataIncrement.deleteIndexIncrement(
+                                    Collections.singletonList(index.indexFile())),
+                            CompactIncrement.emptyIncrement()));
+        }
+        return commitMessages;
     }
 
     static long rowsPerShard(Options options) {

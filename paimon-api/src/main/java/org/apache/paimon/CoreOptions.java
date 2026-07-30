@@ -2609,6 +2609,20 @@ public class CoreOptions implements Serializable {
                                     "Defines the action to take when an update modifies columns that are covered by a global index. "
                                             + "IGNORE leaves existing index files unchanged and may make the index stale.");
 
+    public static final ConfigOption<Boolean> GLOBAL_INDEX_DETECT_DATA_FILE_CHANGE =
+            key("global-index.detect-datafile-change")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether incremental global index builds inspect active data files to detect changes in already indexed row ranges.");
+
+    public static final ConfigOption<Boolean> GLOBAL_INDEX_IGNORE_MISSING_DELETE =
+            key("global-index.ignore-missing-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to ignore deleting a global index file which does not exist in the previous index manifest.");
+
     public static final ConfigOption<MemorySize> LOOKUP_MERGE_BUFFER_SIZE =
             key("lookup.merge-buffer-size")
                     .memoryType()
@@ -3716,6 +3730,14 @@ public class CoreOptions implements Serializable {
 
     public GlobalIndexColumnUpdateAction globalIndexColumnUpdateAction() {
         return options.get(GLOBAL_INDEX_COLUMN_UPDATE_ACTION);
+    }
+
+    public boolean globalIndexDetectDataFileChange() {
+        return options.get(GLOBAL_INDEX_DETECT_DATA_FILE_CHANGE);
+    }
+
+    public boolean globalIndexIgnoreMissingDelete() {
+        return options.get(GLOBAL_INDEX_IGNORE_MISSING_DELETE);
     }
 
     public LookupStrategy lookupStrategy() {

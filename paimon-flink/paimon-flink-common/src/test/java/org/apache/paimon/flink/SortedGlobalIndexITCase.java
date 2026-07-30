@@ -19,17 +19,20 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -105,6 +108,212 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testBitmapRefreshesUpdatedDataEvolutionRange() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE T_BITMAP_REFRESH (id INT, idx INT) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'global-index.detect-datafile-change' = 'true', "
+                        + "'global-index.column-update-action' = 'IGNORE'"
+                        + ")");
+        sql(
+                "INSERT INTO T_BITMAP_REFRESH VALUES "
+                        + IntStream.range(0, 10)
+                                .mapToObj(i -> String.format("(%d, %d)", i, i))
+                                .collect(Collectors.joining(",")));
+        buildBitmapIndexForTable("T_BITMAP_REFRESH", "idx");
+
+        FileStoreTable table = paimonTable("T_BITMAP_REFRESH");
+        List<IndexManifestEntry> initial = indexEntries(table, "bitmap");
+        assertThat(initial).isNotEmpty();
+        Set<String> initialFiles = fileNames(initial);
+
+        sql("CREATE TABLE S_BITMAP_REFRESH (id INT, idx INT)");
+        sql("INSERT INTO S_BITMAP_REFRESH VALUES (1, 1001)");
+        sql(
+                "CALL sys.data_evolution_merge_into("
+                        + "'default.T_BITMAP_REFRESH', '', '', 'S_BITMAP_REFRESH', "
+                        + "'T_BITMAP_REFRESH.id=S_BITMAP_REFRESH.id', "
+                        + "'idx=S_BITMAP_REFRESH.idx', 2)");
+        table = paimonTable("T_BITMAP_REFRESH");
+        long updateSnapshotId = table.snapshotManager().latestSnapshot().id();
+        assertThat(fileNames(indexEntries(table, "bitmap"))).isEqualTo(initialFiles);
+
+        buildBitmapIndexForTable("T_BITMAP_REFRESH", "idx");
+        table = paimonTable("T_BITMAP_REFRESH");
+        List<IndexManifestEntry> refreshed = indexEntries(table, "bitmap");
+        assertThat(fileNames(refreshed)).doesNotContainAnyElementsOf(initialFiles);
+        assertThat(refreshed)
+                .allSatisfy(
+                        entry ->
+                                assertThat(
+                                                DataEvolutionIndexSourceMeta.fromIndexFile(
+                                                                entry.indexFile())
+                                                        .scanSnapshotId())
+                                        .isEqualTo(updateSnapshotId));
+        assertThat(sql("SELECT id FROM T_BITMAP_REFRESH WHERE idx = 1001")).containsOnly(Row.of(1));
+    }
+
+    @Test
+    public void testBTreeRefreshesUpdatedDataEvolutionRangeAtomically() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE T_REFRESH (id INT, idx INT, payload STRING) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'global-index.detect-datafile-change' = 'true', "
+                        + "'global-index.column-update-action' = 'IGNORE', "
+                        + "'btree-index.records-per-range' = '2'"
+                        + ")");
+        sql(
+                "INSERT INTO T_REFRESH VALUES "
+                        + IntStream.range(0, 10)
+                                .mapToObj(i -> String.format("(%d, %d, 'p%d')", i, i, i))
+                                .collect(Collectors.joining(",")));
+        buildBTreeIndexForTable("T_REFRESH", "idx");
+
+        sql(
+                "INSERT INTO T_REFRESH VALUES "
+                        + IntStream.range(10, 20)
+                                .mapToObj(i -> String.format("(%d, %d, 'p%d')", i, i, i))
+                                .collect(Collectors.joining(",")));
+        buildBTreeIndexForTable("T_REFRESH", "idx");
+
+        FileStoreTable table = paimonTable("T_REFRESH");
+        Map<String, List<IndexManifestEntry>> initial = btreeEntriesByRange(table);
+        assertThat(initial.keySet()).containsExactlyInAnyOrder("0:9", "10:19");
+        assertThat(initial.get("0:9")).hasSizeGreaterThan(1);
+        assertThat(initial.get("10:19")).hasSizeGreaterThan(1);
+        assertThat(flatten(initial)).allSatisfy(entry -> assertThat(entry.bucket()).isZero());
+        assertThat(table.store().newScan().plan().files())
+                .allSatisfy(entry -> assertThat(entry.bucket()).isZero());
+        Set<String> initialFirstFiles = fileNames(initial.get("0:9"));
+        Set<String> initialSecondFiles = fileNames(initial.get("10:19"));
+        Set<String> initialFiles = fileNames(flatten(initial));
+        long beforeUpdateSnapshotId = table.snapshotManager().latestSnapshot().id();
+
+        sql("CREATE TABLE S_REFRESH (id INT, idx INT)");
+        sql("INSERT INTO S_REFRESH VALUES (1, 1001)");
+        sql(
+                "CALL sys.data_evolution_merge_into("
+                        + "'default.T_REFRESH', '', '', 'S_REFRESH', "
+                        + "'T_REFRESH.id=S_REFRESH.id', 'idx=S_REFRESH.idx', 2)");
+        table = paimonTable("T_REFRESH");
+        long updateSnapshotId = table.snapshotManager().latestSnapshot().id();
+        assertThat(updateSnapshotId).isGreaterThan(beforeUpdateSnapshotId);
+        assertThat(fileNames(flatten(btreeEntriesByRange(table)))).isEqualTo(initialFiles);
+        assertThat(sql("SELECT id FROM T_REFRESH WHERE idx = 1")).isEmpty();
+        assertThat(sql("SELECT id FROM T_REFRESH WHERE idx = 1001")).isEmpty();
+        assertThat(sql("SELECT idx FROM T_REFRESH WHERE id = 1")).containsOnly(Row.of(1001));
+        assertThat(sql("SELECT id FROM T_REFRESH WHERE idx = 2")).containsOnly(Row.of(2));
+
+        buildBTreeIndexForTable("T_REFRESH", "idx");
+        table = paimonTable("T_REFRESH");
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(updateSnapshotId + 1);
+
+        Map<String, List<IndexManifestEntry>> refreshed = btreeEntriesByRange(table);
+        assertThat(refreshed.keySet()).containsExactlyInAnyOrder("0:9", "10:19");
+        assertThat(fileNames(refreshed.get("0:9"))).doesNotContainAnyElementsOf(initialFirstFiles);
+        assertThat(fileNames(refreshed.get("10:19"))).isEqualTo(initialSecondFiles);
+        assertThat(refreshed.get("0:9"))
+                .allSatisfy(
+                        entry ->
+                                assertThat(
+                                                DataEvolutionIndexSourceMeta.fromIndexFile(
+                                                                entry.indexFile())
+                                                        .scanSnapshotId())
+                                        .isEqualTo(updateSnapshotId));
+        assertThat(sql("SELECT id FROM T_REFRESH WHERE idx = 1")).isEmpty();
+        assertThat(sql("SELECT id FROM T_REFRESH WHERE idx = 1001")).containsOnly(Row.of(1));
+
+        long refreshedSnapshotId = table.snapshotManager().latestSnapshot().id();
+        Set<String> refreshedFiles = fileNames(flatten(refreshed));
+        buildBTreeIndexForTable("T_REFRESH", "idx");
+        table = paimonTable("T_REFRESH");
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(refreshedSnapshotId);
+        assertThat(fileNames(flatten(btreeEntriesByRange(table)))).isEqualTo(refreshedFiles);
+
+        sql("CREATE TABLE S_PAYLOAD (id INT, payload STRING)");
+        sql("INSERT INTO S_PAYLOAD VALUES (1, 'new-payload')");
+        sql(
+                "CALL sys.data_evolution_merge_into("
+                        + "'default.T_REFRESH', '', '', 'S_PAYLOAD', "
+                        + "'T_REFRESH.id=S_PAYLOAD.id', 'payload=S_PAYLOAD.payload', 1)");
+        table = paimonTable("T_REFRESH");
+        long payloadUpdateSnapshotId = table.snapshotManager().latestSnapshot().id();
+        assertThat(payloadUpdateSnapshotId).isGreaterThan(refreshedSnapshotId);
+        assertThat(sql("SELECT payload FROM T_REFRESH WHERE id = 1"))
+                .containsOnly(Row.of("new-payload"));
+        buildBTreeIndexForTable("T_REFRESH", "idx");
+        table = paimonTable("T_REFRESH");
+        assertThat(table.snapshotManager().latestSnapshot().id())
+                .isEqualTo(payloadUpdateSnapshotId);
+        assertThat(fileNames(flatten(btreeEntriesByRange(table)))).isEqualTo(refreshedFiles);
+    }
+
+    @Test
+    public void testBTreeRefreshesOnlyUpdatedPartition() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE T_PARTITION_REFRESH (pt INT, id INT, idx INT) "
+                        + "PARTITIONED BY (pt) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'global-index.detect-datafile-change' = 'true', "
+                        + "'global-index.column-update-action' = 'IGNORE', "
+                        + "'btree-index.records-per-range' = '2'"
+                        + ")");
+        sql(
+                "INSERT INTO T_PARTITION_REFRESH VALUES "
+                        + IntStream.range(0, 10)
+                                .mapToObj(i -> String.format("(0, %d, %d)", i, i))
+                                .collect(Collectors.joining(",")));
+        sql(
+                "INSERT INTO T_PARTITION_REFRESH VALUES "
+                        + IntStream.range(10, 20)
+                                .mapToObj(i -> String.format("(1, %d, %d)", i, i))
+                                .collect(Collectors.joining(",")));
+        buildBTreeIndexForTable("T_PARTITION_REFRESH", "idx");
+
+        FileStoreTable table = paimonTable("T_PARTITION_REFRESH");
+        Map<String, List<IndexManifestEntry>> initial = btreeEntriesByRange(table);
+        assertThat(initial.keySet()).containsExactlyInAnyOrder("0:9", "10:19");
+        Set<String> firstPartitionFiles = fileNames(initial.get("0:9"));
+        Set<String> secondPartitionFiles = fileNames(initial.get("10:19"));
+        assertThat(initial.get("0:9"))
+                .allSatisfy(entry -> assertThat(entry.partition().getInt(0)).isZero());
+        assertThat(initial.get("10:19"))
+                .allSatisfy(entry -> assertThat(entry.partition().getInt(0)).isEqualTo(1));
+
+        sql("CREATE TABLE S_PARTITION_REFRESH (id INT, idx INT)");
+        sql("INSERT INTO S_PARTITION_REFRESH VALUES (11, 1011)");
+        sql(
+                "CALL sys.data_evolution_merge_into("
+                        + "'default.T_PARTITION_REFRESH', '', '', 'S_PARTITION_REFRESH', "
+                        + "'T_PARTITION_REFRESH.id=S_PARTITION_REFRESH.id', "
+                        + "'idx=S_PARTITION_REFRESH.idx', 2)");
+        long updateSnapshotId =
+                paimonTable("T_PARTITION_REFRESH").snapshotManager().latestSnapshot().id();
+
+        buildBTreeIndexForTable("T_PARTITION_REFRESH", "idx");
+        table = paimonTable("T_PARTITION_REFRESH");
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(updateSnapshotId + 1);
+        Map<String, List<IndexManifestEntry>> refreshed = btreeEntriesByRange(table);
+        assertThat(fileNames(refreshed.get("0:9"))).isEqualTo(firstPartitionFiles);
+        assertThat(fileNames(refreshed.get("10:19")))
+                .doesNotContainAnyElementsOf(secondPartitionFiles);
+        assertThat(sql("SELECT pt, id FROM T_PARTITION_REFRESH WHERE idx = 1011"))
+                .containsOnly(Row.of(1, 11));
+    }
+
+    @Test
     public void testBTreeIndexWithMultiPartition() throws Catalog.TableNotExistException {
         sql(
                 "CREATE TABLE T_MP (pt INT, id INT, name STRING) PARTITIONED BY (pt) WITH ("
@@ -175,6 +384,43 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
         sql(
                 "CALL sys.create_global_index(`table` => 'default.%s', index_column => '%s', index_type => 'btree')",
                 tableName, indexColumn);
+    }
+
+    private void buildBitmapIndexForTable(String tableName, String indexColumn) {
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.%s', "
+                        + "index_column => '%s', index_type => 'bitmap', "
+                        + "options => 'sorted-index.records-per-range=20')",
+                tableName, indexColumn);
+    }
+
+    private List<IndexManifestEntry> indexEntries(FileStoreTable table, String indexType) {
+        return table.store().newIndexFileHandler().scanEntries().stream()
+                .filter(entry -> indexType.equals(entry.indexFile().indexType()))
+                .collect(Collectors.toList());
+    }
+
+    private Map<String, List<IndexManifestEntry>> btreeEntriesByRange(FileStoreTable table) {
+        return table.store().newIndexFileHandler().scanEntries().stream()
+                .filter(entry -> "btree".equals(entry.indexFile().indexType()))
+                .collect(
+                        Collectors.groupingBy(
+                                entry ->
+                                        entry.indexFile().globalIndexMeta().rowRangeStart()
+                                                + ":"
+                                                + entry.indexFile()
+                                                        .globalIndexMeta()
+                                                        .rowRangeEnd()));
+    }
+
+    private List<IndexManifestEntry> flatten(Map<String, List<IndexManifestEntry>> entriesByRange) {
+        return entriesByRange.values().stream().flatMap(List::stream).collect(Collectors.toList());
+    }
+
+    private Set<String> fileNames(List<IndexManifestEntry> entries) {
+        return entries.stream()
+                .map(entry -> entry.indexFile().fileName())
+                .collect(Collectors.toSet());
     }
 
     @Test
