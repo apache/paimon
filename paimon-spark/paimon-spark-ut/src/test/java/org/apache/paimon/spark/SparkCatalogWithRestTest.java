@@ -369,11 +369,9 @@ public class SparkCatalogWithRestTest {
         spark.sql(
                 "CREATE TABLE t_cross_column_masking (first_name STRING, last_name STRING, display STRING, other_col STRING)"
                         + " TBLPROPERTIES ('query-auth.enabled'='true', 'source.split.target-size'='1 b')");
-        // two commits so the scan yields multiple splits
         spark.sql("INSERT INTO t_cross_column_masking VALUES ('john', 'doe', 'ignored', 'o1')");
         spark.sql("INSERT INTO t_cross_column_masking VALUES ('jane', 'roe', 'ignored', 'o2')");
 
-        // the mask on "display" reads OTHER columns: concat_ws('-', first_name, last_name)
         Map<String, Transform> columnMasking = new HashMap<>();
         columnMasking.put(
                 "display",
@@ -385,13 +383,11 @@ public class SparkCatalogWithRestTest {
         restCatalogServer.setColumnMaskingAuth(
                 Identifier.create("db2", "t_cross_column_masking"), columnMasking);
 
-        // project only the masked target: its input columns must be read regardless
         assertThat(
                         spark.sql("SELECT display FROM t_cross_column_masking ORDER BY other_col")
                                 .collectAsList()
                                 .toString())
                 .isEqualTo("[[john-doe], [jane-roe]]");
-        // a projection without the masked column is unaffected
         assertThat(
                         spark.sql("SELECT other_col FROM t_cross_column_masking ORDER BY other_col")
                                 .collectAsList()
@@ -414,8 +410,6 @@ public class SparkCatalogWithRestTest {
         restCatalogServer.setRowFilterAuth(
                 Identifier.create("db2", "t_agg_pushdown"), Collections.singletonList(idFilter));
 
-        // statistics-based aggregate pushdown must not bypass the read-time row filter
-        // (today it degrades because auth splits are not DataSplits; this anchors that)
         assertThat(spark.sql("SELECT COUNT(*) FROM t_agg_pushdown").collectAsList().toString())
                 .isEqualTo("[[2]]");
     }

@@ -373,7 +373,6 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         "CREATE TABLE %s.%s (first_name STRING, last_name STRING, display STRING, other_col STRING)"
                                 + " WITH ('query-auth.enabled' = 'true', 'source.split.target-size' = '1 b')",
                         DATABASE_NAME, maskingTable));
-        // two commits so the scan yields multiple splits
         batchSql(
                 String.format(
                         "INSERT INTO %s.%s VALUES ('john', 'doe', 'ignored', 'o1')",
@@ -383,7 +382,6 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         "INSERT INTO %s.%s VALUES ('jane', 'roe', 'ignored', 'o2')",
                         DATABASE_NAME, maskingTable));
 
-        // the mask on "display" reads OTHER columns: concat_ws('-', first_name, last_name)
         Map<String, Transform> columnMasking = new HashMap<>();
         columnMasking.put(
                 "display",
@@ -395,13 +393,11 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
         restCatalogServer.setColumnMaskingAuth(
                 Identifier.create(DATABASE_NAME, maskingTable), columnMasking);
 
-        // project only the masked target: its input columns must be read regardless
         assertThat(
                         batchSql(
                                 String.format(
                                         "SELECT display FROM %s.%s", DATABASE_NAME, maskingTable)))
                 .containsExactlyInAnyOrder(Row.of("john-doe"), Row.of("jane-roe"));
-        // a projection without the masked column is unaffected
         assertThat(
                         batchSql(
                                 String.format(
@@ -428,22 +424,18 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
         restCatalogServer.setColumnMaskingAuth(
                 Identifier.create(DATABASE_NAME, maskingTable), columnMasking);
 
-        // Flink consumes bounded partition filters without re-evaluating them, so the
-        // source itself must evaluate the predicate, on the masked value
         assertThat(
                         batchSql(
                                 String.format(
                                         "SELECT p, v FROM %s.%s WHERE p = 'vb'",
                                         DATABASE_NAME, maskingTable)))
                 .containsExactlyInAnyOrder(Row.of("vb", "vb"));
-        // the raw partition value must not match
         assertThat(
                         batchSql(
                                 String.format(
                                         "SELECT p, v FROM %s.%s WHERE p = 'a'",
                                         DATABASE_NAME, maskingTable)))
                 .isEmpty();
-        // filter column not projected
         assertThat(
                         batchSql(
                                 String.format(

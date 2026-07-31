@@ -3955,7 +3955,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         writeStringRows(table, values);
     }
 
-    /** Cross-column mask: display := concat_ws('-', first, last). */
     private void maskDisplayWithFullName(Identifier identifier) {
         Map<String, Transform> columnMasking = new HashMap<>();
         columnMasking.put(
@@ -3968,7 +3967,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         setColumnMasking(identifier, columnMasking);
     }
 
-    /** Rows must be copied: the auth back-projection reuses one ProjectedRow per split. */
     private static List<InternalRow> collectRows(RecordReader<InternalRow> reader, RowType rowType)
             throws Exception {
         List<InternalRow> rows = new ArrayList<>();
@@ -3985,14 +3983,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         identifier,
                         stringFields("first", "last", "display", "other"),
                         Collections.emptyMap());
-        // two rows in one commit -> one split with multiple rows
         writeStringRows(
                 table,
                 new String[] {"john", "doe", "ignored", "o1"},
                 new String[] {"jane", "roe", "ignored", "o2"});
         maskDisplayWithFullName(identifier);
 
-        // project only the masked target; its input columns are not selected
         ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {2});
         List<Split> splits = readBuilder.newScan().plan().splits();
         List<InternalRow> rows =
@@ -4019,10 +4015,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 createMaskingAuthTable(
                         identifier,
                         stringFields("first", "last", "display"),
-                        // one file per split, so the scan below yields multiple splits
                         Collections.singletonMap(
                                 CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
-        // two commits -> two splits; the widening must not leak state across splits
         writeStringRow(table, "john", "doe", "ignored");
         writeStringRow(table, "jane", "roe", "ignored");
         maskDisplayWithFullName(identifier);
@@ -4037,7 +4031,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         List<String> values = new ArrayList<>();
         for (InternalRow row : rows) {
-            // every split must be projected back to the query's arity
             assertThat(row.getFieldCount()).isEqualTo(1);
             values.add(row.getString(0).toString());
         }
@@ -4055,7 +4048,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.emptyMap());
         writeStringRow(table, "john", "doe", "secret", "o1");
 
-        // the filter pulls unprojected "display" into the read type, activating its mask
         LeafPredicate displayFilter =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(2, "display", DataTypes.STRING())),
@@ -4064,7 +4056,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         setRowFilter(identifier, Collections.singletonList(displayFilter));
         maskDisplayWithFullName(identifier);
 
-        // project only "other": the mask target and inputs are all unprojected
         ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {3});
         List<Split> splits = readBuilder.newScan().plan().splits();
         List<InternalRow> rows =
@@ -4097,7 +4088,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(masked).hasSize(1);
         assertThat(masked.get(0).getString(0).toString()).isEqualTo("john-doe");
 
-        // revoke the rules: the same TableRead must drop the widened read type
         setColumnMasking(identifier, new HashMap<>());
         List<InternalRow> plain =
                 collectRows(
@@ -4118,7 +4108,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.emptyMap());
         writeStringRow(table, "john", "doe", "plain");
 
-        // first read without rules fixes the read schema to the projection
         ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {2});
         TableRead read = readBuilder.newRead();
         List<InternalRow> plain =
@@ -4127,7 +4116,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         table.rowType().project("display"));
         assertThat(plain.get(0).getString(0).toString()).isEqualTo("plain");
 
-        // a mask granted afterwards needs columns outside the fixed schema: fail closed
         maskDisplayWithFullName(identifier);
         List<Split> splits = readBuilder.newScan().plan().splits();
         assertThatThrownBy(
@@ -4166,7 +4154,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         write.close();
         commit.close();
 
-        // a nested-pruned read type, as engines push down
         RowType tableRowType = table.rowType();
         DataField sField = tableRowType.getField("s");
         RowType prunedS = ((RowType) sField.type()).project("b");
@@ -4176,7 +4163,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 tableRowType.getField("display"),
                                 new DataField(sField.id(), "s", prunedS)));
 
-        // sanity: the nested-pruned read works without masking
         ReadBuilder readBuilder = table.newReadBuilder().withReadType(prunedReadType);
         List<InternalRow> rows =
                 collectRows(
@@ -4185,7 +4171,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).getRow(1, 1).getString(0).toString()).isEqualTo("BV");
 
-        // mask "display" from unprojected "extra": widening must keep "s" pruned
         Map<String, Transform> columnMasking = new HashMap<>();
         columnMasking.put(
                 "display",
@@ -4216,7 +4201,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.emptyMap());
         writeStringRow(table, "john", "doe", "secret");
 
-        // mask target absent from the schema (e.g. renamed since the rule was written)
         Map<String, Transform> staleTarget = new HashMap<>();
         staleTarget.put(
                 "renamed_away",
@@ -4226,7 +4210,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("does not exist in table schema");
 
-        // mask input absent from the schema
         Map<String, Transform> staleInput = new HashMap<>();
         staleInput.put(
                 "display",
@@ -4250,7 +4233,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.emptyMap());
         writeStringRow(table, "d1", "a1", "b1");
 
-        // first rules widen and fix the read schema to [display, hidden_a]
         Map<String, Transform> rules = new HashMap<>();
         rules.put(
                 "display",
@@ -4268,7 +4250,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         table.rowType().project("display"));
         assertThat(masked.get(0).getString(0).toString()).isEqualTo("a1");
 
-        // the new rules mask only hidden_a, retained but unread: must not activate
         rules.clear();
         rules.put(
                 "hidden_a",
@@ -4313,7 +4294,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         write.close();
         commit.close();
 
-        // the mask TARGETS the struct column "s" (reading another column)
         RowType tableRowType = table.rowType();
         DataField sField = tableRowType.getField("s");
         Map<String, Transform> masking = new HashMap<>();
@@ -4322,7 +4302,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
         setColumnMasking(identifier, masking);
 
-        // projecting "s" nested-pruned would write the mask into a partial slot: fail closed
         RowType prunedS = ((RowType) sField.type()).project("b");
         RowType prunedReadType =
                 new RowType(
@@ -4351,7 +4330,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         identifier, stringFields("first", "display"), Collections.emptyMap());
         writeStringRow(table, "john", "d1"); // snapshot 1
 
-        // add a column, then mask it: the rule is valid only in the latest schema
         catalog.alterTable(
                 identifier,
                 Collections.singletonList(SchemaChange.addColumn("extra", DataTypes.STRING())),
@@ -4362,7 +4340,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
         setColumnMasking(identifier, masking);
 
-        // the latest read masks the new column
         Table latest = catalog.getTable(identifier);
         ReadBuilder latestRead = latest.newReadBuilder();
         List<InternalRow> latestRows =
@@ -4372,7 +4349,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(latestRows).hasSize(1);
         assertThat(latestRows.get(0).getString(2).toString()).isEqualTo("****");
 
-        // a time-travel read of the old snapshot must not fail on the newer rule
         Table old =
                 catalog.getTable(identifier)
                         .copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
@@ -4394,7 +4370,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         identifier, stringFields("first", "secret"), Collections.emptyMap());
         writeStringRow(table, "john", "s1"); // snapshot 1, column named "secret"
 
-        // rename the column, then mask it under the new name
         catalog.alterTable(
                 identifier,
                 Collections.singletonList(SchemaChange.renameColumn("secret", "masked_secret")),
@@ -4405,7 +4380,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
         setColumnMasking(identifier, masking);
 
-        // the latest read masks the renamed column
         Table latest = catalog.getTable(identifier);
         ReadBuilder latestRead = latest.newReadBuilder();
         List<InternalRow> latestRows =
@@ -4414,9 +4388,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         latest.rowType());
         assertThat(latestRows.get(0).getString(1).toString()).isEqualTo("****");
 
-        // a time-travel read of the pre-rename snapshot exposes the same physical column
-        // as "secret"; the rule keyed on "masked_secret" would be silently skipped by name
-        // and leak the raw value -- it must fail closed instead
         Table old =
                 catalog.getTable(identifier)
                         .copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
@@ -4437,8 +4408,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
         writeStringRow(table, "d1", "o1");
 
-        // a mask on a system column the query does not project must be inert, not reject
-        // the whole query at plan time
         Map<String, Transform> masking = new HashMap<>();
         masking.put(
                 "_ROW_ID",
@@ -4463,7 +4432,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         identifier, stringFields("first", "old_input"), Collections.emptyMap());
         writeStringRow(table, "john", "in1"); // snapshot 1
 
-        // rename the input, then add a target column masked from the renamed input
         catalog.alterTable(
                 identifier,
                 Collections.singletonList(SchemaChange.renameColumn("old_input", "renamed_input")),
@@ -4478,8 +4446,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 new FieldTransform(new FieldRef(1, "renamed_input", DataTypes.STRING())));
         setColumnMasking(identifier, masking);
 
-        // the pre-rename snapshot predates "display": the mask cannot output there, so the
-        // rename of its input must not fail the read
         Table old =
                 catalog.getTable(identifier)
                         .copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
@@ -4503,7 +4469,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         StreamTableScan scan = table.newReadBuilder().newStreamScan();
 
-        // plan 1: a valid mask on "secret" is validated and cached
         Map<String, Transform> masking = new HashMap<>();
         masking.put(
                 "secret",
@@ -4511,12 +4476,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         setColumnMasking(identifier, masking);
         scan.plan();
 
-        // plan 2: rules disappear -- the cached validation must be forgotten
         setColumnMasking(identifier, Collections.emptyMap());
         scan.plan();
 
-        // the masked column is renamed away, then the identical rule is restored; a stale-rule
-        // cache short-circuit would skip re-validation and silently stop masking
         catalog.alterTable(
                 identifier,
                 Collections.singletonList(SchemaChange.renameColumn("secret", "hidden")),
@@ -4545,8 +4507,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         StreamTableScan scan = table.newReadBuilder().newStreamScan();
         scan.plan();
 
-        // the masked column is renamed while the rules stay identical: the live scan must
-        // notice on its next plan and fail closed, not keep planning on the stale rule
         catalog.alterTable(
                 identifier,
                 Collections.singletonList(SchemaChange.renameColumn("secret", "hidden")),
@@ -4583,7 +4543,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         write.close();
         commit.close();
 
-        // the mask on "display" reads the whole struct column "s"
         RowType tableRowType = table.rowType();
         DataField sField = tableRowType.getField("s");
         Map<String, Transform> masking = new HashMap<>();
@@ -4592,7 +4551,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 new CastTransform(new FieldRef(1, "s", sField.type()), DataTypes.STRING()));
         setColumnMasking(identifier, masking);
 
-        // projecting "s" nested-pruned would hand the mask a partial struct: fail closed
         RowType prunedS = ((RowType) sField.type()).project("b");
         RowType prunedReadType =
                 new RowType(
@@ -4625,7 +4583,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         Table table = createMaskingAuthTable(identifier, fields, options);
 
-        // one row group split across two columnar files: (f0, f1) and (f2)
         RowType tableRowType = table.rowType();
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         try (BatchTableWrite write0 =
@@ -4653,7 +4610,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             builder.newCommit().commit(commitables);
         }
 
-        // mask f1 from f2 and project only f1: the scan must keep f2's file
         Map<String, Transform> masking = new HashMap<>();
         masking.put(
                 "f1",
@@ -4701,7 +4657,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         write.close();
         commit.close();
 
-        // the mask reads the unprojected blob-view column: resolution cannot apply
         Map<String, Transform> masking = new HashMap<>();
         masking.put(
                 "display",
@@ -4736,7 +4691,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         fields,
                         Collections.singletonMap(
                                 CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
-        // two splits with opposite raw/masked ordering
         for (int[] row : new int[][] {{100, 0}, {50, 1000}}) {
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
             BatchTableWrite write = writeBuilder.newWrite();
@@ -4747,7 +4701,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             commit.close();
         }
 
-        // display := source inverts the ordering the raw statistics suggest
         Map<String, Transform> masking = new HashMap<>();
         masking.put("display", new FieldTransform(new FieldRef(1, "source", DataTypes.INT())));
         setColumnMasking(identifier, masking);
@@ -4761,7 +4714,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 collectRows(
                         readBuilder.newRead().createReader(splits),
                         table.rowType().project("display"));
-        // split pruning must not drop the split holding the real top row (1000)
         assertThat(
                         rows.stream()
                                 .map(row -> row.getInt(0))
@@ -4788,7 +4740,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         write.close();
         commit.close();
 
-        // the mask reads the projected _ROW_ID metadata field: not a stale rule
         Map<String, Transform> masking = new HashMap<>();
         masking.put(
                 "display",
@@ -4806,7 +4757,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         readBuilder.newRead().createReader(readBuilder.newScan().plan().splits()),
                         readType);
         assertThat(rows).hasSize(1);
-        // display masked to the row id
         assertThat(rows.get(0).getLong(0)).isEqualTo(rows.get(0).getLong(1));
     }
 
@@ -4821,7 +4771,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
         writeStringRow(table, "d1", "o1");
 
-        // a mask keyed by a key-reader-internal name is stale, not a system field
         Map<String, Transform> masking = new HashMap<>();
         masking.put(
                 "_KEY_display",
@@ -4831,7 +4780,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("does not exist in table schema");
 
-        // a rule reading an unprojected system field fails clearly at plan time
         masking.clear();
         masking.put(
                 "display",
@@ -4856,7 +4804,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         fields,
                         Collections.singletonMap(
                                 CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
-        // two splits whose raw and masked values order oppositely
         for (int[] row : new int[][] {{1, 1000}, {900, 10}}) {
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
             BatchTableWrite write = writeBuilder.newWrite();
@@ -4870,9 +4817,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         masking.put("amount", new FieldTransform(new FieldRef(1, "src", DataTypes.INT())));
         setColumnMasking(identifier, masking);
 
-        // the predicate applies to masked values, with no engine help (no executeFilter):
-        // raw statistics must not prune the split whose masked value matches, and the
-        // raw-matching row must not come back
         LeafPredicate amountFilter =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "amount", DataTypes.INT())),
@@ -4916,20 +4860,16 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         table.rowType().project("display"));
         assertThat(plain).hasSize(1);
 
-        // a mask now covers the filter column
         Map<String, Transform> masking = new HashMap<>();
         masking.put(
                 "display",
                 new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
         setColumnMasking(identifier, masking);
 
-        // this scan already pruned with the column's raw statistics: it must fail closed
         assertThatThrownBy(scan::plan)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Recreate the scan");
 
-        // a fresh scan carries no raw pruning, and the existing reader evaluates the
-        // filter on the masked value: 'd1' no longer matches
         List<Split> splits = readBuilder.newScan().plan().splits();
         List<InternalRow> masked =
                 collectRows(read.createReader(splits), table.rowType().project("display"));
@@ -4961,7 +4901,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
                         Equal.INSTANCE,
                         Collections.singletonList(BinaryString.fromString("a")));
-        // partition listing bypasses plan(): the filter must still prune
         assertThat(
                         table.newReadBuilder()
                                 .withFilter(partitionFilter)
@@ -4995,8 +4934,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         masking.put("amount", new FieldTransform(new FieldRef(1, "src", DataTypes.INT())));
         setColumnMasking(identifier, masking);
 
-        // the whole filter sits on the masked column: nothing is pushed down, but limit
-        // pruning must still know a read-time filter drops rows
         LeafPredicate amountFilter =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "amount", DataTypes.INT())),
@@ -5032,13 +4969,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         writeStringRow(table, "a", "va");
         writeStringRow(table, "b", "vb");
 
-        // the partition column is masked to another column's value
         Map<String, Transform> masking = new HashMap<>();
         masking.put("p", new FieldTransform(new FieldRef(1, "v", DataTypes.STRING())));
         setColumnMasking(identifier, masking);
 
-        // engines consume partition filters without re-evaluating them, so the read
-        // itself must evaluate this predicate, on the masked value
         LeafPredicate maskedMatch =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
@@ -5049,7 +4983,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(rows.get(0).getString(0).toString()).isEqualTo("vb");
         assertThat(rows.get(0).getString(1).toString()).isEqualTo("vb");
 
-        // the raw partition value must not match: matching it would reveal the raw value
         LeafPredicate rawMatch =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
@@ -5057,8 +4990,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.singletonList(BinaryString.fromString("a")));
         assertThat(readWithFilter(table, rawMatch, "p", "v")).isEmpty();
 
-        // filter column not projected: it is read and masked for the filter only, then
-        // projected back out
         List<InternalRow> unprojected = readWithFilter(table, maskedMatch, "v");
         assertThat(unprojected).hasSize(1);
         assertThat(unprojected.get(0).getString(0).toString()).isEqualTo("vb");
@@ -5081,8 +5012,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         masking.put("p", new FieldTransform(new FieldRef(1, "v", DataTypes.STRING())));
         setColumnMasking(identifier, masking);
 
-        // the filter is partition-only but sits on a masked column, so it drops rows at
-        // read time: limit pruning must not pick splits by raw row counts
         LeafPredicate maskedMatch =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
@@ -5127,8 +5056,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         masking.put("id", new FieldTransform(new FieldRef(1, "src", DataTypes.INT())));
         setColumnMasking(identifier, masking);
 
-        // the key filter matches a masked value only: key-range skipping inside the
-        // merge read must not drop the row by its raw key
         LeafPredicate idFilter =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
@@ -5624,16 +5551,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         BinaryString.fromString("bee"),
                         BinaryString.fromString("cee")));
 
-        // mask a -> "MASKED"; b and c are not masked
         Map<String, Transform> masking = new HashMap<>();
         masking.put(
                 "a",
                 new ConcatTransform(Collections.singletonList(BinaryString.fromString("MASKED"))));
         setColumnMasking(identifier, masking);
 
-        // WHERE a = 'MASKED' OR b = 'bee' -- one masked operand, one plain, neither projected.
-        // splitAnd does not split the OR, so retainFields keeps the whole disjunction, but only
-        // the masked column 'a' is widened in; 'b' is missing from the read schema.
         Predicate onMasked =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "a", DataTypes.STRING())),
@@ -5689,8 +5612,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Equal.INSTANCE,
                         Collections.singletonList(BinaryString.fromString("MASKED")));
 
-        // listPartitionEntries() bypasses plan(); a later plan() on the same scan must not treat
-        // the masks discovered then as a rule change against an already-pushed filter.
         InnerTableScan scan =
                 (InnerTableScan) table.newReadBuilder().withFilter(onMasked).newScan();
         assertThat(scan.listPartitionEntries()).hasSize(1);
@@ -5714,15 +5635,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         ""),
                 true);
         Table table = catalog.getTable(identifier);
-        // one file, the matching row second
         commitRows(
                 table,
                 GenericRow.of(BinaryString.fromString("no"), BinaryString.fromString("r1")),
                 GenericRow.of(BinaryString.fromString("yes"), BinaryString.fromString("r2")));
 
-        // The reader does not evaluate the query filter on an auth-enabled table; engines
-        // re-apply it. A read-level limit would cap the raw rows at "no" and the engine would
-        // then filter it away, losing the matching row entirely.
         Predicate onA =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "a", DataTypes.STRING())),
@@ -5760,15 +5677,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Equal.INSTANCE,
                         Collections.singletonList(BinaryString.fromString("vb")));
 
-        // routed through withPartitionFilter (as Spark does) the predicate never reaches the
-        // masked value, so it must fail closed rather than prune on the raw partition value
         InnerTableScan partitionScan = (InnerTableScan) table.newReadBuilder().newScan();
         partitionScan.withPartitionFilter(maskedMatch);
         assertThatThrownBy(partitionScan::plan)
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("masked partition key");
 
-        // the same predicate through withFilter is evaluated post-mask and still works
         assertThat(readWithFilter(table, maskedMatch, "p", "v")).hasSize(1);
     }
 
@@ -5784,12 +5698,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.emptyMap());
         writeStringRows(table, new String[] {"x", "a", "v1"}, new String[] {"y", "b", "v2"});
 
-        // only p2 is masked
         Map<String, Transform> masking = new HashMap<>();
         masking.put("p2", new FieldTransform(new FieldRef(2, "v", DataTypes.STRING())));
         setColumnMasking(identifier, masking);
 
-        // a partition predicate touching only the UNMASKED key stays prunable
         LeafPredicate onP1 =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "p1", DataTypes.STRING())),
@@ -5799,7 +5711,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         okScan.withPartitionFilter(onP1);
         assertThat(okScan.plan().splits()).isNotEmpty();
 
-        // touching the masked key is still rejected
         LeafPredicate onP2 =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(1, "p2", DataTypes.STRING())),
@@ -5824,8 +5735,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.emptyMap());
         writeStringRows(table, new String[] {"a", "va"}, new String[] {"b", "vb"});
 
-        // no masking: query auth alone defers the filter push, which must not overwrite
-        // the caller's partition filter
         LeafPredicate pAtLeastA =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
@@ -5833,7 +5742,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.singletonList(BinaryString.fromString("a")));
         assertThat(readPartitionB(table, pAtLeastA)).containsExactly("b");
 
-        // control: without query auth the filter is pushed eagerly, so this always held
         Identifier plain = Identifier.create("test_table_db", "plain_part_filter_with_filter");
         catalog.createTable(
                 plain,
@@ -5886,8 +5794,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 GenericRow.of(BinaryString.fromString("yes"), BinaryString.fromString("r2")),
                 GenericRow.of(BinaryString.fromString("yes"), BinaryString.fromString("r3")));
 
-        // executeFilter() means the reader evaluates the predicate itself, so capping after it
-        // is safe and the caller's limit must still be honoured
         Predicate onA =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(0, "a", DataTypes.STRING())),
@@ -5906,8 +5812,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testPartitionFilterFieldsReplacedOnRepush() throws Exception {
-        Identifier identifier = Identifier.create("test_table_db", "auth_part_filter_repush");
+    void testPartitionFilterFieldsReplacedOnReapply() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_part_filter_reapply");
         Table table =
                 createMaskingAuthTable(
                         identifier,
@@ -5932,8 +5838,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Equal.INSTANCE,
                         Collections.singletonList(BinaryString.fromString("x")));
 
-        // the second push overwrites the first in ManifestsReader, so the tracked fields must be
-        // replaced too: the effective predicate only touches the unmasked key
         InnerTableScan scan = (InnerTableScan) table.newReadBuilder().newScan();
         scan.withPartitionFilter(onMaskedP2);
         scan.withPartitionFilter(onPlainP1);
@@ -5953,7 +5857,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
         setColumnMasking(identifier, masking);
 
-        // these report per-column min/max of the raw files, which no mask can cover
         for (String suffix : Arrays.asList("files", "file_key_ranges", "binlog")) {
             Identifier sysId =
                     Identifier.create(
@@ -5964,7 +5867,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                     .hasMessageContaining("query-auth table");
         }
 
-        // the row-producing ones read through the masking reader and stay available
         for (String suffix : Arrays.asList("audit_log", "ro")) {
             Identifier sysId =
                     Identifier.create(
@@ -5984,8 +5886,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         identifier, stringFields("secret", "display"), Collections.emptyMap());
         writeStringRow(table, "TOPSECRET", "ignored");
 
-        // display := secret, while secret is masked. A transform reads the raw row, so this
-        // would publish secret's raw value through display.
         Map<String, Transform> compose = new HashMap<>();
         compose.put(
                 "secret",
@@ -5996,7 +5896,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("which is masked too");
 
-        // a mask reading an unmasked column, and one reading its own column, both stay valid
         Map<String, Transform> plain = new HashMap<>();
         plain.put("display", new FieldTransform(new FieldRef(0, "secret", DataTypes.STRING())));
         setColumnMasking(identifier, plain);
@@ -6013,8 +5912,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testQueryAuthRejectedWhereItCannotBeEnforced() throws Exception {
-        // a non-file-store table never reads through the auth reader, so accepting the option
-        // would leave the rules silently inert
         for (String type : Arrays.asList("format-table", "object-table")) {
             Map<String, String> opts = new HashMap<>();
             opts.put(QUERY_AUTH_ENABLED.key(), "true");
@@ -6037,7 +5934,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                     .hasMessageContaining(QUERY_AUTH_ENABLED.key());
         }
 
-        // search ranks raw index values, so it is refused rather than answered from them
         Identifier identifier = Identifier.create("test_table_db", "auth_search_rejected");
         Table table =
                 createMaskingAuthTable(
@@ -6047,7 +5943,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("query-auth table");
 
-        // the lookup cache serves rows straight from the store
         assertThatThrownBy(() -> new LocalTableQuery((FileStoreTable) table))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("query-auth table");
@@ -6071,8 +5966,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             builder.newCommit().commit(write.prepareCommit());
         }
 
-        // no masking rules at all -- a _ROW_ID predicate must still plan. Data-evolution
-        // statistics carry only logical columns, so the row-id part must not be pushed.
         Predicate onRowId =
                 LeafPredicate.of(
                         new FieldTransform(

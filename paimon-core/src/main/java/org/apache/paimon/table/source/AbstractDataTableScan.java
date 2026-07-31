@@ -68,7 +68,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -110,7 +109,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
     private Set<String> pushedMaskedFields = Collections.emptySet();
     private Set<String> partitionFilterFields = Collections.emptySet();
     // re-applied after the deferred filter push, which writes the same slot
-    @Nullable private Runnable repushPartitionFilter;
+    @Nullable private Runnable reapplyPartitionFilter;
 
     protected AbstractDataTableScan(
             TableSchema schema,
@@ -304,7 +303,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     private AbstractDataTableScan pushPartitionFilter(Set<String> fields, Runnable push) {
         partitionFilterFields = fields;
-        repushPartitionFilter = push;
+        reapplyPartitionFilter = push;
         push.run();
         return this;
     }
@@ -363,8 +362,8 @@ abstract class AbstractDataTableScan implements DataTableScan {
             snapshotReader.withFilter(userFilter, effective);
             filterPushed = true;
             pushedMaskedFields = maskedInFilter;
-            if (repushPartitionFilter != null) {
-                repushPartitionFilter.run();
+            if (reapplyPartitionFilter != null) {
+                reapplyPartitionFilter.run();
             }
         } else if (!pushedMaskedFields.containsAll(maskedInFilter)) {
             throw new IllegalStateException(
@@ -384,24 +383,11 @@ abstract class AbstractDataTableScan implements DataTableScan {
         RowType desired = readType;
         if (queryAuthResult != null && queryAuthResult.hasRules()) {
             // post-mask conjuncts are evaluated at read time; their columns must survive planning
-            List<String> seed = readType.getFieldNames();
-            Set<String> postMask =
-                    TableQueryAuthResult.postMaskFilterFields(
-                            userFilter, queryAuthResult.extractColumnMasking().keySet());
-            if (!postMask.isEmpty()) {
-                seed = new ArrayList<>(seed);
-                for (String field : postMask) {
-                    if (!seed.contains(field)) {
-                        seed.add(field);
-                    }
-                }
-            }
-            Set<String> ruleFields = queryAuthResult.requiredAuthFields(seed);
-            // requiredAuthFields returns what the rules read, not the seed itself
-            ruleFields.addAll(postMask);
             RowType widened =
                     TableQueryAuthResult.appendMissingFields(
-                            schema.logicalRowType(), readType, ruleFields);
+                            schema.logicalRowType(),
+                            readType,
+                            queryAuthResult.authFields(readType.getFieldNames(), userFilter));
             if (widened != null) {
                 desired = widened;
             }

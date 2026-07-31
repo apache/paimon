@@ -67,13 +67,9 @@ public class TableQueryAuthResultTest {
         Map<String, String> masking = Collections.singletonMap("display", maskJson());
         TableQueryAuthResult result = new TableQueryAuthResult(null, masking);
 
-        // same names and ids: the rule binds to the same physical columns
         assertThatCode(() -> result.validateReadableWithoutRename(TABLE_TYPE, TABLE_TYPE))
                 .doesNotThrowAnyException();
 
-        // the mask input 'extra' was dropped and re-added, so the latest schema gives it a fresh
-        // id. A time-travel read of the pre-drop snapshot still has an 'extra', but it is an
-        // unrelated column; resolving the rule by name would mask with its values.
         RowType latest =
                 RowType.of(
                         new org.apache.paimon.types.DataField(0, "display", DataTypes.STRING()),
@@ -85,7 +81,6 @@ public class TableQueryAuthResultTest {
 
     @Test
     public void testValidateRejectsReAddedColumnForRowFilter() {
-        // a row filter is remapped by name too, so it needs the same binding check as a mask
         TableQueryAuthResult result =
                 new TableQueryAuthResult(Collections.singletonList(filterJson()), null);
         assertThatCode(() -> result.validateReadableWithoutRename(TABLE_TYPE, TABLE_TYPE))
@@ -108,22 +103,9 @@ public class TableQueryAuthResultTest {
                         new TableQueryAuthResult(Collections.emptyList(), Collections.emptyMap())
                                 .hasRules())
                 .isFalse();
-        // blank filter entries parse to no predicate
         assertThat(new TableQueryAuthResult(Collections.singletonList(""), null).hasRules())
                 .isFalse();
         Map<String, String> masking = Collections.singletonMap("display", maskJson());
         assertThat(new TableQueryAuthResult(null, masking).hasRules()).isTrue();
-    }
-
-    @Test
-    public void testWidenReadType() {
-        Map<String, String> masking = Collections.singletonMap("display", maskJson());
-        TableQueryAuthResult result = new TableQueryAuthResult(null, masking);
-        // the mask input is unprojected: widen
-        RowType widened = result.widenReadType(TABLE_TYPE, TABLE_TYPE.project("display"));
-        assertThat(widened).isNotNull();
-        assertThat(widened.getFieldNames()).containsExactly("display", "extra");
-        // already covered: no widening
-        assertThat(result.widenReadType(TABLE_TYPE, TABLE_TYPE)).isNull();
     }
 }
