@@ -30,6 +30,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.hadoop.SerializableConfiguration;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.FunctionWithException;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ReflectionUtils;
 
@@ -39,12 +40,16 @@ import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Options;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -60,6 +65,12 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
     private org.apache.paimon.options.Options options;
 
     protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
+
+    /**
+     * Transient so that a deserialized copy starts out usable: closing one instance must not
+     * disable the copies that were shipped to other processes.
+     */
+    private transient volatile boolean closed;
 
     private final Path path;
 
@@ -197,6 +208,10 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
             org.apache.hadoop.fs.Path path,
             FunctionWithException<org.apache.hadoop.fs.Path, FileSystem, IOException> creator)
             throws IOException {
+        if (closed) {
+            throw new IOException("This FileIO is closed.");
+        }
+
         if (fsMap == null) {
             synchronized (this) {
                 if (fsMap == null) {
@@ -214,7 +229,25 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
         FileSystem fs = map.get(key);
         if (fs == null) {
             fs = creator.apply(path);
-            map.put(key, fs);
+            boolean owned = isOwnedScheme(scheme);
+            // publish under the same monitor close() takes, otherwise an instance created here can
+            // land in the map after close() drained it and then nobody would ever release it
+            synchronized (this) {
+                if (closed) {
+                    if (owned) {
+                        IOUtils.closeQuietly(fs);
+                    }
+                    throw new IOException("This FileIO is closed.");
+                }
+                FileSystem previous = map.putIfAbsent(key, fs);
+                if (previous != null) {
+                    // another thread won the race, release the instance we own and use theirs
+                    if (owned) {
+                        IOUtils.closeQuietly(fs);
+                    }
+                    fs = previous;
+                }
+            }
         }
         return fs;
     }
@@ -224,6 +257,64 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
         FileSystem fileSystem = path.getFileSystem(conf);
         fileSystem = HadoopSecuredFileSystem.trySecureFileSystem(fileSystem, options, conf);
         return fileSystem;
+    }
+
+    /**
+     * Whether the {@link FileSystem} instances created for the given scheme belong to this {@link
+     * FileIO} exclusively, and may therefore be closed by it.
+     *
+     * <p>This mirrors the branch Hadoop itself takes in {@code FileSystem#get(URI, Configuration)}:
+     * with {@code fs.<scheme>.impl.disable.cache} set, Hadoop hands out a fresh instance that
+     * nobody else can reach, so releasing it is our responsibility. Otherwise the instance lives in
+     * Hadoop's global cache and is shared with every other user in this JVM, including other {@link
+     * FileIO}s and the compute engine itself; {@code FileSystem#closeAll} releases those on
+     * shutdown and closing one here would break unrelated readers.
+     *
+     * <p>The scheme is the one taken from the path, not from {@code FileSystem#getUri()}, and it is
+     * matched as written rather than lower cased, because that is what Hadoop looks up. Any
+     * deviation could report a cached, shared instance as owned.
+     */
+    @VisibleForTesting
+    boolean isOwnedScheme(@Nullable String scheme) {
+        if (hadoopConf == null) {
+            return false;
+        }
+        Configuration conf = hadoopConf.get();
+        if (scheme == null) {
+            // a path without a scheme is served by the default file system
+            try {
+                scheme = FileSystem.getDefaultUri(conf).getScheme();
+            } catch (IllegalArgumentException e) {
+                // a missing or malformed fs.defaultFS, so there is no scheme to claim ownership of
+                return false;
+            }
+        }
+        return conf.getBoolean(String.format("fs.%s.impl.disable.cache", scheme), false);
+    }
+
+    @Override
+    public void close() throws IOException {
+        List<FileSystem> owned = new ArrayList<>();
+        synchronized (this) {
+            closed = true;
+            Map<Pair<String, String>, FileSystem> map = fsMap;
+            if (map == null) {
+                return;
+            }
+            for (Map.Entry<Pair<String, String>, FileSystem> entry : map.entrySet()) {
+                if (isOwnedScheme(entry.getKey().getLeft())) {
+                    owned.add(entry.getValue());
+                }
+            }
+            // drop the cached instances as well, a closed one must never be handed out again
+            map.clear();
+        }
+
+        try {
+            IOUtils.closeAll(owned);
+        } catch (Exception e) {
+            throw new IOException("Failed to close the file systems owned by this FileIO", e);
+        }
     }
 
     private static class HadoopSeekableInputStream extends SeekableInputStream {

@@ -270,8 +270,13 @@ public interface FileIO extends Serializable, Closeable {
     }
 
     /**
-     * Override this method to empty, many FileIO implementation classes rely on static variables
-     * and do not have the ability to close them.
+     * Releases the resources this instance owns exclusively. The default is empty because many
+     * implementations hold nothing of their own, or reach their resources through static variables
+     * shared with the rest of the JVM, which they must not close.
+     *
+     * <p>Override it only for resources that belong to this instance alone, and make the override
+     * idempotent. Implementations that delegate to another {@link FileIO} should forward the call,
+     * otherwise the delegate can never be released.
      */
     @Override
     default void close() throws IOException {}
@@ -655,10 +660,16 @@ public interface FileIO extends Serializable, Closeable {
             return null;
         }
 
-        // check access
+        // check access, the probe is thrown away afterwards so it has to be released here: with
+        // the Hadoop file system cache disabled its exists() call creates a file system that no
+        // one else can reach
         FileIO io = fileIO.load(path);
-        io.configure(config);
-        io.exists(path);
+        try {
+            io.configure(config);
+            io.exists(path);
+        } finally {
+            IOUtils.closeQuietly(io);
+        }
         return fileIO;
     }
 }

@@ -29,17 +29,23 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -144,6 +150,79 @@ public class ResolvingFileIOTest {
         assertNotNull(hdfsFileIOAgain);
         assertEquals(localFileIO, localFileIOAgain);
         assertEquals(hdfsFileIO, hdfsFileIOAgain);
+    }
+
+    @Test
+    public void testCloseReleasesEveryResolvedFileIO() throws Exception {
+        List<FileIO> loaded = new ArrayList<>();
+        configureWithFreshDelegates(loaded, false);
+
+        // two authorities mean two entries in the delegate map
+        FileIO first = resolvingFileIO.fileIO(new Path("oss://bucket-1/table"));
+        FileIO second = resolvingFileIO.fileIO(new Path("oss://bucket-2/table"));
+        assertNotEquals(first, second);
+
+        resolvingFileIO.close();
+
+        // both resolved delegates, and the throwaway probes FileIO.get made along the way
+        for (FileIO fileIO : loaded) {
+            verify(fileIO, times(1)).close();
+        }
+    }
+
+    @Test
+    public void testCloseKeepsGoingWhenADelegateFails() throws Exception {
+        List<FileIO> loaded = new ArrayList<>();
+        configureWithFreshDelegates(loaded, true);
+
+        FileIO first = resolvingFileIO.fileIO(new Path("oss://bucket-1/table"));
+        FileIO second = resolvingFileIO.fileIO(new Path("oss://bucket-2/table"));
+
+        // the first failure must not keep the second entry from being closed
+        assertThrows(IOException.class, () -> resolvingFileIO.close());
+
+        verify(first, times(1)).close();
+        verify(second, times(1)).close();
+    }
+
+    @Test
+    public void testUseAfterCloseIsRejectedAndTheMapIsEmptied() throws Exception {
+        List<FileIO> loaded = new ArrayList<>();
+        configureWithFreshDelegates(loaded, false);
+
+        FileIO delegate = resolvingFileIO.fileIO(new Path("oss://bucket-1/table"));
+        resolvingFileIO.close();
+
+        // the map really is drained, so a second close must not close the delegate again
+        resolvingFileIO.close();
+        verify(delegate, times(1)).close();
+
+        // and resolving again must not silently rebuild a delegate nobody will release
+        assertThrows(
+                IOException.class, () -> resolvingFileIO.fileIO(new Path("oss://bucket-1/table")));
+    }
+
+    /**
+     * Hands out a fresh delegate per load, the way a real loader does. FileIO.get loads one
+     * throwaway instance to probe access and another one to return, so a single shared mock cannot
+     * tell the two apart.
+     */
+    private void configureWithFreshDelegates(List<FileIO> loaded, boolean failOnClose)
+            throws IOException {
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.getScheme()).thenReturn("oss");
+        when(loader.load(any()))
+                .thenAnswer(
+                        ignored -> {
+                            FileIO delegate = mock(FileIO.class);
+                            when(delegate.exists(any())).thenReturn(true);
+                            if (failOnClose) {
+                                doThrow(new IOException("cannot close")).when(delegate).close();
+                            }
+                            loaded.add(delegate);
+                            return delegate;
+                        });
+        resolvingFileIO.configure(CatalogContext.create(new Options(), loader, null));
     }
 
     @Test
