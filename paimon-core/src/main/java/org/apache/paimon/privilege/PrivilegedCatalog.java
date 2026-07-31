@@ -174,6 +174,14 @@ public class PrivilegedCatalog extends DelegateCatalog {
     }
 
     @Override
+    public void createPartitions(
+            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            throws TableNotExistException {
+        privilegeManager.getPrivilegeChecker().assertCanInsert(identifier);
+        wrapped.createPartitions(identifier, partitions, ignoreIfExists);
+    }
+
+    @Override
     public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         privilegeManager.getPrivilegeChecker().assertCanInsert(identifier);
