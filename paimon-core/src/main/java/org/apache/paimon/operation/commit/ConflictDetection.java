@@ -67,6 +67,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
+import static org.apache.paimon.operation.commit.RowIdConflictChecker.TriggerSource.MATERIALIZE_DV_COMPACTION;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -99,6 +100,7 @@ public class ConflictDetection {
 
     private @Nullable PartitionExpire partitionExpire;
     private @Nullable Long rowIdCheckFromSnapshot = null;
+    private @Nullable RowIdConflictChecker.TriggerSource rowIdConflictCheckTriggerSource = null;
 
     public ConflictDetection(
             String tableName,
@@ -128,11 +130,34 @@ public class ConflictDetection {
     }
 
     public void setRowIdCheckFromSnapshot(@Nullable Long rowIdCheckFromSnapshot) {
-        this.rowIdCheckFromSnapshot = rowIdCheckFromSnapshot;
+        setRowIdCheckFromSnapshot(
+                rowIdCheckFromSnapshot, RowIdConflictChecker.TriggerSource.DATA_EVOLUTION_DML);
     }
 
-    public boolean hasRowIdCheckFromSnapshot() {
-        return rowIdCheckFromSnapshot != null;
+    public void setRowIdCheckFromSnapshotForMaterializeDvCompaction(
+            @Nullable Long rowIdCheckFromSnapshot) {
+        setRowIdCheckFromSnapshot(rowIdCheckFromSnapshot, MATERIALIZE_DV_COMPACTION);
+    }
+
+    private void setRowIdCheckFromSnapshot(
+            @Nullable Long rowIdCheckFromSnapshot,
+            RowIdConflictChecker.TriggerSource triggerSource) {
+        this.rowIdCheckFromSnapshot = rowIdCheckFromSnapshot;
+        this.rowIdConflictCheckTriggerSource =
+                rowIdCheckFromSnapshot == null ? null : triggerSource;
+    }
+
+    public boolean shouldCheckRowIdFromSnapshot(CommitKind commitKind) {
+        return rowIdCheckFromSnapshot != null
+                && (rowIdConflictCheckTriggerSource != MATERIALIZE_DV_COMPACTION
+                        || commitKind == CommitKind.COMPACT);
+    }
+
+    public RowIdConflictChecker.TriggerSource rowIdConflictCheckTriggerSource() {
+        checkState(
+                rowIdConflictCheckTriggerSource != null,
+                "Row ID conflict check trigger source is not set.");
+        return rowIdConflictCheckTriggerSource;
     }
 
     @Nullable
@@ -164,7 +189,7 @@ public class ConflictDetection {
             List<SimpleFileEntry> baseEntries,
             List<SimpleFileEntry> deltaEntries,
             List<IndexManifestEntry> deltaIndexEntries,
-            @Nullable RowIdColumnConflictChecker rowIdColumnConflictChecker,
+            @Nullable RowIdConflictChecker rowIdConflictChecker,
             CommitKind commitKind) {
         String baseCommitUser = latestSnapshot.commitUser();
         if (deletionVectorsEnabled && bucketMode.equals(BucketMode.BUCKET_UNAWARE)) {
@@ -245,7 +270,7 @@ public class ConflictDetection {
         }
 
         return checkForRowIdFromSnapshot(
-                latestSnapshot, deltaEntries, deltaIndexEntries, rowIdColumnConflictChecker);
+                latestSnapshot, deltaEntries, deltaIndexEntries, rowIdConflictChecker);
     }
 
     public <T extends FileEntry> Map<BinaryRow, Integer> collectUncheckedBucketPartitions(
@@ -578,14 +603,14 @@ public class ConflictDetection {
             Snapshot latestSnapshot,
             List<SimpleFileEntry> deltaEntries,
             List<IndexManifestEntry> deltaIndexEntries,
-            @Nullable RowIdColumnConflictChecker columnChecker) {
+            @Nullable RowIdConflictChecker conflictChecker) {
         if (!dataEvolutionEnabled) {
             return Optional.empty();
         }
         if (rowIdCheckFromSnapshot == null) {
             return Optional.empty();
         }
-        if (columnChecker == null || columnChecker.isEmpty()) {
+        if (conflictChecker == null || conflictChecker.isEmpty()) {
             return Optional.empty();
         }
 
@@ -605,10 +630,13 @@ public class ConflictDetection {
             List<ManifestEntry> changes =
                     commitScanner.readIncrementalEntries(snapshot, changedPartitions);
             for (ManifestEntry entry : changes) {
+                if (!shouldCheckHistoricalRowIdEntry(entry.kind())) {
+                    continue;
+                }
                 DataFileMeta file = entry.file();
                 if (file.firstRowId() != null
                         && file.nonNullRowIdRange().from < checkNextRowId
-                        && columnChecker.conflictsWith(file)) {
+                        && conflictChecker.conflictsWith(file)) {
                     LOG.debug(
                             "Data evolution row id conflict detected for table {}, commit user {}, "
                                     + "snapshot {}, file {}.",
@@ -624,6 +652,10 @@ public class ConflictDetection {
         }
 
         return Optional.empty();
+    }
+
+    boolean shouldCheckHistoricalRowIdEntry(FileKind kind) {
+        return rowIdConflictCheckTriggerSource != MATERIALIZE_DV_COMPACTION || kind == FileKind.ADD;
     }
 
     private Optional<RuntimeException> checkGlobalIndexRowIdExistence(

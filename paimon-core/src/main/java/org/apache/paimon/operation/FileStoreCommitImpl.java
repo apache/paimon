@@ -54,6 +54,8 @@ import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
 import org.apache.paimon.operation.commit.RowIdColumnConflictChecker;
+import org.apache.paimon.operation.commit.RowIdConflictChecker;
+import org.apache.paimon.operation.commit.RowIdRangeConflictChecker;
 import org.apache.paimon.operation.commit.RowTrackingCommitUtils.RowTrackingAssigned;
 import org.apache.paimon.operation.commit.StrictModeChecker;
 import org.apache.paimon.operation.commit.SuccessCommitResult;
@@ -106,13 +108,16 @@ import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestEntry.nullableRecordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
+import static org.apache.paimon.operation.commit.RowIdConflictChecker.TriggerSource.MATERIALIZE_DV_COMPACTION;
 import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRowTracking;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -265,6 +270,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
+    public FileStoreCommit rowIdCheckConflictForMaterializeDvCompaction(
+            @Nullable Long rowIdCheckFromSnapshot) {
+        this.conflictDetection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(
+                rowIdCheckFromSnapshot);
+        return this;
+    }
+
+    @Override
     public FileStoreCommit withOperation(Snapshot.Operation operation) {
         this.operation = operation;
         return this;
@@ -346,7 +359,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     checkAppendFiles = true;
                     allowRollback = true;
                 }
-                if (conflictDetection.hasRowIdCheckFromSnapshot()) {
+                if (conflictDetection.shouldCheckRowIdFromSnapshot(commitKind)) {
                     checkAppendFiles = true;
                     allowRollback = true;
                 }
@@ -1006,14 +1019,35 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
                                 .collect(Collectors.toList());
             }
-            RowIdColumnConflictChecker rowIdColumnConflictChecker = null;
-            if (conflictDetection.hasRowIdCheckFromSnapshot()) {
-                rowIdColumnConflictChecker =
-                        RowIdColumnConflictChecker.fromDataFiles(
-                                schemaManager,
-                                deltaFiles.stream()
-                                        .map(ManifestEntry::file)
-                                        .collect(Collectors.toList()));
+            RowIdConflictChecker rowIdConflictChecker = null;
+            if (conflictDetection.shouldCheckRowIdFromSnapshot(commitKind)) {
+                List<DataFileMeta> rowIdConflictFiles;
+                if (conflictDetection.rowIdConflictCheckTriggerSource()
+                        == MATERIALIZE_DV_COMPACTION) {
+                    // For materialize dv compaction jobs, we should check each deleted file range
+                    // will not be erroneously restored by concurrent merg-into updates.
+                    rowIdConflictFiles =
+                            deltaFiles.stream()
+                                    .filter(entry -> entry.kind() == FileKind.DELETE)
+                                    .map(ManifestEntry::file)
+                                    .filter(file -> file.firstRowId() != null)
+                                    .filter(
+                                            file ->
+                                                    !isBlobFile(file.fileName())
+                                                            && !isVectorStoreFile(file.fileName()))
+                                    .collect(Collectors.toList());
+
+                    rowIdConflictChecker =
+                            RowIdRangeConflictChecker.fromDataFiles(rowIdConflictFiles);
+                } else {
+                    rowIdConflictFiles =
+                            deltaFiles.stream()
+                                    .map(ManifestEntry::file)
+                                    .collect(Collectors.toList());
+                    rowIdConflictChecker =
+                            RowIdColumnConflictChecker.fromDataFiles(
+                                    schemaManager, rowIdConflictFiles);
+                }
             }
             Optional<RuntimeException> exception =
                     conflictDetection.checkConflicts(
@@ -1021,7 +1055,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             baseDataFiles,
                             SimpleFileEntry.from(deltaFiles),
                             indexFiles,
-                            rowIdColumnConflictChecker,
+                            rowIdConflictChecker,
                             commitKind);
             if (exception.isPresent()) {
                 if (allowRollback && rollback != null) {

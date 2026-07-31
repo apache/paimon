@@ -851,6 +851,8 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         tableOptions.put(CoreOptions.BUCKET.key(), "-1");
         tableOptions.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         tableOptions.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        tableOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        tableOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
         tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
 
         FileStoreTable table =

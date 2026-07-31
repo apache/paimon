@@ -53,6 +53,7 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -79,6 +80,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.errors.ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
@@ -596,6 +598,71 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
         assertThat(liveDeletionVectorDataFileNames(table))
                 .doesNotContainAnyElementsOf(oldAnchorFiles);
+    }
+
+    @Test
+    public void testStaleMaterializeCompactionRejectedAfterConcurrentUpdate() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        commitDeletionVectors(table, DEFAULT_DV_SPECS);
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
+        FileStoreTable compactTable = table.copy(dynamicOptions);
+        Snapshot compactSnapshot = compactTable.latestSnapshot().get();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(compactTable, false, false, compactSnapshot);
+        List<CommitMessage> staleMaterializeMessages = new ArrayList<>();
+        try {
+            while (true) {
+                for (DataEvolutionCompactTask task : coordinator.plan()) {
+                    staleMaterializeMessages.add(
+                            task.doCompact(compactTable, "test-stale-materialize"));
+                }
+            }
+        } catch (EndOfScanException ignored) {
+        }
+        assertThat(staleMaterializeMessages).isNotEmpty();
+        staleMaterializeMessages.addAll(
+                new DataEvolutionCompactionCommitPreparation(compactTable, compactSnapshot)
+                        .prepare(staleMaterializeMessages));
+
+        RowType writeType = table.rowType().project(Collections.singletonList("f2"));
+        List<CommitMessage> concurrentUpdateMessages = new ArrayList<>();
+        for (int batch = 0; batch < 3; batch++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite().withWriteType(writeType)) {
+                for (int rowId = batch * 5; rowId < batch * 5 + 5; rowId++) {
+                    write.write(GenericRow.of(BinaryString.fromString("concurrent-" + rowId)));
+                }
+                List<CommitMessage> messages = write.prepareCommit();
+                setFirstRowId(messages, batch * 5L);
+                concurrentUpdateMessages.addAll(messages);
+            }
+        }
+        commit(table, concurrentUpdateMessages);
+
+        assertThat(readProjectedStrings(table.newReadBuilder().withProjection(new int[] {2})))
+                .containsExactlyElementsOf(expectedProjectedStrings("concurrent", FULL_RANGE));
+        long updateSnapshotId = table.latestSnapshot().get().id();
+
+        assertThatThrownBy(
+                        () -> {
+                            try (TableCommitImpl commit =
+                                    compactTable.newCommit("test-stale-materialize")) {
+                                commit.rowIdCheckConflictForMaterializeDvCompaction(
+                                                compactSnapshot.id())
+                                        .commit(staleMaterializeMessages);
+                            }
+                        })
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
+
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(updateSnapshotId);
+        assertThat(readProjectedStrings(table.newReadBuilder().withProjection(new int[] {2})))
+                .containsExactlyElementsOf(expectedProjectedStrings("concurrent", FULL_RANGE));
     }
 
     @Test
