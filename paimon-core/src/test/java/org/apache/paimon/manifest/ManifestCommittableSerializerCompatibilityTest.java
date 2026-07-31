@@ -107,28 +107,8 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         dvRanges,
                         "external_path");
 
-        CommitMessageImpl commitMessage =
-                new CommitMessageImpl(
-                        singleColumn("my_partition"),
-                        11,
-                        16,
-                        new DataIncrement(
-                                dataFiles,
-                                dataFiles,
-                                dataFiles,
-                                Collections.singletonList(hashIndexFile),
-                                Collections.singletonList(hashIndexFile)),
-                        new CompactIncrement(
-                                dataFiles,
-                                dataFiles,
-                                dataFiles,
-                                Collections.singletonList(devIndexFile),
-                                Collections.emptyList()));
-
         ManifestCommittable manifestCommittable =
-                new ManifestCommittable(5, 202020L, Collections.singletonList(commitMessage));
-        manifestCommittable.addProperty("k1", "v1");
-        manifestCommittable.addProperty("k2", "v2");
+                createManifestCommittable(dataFiles, hashIndexFile, devIndexFile);
 
         ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
         byte[] bytes = serializer.serialize(manifestCommittable);
@@ -149,7 +129,19 @@ public class ManifestCommittableSerializerCompatibilityTest {
                                 .getResourceAsStream("compatibility/" + fileName),
                         true);
         deserialized = serializer.deserialize(5, oldBytes);
-        assertThat(deserialized).isEqualTo(manifestCommittable);
+        GlobalIndexMeta legacyGlobalIndexMeta =
+                new GlobalIndexMeta(1L, 2L, 3, new int[] {5, 6, 7}, new byte[] {0x23, 0x45});
+        IndexFileMeta legacyHashIndexFile =
+                new IndexFileMeta(
+                        "my_index_type",
+                        "my_index_file",
+                        1024 * 100,
+                        1002,
+                        null,
+                        null,
+                        legacyGlobalIndexMeta);
+        assertThat(deserialized)
+                .isEqualTo(createManifestCommittable(dataFiles, legacyHashIndexFile, devIndexFile));
         deserializedGlobalIndexMeta =
                 ((CommitMessageImpl) deserialized.fileCommittables().get(0))
                         .newFilesIncrement()
@@ -157,6 +149,32 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         .get(0)
                         .globalIndexMeta();
         assertThat(deserializedGlobalIndexMeta.sourceMeta()).isNull();
+    }
+
+    private static ManifestCommittable createManifestCommittable(
+            List<DataFileMeta> dataFiles, IndexFileMeta hashIndexFile, IndexFileMeta devIndexFile) {
+        CommitMessageImpl commitMessage =
+                new CommitMessageImpl(
+                        singleColumn("my_partition"),
+                        11,
+                        16,
+                        new DataIncrement(
+                                dataFiles,
+                                dataFiles,
+                                dataFiles,
+                                Collections.singletonList(hashIndexFile),
+                                Collections.singletonList(hashIndexFile)),
+                        new CompactIncrement(
+                                dataFiles,
+                                dataFiles,
+                                dataFiles,
+                                Collections.singletonList(devIndexFile),
+                                Collections.emptyList()));
+        ManifestCommittable manifestCommittable =
+                new ManifestCommittable(5, 202020L, Collections.singletonList(commitMessage));
+        manifestCommittable.addProperty("k1", "v1");
+        manifestCommittable.addProperty("k2", "v2");
+        return manifestCommittable;
     }
 
     @Test
