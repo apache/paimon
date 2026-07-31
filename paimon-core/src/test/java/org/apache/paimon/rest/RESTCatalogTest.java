@@ -45,6 +45,7 @@ import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.options.Options;
@@ -4837,6 +4838,51 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testStreamScanFilterOnMaskedColumnNotPushedToStats() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_stream_masking_filter_stats");
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "amount", DataTypes.INT()));
+        fields.add(new DataField(1, "src", DataTypes.INT()));
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        fields,
+                        Collections.singletonMap(
+                                CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
+        for (int[] row : new int[][] {{1, 1000}, {900, 10}}) {
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            BatchTableWrite write = writeBuilder.newWrite();
+            write.write(GenericRow.of(row[0], row[1]));
+            BatchTableCommit commit = writeBuilder.newCommit();
+            commit.commit(write.prepareCommit());
+            write.close();
+            commit.close();
+        }
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put("amount", new FieldTransform(new FieldRef(1, "src", DataTypes.INT())));
+        setColumnMasking(identifier, masking);
+
+        LeafPredicate amountFilter =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "amount", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(500));
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withProjection(new int[] {0}).withFilter(amountFilter);
+        StreamTableScan scan = readBuilder.newStreamScan();
+        List<InternalRow> rows =
+                collectRows(
+                        readBuilder.newRead().createReader(scan.plan().splits()),
+                        table.rowType().project("amount"));
+        assertThat(
+                        rows.stream()
+                                .map(row -> row.getInt(0))
+                                .collect(java.util.stream.Collectors.toList()))
+                .containsExactly(1000);
+    }
+
+    @Test
     void testMaskGrowthOnPushedFilterColumn() throws Exception {
         Identifier identifier =
                 Identifier.create("test_table_db", "auth_table_masking_pushed_filter");
@@ -4907,6 +4953,32 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 .newScan()
                                 .listPartitionEntries())
                 .hasSize(1);
+    }
+
+    @Test
+    void testRowFilterAppliesToPartitionListing() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_table_db", "auth_row_filter_partition_listing");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("p", "v"),
+                        Collections.singletonList("p"),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        writeStringRows(table, new String[] {"a", "v1"}, new String[] {"b", "v2"});
+
+        LeafPredicate onA =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("a")));
+        setRowFilter(identifier, Collections.singletonList(onA));
+
+        List<PartitionEntry> entries =
+                catalog.getTable(identifier).newReadBuilder().newScan().listPartitionEntries();
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).partition().getString(0).toString()).isEqualTo("a");
     }
 
     @Test
@@ -5857,7 +5929,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
         setColumnMasking(identifier, masking);
 
-        for (String suffix : Arrays.asList("files", "file_key_ranges", "binlog")) {
+        for (String suffix : Arrays.asList("files", "file_key_ranges", "binlog", "statistics")) {
             Identifier sysId =
                     Identifier.create(
                             identifier.getDatabaseName(),
@@ -5946,6 +6018,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThatThrownBy(() -> new LocalTableQuery((FileStoreTable) table))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("query-auth table");
+
+        assertThatThrownBy(() -> ((FileStoreTable) table).newVectorSearchBuilder().newVectorRead())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("query-auth table");
     }
 
     @Test
@@ -5977,6 +6053,49 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.singletonList(0L));
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(onRowId);
         assertThat(readBuilder.newScan().plan().splits()).isNotEmpty();
+    }
+
+    @Test
+    void testMaskedRowIdFilterOnDataEvolutionQueryAuthTable() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_de_masked_rowid");
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "f0", DataTypes.BIGINT()));
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        Table table = createMaskingAuthTable(identifier, fields, options);
+
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            write.write(GenericRow.of(42L));
+            builder.newCommit().commit(write.prepareCommit());
+        }
+
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(
+                SpecialFields.ROW_ID.name(),
+                new FieldTransform(new FieldRef(0, "f0", DataTypes.BIGINT())));
+        setColumnMasking(identifier, masking);
+
+        Predicate onMaskedRowId =
+                LeafPredicate.of(
+                        new FieldTransform(
+                                new FieldRef(
+                                        SpecialFields.ROW_ID.id(),
+                                        SpecialFields.ROW_ID.name(),
+                                        DataTypes.BIGINT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(42L));
+        RowType readType =
+                new RowType(Arrays.asList(table.rowType().getField("f0"), SpecialFields.ROW_ID));
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withReadType(readType).withFilter(onMaskedRowId);
+        List<InternalRow> rows =
+                collectRows(
+                        readBuilder.newRead().createReader(readBuilder.newScan().plan().splits()),
+                        readType);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getLong(1)).isEqualTo(42L);
     }
 
     @Test

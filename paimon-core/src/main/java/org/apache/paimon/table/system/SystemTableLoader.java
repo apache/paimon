@@ -93,11 +93,11 @@ public class SystemTableLoader {
             Arrays.asList(ALL_TABLES, ALL_PARTITIONS, ALL_TABLE_OPTIONS, CATALOG_OPTIONS);
 
     /**
-     * System tables built from raw DataSplit metadata -- file names, row counts, per-column min/max
-     * -- none of which a column mask covers.
+     * System tables built from raw metadata -- file names, row counts, per-column min/max and
+     * distinct/null counts -- none of which a column mask covers.
      */
     private static final List<String> PHYSICAL_METADATA_TABLES =
-            Arrays.asList(FILES, FILE_KEY_RANGES, BINLOG);
+            Arrays.asList(FILES, FILE_KEY_RANGES, BINLOG, STATISTICS);
 
     @Nullable
     public static Table load(String type, FileStoreTable dataTable) {

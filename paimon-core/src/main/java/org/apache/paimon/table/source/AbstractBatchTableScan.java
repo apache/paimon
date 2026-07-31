@@ -42,6 +42,7 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -151,12 +152,14 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
 
     @Override
     public List<PartitionEntry> listPartitionEntries() {
-        // partition listing bypasses plan(), so resolve the masks here too: pushing a filter on a
-        // masked column against raw partition values would drop partitions the query matches
+        // partition listing bypasses plan(), so apply the rules here too: without the row filter
+        // it would report partitions the caller cannot read, and pushing a filter on a masked
+        // column against raw partition values would drop partitions the query matches
         TableQueryAuthResult authResult = authQuery();
+        applyAuthFilter(authResult == null ? null : authResult.extractPredicate());
         this.authMaskedFields =
                 authResult == null
-                        ? java.util.Collections.emptySet()
+                        ? Collections.emptySet()
                         : authResult.extractColumnMasking().keySet();
         rejectMaskedPartitionFilter();
         ensureFilterPushdown(authMaskedFields);
