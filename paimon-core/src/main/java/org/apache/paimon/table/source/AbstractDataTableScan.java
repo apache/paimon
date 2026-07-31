@@ -109,6 +109,8 @@ abstract class AbstractDataTableScan implements DataTableScan {
     private boolean filterPushed = false;
     private Set<String> pushedMaskedFields = Collections.emptySet();
     private Set<String> partitionFilterFields = Collections.emptySet();
+    // re-applied after the deferred filter push, which writes the same slot
+    @Nullable private Runnable repushPartitionFilter;
 
     protected AbstractDataTableScan(
             TableSchema schema,
@@ -209,21 +211,19 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     @Override
     public AbstractDataTableScan withPartitionFilter(Map<String, String> partitionSpec) {
-        partitionFilterFields =
+        return pushPartitionFilter(
                 partitionSpec == null
                         ? Collections.emptySet()
-                        : new HashSet<>(partitionSpec.keySet());
-        snapshotReader.withPartitionFilter(partitionSpec);
-        return this;
+                        : new HashSet<>(partitionSpec.keySet()),
+                () -> snapshotReader.withPartitionFilter(partitionSpec));
     }
 
     @Override
     public AbstractDataTableScan withPartitionFilter(List<BinaryRow> partitions) {
         // binary partitions carry no field names; assume every partition key
-        partitionFilterFields =
-                partitions == null ? Collections.emptySet() : new HashSet<>(schema.partitionKeys());
-        snapshotReader.withPartitionFilter(partitions);
-        return this;
+        return pushPartitionFilter(
+                partitions == null ? Collections.emptySet() : new HashSet<>(schema.partitionKeys()),
+                () -> snapshotReader.withPartitionFilter(partitions));
     }
 
     @Override
@@ -232,29 +232,25 @@ abstract class AbstractDataTableScan implements DataTableScan {
         if (partitions != null) {
             partitions.forEach(spec -> fields.addAll(spec.keySet()));
         }
-        partitionFilterFields = fields;
-        snapshotReader.withPartitionsFilter(partitions);
-        return this;
+        return pushPartitionFilter(fields, () -> snapshotReader.withPartitionsFilter(partitions));
     }
 
     @Override
     public AbstractDataTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
-        partitionFilterFields =
+        return pushPartitionFilter(
                 partitionPredicate == null
                         ? Collections.emptySet()
-                        : partitionPredicateFields(partitionPredicate);
-        snapshotReader.withPartitionFilter(partitionPredicate);
-        return this;
+                        : partitionPredicateFields(partitionPredicate),
+                () -> snapshotReader.withPartitionFilter(partitionPredicate));
     }
 
     @Override
     public InnerTableScan withPartitionFilter(Predicate predicate) {
-        partitionFilterFields =
+        return pushPartitionFilter(
                 predicate == null
                         ? Collections.emptySet()
-                        : PredicateVisitor.collectFieldNames(predicate);
-        snapshotReader.withPartitionFilter(predicate);
-        return this;
+                        : PredicateVisitor.collectFieldNames(predicate),
+                () -> snapshotReader.withPartitionFilter(predicate));
     }
 
     @Override
@@ -303,6 +299,13 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public InnerTableScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
         snapshotReader.withRowRangeIndex(rowRangeIndex);
+        return this;
+    }
+
+    private AbstractDataTableScan pushPartitionFilter(Set<String> fields, Runnable push) {
+        partitionFilterFields = fields;
+        repushPartitionFilter = push;
+        push.run();
         return this;
     }
 
@@ -360,6 +363,9 @@ abstract class AbstractDataTableScan implements DataTableScan {
             snapshotReader.withFilter(userFilter, effective);
             filterPushed = true;
             pushedMaskedFields = maskedInFilter;
+            if (repushPartitionFilter != null) {
+                repushPartitionFilter.run();
+            }
         } else if (!pushedMaskedFields.containsAll(maskedInFilter)) {
             throw new IllegalStateException(
                     "Query auth rules changed and now mask a pushed-down filter column. "
