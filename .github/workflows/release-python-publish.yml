@@ -20,6 +20,10 @@ name: Release PyPaimon Publish
 
 on:
   workflow_call:
+    inputs:
+      release_version:
+        required: true
+        type: string
     secrets:
       TEST_PYPI_API_TOKEN:
         required: true
@@ -55,13 +59,19 @@ jobs:
         run: |
           set -euo pipefail
 
-          base_version="$(
+          source_version="$(
             sed -n 's/^VERSION = "\(.*\)"/\1/p' \
               paimon-python/setup.py
           )"
-          expected_version="${base_version}"
+          release_version="${{ inputs.release_version }}"
+          if [[ "${source_version}" != "${release_version}" ]]; then
+            echo "PyPaimon version ${source_version:-missing} does not match Paimon ${release_version}" >&2
+            exit 1
+          fi
+
+          expected_version="${release_version}"
           if [[ "${GITHUB_REF_NAME}" == *-rc* ]]; then
-            expected_version="${base_version}rc${GITHUB_REF_NAME##*-rc}"
+            expected_version="${release_version}rc${GITHUB_REF_NAME##*-rc}"
           fi
 
           test -f "dist/pypaimon-${expected_version}.tar.gz"

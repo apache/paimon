@@ -23,7 +23,16 @@ name: Release PyPaimon Package
 
 on:
   workflow_call:
+    inputs:
+      release_version:
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: Paimon release version
+        required: true
+        type: string
 
 concurrency:
   group: release-python-${{ github.ref }}
@@ -51,19 +60,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          base_version="$(
+          source_version="$(
             sed -n 's/^VERSION = "\(.*\)"/\1/p' \
               paimon-python/setup.py
           )"
-          if [[ -z "${base_version}" || "${base_version}" == *dev* || "${base_version}" == *rc* ]]; then
-            echo "PyPaimon release base version is invalid: ${base_version:-missing}" >&2
+          release_version="${{ inputs.release_version }}"
+          if [[ "${source_version}" != "${release_version}" ]]; then
+            echo "PyPaimon version ${source_version:-missing} does not match Paimon ${release_version}" >&2
             exit 1
           fi
 
-          package_version="${base_version}"
+          package_version="${release_version}"
           if [[ "${GITHUB_REF}" == refs/tags/*-rc* ]]; then
             rc_number="${GITHUB_REF_NAME##*-rc}"
-            package_version="${base_version}rc${rc_number}"
+            package_version="${release_version}rc${rc_number}"
             sed -i \
               "s/^VERSION = \".*\"/VERSION = \"${package_version}\"/" \
               paimon-python/setup.py
