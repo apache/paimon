@@ -205,8 +205,11 @@ jobs:
 
           tar -czf "release-java/${LANE}-packages.tar.gz" \
             -T "${files}"
-          sha512sum "release-java/${LANE}-packages.tar.gz" \
-            > "release-java/${LANE}-packages.tar.gz.sha512"
+          (
+            cd release-java
+            sha512sum "${LANE}-packages.tar.gz" \
+              > "${LANE}-packages.tar.gz.sha512"
+          )
 
           {
             echo "lane=${LANE}"

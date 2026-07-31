@@ -116,8 +116,9 @@ jobs:
 
   java:
     name: Java packages
-    needs: validation
-    if: needs.validation.outputs.release_kind == 'rc'
+    if: >-
+      startsWith(github.ref, 'refs/tags/') &&
+      contains(github.ref_name, '-rc')
     uses: ./.github/workflows/release-java.yml
 
   python-package:
@@ -129,14 +130,11 @@ jobs:
 
   python-publish:
     name: PyPaimon publish
-    needs: [validation, java, python-package]
+    needs: [validation, python-package]
     if: >-
-      always() &&
       needs.validation.result == 'success' &&
       startsWith(github.ref, 'refs/tags/') &&
-      needs.python-package.result == 'success' &&
-      (needs.java.result == 'success' ||
-       needs.validation.outputs.release_kind == 'final')
+      needs.python-package.result == 'success'
     uses: ./.github/workflows/release-python-publish.yml
     with:
       release_version: ${{ needs.validation.outputs.release_version }}

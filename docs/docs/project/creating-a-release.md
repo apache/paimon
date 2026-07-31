@@ -86,7 +86,7 @@ The workflow has the following contract:
 | Java 11 | Use Temurin 11 to package Flink 2 and Iceberg, then upload the package, checksums, manifest, and log |
 | Java 17 | Use Temurin 17 to package Spark 4, then upload the package, checksums, manifest, and log |
 | Python package | Build and validate the PyPaimon source distribution and universal wheel, then upload them as workflow artifacts |
-| Python publish | Publish an RC to TestPyPI only after all Java and Python packaging jobs pass; publish a final tag to PyPI |
+| Python publish | Publish an RC to TestPyPI or a final tag to PyPI after Python packaging passes, without waiting for Java packaging |
 
 Before packaging, every Java lane runs Maven Enforcer's
 `requireReleaseVersion` and `requireReleaseDeps` rules over its complete reactor
@@ -94,9 +94,11 @@ scope. The latter includes transitive dependencies. Any remaining
 `-SNAPSHOT` project, parent, direct dependency, or transitive dependency is a
 release blocker.
 
-The Java jobs use `-Dgpg.skip=true` and never receive Nexus credentials or a
-GPG private key. Their artifacts are build evidence, not the Maven staging
-repositories used for the vote. The Python RC job uses the
+The Java jobs run independently of the common validation and Python jobs. They
+use `-Dgpg.skip=true` and never receive Nexus credentials or a GPG private key.
+Their artifacts are optional build evidence, not a prerequisite for the RM's
+local Java staging and not the Maven staging repositories used for the vote.
+The Python RC job uses the
 `TEST_PYPI_API_TOKEN` repository Actions secret to publish
 `PAIMON_VERSIONrcRC_NUMBER` to TestPyPI. The final job uses the
 `PYPI_API_TOKEN` repository Actions secret to publish to PyPI. The release
@@ -134,7 +136,8 @@ svn --version
 
 Discuss the release on `dev@paimon.apache.org`, select an RM, resolve release
 blockers, review incompatible changes and upgrade notes, and prepare release
-notes. Ensure CI is green on the commit from which the candidate will be cut.
+notes. Review the CI status of the commit from which the candidate will be cut;
+the RM decides whether any unresolved failures block the release.
 
 ### Set the release variables
 
@@ -218,17 +221,18 @@ git push origin \
   "refs/tags/${RC_REF}:refs/tags/${RC_REF}"
 ```
 
-Pushing the signed tag starts the Release workflow. The common validation job
-must succeed before any Java or Python packaging or publishing job can run.
-Wait for every required job to succeed. Record:
+Pushing the signed tag starts the Release workflow. Java packaging runs
+independently. Python publishing starts as soon as common validation and Python
+packaging succeed; it does not wait for the Java packaging jobs. Record:
 
 - the workflow run URL and `head_sha`;
-- the JDK 8, 11, and 17 package artifact names, manifests, and SHA-512
-  checksums;
+- any available JDK 8, 11, and 17 package artifacts, manifests, and SHA-512
+  checksums which the RM chooses to use as additional build evidence;
 - the TestPyPI project/version URL.
 
-Do not start the vote when a required lane is missing or has been rerun from a
-different commit.
+CI status is not an automatic gate for local Java staging or the release vote.
+The RM evaluates the available CI results together with the local release
+checks and decides whether the candidate is ready.
 
 ## Stage the Java convenience artifacts locally
 
@@ -245,10 +249,10 @@ gpg --list-secret-keys --keyid-format LONG
 mvn -q -DforceStdout help:evaluate -Dexpression=project.version
 ```
 
-Download the three Java package artifacts from the recorded workflow run and
-verify each `*-packages.tar.gz.sha512` file. Inspect each manifest and artifact
-inventory to confirm that the lane, version, commit, JDK, and module scope match
-the signed RC tag. The workflow packages are CI build evidence; do not compare
+If the RM chooses to use the Java workflow artifacts as additional evidence,
+download the available packages, verify each `*-packages.tar.gz.sha512` file,
+and inspect each manifest and artifact inventory. Confirm that the lane,
+version, commit, JDK, and module scope match the signed RC tag. Do not compare
 their individual JAR checksums with the locally built and signed JARs. Archive
 entry order and other build metadata can make independently built JARs differ
 at the byte level.
@@ -292,13 +296,16 @@ python3 setup.py sdist
 gpg --armor --detach-sig \
   "dist/pypaimon-${PAIMON_VERSION}.tar.gz"
 
-if command -v sha512sum >/dev/null 2>&1; then
-  sha512sum "dist/pypaimon-${PAIMON_VERSION}.tar.gz" \
-    > "dist/pypaimon-${PAIMON_VERSION}.tar.gz.sha512"
-else
-  shasum -a 512 "dist/pypaimon-${PAIMON_VERSION}.tar.gz" \
-    > "dist/pypaimon-${PAIMON_VERSION}.tar.gz.sha512"
-fi
+(
+  cd dist
+  if command -v sha512sum >/dev/null 2>&1; then
+    sha512sum "pypaimon-${PAIMON_VERSION}.tar.gz" \
+      > "pypaimon-${PAIMON_VERSION}.tar.gz.sha512"
+  else
+    shasum -a 512 "pypaimon-${PAIMON_VERSION}.tar.gz" \
+      > "pypaimon-${PAIMON_VERSION}.tar.gz.sha512"
+  fi
+)
 
 cp "dist/pypaimon-${PAIMON_VERSION}.tar.gz"* ../release/
 cd ..
