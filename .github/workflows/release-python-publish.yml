@@ -47,6 +47,7 @@ jobs:
           path: dist
 
       - name: Verify package versions
+        id: package_version
         shell: bash
         run: |
           set -euo pipefail
@@ -71,12 +72,41 @@ jobs:
             exit 1
           fi
 
+          echo "version=${expected_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Reject existing TestPyPI RC version
+        if: contains(github.ref_name, '-rc')
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ steps.package_version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          status="$(
+            curl --silent --show-error --output /dev/null \
+              --write-out '%{http_code}' \
+              "https://test.pypi.org/pypi/pypaimon/${EXPECTED_VERSION}/json"
+          )"
+
+          case "${status}" in
+            404)
+              ;;
+            200)
+              echo "pypaimon ${EXPECTED_VERSION} already exists on TestPyPI; create a new RC" >&2
+              exit 1
+              ;;
+            *)
+              echo "TestPyPI version check returned HTTP ${status}; refusing to publish" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Publish RC to TestPyPI
         if: contains(github.ref_name, '-rc')
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
         with:
           repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
+          skip-existing: false
           packages-dir: dist
           password: ${{ secrets.TEST_PYPI_API_TOKEN }}
 

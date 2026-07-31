@@ -338,7 +338,11 @@ svn commit -m \
   paimon-dist-dev
 ```
 
-Never overwrite an existing RC directory. If any byte changes, create a new RC.
+Never overwrite an existing RC directory. TestPyPI versions are immutable for
+this release process as well: the workflow checks for an existing version before
+upload and fails instead of skipping files. The uploader also rejects duplicate
+files to cover races after the check. If any byte changes, create a new RC with
+a new RC number.
 
 ## Call the vote
 
@@ -401,7 +405,7 @@ If the vote finds a problem:
 2. Drop every Nexus staging repository belonging to the failed RC.
 3. Remove the superseded dist-dev directories, or retain them temporarily when
    useful to the vote discussion. Never replace their contents.
-4. Increment `RC_NUMBER`.
+4. Increment `RC_NUMBER`; never reuse the failed candidate's TestPyPI version.
 5. Create a new RC branch and signed tag, run every workflow lane again, stage
    new source candidates, and start a new 72-hour vote.
 
