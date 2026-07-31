@@ -90,6 +90,11 @@ public abstract class FlinkSink<T> implements Serializable {
         this.ignorePreviousFiles = ignorePreviousFiles;
     }
 
+    @Nullable
+    protected StoreSinkWrite.Provider writeProviderOverride() {
+        return null;
+    }
+
     void setBlobDescriptorReaderFactory(UriReaderFactory uriReaderFactory) {
         this.blobDescriptorReaderFactory = uriReaderFactory;
     }
@@ -137,17 +142,19 @@ public abstract class FlinkSink<T> implements Serializable {
         boolean isStreaming = isStreaming(input);
 
         boolean writeOnly = table.coreOptions().writeOnly();
-        StoreSinkWrite.Provider writeProvider =
-                StoreSinkWrite.createWriteProvider(
-                        table,
-                        env.getCheckpointConfig(),
-                        isStreaming,
-                        ignorePreviousFiles,
-                        hasSinkMaterializer(input));
+        StoreSinkWrite.Provider writeProvider = writeProviderOverride();
+        if (writeProvider == null) {
+            writeProvider =
+                    StoreSinkWrite.createWriteProvider(
+                            table,
+                            env.getCheckpointConfig(),
+                            isStreaming,
+                            ignorePreviousFiles,
+                            hasSinkMaterializer(input));
+        }
         writeProvider =
                 StoreSinkWrite.withBlobDescriptorReaderFactory(
                         writeProvider, blobDescriptorReaderFactory);
-
         SingleOutputStreamOperator<Committable> written =
                 input.transform(
                         (writeOnly ? WRITER_WRITE_ONLY_NAME : WRITER_NAME) + " : " + table.name(),

@@ -25,8 +25,11 @@ import org.apache.paimon.flink.sink.SortCompactSinkBuilder;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -38,6 +41,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -55,18 +59,22 @@ public class SortCompactAction extends CompactAction {
             String tableName,
             Map<String, String> catalogConfig,
             Map<String, String> tableConf) {
-        super(database, tableName, catalogConfig, tableConf);
+        // Time-travel scan options in tableConf would switch tableSchema to a historical
+        // version during table.copy() in the parent constructor. Sort compact always plans
+        // against the latest snapshot and must read/write with the latest schema.
+        super(database, tableName, catalogConfig, withoutInheritedScanOptions(tableConf));
         table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
     }
 
     @Override
     public void run() throws Exception {
-        build();
-        execute("Sort Compact Job");
+        if (buildImpl()) {
+            execute("Sort Compact Job");
+        }
     }
 
     @Override
-    public void build() throws Exception {
+    protected boolean buildImpl() throws Exception {
         // only support batch sort yet
         if (env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                 != RuntimeExecutionMode.BATCH) {
@@ -80,13 +88,47 @@ public class SortCompactAction extends CompactAction {
             throw new UnsupportedOperationException("Data Evolution table cannot be sorted!");
         }
 
-        if (fileStoreTable.bucketMode() != BucketMode.BUCKET_UNAWARE
-                && fileStoreTable.bucketMode() != BucketMode.HASH_DYNAMIC) {
-            throw new IllegalArgumentException("Sort Compact only supports bucket=-1 yet.");
+        if (fileStoreTable.coreOptions().rowTrackingEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Sort compact is unsupported for row tracking tables.");
         }
+
+        if (!fileStoreTable.primaryKeys().isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "Sort compact only supports append tables without primary keys.");
+        }
+
+        if (fileStoreTable.bucketMode() != BucketMode.BUCKET_UNAWARE) {
+            throw new IllegalArgumentException(
+                    "Sort compact only supports bucket-unaware append tables.");
+        }
+
+        // Capture the base snapshot and the planned input splits. The old files in these splits
+        // become compactBefore of the compact commit, so that sort compact is committed as a
+        // normal COMPACT commit (instead of OVERWRITE) and does not drop data appended
+        // concurrently since the base snapshot.
+        PartitionPredicate partitionPredicate = getPartitionPredicate();
+        SnapshotReader snapshotReader = fileStoreTable.newSnapshotReader();
+        if (partitionPredicate != null) {
+            snapshotReader.withPartitionFilter(partitionPredicate);
+        }
+        SnapshotReader.Plan plan = snapshotReader.read();
+        Long baseSnapshotId = plan.snapshotId();
+        List<DataSplit> dataSplits = plan.dataSplits();
+        if (dataSplits.isEmpty()) {
+            // empty table or no matching partitions: no-op job with no commit
+            return false;
+        }
+
+        // Pin the source to the captured base snapshot so that the sort compact reads exactly
+        // the planned data, while the sink stays write-only. Clear mutually exclusive scan
+        // options inherited from the table and set scan.mode=from-snapshot explicitly.
+        FileStoreTable sourceTable =
+                fileStoreTable.copyWithoutTimeTravel(pinnedSnapshotSourceOptions(baseSnapshotId));
+
         Map<String, String> tableConfig = fileStoreTable.options();
         FlinkSourceBuilder sourceBuilder =
-                new FlinkSourceBuilder(fileStoreTable)
+                new FlinkSourceBuilder(sourceTable)
                         .sourceName(
                                 ObjectIdentifier.of(
                                                 catalogName,
@@ -94,7 +136,7 @@ public class SortCompactAction extends CompactAction {
                                                 identifier.getObjectName())
                                         .asSummaryString());
 
-        sourceBuilder.partitionPredicate(getPartitionPredicate());
+        sourceBuilder.partitionPredicate(partitionPredicate);
 
         String scanParallelism = tableConfig.get(FlinkConnectorOptions.SCAN_PARALLELISM.key());
         if (scanParallelism != null) {
@@ -137,9 +179,10 @@ public class SortCompactAction extends CompactAction {
 
         new SortCompactSinkBuilder(fileStoreTable)
                 .forCompact(true)
+                .withSortCompactInput(baseSnapshotId == null ? 0L : baseSnapshotId, dataSplits)
                 .forRowData(sorter.sort())
-                .overwrite()
                 .build();
+        return true;
     }
 
     public SortCompactAction withOrderStrategy(String sortStrategy) {
@@ -154,5 +197,36 @@ public class SortCompactAction extends CompactAction {
     public SortCompactAction withOrderColumns(List<String> orderColumns) {
         this.orderColumns = orderColumns.stream().map(String::trim).collect(Collectors.toList());
         return this;
+    }
+
+    private static Map<String, String> withoutInheritedScanOptions(Map<String, String> tableConf) {
+        Map<String, String> options = new HashMap<>(tableConf);
+        clearInheritedScanOptions(options);
+        return options;
+    }
+
+    private static void clearInheritedScanOptions(Map<String, String> options) {
+        options.put(CoreOptions.SCAN_VERSION.key(), null);
+        options.put(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), null);
+        options.put(CoreOptions.SCAN_TIMESTAMP.key(), null);
+        options.put(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(), null);
+        options.put(CoreOptions.SCAN_CREATION_TIME_MILLIS.key(), null);
+        options.put(CoreOptions.SCAN_TAG_NAME.key(), null);
+        options.put(CoreOptions.SCAN_WATERMARK.key(), null);
+        options.put(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(), null);
+        options.put(CoreOptions.INCREMENTAL_BETWEEN.key(), null);
+        options.put(CoreOptions.INCREMENTAL_TO_AUTO_TAG.key(), null);
+        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), null);
+        options.put(CoreOptions.SCAN_MODE.key(), null);
+    }
+
+    private static Map<String, String> pinnedSnapshotSourceOptions(Long snapshotId) {
+        Map<String, String> options = new HashMap<>();
+        clearInheritedScanOptions(options);
+        options.put(
+                CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                String.valueOf(snapshotId == null ? 0L : snapshotId));
+        options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_SNAPSHOT.toString());
+        return options;
     }
 }
