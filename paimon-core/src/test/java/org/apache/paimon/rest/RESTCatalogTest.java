@@ -5814,6 +5814,57 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testExplicitPartitionFilterSurvivesDeferredQueryFilter() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_part_filter_with_filter");
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("p", "v"),
+                        Collections.singletonList("p"),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        writeStringRows(table, new String[] {"a", "va"}, new String[] {"b", "vb"});
+
+        // no masking: query auth alone defers the filter push, which must not overwrite
+        // the caller's partition filter
+        LeafPredicate pAtLeastA =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("a")));
+        assertThat(readPartitionB(table, pAtLeastA)).containsExactly("b");
+
+        // control: without query auth the filter is pushed eagerly, so this always held
+        Identifier plain = Identifier.create("test_table_db", "plain_part_filter_with_filter");
+        catalog.createTable(
+                plain,
+                new Schema(
+                        stringFields("p", "v"),
+                        Collections.singletonList("p"),
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        ""),
+                true);
+        Table plainTable = catalog.getTable(plain);
+        writeStringRows(plainTable, new String[] {"a", "va"}, new String[] {"b", "vb"});
+        assertThat(readPartitionB(plainTable, pAtLeastA)).containsExactly("b");
+    }
+
+    private static List<String> readPartitionB(Table table, Predicate filter) throws Exception {
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withFilter(filter)
+                        .withPartitionFilter(Collections.singletonMap("p", "b"));
+        return collectRows(
+                        readBuilder.newRead().createReader(readBuilder.newScan().plan().splits()),
+                        table.rowType())
+                .stream()
+                .map(row -> row.getString(0).toString())
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    @Test
     void testQueryAuthLimitAppliesWhenReaderExecutesFilter() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "auth_limit_execute_filter");
         catalog.createDatabase(identifier.getDatabaseName(), true);
