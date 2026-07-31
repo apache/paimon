@@ -41,12 +41,15 @@ import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -57,6 +60,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -115,8 +119,6 @@ public class ChainTablePartitionExpireTest {
         write(deltaTable, "20250215", "v7");
         write(deltaTable, "20250315", "v8");
 
-        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
-        deltaTable = loadTable(tablePath).switchToBranch("delta");
         assertThat(listPartitions(snapshotTable))
                 .containsExactlyInAnyOrder("20250101", "20250201", "20250301");
         assertThat(listPartitions(deltaTable))
@@ -155,9 +157,6 @@ public class ChainTablePartitionExpireTest {
         write(snapshotTable, "20250315", "v2");
         write(deltaTable, "20250205", "v3");
 
-        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
-        deltaTable = loadTable(tablePath).switchToBranch("delta");
-
         ChainTablePartitionExpire expire =
                 newChainExpire(snapshotTable, deltaTable, Duration.ofDays(30), false);
         expire.setLastCheck(LocalDateTime.of(2025, 1, 1, 0, 0));
@@ -188,9 +187,6 @@ public class ChainTablePartitionExpireTest {
         write(deltaTable, "20250105", "v5");
         write(deltaTable, "20250120", "v6");
         write(deltaTable, "20250210", "v7");
-
-        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
-        deltaTable = loadTable(tablePath).switchToBranch("delta");
 
         // cutoff = 2025-03-31 - 30d = 2025-03-01
         // Snapshots before cutoff: 20250101, 20250115, 20250201 (3 snapshots)
@@ -244,9 +240,6 @@ public class ChainTablePartitionExpireTest {
         write(snapshotTable, "20250101", "v1");
         write(snapshotTable, "20250201", "v2");
 
-        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
-        deltaTable = loadTable(tablePath).switchToBranch("delta");
-
         ChainTablePartitionExpire expire =
                 new ChainTablePartitionExpire(
                         Duration.ofDays(30),
@@ -287,9 +280,6 @@ public class ChainTablePartitionExpireTest {
         write(deltaTable, "20250105", "v5");
         write(deltaTable, "20250120", "v6");
         write(deltaTable, "20250210", "v7");
-
-        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
-        deltaTable = loadTable(tablePath).switchToBranch("delta");
 
         // maxExpireNum=1 means only 1 segment: Segment1={S(0101), d(0105)}
         ChainTablePartitionExpire expire =
@@ -343,9 +333,6 @@ public class ChainTablePartitionExpireTest {
         writeGrouped(snapshotTable, "EU", "20250320", "v5");
         writeGrouped(deltaTable, "EU", "20250220", "d3");
 
-        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
-        deltaTable = loadTable(tablePath).switchToBranch("delta");
-
         // cutoff = 2025-03-31 - 30d = 2025-03-01
         // Group "US": snapshots before cutoff = [0101, 0201]. Anchor = 0201 (kept).
         //   Expire: S(0101), delta(0110) (before anchor 0201)
@@ -363,8 +350,10 @@ public class ChainTablePartitionExpireTest {
         snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
         deltaTable = loadTable(tablePath).switchToBranch("delta");
 
-        List<String> snapshotParts = listGroupedPartitions(snapshotTable);
-        List<String> deltaParts = listGroupedPartitions(deltaTable);
+        List<String> snapshotParts =
+                listPartitions(snapshotTable, p -> p.getString(0) + "|" + p.getString(1));
+        List<String> deltaParts =
+                listPartitions(deltaTable, p -> p.getString(0) + "|" + p.getString(1));
 
         assertThat(snapshotParts).contains("US|20250201", "US|20250301");
         assertThat(snapshotParts).doesNotContain("US|20250101");
@@ -388,9 +377,6 @@ public class ChainTablePartitionExpireTest {
         write(snapshotTable, "20250301", "v3");
         write(deltaTable, "20250110", "d1");
         write(deltaTable, "20250210", "d2");
-
-        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
-        deltaTable = loadTable(tablePath).switchToBranch("delta");
 
         RecordingPartitionModification snapshotModification = new RecordingPartitionModification();
         RecordingPartitionModification deltaModification = new RecordingPartitionModification();
@@ -432,9 +418,6 @@ public class ChainTablePartitionExpireTest {
         write(snapshotTable, "20250201", "v2");
         write(snapshotTable, "20250301", "v3");
 
-        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
-        deltaTable = loadTable(tablePath).switchToBranch("delta");
-
         // expirationTime = 30d, "now" = 2025-03-31 → cutoff = 2025-03-01
         // Snapshots before cutoff: S(0101), S(0201). Anchor = S(0201) (kept).
         ChainTablePartitionExpire expire =
@@ -466,9 +449,6 @@ public class ChainTablePartitionExpireTest {
         write(snapshotTable, "20250201", "v1");
         write(snapshotTable, "20250315", "v2");
 
-        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
-        deltaTable = loadTable(tablePath).switchToBranch("delta");
-
         // cutoff = 2025-03-31 - 30d = 2025-03-01
         // Only S(0201) before cutoff → < 2, nothing can expire
         ChainTablePartitionExpire expire =
@@ -490,9 +470,6 @@ public class ChainTablePartitionExpireTest {
 
         write(deltaTable, "20250101", "d1");
         write(deltaTable, "20250201", "d2");
-
-        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
-        deltaTable = loadTable(tablePath).switchToBranch("delta");
 
         // cutoff = 2025-03-31 - 30d = 2025-03-01
         // No snapshot boundary exists, so delta-only partitions are retained.
@@ -521,9 +498,6 @@ public class ChainTablePartitionExpireTest {
         // Group "EU": only 1 snapshot before cutoff → nothing expires
         writeGrouped(snapshotTable, "EU", "20250215", "v4");
         writeGrouped(snapshotTable, "EU", "20250320", "v5");
-
-        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
-        deltaTable = loadTable(tablePath).switchToBranch("delta");
 
         // cutoff = 2025-03-31 - 30d = 2025-03-01
         ChainTablePartitionExpire expire =
@@ -558,9 +532,6 @@ public class ChainTablePartitionExpireTest {
         write(snapshotTable, "20250101", "v1");
         write(snapshotTable, "20250315", "v2");
 
-        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
-        deltaTable = loadTable(tablePath).switchToBranch("delta");
-
         // cutoff = 2025-03-31 - 30d = 2025-03-01
         // S(0315) is after cutoff → not expired at all
         ChainTablePartitionExpire expire =
@@ -569,6 +540,94 @@ public class ChainTablePartitionExpireTest {
 
         BinaryRow afterCutoff = findPartition(snapshotTable, "20250315");
         assertThat(expire.isValueAllExpired(Collections.singletonList(afterCutoff), now)).isFalse();
+    }
+
+    @Test
+    public void testExpireWithMinuteGranularity() throws Exception {
+        Path tablePath = tablePath("minute_granularity_expire");
+        String pattern = "$y$m$dT$h$min00";
+        String formatter = "yyyyMMdd'T'HHmmss";
+        Map<String, String> chainOptions =
+                buildOptions(pattern, formatter, "15 min", "y,m,d,h,min");
+        createChainTable(
+                tablePath,
+                RowType.of(
+                                new org.apache.paimon.types.DataType[] {
+                                    DataTypes.STRING(),
+                                    DataTypes.STRING(),
+                                    DataTypes.STRING(),
+                                    DataTypes.STRING(),
+                                    DataTypes.STRING(),
+                                    DataTypes.STRING(),
+                                    DataTypes.STRING()
+                                },
+                                new String[] {"y", "m", "d", "h", "min", "pk", "v"})
+                        .getFields(),
+                Arrays.asList("y", "m", "d", "h", "min"),
+                Arrays.asList("pk", "y", "m", "d", "h", "min"),
+                chainOptions);
+
+        FileStoreTable mainTable = loadTable(tablePath);
+        FileStoreTable snapshotTable = mainTable.switchToBranch("snapshot");
+        FileStoreTable deltaTable = mainTable.switchToBranch("delta");
+
+        // Snapshot partitions every hour.
+        write(snapshotTable, "2025", "01", "01", "10", "00", "v1", "v1");
+        write(snapshotTable, "2025", "01", "01", "11", "00", "v2", "v2");
+        write(snapshotTable, "2025", "01", "01", "12", "00", "v3", "v3");
+
+        // Delta partitions every 15 minutes.
+        write(deltaTable, "2025", "01", "01", "10", "15", "d1", "d1");
+        write(deltaTable, "2025", "01", "01", "10", "30", "d2", "d2");
+        write(deltaTable, "2025", "01", "01", "11", "15", "d3", "d3");
+        write(deltaTable, "2025", "01", "01", "11", "30", "d4", "d4");
+        write(deltaTable, "2025", "01", "01", "12", "15", "d5", "d5");
+
+        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
+        deltaTable = loadTable(tablePath).switchToBranch("delta");
+
+        // cutoff = 2025-01-01 12:15 - 15min = 2025-01-01 12:00
+        // Snapshots before cutoff: 10:00, 11:00. Anchor = 11:00 (kept).
+        // Expire segment: S(10:00) + deltas in [10:00, 11:00): d(10:15), d(10:30).
+        ChainTablePartitionExpire expire = newChainExpire(snapshotTable, deltaTable, chainOptions);
+        expire.setLastCheck(LocalDateTime.of(2025, 1, 1, 0, 0));
+        List<Map<String, String>> expired =
+                expire.expire(LocalDateTime.of(2025, 1, 1, 12, 15), Long.MAX_VALUE);
+
+        assertThat(expired).isNotNull();
+        assertThat(expired).hasSize(3);
+
+        snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
+        deltaTable = loadTable(tablePath).switchToBranch("delta");
+        assertThat(
+                        listPartitions(
+                                snapshotTable,
+                                p ->
+                                        p.getString(0)
+                                                + ","
+                                                + p.getString(1)
+                                                + ","
+                                                + p.getString(2)
+                                                + ","
+                                                + p.getString(3)
+                                                + ","
+                                                + p.getString(4)))
+                .containsExactlyInAnyOrder("2025,01,01,11,00", "2025,01,01,12,00");
+        assertThat(
+                        listPartitions(
+                                deltaTable,
+                                p ->
+                                        p.getString(0)
+                                                + ","
+                                                + p.getString(1)
+                                                + ","
+                                                + p.getString(2)
+                                                + ","
+                                                + p.getString(3)
+                                                + ","
+                                                + p.getString(4)))
+                .containsExactlyInAnyOrder(
+                        "2025,01,01,11,15", "2025,01,01,11,30", "2025,01,01,12,15");
     }
 
     // ========== Helper methods ==========
@@ -636,11 +695,13 @@ public class ChainTablePartitionExpireTest {
                 .isEqualTo(2L);
     }
 
-    private Path tablePath(String tableName) {
-        return new Path(tempDir.toUri().toString(), tableName);
-    }
-
-    private void createChainTable(Path tablePath, boolean withGroupPartition) throws Exception {
+    private void createChainTable(
+            Path tablePath,
+            List<DataField> fields,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            Map<String, String> chainOptions)
+            throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
 
@@ -649,59 +710,64 @@ public class ChainTablePartitionExpireTest {
         options.put("merge-engine", "deduplicate");
         options.put("sequence.field", "v");
 
-        Schema schema;
-        if (withGroupPartition) {
-            schema =
-                    new Schema(
-                            RowType.of(
-                                            new org.apache.paimon.types.DataType[] {
-                                                DataTypes.STRING(),
-                                                DataTypes.STRING(),
-                                                DataTypes.STRING(),
-                                                DataTypes.STRING()
-                                            },
-                                            new String[] {"region", "dt", "pk", "v"})
-                                    .getFields(),
-                            Arrays.asList("region", "dt"),
-                            Arrays.asList("pk", "region", "dt"),
-                            options,
-                            "");
-        } else {
-            schema =
-                    new Schema(
-                            RowType.of(
-                                            new org.apache.paimon.types.DataType[] {
-                                                DataTypes.STRING(),
-                                                DataTypes.STRING(),
-                                                DataTypes.STRING()
-                                            },
-                                            new String[] {"dt", "pk", "v"})
-                                    .getFields(),
-                            Collections.singletonList("dt"),
-                            Arrays.asList("pk", "dt"),
-                            options,
-                            "");
-        }
+        Schema schema = new Schema(fields, partitionKeys, primaryKeys, options, "");
         schemaManager.createTable(schema);
 
         FileStoreTable mainTable = loadTable(tablePath);
         mainTable.createBranch("snapshot");
         mainTable.createBranch("delta");
 
-        List<SchemaChange> chainTableOptions =
-                Arrays.asList(
-                        SchemaChange.setOption("chain-table.enabled", "true"),
-                        SchemaChange.setOption("scan.fallback-snapshot-branch", "snapshot"),
-                        SchemaChange.setOption("scan.fallback-delta-branch", "delta"),
-                        SchemaChange.setOption("partition.timestamp-pattern", "$dt"),
-                        SchemaChange.setOption("partition.timestamp-formatter", "yyyyMMdd"));
-        if (withGroupPartition) {
-            chainTableOptions = new java.util.ArrayList<>(chainTableOptions);
-            chainTableOptions.add(SchemaChange.setOption("chain-table.chain-partition-keys", "dt"));
+        List<SchemaChange> changes =
+                new ArrayList<>(
+                        Arrays.asList(
+                                SchemaChange.setOption("chain-table.enabled", "true"),
+                                SchemaChange.setOption("scan.fallback-snapshot-branch", "snapshot"),
+                                SchemaChange.setOption("scan.fallback-delta-branch", "delta")));
+        for (Map.Entry<String, String> entry : chainOptions.entrySet()) {
+            changes.add(SchemaChange.setOption(entry.getKey(), entry.getValue()));
         }
-        schemaManager.commitChanges(chainTableOptions);
-        new SchemaManager(fileIO, tablePath, "snapshot").commitChanges(chainTableOptions);
-        new SchemaManager(fileIO, tablePath, "delta").commitChanges(chainTableOptions);
+        schemaManager.commitChanges(changes);
+        new SchemaManager(fileIO, tablePath, "snapshot").commitChanges(changes);
+        new SchemaManager(fileIO, tablePath, "delta").commitChanges(changes);
+    }
+
+    private Path tablePath(String tableName) {
+        return new Path(tempDir.toUri().toString(), tableName);
+    }
+
+    private void createChainTable(Path tablePath, boolean withGroupPartition) throws Exception {
+        Map<String, String> chainOptions = new HashMap<>();
+        chainOptions.put("partition.timestamp-pattern", "$dt");
+        chainOptions.put("partition.timestamp-formatter", "yyyyMMdd");
+        if (withGroupPartition) {
+            chainOptions.put("chain-table.chain-partition-keys", "dt");
+            createChainTable(
+                    tablePath,
+                    RowType.of(
+                                    new org.apache.paimon.types.DataType[] {
+                                        DataTypes.STRING(),
+                                        DataTypes.STRING(),
+                                        DataTypes.STRING(),
+                                        DataTypes.STRING()
+                                    },
+                                    new String[] {"region", "dt", "pk", "v"})
+                            .getFields(),
+                    Arrays.asList("region", "dt"),
+                    Arrays.asList("pk", "region", "dt"),
+                    chainOptions);
+        } else {
+            createChainTable(
+                    tablePath,
+                    RowType.of(
+                                    new org.apache.paimon.types.DataType[] {
+                                        DataTypes.STRING(), DataTypes.STRING(), DataTypes.STRING()
+                                    },
+                                    new String[] {"dt", "pk", "v"})
+                            .getFields(),
+                    Collections.singletonList("dt"),
+                    Arrays.asList("pk", "dt"),
+                    chainOptions);
+        }
     }
 
     private FileStoreTable loadTable(Path tablePath) {
@@ -715,32 +781,24 @@ public class ChainTablePartitionExpireTest {
     }
 
     private void write(FileStoreTable table, String dt, String v) throws Exception {
-        StreamTableWrite write =
-                table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"))
-                        .newWrite(commitUser);
-        write.write(
-                GenericRow.of(
-                        BinaryString.fromString(dt),
-                        BinaryString.fromString(v),
-                        BinaryString.fromString(v)));
-        TableCommitImpl commit = table.newCommit(commitUser);
-        List<CommitMessage> commitMessages = write.prepareCommit(true, 0);
-        commit.commit(0, commitMessages);
-        write.close();
-        commit.close();
+        write(table, dt, v, v);
     }
 
     private void writeGrouped(FileStoreTable table, String region, String dt, String v)
             throws Exception {
+        write(table, region, dt, v, v);
+    }
+
+    private void write(FileStoreTable table, Object... values) throws Exception {
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] != null && values[i] instanceof String) {
+                values[i] = BinaryString.fromString((String) values[i]);
+            }
+        }
         StreamTableWrite write =
                 table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"))
                         .newWrite(commitUser);
-        write.write(
-                GenericRow.of(
-                        BinaryString.fromString(region),
-                        BinaryString.fromString(dt),
-                        BinaryString.fromString(v),
-                        BinaryString.fromString(v)));
+        write.write(GenericRow.of(values));
         TableCommitImpl commit = table.newCommit(commitUser);
         List<CommitMessage> commitMessages = write.prepareCommit(true, 0);
         commit.commit(0, commitMessages);
@@ -749,30 +807,39 @@ public class ChainTablePartitionExpireTest {
     }
 
     private List<String> listPartitions(FileStoreTable table) {
-        return table.newSnapshotReader().partitionEntries().stream()
-                .map(PartitionEntry::partition)
-                .map(p -> p.getString(0).toString())
-                .sorted()
-                .collect(Collectors.toList());
+        return listPartitions(table, p -> p.getString(0).toString());
     }
 
-    private List<String> listGroupedPartitions(FileStoreTable table) {
+    private List<String> listPartitions(
+            FileStoreTable table, Function<BinaryRow, String> partitionToString) {
         return table.newSnapshotReader().partitionEntries().stream()
                 .map(PartitionEntry::partition)
-                .map(p -> p.getString(0).toString() + "|" + p.getString(1).toString())
+                .map(partitionToString)
                 .sorted()
                 .collect(Collectors.toList());
     }
 
     private Map<String, String> buildOptions(Duration expirationTime, boolean withGroupPartition) {
+        return buildOptions(
+                "$dt",
+                "yyyyMMdd",
+                expirationTime.toDays() + " d",
+                withGroupPartition ? "dt" : null);
+    }
+
+    private Map<String, String> buildOptions(
+            String timestampPattern,
+            String timestampFormatter,
+            String expirationTime,
+            @Nullable String chainPartitionKeys) {
         Map<String, String> opts = new HashMap<>();
-        opts.put("partition.timestamp-pattern", "$dt");
-        opts.put("partition.timestamp-formatter", "yyyyMMdd");
+        opts.put("partition.timestamp-pattern", timestampPattern);
+        opts.put("partition.timestamp-formatter", timestampFormatter);
         opts.put("scan.fallback-snapshot-branch", "snapshot");
         opts.put("scan.fallback-delta-branch", "delta");
-        opts.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime.toDays() + " d");
-        if (withGroupPartition) {
-            opts.put("chain-table.chain-partition-keys", "dt");
+        opts.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), expirationTime);
+        if (chainPartitionKeys != null) {
+            opts.put("chain-table.chain-partition-keys", chainPartitionKeys);
         }
         return opts;
     }
@@ -782,12 +849,18 @@ public class ChainTablePartitionExpireTest {
             FileStoreTable deltaTable,
             Duration expirationTime,
             boolean withGroupPartition) {
+        return newChainExpire(
+                snapshotTable, deltaTable, buildOptions(expirationTime, withGroupPartition));
+    }
+
+    private ChainTablePartitionExpire newChainExpire(
+            FileStoreTable snapshotTable, FileStoreTable deltaTable, Map<String, String> options) {
         return new ChainTablePartitionExpire(
-                expirationTime,
+                CoreOptions.fromMap(options).partitionExpireTime(),
                 Duration.ZERO,
                 snapshotTable,
                 deltaTable,
-                CoreOptions.fromMap(buildOptions(expirationTime, withGroupPartition)),
+                CoreOptions.fromMap(options),
                 snapshotTable.schema().logicalPartitionType(),
                 false,
                 Integer.MAX_VALUE,

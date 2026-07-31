@@ -84,7 +84,8 @@ public class PartitionMarkDoneListener implements CommitListener {
                         coreOptions.legacyPartitionName());
 
         PartitionMarkDoneTrigger trigger =
-                PartitionMarkDoneTrigger.create(coreOptions, isRestored, stateStore);
+                PartitionMarkDoneTrigger.create(
+                        coreOptions, table.partitionKeys(), isRestored, stateStore);
 
         List<PartitionMarkDoneAction> actions =
                 PartitionMarkDoneAction.createActions(cl, table, coreOptions);

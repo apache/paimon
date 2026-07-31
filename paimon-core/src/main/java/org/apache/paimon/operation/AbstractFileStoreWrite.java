@@ -37,7 +37,7 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
-import org.apache.paimon.partition.PartitionTimeExtractor;
+import org.apache.paimon.partition.PartitionTimeResolvable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
@@ -714,15 +714,15 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     private static class PartitionTimestampValidator {
 
-        private final PartitionTimeExtractor timeExtractor;
+        private final PartitionTimeResolvable timeResolver;
         private final RowDataToObjectArrayConverter partitionConverter;
         private final List<String> partitionKeys;
 
         private PartitionTimestampValidator(
-                PartitionTimeExtractor timeExtractor,
+                PartitionTimeResolvable timeResolver,
                 RowDataToObjectArrayConverter partitionConverter,
                 List<String> partitionKeys) {
-            this.timeExtractor = timeExtractor;
+            this.timeResolver = timeResolver;
             this.partitionConverter = partitionConverter;
             this.partitionKeys = partitionKeys;
         }
@@ -738,7 +738,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             if ((timeFormatter != null || timePattern != null)
                     && partitionType.getFieldCount() > 0) {
                 return new PartitionTimestampValidator(
-                        new PartitionTimeExtractor(timePattern, timeFormatter),
+                        PartitionTimeResolvable.create(
+                                partitionType.getFieldNames(), timePattern, timeFormatter),
                         new RowDataToObjectArrayConverter(partitionType),
                         partitionType.getFieldNames());
             }
@@ -748,7 +749,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         private void validate(BinaryRow partition) {
             Object[] array = partitionConverter.convert(partition);
             try {
-                timeExtractor.extract(partitionKeys, Arrays.asList(array));
+                timeResolver.parsePartitionValues(Arrays.asList(array));
             } catch (DateTimeParseException e) {
                 String partitionInfo =
                         IntStream.range(0, partitionKeys.size())

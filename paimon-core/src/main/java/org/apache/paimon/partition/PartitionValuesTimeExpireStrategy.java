@@ -50,13 +50,14 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
     private static final Logger LOG =
             LoggerFactory.getLogger(PartitionValuesTimeExpireStrategy.class);
 
-    private final PartitionTimeExtractor timeExtractor;
+    private final PartitionTimeResolvable timeResolver;
 
     public PartitionValuesTimeExpireStrategy(CoreOptions options, RowType partitionType) {
         super(partitionType, options.partitionDefaultName());
         String timePattern = options.partitionTimestampPattern();
         String timeFormatter = options.partitionTimestampFormatter();
-        this.timeExtractor = new PartitionTimeExtractor(timePattern, timeFormatter);
+        this.timeResolver =
+                PartitionTimeResolvable.create(partitionKeys, timePattern, timeFormatter);
     }
 
     @Override
@@ -83,7 +84,7 @@ public class PartitionValuesTimeExpireStrategy extends PartitionExpireStrategy {
         public boolean test(BinaryRow partition) {
             Object[] array = convertPartition(partition);
             try {
-                LocalDateTime partTime = timeExtractor.extract(partitionKeys, Arrays.asList(array));
+                LocalDateTime partTime = timeResolver.parsePartitionValues(Arrays.asList(array));
                 return expireDateTime.isAfter(partTime);
             } catch (DateTimeParseException e) {
                 LOG.warn(

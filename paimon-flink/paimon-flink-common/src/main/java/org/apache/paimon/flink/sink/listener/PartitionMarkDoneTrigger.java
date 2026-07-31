@@ -23,7 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.sink.state.StateStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.partition.PartitionTimeExtractor;
+import org.apache.paimon.partition.PartitionTimeResolvable;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.state.ListState;
@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -62,7 +63,8 @@ public class PartitionMarkDoneTrigger {
                     new ListSerializer<>(StringSerializer.INSTANCE));
 
     private final State state;
-    private final PartitionTimeExtractor timeExtractor;
+    private final PartitionTimeResolvable timeResolver;
+    private final List<String> partitionKeys;
     // can be null when markDoneWhenEndInput is true
     @Nullable private final Long timeInterval;
     // can be null when markDoneWhenEndInput is true
@@ -72,14 +74,16 @@ public class PartitionMarkDoneTrigger {
 
     public PartitionMarkDoneTrigger(
             State state,
-            PartitionTimeExtractor timeExtractor,
+            PartitionTimeResolvable timeResolver,
+            List<String> partitionKeys,
             @Nullable Duration timeInterval,
             @Nullable Duration idleTime,
             boolean markDoneWhenEndInput)
             throws Exception {
         this(
                 state,
-                timeExtractor,
+                timeResolver,
+                partitionKeys,
                 timeInterval,
                 idleTime,
                 System.currentTimeMillis(),
@@ -88,7 +92,8 @@ public class PartitionMarkDoneTrigger {
 
     public PartitionMarkDoneTrigger(
             State state,
-            PartitionTimeExtractor timeExtractor,
+            PartitionTimeResolvable timeResolver,
+            List<String> partitionKeys,
             @Nullable Duration timeInterval,
             @Nullable Duration idleTime,
             long currentTimeMillis,
@@ -96,7 +101,8 @@ public class PartitionMarkDoneTrigger {
             throws Exception {
         this.pendingPartitions = new HashMap<>();
         this.state = state;
-        this.timeExtractor = timeExtractor;
+        this.timeResolver = timeResolver;
+        this.partitionKeys = partitionKeys;
         this.timeInterval = timeInterval == null ? null : timeInterval.toMillis();
         this.idleTime = idleTime == null ? null : idleTime.toMillis();
         this.markDoneWhenEndInput = markDoneWhenEndInput;
@@ -204,8 +210,12 @@ public class PartitionMarkDoneTrigger {
     @VisibleForTesting
     Optional<LocalDateTime> extractDateTime(String partition) {
         try {
-            return Optional.of(
-                    timeExtractor.extract(extractPartitionSpecFromPath(new Path(partition))));
+            LinkedHashMap<String, String> spec = extractPartitionSpecFromPath(new Path(partition));
+            List<String> values = new ArrayList<>(partitionKeys.size());
+            for (String key : partitionKeys) {
+                values.add(spec.get(key));
+            }
+            return Optional.of(timeResolver.parsePartitionValues(values));
         } catch (DateTimeParseException e) {
             LOG.warn(
                     "Can't extract datetime from partition {}, please check configuration items 'partition.timestamp-formatter' and 'partition.timestamp-pattern'.",
@@ -256,13 +266,19 @@ public class PartitionMarkDoneTrigger {
     }
 
     public static PartitionMarkDoneTrigger create(
-            CoreOptions coreOptions, boolean isRestored, StateStore stateStore) throws Exception {
+            CoreOptions coreOptions,
+            List<String> partitionKeys,
+            boolean isRestored,
+            StateStore stateStore)
+            throws Exception {
         Options options = coreOptions.toConfiguration();
         return new PartitionMarkDoneTrigger(
                 new PartitionMarkDoneTrigger.PartitionMarkDoneTriggerState(isRestored, stateStore),
-                new PartitionTimeExtractor(
+                PartitionTimeResolvable.create(
+                        partitionKeys,
                         coreOptions.partitionTimestampPattern(),
                         coreOptions.partitionTimestampFormatter()),
+                partitionKeys,
                 options.get(PARTITION_TIME_INTERVAL),
                 options.get(PARTITION_IDLE_TIME_TO_DONE),
                 options.get(PARTITION_MARK_DONE_WHEN_END_INPUT));

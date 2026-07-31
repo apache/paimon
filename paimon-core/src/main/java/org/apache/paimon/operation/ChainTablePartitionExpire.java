@@ -25,7 +25,7 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.partition.PartitionTimeExtractor;
+import org.apache.paimon.partition.PartitionTimeResolver;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -85,7 +85,7 @@ public class ChainTablePartitionExpire implements PartitionExpire {
     private final Duration checkInterval;
     private final FileStoreTable snapshotTable;
     private final FileStoreTable deltaTable;
-    private final PartitionTimeExtractor timeExtractor;
+    private final PartitionTimeResolver timeResolver;
     private final ChainPartitionProjector projector;
     private final RecordComparator chainPartitionComparator;
     private final InternalRowPartitionComputer partitionComputer;
@@ -126,9 +126,11 @@ public class ChainTablePartitionExpire implements PartitionExpire {
         this.projector = new ChainPartitionProjector(partitionType, chainFieldCount);
         this.chainPartitionComparator =
                 CodeGenUtils.newRecordComparator(projector.chainPartitionType().getFieldTypes());
-        this.timeExtractor =
-                new PartitionTimeExtractor(
-                        options.partitionTimestampPattern(), options.partitionTimestampFormatter());
+        this.timeResolver =
+                new PartitionTimeResolver(
+                        this.chainPartitionKeys,
+                        options.partitionTimestampPattern(),
+                        options.partitionTimestampFormatter());
         this.partitionComputer =
                 new InternalRowPartitionComputer(
                         options.partitionDefaultName(),
@@ -408,7 +410,7 @@ public class ChainTablePartitionExpire implements PartitionExpire {
             for (String key : chainPartitionKeys) {
                 chainValues.add(partValues.get(key));
             }
-            return timeExtractor.extract(chainPartitionKeys, chainValues);
+            return timeResolver.parsePartitionValues(chainValues);
         } catch (Exception e) {
             LOG.warn("Failed to extract partition time from {}", partition, e);
             return null;

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink.listener;
 
-import org.apache.paimon.partition.PartitionTimeExtractor;
+import org.apache.paimon.partition.PartitionTimeResolver;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +29,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,7 +41,8 @@ class PartitionMarkDoneTriggerTest {
 
     private List<String> pendingPartitions;
     private PartitionMarkDoneTrigger.State state;
-    private PartitionTimeExtractor extractor;
+    private PartitionTimeResolver resolver;
+    private final List<String> partitionKeys = Collections.singletonList("dt");
 
     @BeforeEach
     public void before() throws Exception {
@@ -58,7 +60,7 @@ class PartitionMarkDoneTriggerTest {
                         pendingPartitions.addAll(partitions);
                     }
                 };
-        this.extractor = new PartitionTimeExtractor("$dt", "yyyy-MM-dd");
+        this.resolver = new PartitionTimeResolver(partitionKeys, "$dt", "yyyy-MM-dd");
     }
 
     @Test
@@ -66,7 +68,8 @@ class PartitionMarkDoneTriggerTest {
         PartitionMarkDoneTrigger trigger =
                 new PartitionMarkDoneTrigger(
                         state,
-                        extractor,
+                        resolver,
+                        partitionKeys,
                         timeInterval,
                         idleTime,
                         toEpochMillis("2024-02-01"),
@@ -112,7 +115,8 @@ class PartitionMarkDoneTriggerTest {
         trigger =
                 new PartitionMarkDoneTrigger(
                         state,
-                        extractor,
+                        resolver,
+                        partitionKeys,
                         timeInterval,
                         idleTime,
                         toEpochMillis("2024-02-06"),
@@ -130,7 +134,8 @@ class PartitionMarkDoneTriggerTest {
         PartitionMarkDoneTrigger trigger =
                 new PartitionMarkDoneTrigger(
                         state,
-                        extractor,
+                        resolver,
+                        partitionKeys,
                         timeInterval,
                         idleTime,
                         toEpochMillis("2024-02-01"),
@@ -147,7 +152,8 @@ class PartitionMarkDoneTriggerTest {
         PartitionMarkDoneTrigger trigger =
                 new PartitionMarkDoneTrigger(
                         state,
-                        extractor,
+                        resolver,
+                        partitionKeys,
                         timeInterval,
                         idleTime,
                         toEpochMillis("2024-02-01"),

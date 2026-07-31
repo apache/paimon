@@ -18,15 +18,22 @@
 
 package org.apache.paimon.partition;
 
+import javax.annotation.Nullable;
+
 import java.text.ParsePosition;
 import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.Period;
 import java.time.Year;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.DateTimeParseException;
+import java.time.format.ResolverStyle;
+import java.time.format.SignStyle;
 import java.time.temporal.ChronoField;
 import java.time.temporal.TemporalAccessor;
 import java.time.temporal.TemporalAmount;
@@ -46,10 +53,11 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * Resolves timestamp pattern and formatter to extract time step and compute partition values for
- * chain table partitions.
+ * Pattern-based implementation of {@link PartitionTimeResolvable}. It matches the user-provided
+ * timestamp pattern against the formatter and supports bidirectional conversion between partition
+ * values and {@link LocalDateTime}.
  */
-public class PartitionTimeResolver {
+public class PartitionTimeResolver implements PartitionTimeResolvable {
     private static final Map<Character, ChronoField> FIELD_MAP = new HashMap<>();
     private final List<String> partitionColumns;
     private final String pattern;
@@ -68,6 +76,16 @@ public class PartitionTimeResolver {
         init();
     }
 
+    /**
+     * Creates a fallback resolver used when the user has not configured {@code
+     * partition.timestamp-pattern} or {@code partition.timestamp-formatter}. The fallback supports
+     * the common unconfigured case.
+     */
+    static PartitionTimeResolvable createFallback(
+            List<String> partitionColumns, String pattern, String formatter) {
+        return new FallbackPartitionTimeResolver(partitionColumns, pattern, formatter);
+    }
+
     static {
         FIELD_MAP.put('y', ChronoField.YEAR);
         FIELD_MAP.put('M', ChronoField.MONTH_OF_YEAR);
@@ -80,7 +98,7 @@ public class PartitionTimeResolver {
 
     private void init() {
         this.patternFormatMappings = new HashMap<>();
-        this.patternTokens = parsePattern();
+        this.patternTokens = parsePattern(partitionColumns, pattern);
         this.formatTokens = parseFormatter();
         boolean matched = matchRecursive(0, 0);
         checkArgument(
@@ -130,22 +148,8 @@ public class PartitionTimeResolver {
     }
 
     public LocalDateTime parsePartitionValues(List<?> partitionValues) {
-        checkArgument(partitionValues != null, "Values cannot be null");
-
-        Map<String, Object> valueMap = new HashMap<>();
-        for (int i = 0; i < partitionColumns.size(); i++) {
-            valueMap.put(partitionColumns.get(i), partitionValues.get(i));
-        }
-        checkArgument(partitionValues.size() == valueMap.size(), "Values size mismatch");
-
-        StringBuilder timestampString = new StringBuilder();
-        for (PatternToken token : patternTokens) {
-            if (token.isVariable) {
-                timestampString.append(valueMap.get(token.token.substring(1)));
-            } else {
-                timestampString.append(token.token);
-            }
-        }
+        String timestampString =
+                buildTimestampString(partitionColumns, partitionValues, patternTokens);
         DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(formatter, Locale.ROOT);
 
         Set<ChronoField> fields =
@@ -173,6 +177,32 @@ public class PartitionTimeResolver {
                     .atStartOfDay();
         }
         throw new IllegalStateException("No time field found in formatter");
+    }
+
+    /**
+     * Builds the timestamp string by substituting partition column values into the pattern tokens.
+     */
+    private static String buildTimestampString(
+            List<String> partitionColumns,
+            List<?> partitionValues,
+            List<PatternToken> patternTokens) {
+        checkArgument(partitionValues != null, "Values cannot be null");
+
+        Map<String, Object> valueMap = new HashMap<>();
+        for (int i = 0; i < partitionColumns.size(); i++) {
+            valueMap.put(partitionColumns.get(i), partitionValues.get(i));
+        }
+        checkArgument(partitionValues.size() == valueMap.size(), "Values size mismatch");
+
+        StringBuilder timestampString = new StringBuilder();
+        for (PatternToken token : patternTokens) {
+            if (token.isVariable) {
+                timestampString.append(valueMap.get(token.token.substring(1)));
+            } else {
+                timestampString.append(token.token);
+            }
+        }
+        return timestampString.toString();
     }
 
     /** Parses formatter into format tokens (time fields and literals). */
@@ -227,7 +257,7 @@ public class PartitionTimeResolver {
     }
 
     /** Parses pattern string into pattern tokens (variables and literals). */
-    private List<PatternToken> parsePattern() {
+    private static List<PatternToken> parsePattern(List<String> partitionColumns, String pattern) {
         List<String> sortedPartCols =
                 partitionColumns.stream()
                         .sorted(Comparator.reverseOrder())
@@ -243,8 +273,6 @@ public class PartitionTimeResolver {
                     literalBuf.setLength(0);
                 }
                 boolean matched = false;
-                // Match the longest column name first to resolve ambiguity when one column name
-                // is a prefix of another (e.g., "dt" vs "dt1").
                 for (String part : sortedPartCols) {
                     String varToken = curr + part;
                     if (pattern.startsWith(varToken, cursor)) {
@@ -306,6 +334,9 @@ public class PartitionTimeResolver {
             } else {
                 // Literal pattern tokens match 1...len consecutive format tokens, split by token
                 // length
+                if (minFormattedLength(formatIdx, formatEndIdx) > patternToken.token.length()) {
+                    continue;
+                }
                 if (matchLiteral(patternToken.token, formatIdx, formatEndIdx)) {
                     if (matchRecursive(patternIdx + 1, formatEndIdx)) {
                         return true;
@@ -321,18 +352,28 @@ public class PartitionTimeResolver {
     }
 
     /** Checks if a literal pattern token matches a sequence of format tokens. */
-    private boolean matchLiteral(String patternToken, int startIdx, int endIdx) {
+    private boolean matchLiteral(String literalToken, int startIdx, int endIdx) {
         StringBuilder subFormatter = new StringBuilder();
+        StringBuilder literalValue = new StringBuilder();
+        boolean pureLiteral = true;
         for (int i = startIdx; i < endIdx; i++) {
             FormatToken token = formatTokens.get(i);
             subFormatter.append(formatter, token.start, token.end);
+            pureLiteral = pureLiteral && token instanceof LiteralToken;
+            if (pureLiteral) {
+                literalValue.append(((LiteralToken) token).token);
+            }
+        }
+
+        if (pureLiteral) {
+            return literalToken.contentEquals(literalValue);
         }
 
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern(subFormatter.toString(), Locale.ROOT);
         ParsePosition pp = new ParsePosition(0);
         try {
-            TemporalAccessor ta = fmt.parse(patternToken, pp);
-            if (pp.getErrorIndex() >= 0 || pp.getIndex() != patternToken.length()) {
+            TemporalAccessor ta = fmt.parse(literalToken, pp);
+            if (pp.getErrorIndex() >= 0 || pp.getIndex() != literalToken.length()) {
                 return false;
             }
             for (TemporalField field : FIELD_MAP.values()) {
@@ -348,6 +389,27 @@ public class PartitionTimeResolver {
             return false;
         }
         return true;
+    }
+
+    /** Minimum formatted length of the given format-token range; used to prune literal matches. */
+    private int minFormattedLength(int startIdx, int endIdx) {
+        int length = 0;
+        for (int i = startIdx; i < endIdx; i++) {
+            FormatToken token = formatTokens.get(i);
+            if (token instanceof TimeFieldToken) {
+                TimeFieldToken t = (TimeFieldToken) token;
+                // Text month forms (MMMM/MMMMM) output variable-length strings whose length
+                // depends on the month value and locale. For example, MMMM outputs "May" (3) in
+                // English but "五月" (2) in Chinese; MMMMM can output a single character.
+                // Use a conservative lower bound of 1 to avoid pruning valid matches.
+                if (t.field == ChronoField.MONTH_OF_YEAR && token.getLength() >= 3) {
+                    length += 1;
+                    continue;
+                }
+            }
+            length += token.getLength();
+        }
+        return length;
     }
 
     private static TemporalAmount stepOf(ChronoField field) {
@@ -429,6 +491,94 @@ public class PartitionTimeResolver {
         @Override
         public String toString() {
             return String.format("PatternToken{token='%s', isVariable=%s}", token, isVariable);
+        }
+    }
+
+    /**
+     * Fallback resolver for the unconfigured case. When {@code partition.timestamp-pattern} or
+     * {@code partition.timestamp-formatter} is missing, pattern defaults to the first partition
+     * column and formatter defaults to {@code yyyy-MM-dd HH:mm:ss} / {@code yyyy-MM-dd}.
+     */
+    private static class FallbackPartitionTimeResolver implements PartitionTimeResolvable {
+        private static final DateTimeFormatter TIMESTAMP_FORMATTER =
+                new DateTimeFormatterBuilder()
+                        .appendValue(ChronoField.YEAR, 1, 10, SignStyle.NORMAL)
+                        .appendLiteral('-')
+                        .appendValue(ChronoField.MONTH_OF_YEAR, 1, 2, SignStyle.NORMAL)
+                        .appendLiteral('-')
+                        .appendValue(ChronoField.DAY_OF_MONTH, 1, 2, SignStyle.NORMAL)
+                        .optionalStart()
+                        .appendLiteral(" ")
+                        .appendValue(ChronoField.HOUR_OF_DAY, 1, 2, SignStyle.NORMAL)
+                        .appendLiteral(':')
+                        .appendValue(ChronoField.MINUTE_OF_HOUR, 1, 2, SignStyle.NORMAL)
+                        .appendLiteral(':')
+                        .appendValue(ChronoField.SECOND_OF_MINUTE, 1, 2, SignStyle.NORMAL)
+                        .optionalStart()
+                        .appendFraction(ChronoField.NANO_OF_SECOND, 1, 9, true)
+                        .optionalEnd()
+                        .optionalEnd()
+                        .toFormatter()
+                        .withResolverStyle(ResolverStyle.LENIENT);
+
+        private static final DateTimeFormatter DATE_FORMATTER =
+                new DateTimeFormatterBuilder()
+                        .appendValue(ChronoField.YEAR, 1, 10, SignStyle.NORMAL)
+                        .appendLiteral('-')
+                        .appendValue(ChronoField.MONTH_OF_YEAR, 1, 2, SignStyle.NORMAL)
+                        .appendLiteral('-')
+                        .appendValue(ChronoField.DAY_OF_MONTH, 1, 2, SignStyle.NORMAL)
+                        .toFormatter()
+                        .withResolverStyle(ResolverStyle.LENIENT);
+
+        private final List<String> partitionColumns;
+        @Nullable private final String pattern;
+        @Nullable private final String formatter;
+
+        FallbackPartitionTimeResolver(
+                List<String> partitionColumns,
+                @Nullable String pattern,
+                @Nullable String formatter) {
+            checkArgument(partitionColumns != null, "partitionColumns cannot be null");
+            this.partitionColumns = partitionColumns;
+            this.pattern = pattern;
+            this.formatter = formatter;
+        }
+
+        @Override
+        public LocalDateTime parsePartitionValues(List<?> partitionValues) {
+            checkArgument(partitionValues != null, "Values cannot be null");
+            String timestampString;
+            if (pattern == null) {
+                timestampString = partitionValues.get(0).toString();
+            } else {
+                timestampString =
+                        buildTimestampString(
+                                partitionColumns,
+                                partitionValues,
+                                parsePattern(partitionColumns, pattern));
+            }
+            return toLocalDateTime(timestampString, formatter);
+        }
+
+        private static LocalDateTime toLocalDateTime(
+                String timestampString, @Nullable String formatterPattern) {
+            if (formatterPattern == null) {
+                try {
+                    return LocalDateTime.parse(timestampString, TIMESTAMP_FORMATTER);
+                } catch (DateTimeParseException e) {
+                    return LocalDateTime.of(
+                            LocalDate.parse(timestampString, DATE_FORMATTER), LocalTime.MIDNIGHT);
+                }
+            }
+            DateTimeFormatter dateTimeFormatter =
+                    DateTimeFormatter.ofPattern(formatterPattern, Locale.ROOT);
+            try {
+                return LocalDateTime.parse(timestampString, dateTimeFormatter);
+            } catch (DateTimeParseException e) {
+                return LocalDateTime.of(
+                        LocalDate.parse(timestampString, dateTimeFormatter), LocalTime.MIDNIGHT);
+            }
         }
     }
 }

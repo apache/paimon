@@ -149,6 +149,24 @@ public class PartitionTimeResolverTest {
         assertThat(extractMinStep("$date $time", "yyyyMMdd hh", "date", "time"))
                 .isEqualTo(Duration.ofHours(1));
         assertThat(extractMinStep("$a $b", "yyyyMMdd hh", "a", "b")).isEqualTo(Duration.ofHours(1));
+
+        // Unused partition columns should not affect the extracted minimum step.
+        assertThat(extractMinStep("$dt", "yyyy-MM-dd", "other", "dt"))
+                .isEqualTo(Duration.ofDays(1));
+        assertThat(
+                        extractMinStep(
+                                "$dt $hour:$minute:00",
+                                "yyyy-MM-dd HH:mm:ss",
+                                "region",
+                                "dt",
+                                "hour",
+                                "minute"))
+                .isEqualTo(Duration.ofMinutes(1));
+        assertThat(
+                        extractMinStep(
+                                "$hour:00:00 $date", "HH:mm:ss yyyyMMdd", "date", "extra", "hour"))
+                .isEqualTo(Duration.ofHours(1));
+
         assertThatThrownBy(() -> extractMinStep("$dt", "yyyyMMddHHmmssSSS", "dt"))
                 .satisfies(
                         PaimonAssertions.anyCauseMatches(
@@ -221,6 +239,20 @@ public class PartitionTimeResolverTest {
                 new PartitionTimeResolver(Arrays.asList("ym"), "$ym", "yy-M")
                         .resolvePartitionValues(LocalDateTime.of(2023, 1, 1, 11, 2, 3));
         assertEquals(ImmutableMap.of("ym", "23-1"), partitionValues);
+
+        // Partition columns that are not referenced by the pattern should not appear in the result.
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("other", "dt"), "$dt", "yyyy-MM-dd")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 1, 0, 0, 0));
+        assertEquals(ImmutableMap.of("dt", "2023-01-01"), partitionValues);
+
+        partitionValues =
+                new PartitionTimeResolver(
+                                Arrays.asList("region", "dt", "hour"),
+                                "$dt $hour:00:00",
+                                "yyyy-MM-dd HH:mm:ss")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 1, 10, 0, 0));
+        assertEquals(ImmutableMap.of("dt", "2023-01-01", "hour", "10"), partitionValues);
     }
 
     @Test
@@ -334,6 +366,35 @@ public class PartitionTimeResolverTest {
                 .satisfies(
                         PaimonAssertions.anyCauseMatches(
                                 IllegalArgumentException.class, "Values size mismatch"));
+
+        // Partition columns that are not referenced by the pattern should be ignored.
+        resolver = new PartitionTimeResolver(Arrays.asList("other", "dt"), "$dt", "yyyy-MM-dd");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("dummy", "2023-01-01")))
+                .isEqualTo(LocalDateTime.parse("2023-01-01T00:00:00"));
+
+        resolver =
+                new PartitionTimeResolver(
+                        Arrays.asList("region", "dt", "hour"),
+                        "$dt $hour:00:00",
+                        "yyyy-MM-dd HH:mm:ss");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("us", "2023-01-01", "10")))
+                .isEqualTo(LocalDateTime.parse("2023-01-01T10:00:00"));
+
+        resolver =
+                new PartitionTimeResolver(
+                        Arrays.asList("year", "skip", "month", "skip2", "day"),
+                        "$year-$month-$day",
+                        "yyyy-MM-dd");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("2023", "x", "01", "y", "02")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T00:00:00"));
+
+        resolver =
+                new PartitionTimeResolver(
+                        Arrays.asList("hour", "dt", "minute"),
+                        "$dt $hour:$minute:00",
+                        "yyyy-MM-dd HH:mm:ss");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("10", "2023-01-01", "30")))
+                .isEqualTo(LocalDateTime.parse("2023-01-01T10:30:00"));
     }
 
     @Test
