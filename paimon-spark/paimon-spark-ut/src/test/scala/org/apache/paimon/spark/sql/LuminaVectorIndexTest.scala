@@ -465,7 +465,6 @@ class LuminaVectorIndexTest extends PaimonSparkTestBase {
                   |  'global-index.row-count-per-shard' = '10000',
                   |  'row-tracking.enabled' = 'true',
                   |  'data-evolution.enabled' = 'true',
-                  |  'global-index.detect-datafile-change' = 'true',
                   |  'lumina.distance.metric' = 'l2',
                   |  'global-index.column-update-action' = 'IGNORE')
                   |""".stripMargin)

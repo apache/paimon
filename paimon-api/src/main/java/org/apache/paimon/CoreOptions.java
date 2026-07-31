@@ -2607,14 +2607,7 @@ public class CoreOptions implements Serializable {
                             .defaultValue(GlobalIndexColumnUpdateAction.THROW_ERROR)
                             .withDescription(
                                     "Defines the action to take when an update modifies columns that are covered by a global index. "
-                                            + "IGNORE leaves existing index files unchanged and may make the index stale.");
-
-    public static final ConfigOption<Boolean> GLOBAL_INDEX_DETECT_DATA_FILE_CHANGE =
-            key("global-index.detect-datafile-change")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether incremental global index builds inspect active data files to detect changes in already indexed row ranges.");
+                                            + "IGNORE leaves existing index files unchanged during the update and enables a later incremental index build to refresh affected row ranges.");
 
     public static final ConfigOption<Boolean> GLOBAL_INDEX_IGNORE_MISSING_DELETE =
             key("global-index.ignore-missing-delete")
@@ -3730,10 +3723,6 @@ public class CoreOptions implements Serializable {
 
     public GlobalIndexColumnUpdateAction globalIndexColumnUpdateAction() {
         return options.get(GLOBAL_INDEX_COLUMN_UPDATE_ACTION);
-    }
-
-    public boolean globalIndexDetectDataFileChange() {
-        return options.get(GLOBAL_INDEX_DETECT_DATA_FILE_CHANGE);
     }
 
     public boolean globalIndexIgnoreMissingDelete() {

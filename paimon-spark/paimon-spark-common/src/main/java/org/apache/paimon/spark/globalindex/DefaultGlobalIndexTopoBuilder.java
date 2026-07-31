@@ -60,8 +60,9 @@ import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_BUILD_MAX_PARALLELISM;
-import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_DETECT_DATA_FILE_CHANGE;
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD;
+import static org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction.IGNORE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Default topology builder. */
@@ -119,8 +120,8 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                         GlobalIndexBuilderUtils.unindexedRowRanges(snapshot, currentIndexes));
         byte[] sourceMeta = new DataEvolutionIndexSourceMeta(snapshot.id()).serialize();
         boolean detectDataFileChange =
-                new Options(table.options(), options.toMap())
-                        .get(GLOBAL_INDEX_DETECT_DATA_FILE_CHANGE);
+                new Options(table.options(), options.toMap()).get(GLOBAL_INDEX_COLUMN_UPDATE_ACTION)
+                        == IGNORE;
         if (rowRangesToBuild.isEmpty() && !detectDataFileChange) {
             return Collections.emptyList();
         }

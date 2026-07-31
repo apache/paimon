@@ -476,7 +476,6 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
                         + "'bucket' = '-1', "
                         + "'row-tracking.enabled' = 'true', "
                         + "'data-evolution.enabled' = 'true', "
-                        + "'global-index.detect-datafile-change' = 'true', "
                         + "'global-index.column-update-action' = 'IGNORE', "
                         + "'lumina.index.dimension' = '3', "
                         + "'lumina.distance.metric' = 'l2'"

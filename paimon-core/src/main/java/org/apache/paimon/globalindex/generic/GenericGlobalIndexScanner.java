@@ -143,7 +143,8 @@ public class GenericGlobalIndexScanner implements Serializable {
                 new ArrayList<>(unindexedRowRanges(scanSnapshot, currentIndexes));
         List<IndexManifestEntry> deletedIndexEntries = Collections.emptyList();
         Options mergedOptions = new Options(table.options(), options.toMap());
-        if (mergedOptions.get(CoreOptions.GLOBAL_INDEX_DETECT_DATA_FILE_CHANGE)) {
+        if (mergedOptions.get(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION)
+                == CoreOptions.GlobalIndexColumnUpdateAction.IGNORE) {
             deletedIndexEntries =
                     DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
                             table.schemaManager(),

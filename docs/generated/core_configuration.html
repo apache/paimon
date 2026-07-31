@@ -798,13 +798,7 @@ under the License.
             <td><h5>global-index.column-update-action</h5></td>
             <td style="word-wrap: break-word;">THROW_ERROR</td>
             <td><p>Enum</p></td>
-            <td>Defines the action to take when an update modifies columns that are covered by a global index. IGNORE leaves existing index files unchanged and may make the index stale.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li><li>"IGNORE"</li></ul></td>
-        </tr>
-        <tr>
-            <td><h5>global-index.detect-datafile-change</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether incremental global index builds inspect active data files to detect changes in already indexed row ranges.</td>
+            <td>Defines the action to take when an update modifies columns that are covered by a global index. IGNORE leaves existing index files unchanged during the update and enables a later incremental index build to refresh affected row ranges.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li><li>"IGNORE"</li></ul></td>
         </tr>
         <tr>
             <td><h5>global-index.enabled</h5></td>

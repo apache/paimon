@@ -177,8 +177,9 @@ public class SortedGlobalIndexScanner implements Serializable {
     }
 
     private boolean detectDataFileChange() {
-        return new Options(table.options(), options.toMap())
-                .get(CoreOptions.GLOBAL_INDEX_DETECT_DATA_FILE_CHANGE);
+        Options mergedOptions = new Options(table.options(), options.toMap());
+        return mergedOptions.get(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION)
+                == CoreOptions.GlobalIndexColumnUpdateAction.IGNORE;
     }
 
     private SnapshotReader withManifestEntryFilter(SnapshotReader snapshotReader) {

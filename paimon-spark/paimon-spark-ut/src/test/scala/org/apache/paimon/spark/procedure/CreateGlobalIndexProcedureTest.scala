@@ -46,7 +46,6 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
                   |  'global-index.enabled' = 'true',
                   |  'row-tracking.enabled' = 'true',
                   |  'data-evolution.enabled' = 'true',
-                  |  'global-index.detect-datafile-change' = 'true',
                   |  'global-index.column-update-action' = 'IGNORE',
                   |  'btree-index.records-per-range' = '2')
                   |""".stripMargin)

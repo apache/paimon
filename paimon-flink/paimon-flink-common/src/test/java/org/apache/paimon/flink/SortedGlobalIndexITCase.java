@@ -116,7 +116,6 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                         + "'global-index.enabled' = 'true', "
                         + "'row-tracking.enabled' = 'true', "
                         + "'data-evolution.enabled' = 'true', "
-                        + "'global-index.detect-datafile-change' = 'true', "
                         + "'global-index.column-update-action' = 'IGNORE'"
                         + ")");
         sql(
@@ -166,7 +165,6 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                         + "'global-index.enabled' = 'true', "
                         + "'row-tracking.enabled' = 'true', "
                         + "'data-evolution.enabled' = 'true', "
-                        + "'global-index.detect-datafile-change' = 'true', "
                         + "'global-index.column-update-action' = 'IGNORE', "
                         + "'btree-index.records-per-range' = '2'"
                         + ")");
@@ -266,7 +264,6 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                         + "'global-index.enabled' = 'true', "
                         + "'row-tracking.enabled' = 'true', "
                         + "'data-evolution.enabled' = 'true', "
-                        + "'global-index.detect-datafile-change' = 'true', "
                         + "'global-index.column-update-action' = 'IGNORE', "
                         + "'btree-index.records-per-range' = '2'"
                         + ")");

@@ -168,15 +168,6 @@ public class CoreOptionsTest {
     }
 
     @Test
-    public void testGlobalIndexDetectDataFileChange() {
-        Options conf = new Options();
-        assertThat(new CoreOptions(conf).globalIndexDetectDataFileChange()).isFalse();
-
-        conf.set(CoreOptions.GLOBAL_INDEX_DETECT_DATA_FILE_CHANGE, true);
-        assertThat(new CoreOptions(conf).globalIndexDetectDataFileChange()).isTrue();
-    }
-
-    @Test
     public void testBlobSplitByFileSizeDefault() {
         Options conf = new Options();
         conf.set(CoreOptions.BLOB_SPLIT_BY_FILE_SIZE, false);

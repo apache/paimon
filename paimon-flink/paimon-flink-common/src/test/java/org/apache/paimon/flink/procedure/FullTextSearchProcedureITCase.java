@@ -44,7 +44,6 @@ public class FullTextSearchProcedureITCase extends CatalogITCaseBase {
                         + "'bucket' = '-1', "
                         + "'row-tracking.enabled' = 'true', "
                         + "'data-evolution.enabled' = 'true', "
-                        + "'global-index.detect-datafile-change' = 'true', "
                         + "'global-index.column-update-action' = 'IGNORE'"
                         + ")");
         sql("INSERT INTO T_DE VALUES (1, 'apache paimon'), (2, 'lake format')");
