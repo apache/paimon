@@ -59,7 +59,7 @@ curl -O "https://dist.apache.org/repos/dist/dev/paimon/${PYPAIMON_RC_DIR}/${PYPA
 curl -O https://downloads.apache.org/paimon/KEYS
 ```
 
-Keep the workflow run URL, announced commit SHA, three Nexus staging URLs, and
+Keep the workflow run URL, announced commit SHA, Java Nexus staging URL, and
 TestPyPI URL beside these files. All of them must identify this RC.
 
 ## Verify signatures and checksums
@@ -154,23 +154,17 @@ tar xzf "${PYPAIMON_ARCHIVE}"
 
 ## Build Java from the source archive
 
-Use three clean extracted copies or three clean containers so that class files
-and Maven state from one JDK cannot leak into another lane. Record `java
--version` and `mvn -version` for each build.
+Compile the signed source archive and run an appropriate test or smoke test on
+at least one supported JDK. Record `java -version`, `mvn -version`, and the
+exact scope. Voters do not need to reproduce the complete CI matrix or run any
+full JDK test lane locally. The RM is responsible for reviewing the relevant CI
+results before starting the vote.
 
 ### JDK 8 lane
 
-This lane covers the default reactor, Flink 1.x, and Spark 3.x:
-
-```shell
-(
-  cd "paimon-${PAIMON_VERSION}"
-  mvn -ntp clean verify -Pspark3,flink1
-)
-```
-
-For supplementary or non-binding verification, you may build the same scope
-used for staging and state explicitly that tests were skipped:
+This lane covers the default reactor, Flink 1.x, and Spark 3.x. As an optional
+compatibility check, voters may run the packaging-equivalent build without
+reproducing the full JDK 8 test lane:
 
 ```shell
 (
@@ -182,18 +176,9 @@ used for staging and state explicitly that tests were skipped:
 
 ### JDK 11 lane
 
-This lane covers Flink 2.x and Iceberg:
-
-```shell
-(
-  cd "paimon-${PAIMON_VERSION}"
-  mvn -ntp clean verify -Pflink2 \
-    -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-iceberg \
-    -am
-)
-```
-
-The packaging-equivalent build is:
+This lane covers Flink 2.x and Iceberg. As an optional compatibility check,
+voters may run the packaging-equivalent build without reproducing the full JDK
+11 test lane:
 
 ```shell
 (
@@ -206,18 +191,8 @@ The packaging-equivalent build is:
 
 ### JDK 17 lane
 
-This lane covers Spark 4.x:
-
-```shell
-(
-  cd "paimon-${PAIMON_VERSION}"
-  mvn -ntp clean verify -Pspark4 \
-    -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1 \
-    -am
-)
-```
-
-The packaging-equivalent build is:
+This lane covers Spark 4.x. As an optional compatibility check, voters may run
+the packaging-equivalent build without reproducing the full JDK 17 test lane:
 
 ```shell
 (
@@ -229,19 +204,18 @@ The packaging-equivalent build is:
 ```
 
 Investigate warnings and skipped modules. A successful compiler exit does not,
-by itself, establish that the candidate is suitable for release. The
-`-DskipTests` commands above do not by themselves satisfy the requirements for
-a binding `+1`. A binding voter must compile the signed source package and test
-the result on their own platform; run an appropriate test or smoke test against
-the artifacts produced by that source build and report the exact scope.
+by itself, establish that the candidate is suitable for release. The optional
+`-DskipTests` commands do not by themselves satisfy the requirements for a
+binding `+1`; report the actual source build, test, or smoke-test scope you
+completed. This does not require covering every JDK lane.
 
-## Verify Java staging repositories
+## Verify the Java staging repository
 
-Use all three exact `orgapachepaimon-XXXX` staging URLs from the vote email.
-Do not resolve artifacts from Maven Central or a local cache when testing the
+Use the exact `orgapachepaimon-XXXX` staging URL from the vote email. Do not
+resolve artifacts from Maven Central or a local cache when testing the
 candidate.
 
-For every staging repository:
+For the staging repository:
 
 - Confirm that its status is closed, so the candidate cannot change during the
   vote.
@@ -334,7 +308,7 @@ license files, and a representative read/write operation. The RC suffix is the
 only intended version change from the final PyPaimon source candidate; any
 source-code difference is a release blocker.
 
-## Verify GitHub Actions evidence
+## Review GitHub Actions evidence
 
 Open the workflow run linked in the vote email and confirm:
 
@@ -343,18 +317,24 @@ Open the workflow run linked in the vote email and confirm:
 - the common validation job confirmed that `RC_TAG` is exactly
   `release-PAIMON_VERSION-rcRC_NUMBER` and that `PAIMON_VERSION` equals the
   root Maven `project.version`;
-- JDK 8, JDK 11, JDK 17, Python packaging, and Python publishing jobs all
-  succeeded;
+- the JDK 8, JDK 11, and JDK 17 repository lanes completed successfully;
+- the combined Java repository artifact has the expected tag, commit,
+  manifest, and SHA-512 checksums and identifies all three lanes;
+- each lane's deploy-enabled expected-project inventory matches its POMs, main
+  JARs, source JARs, and Javadoc JARs in the combined repository;
+- the Python packaging and Python publishing job results are clearly recorded;
 - the logs show the expected JDK and Python versions;
-- each Java package artifact contains the expected manifest and SHA-512
-  checksums for its lane;
 - the TestPyPI version equals the version in the vote email;
 - no later rerun silently replaced a failed lane with artifacts from another
   commit.
 
-GitHub Actions evidence is useful for reviewing the complete platform matrix,
-but voters should still perform independent source, signature, build, and smoke
-checks.
+The Java repository image is unsigned workflow output; verify that the closed
+Nexus repository contains the same artifacts plus the RM's signatures. The
+repository lanes package release artifacts; they are not full JDK test lanes.
+Voters do not need to require or reproduce a full test run for any JDK lane.
+The RM manually confirms that the relevant CI checks have passed before
+starting the vote; unrelated CI failures are assessed separately and are not
+an automatic release gate.
 
 ## Report your vote
 
@@ -368,8 +348,8 @@ Verified:
 - signed RC tag and announced commit SHA
 - Paimon and PyPaimon GPG signatures and SHA-512 checksums
 - LICENSE, NOTICE, source-only archive contents, and release versions
-- Paimon source build on <OS/ARCH>, JDK <8/11/17>, Maven <version>
-- Java staging repositories and representative class-file targets
+- Paimon source build/test scope on <OS/ARCH>, JDK <version>, Maven <version>
+- Java staging repository and representative class-file targets
 - PyPaimon source build/tests on Python <versions>
 - TestPyPI installation and smoke test
 - GitHub Actions run provenance, Java package manifests, and Python artifacts
