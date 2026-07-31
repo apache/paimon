@@ -66,6 +66,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -178,6 +179,30 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
         assertThat(readF1(readBuilder, plan))
                 .containsExactlyInAnyOrder("a95", "a96", "a97", "a98", "a99");
+
+        TopN ascendingTopN =
+                new TopN(
+                        new FieldRef(1, "f1", table.rowType().getTypeAt(1)),
+                        ASCENDING,
+                        NULLS_LAST,
+                        5);
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.createForTopN(
+                                table, PartitionPredicate.ALWAYS_TRUE, ascendingTopN)
+                        .orElseThrow(AssertionError::new)) {
+            assertThat(
+                            scanner.scan(ascendingTopN)
+                                    .orElseThrow(AssertionError::new)
+                                    .results()
+                                    .toRangeList())
+                    .containsExactly(new Range(0, 1), new Range(10, 10), new Range(100, 101));
+        }
+
+        ReadBuilder ascendingReadBuilder = table.newReadBuilder().withTopN(ascendingTopN);
+        TableScan.Plan ascendingPlan = ascendingReadBuilder.newScan().plan();
+        assertThat(ascendingPlan.splits()).allMatch(IndexedSplit.class::isInstance);
+        assertThat(readF1(ascendingReadBuilder, ascendingPlan))
+                .containsExactlyInAnyOrder("a0", "a1", "a10", "a100", "a101");
     }
 
     @Test

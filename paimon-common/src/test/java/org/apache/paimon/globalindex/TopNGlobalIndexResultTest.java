@@ -28,7 +28,10 @@ import java.util.List;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link TopNGlobalIndexResult}. */
 public class TopNGlobalIndexResultTest {
@@ -45,6 +48,30 @@ public class TopNGlobalIndexResultTest {
 
         assertThat(merged).isInstanceOf(TopNGlobalIndexResult.class);
         assertThat(merged.results()).containsExactlyInAnyOrder(3L, 4L, 5L);
+    }
+
+    @Test
+    public void testMergeKeepsGlobalAscendingTopN() {
+        TopNGlobalIndexResult first =
+                result(ASCENDING, NULLS_LAST, 3, keyRowIds(50, 5), keyRowIds(10, 1));
+        TopNGlobalIndexResult second =
+                result(ASCENDING, NULLS_LAST, 3, keyRowIds(40, 4), keyRowIds(30, 3));
+
+        TopNGlobalIndexResult merged = (TopNGlobalIndexResult) first.or(second);
+
+        assertThat(merged.results()).containsExactlyInAnyOrder(1L, 3L, 4L);
+        assertThat(merged.keyRowIds()).extracting(KeyRowIds::key).containsExactly(10, 30, 40);
+    }
+
+    @Test
+    public void testCannotMergeDifferentDirections() {
+        TopNGlobalIndexResult ascending = result(ASCENDING, NULLS_LAST, 1, keyRowIds(10, 1));
+        TopNGlobalIndexResult descending = result(DESCENDING, NULLS_LAST, 1, keyRowIds(10, 1));
+
+        assertThatThrownBy(() -> ascending.or(descending))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Cannot merge sorted global index results with different sort directions.");
     }
 
     @Test
@@ -122,8 +149,17 @@ public class TopNGlobalIndexResultTest {
             org.apache.paimon.predicate.SortValue.NullOrdering nullOrdering,
             int limit,
             KeyRowIds... entries) {
+        return result(DESCENDING, nullOrdering, limit, entries);
+    }
+
+    private TopNGlobalIndexResult result(
+            org.apache.paimon.predicate.SortValue.SortDirection direction,
+            org.apache.paimon.predicate.SortValue.NullOrdering nullOrdering,
+            int limit,
+            KeyRowIds... entries) {
         List<KeyRowIds> candidates = Arrays.asList(entries);
-        return TopNGlobalIndexResult.create(candidates, INT_COMPARATOR, nullOrdering, limit);
+        return TopNGlobalIndexResult.create(
+                candidates, INT_COMPARATOR, direction, nullOrdering, limit);
     }
 
     private KeyRowIds keyRowIds(Integer key, long... rowIds) {

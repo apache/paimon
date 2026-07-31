@@ -55,6 +55,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -115,6 +116,15 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
             for (long rowId : result.results()) {
                 assertThat(comparator.compare(valuesByRowId[(int) rowId], boundary))
                         .isGreaterThanOrEqualTo(0);
+            }
+
+            GlobalIndexResult ascending =
+                    reader.visitTopN(new TopN(ref, ASCENDING, NULLS_LAST, limit)).join().get();
+            assertThat(ascending.results().getLongCardinality()).isEqualTo(limit);
+            boundary = data.get(limit - 1).getKey();
+            for (long rowId : ascending.results()) {
+                assertThat(comparator.compare(valuesByRowId[(int) rowId], boundary))
+                        .isLessThanOrEqualTo(0);
             }
         }
     }

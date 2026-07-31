@@ -32,7 +32,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Selects BTree index files which may contain a single-column descending TopN result.
+ * Selects BTree index files which may contain a single-column TopN result.
  *
  * <p>Files without usable sorted metadata are always retained. For files with usable metadata,
  * retaining the first {@code N} files ordered by their best value is safe because every non-empty
@@ -44,11 +44,13 @@ class BTreeTopNIndexFileSelector {
 
     private final KeySerializer keySerializer;
     private final Comparator<Object> keyComparator;
+    private final boolean ascending;
     private final boolean nullsFirst;
 
     private BTreeTopNIndexFileSelector(DataField field, TopN topN) {
         this.keySerializer = KeySerializer.create(field.type());
         this.keyComparator = keySerializer.createComparator();
+        this.ascending = topN.orders().get(0).direction() == SortValue.SortDirection.ASCENDING;
         this.nullsFirst = topN.orders().get(0).nullOrdering() == SortValue.NullOrdering.NULLS_FIRST;
     }
 
@@ -103,12 +105,16 @@ class BTreeTopNIndexFileSelector {
                 return null;
             }
 
+            byte[] nonNullBestKey = ascending ? firstKey : lastKey;
+            byte[] nonNullWorstKey = ascending ? lastKey : firstKey;
             boolean bestIsNull = nullsFirst ? sortedMeta.hasNulls() : !hasNonNulls;
             Object bestKey =
-                    bestIsNull ? null : keySerializer.deserialize(MemorySlice.wrap(lastKey));
+                    bestIsNull ? null : keySerializer.deserialize(MemorySlice.wrap(nonNullBestKey));
             boolean worstIsNull = nullsFirst ? !hasNonNulls : sortedMeta.hasNulls();
             Object worstKey =
-                    worstIsNull ? null : keySerializer.deserialize(MemorySlice.wrap(firstKey));
+                    worstIsNull
+                            ? null
+                            : keySerializer.deserialize(MemorySlice.wrap(nonNullWorstKey));
             return new RankedIndexFile(file, bestIsNull, bestKey, worstIsNull, worstKey);
         } catch (RuntimeException e) {
             return null;
@@ -138,7 +144,10 @@ class BTreeTopNIndexFileSelector {
             }
             return nullsFirst ? 1 : -1;
         }
-        return leftIsNull ? 0 : keyComparator.compare(right, left);
+        if (leftIsNull) {
+            return 0;
+        }
+        return ascending ? keyComparator.compare(left, right) : keyComparator.compare(right, left);
     }
 
     private static class RankedIndexFile {

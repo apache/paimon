@@ -30,7 +30,6 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -272,7 +271,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     }
 
     /**
-     * Creates a scanner for a single-column descending TopN backed by a primary BTree index.
+     * Creates a scanner for a single-column TopN backed by a primary BTree index.
      *
      * <p>Indexes carrying the ordered field only as an extra field are not ordered by that field
      * and cannot serve this scan.
@@ -310,10 +309,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     }
 
     private static boolean isSupportedTopN(TopN topN) {
-        return topN != null
-                && topN.limit() >= 0
-                && topN.orders().size() == 1
-                && topN.orders().get(0).direction() == SortValue.SortDirection.DESCENDING;
+        return topN != null && topN.limit() >= 0 && topN.orders().size() == 1;
     }
 
     private static Filter<IndexManifestEntry> topNIndexFileFilter(

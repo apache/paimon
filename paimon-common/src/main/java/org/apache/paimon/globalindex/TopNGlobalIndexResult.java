@@ -33,15 +33,16 @@ import java.util.List;
 /**
  * A bounded global index result which retains sort keys while merging TopN candidates.
  *
- * <p>Key groups are ordered by key descending and their row ids are ordered ascending. Merging two
- * compatible results combines equal keys and keeps only the globally best {@code limit} row ids.
- * Merging with a plain bitmap result falls back to a conservative bitmap union because the other
- * result has no sort keys.
+ * <p>Key groups are ordered by the requested sort direction and their row ids are ordered
+ * ascending. Merging two compatible results combines equal keys and keeps only the globally best
+ * {@code limit} row ids. Merging with a plain bitmap result falls back to a conservative bitmap
+ * union because the other result has no sort keys.
  */
 public final class TopNGlobalIndexResult implements GlobalIndexResult {
 
     private final List<KeyRowIds> keyRowIds;
     private final Comparator<Object> keyComparator;
+    private final SortValue.SortDirection direction;
     private final SortValue.NullOrdering nullOrdering;
     private final int limit;
     private final RoaringNavigableMap64 results;
@@ -49,9 +50,11 @@ public final class TopNGlobalIndexResult implements GlobalIndexResult {
     private TopNGlobalIndexResult(
             List<KeyRowIds> keyRowIds,
             Comparator<Object> keyComparator,
+            SortValue.SortDirection direction,
             SortValue.NullOrdering nullOrdering,
             int limit) {
         this.keyComparator = keyComparator;
+        this.direction = direction;
         this.nullOrdering = nullOrdering;
         this.limit = limit;
 
@@ -66,8 +69,18 @@ public final class TopNGlobalIndexResult implements GlobalIndexResult {
             Comparator<Object> keyComparator,
             SortValue.NullOrdering nullOrdering,
             int limit) {
+        return create(
+                keyRowIds, keyComparator, SortValue.SortDirection.DESCENDING, nullOrdering, limit);
+    }
+
+    public static TopNGlobalIndexResult create(
+            List<KeyRowIds> keyRowIds,
+            Comparator<Object> keyComparator,
+            SortValue.SortDirection direction,
+            SortValue.NullOrdering nullOrdering,
+            int limit) {
         Preconditions.checkArgument(limit >= 0, "TopN limit must not be negative.");
-        return new TopNGlobalIndexResult(keyRowIds, keyComparator, nullOrdering, limit);
+        return new TopNGlobalIndexResult(keyRowIds, keyComparator, direction, nullOrdering, limit);
     }
 
     @Override
@@ -90,7 +103,7 @@ public final class TopNGlobalIndexResult implements GlobalIndexResult {
             }
             offsetKeyRowIds.add(new KeyRowIds(keyRowIds.key(), offsetRowIds));
         }
-        return create(offsetKeyRowIds, keyComparator, nullOrdering, limit);
+        return create(offsetKeyRowIds, keyComparator, direction, nullOrdering, limit);
     }
 
     @Override
@@ -107,6 +120,9 @@ public final class TopNGlobalIndexResult implements GlobalIndexResult {
                 limit == sortedOther.limit,
                 "Cannot merge sorted global index results with different TopN limits.");
         Preconditions.checkArgument(
+                direction == sortedOther.direction,
+                "Cannot merge sorted global index results with different sort directions.");
+        Preconditions.checkArgument(
                 nullOrdering == sortedOther.nullOrdering,
                 "Cannot merge sorted global index results with different null ordering.");
 
@@ -120,7 +136,7 @@ public final class TopNGlobalIndexResult implements GlobalIndexResult {
         List<KeyRowIds> merged = new ArrayList<>(keyRowIds.size() + sortedOther.keyRowIds.size());
         merged.addAll(keyRowIds);
         merged.addAll(sortedOther.keyRowIds);
-        return new TopNGlobalIndexResult(merged, keyComparator, nullOrdering, limit);
+        return new TopNGlobalIndexResult(merged, keyComparator, direction, nullOrdering, limit);
     }
 
     private List<KeyRowIds> mergeAndLimit(List<KeyRowIds> sorted) {
@@ -177,7 +193,9 @@ public final class TopNGlobalIndexResult implements GlobalIndexResult {
         if (right == null) {
             return nullOrdering == SortValue.NullOrdering.NULLS_FIRST ? 1 : -1;
         }
-        return keyComparator.compare(right, left);
+        return direction == SortValue.SortDirection.ASCENDING
+                ? keyComparator.compare(left, right)
+                : keyComparator.compare(right, left);
     }
 
     private static RoaringNavigableMap64 toBitmap(List<KeyRowIds> keyRowIds) {

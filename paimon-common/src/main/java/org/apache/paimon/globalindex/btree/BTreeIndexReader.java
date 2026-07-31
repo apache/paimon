@@ -328,12 +328,13 @@ public class BTreeIndexReader implements Closeable {
 
     public Optional<GlobalIndexResult> visitTopN(TopN topN) {
         List<SortValue> orders = topN.orders();
-        if (orders.size() != 1 || orders.get(0).direction() != SortValue.SortDirection.DESCENDING) {
+        if (orders.size() != 1) {
             return Optional.empty();
         }
         Preconditions.checkArgument(topN.limit() >= 0, "TopN limit must not be negative.");
+        SortValue order = orders.get(0);
         try {
-            return Optional.of(topN(topN.limit(), orders.get(0).nullOrdering()));
+            return Optional.of(topN(topN.limit(), order.direction(), order.nullOrdering()));
         } catch (IOException e) {
             throw new RuntimeException("fail to read btree index file.", e);
         }
@@ -362,11 +363,12 @@ public class BTreeIndexReader implements Closeable {
         return rangeQuery(minKey, maxKey, true, true);
     }
 
-    private TopNGlobalIndexResult topN(int limit, SortValue.NullOrdering nullOrdering)
+    private TopNGlobalIndexResult topN(
+            int limit, SortValue.SortDirection direction, SortValue.NullOrdering nullOrdering)
             throws IOException {
         List<KeyRowIds> result = new ArrayList<>();
         if (limit == 0) {
-            return TopNGlobalIndexResult.create(result, comparator, nullOrdering, limit);
+            return TopNGlobalIndexResult.create(result, comparator, direction, nullOrdering, limit);
         }
 
         int remaining = limit;
@@ -374,12 +376,15 @@ public class BTreeIndexReader implements Closeable {
             remaining = addNullRows(result, remaining);
         }
         if (remaining > 0) {
-            remaining = addDescendingNonNullRows(result, remaining);
+            remaining =
+                    direction == SortValue.SortDirection.ASCENDING
+                            ? addAscendingNonNullRows(result, remaining)
+                            : addDescendingNonNullRows(result, remaining);
         }
         if (remaining > 0 && nullOrdering == SortValue.NullOrdering.NULLS_LAST) {
             addNullRows(result, remaining);
         }
-        return TopNGlobalIndexResult.create(result, comparator, nullOrdering, limit);
+        return TopNGlobalIndexResult.create(result, comparator, direction, nullOrdering, limit);
     }
 
     private int addNullRows(List<KeyRowIds> result, int remaining) {
@@ -405,6 +410,25 @@ public class BTreeIndexReader implements Closeable {
 
         SstFileReader.SstFileReverseIterator fileIterator = reader.createReverseIterator();
         ReverseBlockIterator dataIterator;
+        while (remaining > 0 && (dataIterator = fileIterator.readBatch()) != null) {
+            while (remaining > 0 && dataIterator.hasNext()) {
+                Map.Entry<MemorySlice, MemorySlice> entry = dataIterator.next();
+                Object key = keySerializer.deserialize(entry.getKey());
+                long[] rowIds = deserializeRowIds(entry.getValue(), remaining);
+                result.add(new KeyRowIds(key, rowIds));
+                remaining -= rowIds.length;
+            }
+        }
+        return remaining;
+    }
+
+    private int addAscendingNonNullRows(List<KeyRowIds> result, int remaining) throws IOException {
+        if (minKey == null) {
+            return remaining;
+        }
+
+        SstFileReader.SstFileIterator fileIterator = reader.createIterator();
+        BlockIterator dataIterator;
         while (remaining > 0 && (dataIterator = fileIterator.readBatch()) != null) {
             while (remaining > 0 && dataIterator.hasNext()) {
                 Map.Entry<MemorySlice, MemorySlice> entry = dataIterator.next();

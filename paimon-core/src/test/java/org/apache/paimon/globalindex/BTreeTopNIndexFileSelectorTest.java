@@ -34,6 +34,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -64,6 +65,42 @@ public class BTreeTopNIndexFileSelectorTest {
                         file("null-a", 10, 20, true));
 
         assertThat(fileNames(select(files, NULLS_FIRST, 2))).containsExactly("null-a", "null-b");
+    }
+
+    @Test
+    public void testSelectAscendingNullsLast() {
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        file("all-null", null, null, true),
+                        file("min-10", 10, 20, false),
+                        file("min-30", 30, 40, false),
+                        file("min-20", 20, 30, true));
+
+        assertThat(fileNames(select(files, ASCENDING, NULLS_LAST, 2)))
+                .containsExactly("min-10", "min-20");
+    }
+
+    @Test
+    public void testSelectAscendingNullsFirst() {
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        file("nonnull", 1, 100, false),
+                        file("null-b", null, null, true),
+                        file("null-a", 10, 20, true));
+
+        assertThat(fileNames(select(files, ASCENDING, NULLS_FIRST, 2)))
+                .containsExactly("null-a", "null-b");
+    }
+
+    @Test
+    public void testAscendingSingleFileCoversTopNAtEqualBoundary() {
+        List<IndexFileMeta> files =
+                Arrays.asList(
+                        file("bottom", 0, 10, false, 100),
+                        file("next", 10, 20, false, 100),
+                        file("upper", 20, 30, false, 100));
+
+        assertThat(fileNames(select(files, ASCENDING, NULLS_LAST, 100))).containsExactly("bottom");
     }
 
     @Test
@@ -136,8 +173,16 @@ public class BTreeTopNIndexFileSelectorTest {
 
     private List<IndexFileMeta> select(
             List<IndexFileMeta> files, SortValue.NullOrdering nullOrdering, int limit) {
+        return select(files, DESCENDING, nullOrdering, limit);
+    }
+
+    private List<IndexFileMeta> select(
+            List<IndexFileMeta> files,
+            SortValue.SortDirection direction,
+            SortValue.NullOrdering nullOrdering,
+            int limit) {
         FieldRef fieldRef = new FieldRef(FIELD.id(), FIELD.name(), FIELD.type());
-        TopN topN = new TopN(fieldRef, DESCENDING, nullOrdering, limit);
+        TopN topN = new TopN(fieldRef, direction, nullOrdering, limit);
         return BTreeTopNIndexFileSelector.select(files, FIELD, topN);
     }
 

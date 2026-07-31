@@ -71,13 +71,20 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
                         .isGreaterThanOrEqualTo(0);
             }
 
+            GlobalIndexResult ascending =
+                    reader.visitTopN(new TopN(ref, ASCENDING, NULLS_LAST, limit)).join().get();
+            assertThat(ascending.results().getLongCardinality()).isEqualTo(limit);
+            boundary = data.get(limit - 1).getKey();
+            for (long rowId : ascending.results()) {
+                assertThat(comparator.compare(valuesByRowId[(int) rowId], boundary))
+                        .isLessThanOrEqualTo(0);
+            }
+
             assertThat(
                             reader.visitTopN(new TopN(ref, DESCENDING, NULLS_LAST, 0))
                                     .join()
                                     .get()
                                     .results())
-                    .isEmpty();
-            assertThat(reader.visitTopN(new TopN(ref, ASCENDING, NULLS_LAST, limit)).join())
                     .isEmpty();
         }
 
@@ -102,6 +109,23 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
                 Object value = valuesByRowId[(int) rowId];
                 assertThat(value).isNotNull();
                 assertThat(comparator.compare(value, boundary)).isGreaterThanOrEqualTo(0);
+            }
+
+            GlobalIndexResult ascendingNullsFirst =
+                    reader.visitTopN(new TopN(ref, ASCENDING, NULLS_FIRST, limit)).join().get();
+            assertThat(ascendingNullsFirst.results().getLongCardinality()).isEqualTo(limit);
+            for (long rowId : ascendingNullsFirst.results()) {
+                assertThat(valuesByRowId[(int) rowId]).isNull();
+            }
+
+            GlobalIndexResult ascendingNullsLast =
+                    reader.visitTopN(new TopN(ref, ASCENDING, NULLS_LAST, limit)).join().get();
+            assertThat(ascendingNullsLast.results().getLongCardinality()).isEqualTo(limit);
+            boundary = data.get(limit - 1).getKey();
+            for (long rowId : ascendingNullsLast.results()) {
+                Object value = valuesByRowId[(int) rowId];
+                assertThat(value).isNotNull();
+                assertThat(comparator.compare(value, boundary)).isLessThanOrEqualTo(0);
             }
         }
     }
