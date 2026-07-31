@@ -92,16 +92,6 @@ public class TableQueryAuthResult implements Serializable {
     }
 
     /**
-     * Widens {@code readType} with the unprojected columns the rules read, or null when the
-     * projection already covers them. Scans apply this before planning file pruning.
-     */
-    @Nullable
-    public RowType widenReadType(RowType tableType, RowType readType) {
-        return appendMissingFields(
-                tableType, readType, requiredAuthFields(readType.getFieldNames()));
-    }
-
-    /**
      * Drops the conjuncts of {@code predicate} referencing any of {@code fields}; returns null when
      * nothing remains. Used to keep raw-statistics pushdown off masked columns.
      */
@@ -139,7 +129,7 @@ public class TableQueryAuthResult implements Serializable {
      * Every column read by the conjuncts of {@code filter} that touch {@code maskTargets}. Their
      * unmasked operands count too, since splitAnd does not split a disjunction.
      */
-    public static Set<String> postMaskFilterFields(
+    private static Set<String> postMaskFilterFields(
             @Nullable Predicate filter, Set<String> maskTargets) {
         if (filter == null || maskTargets.isEmpty()) {
             return Collections.emptySet();
@@ -153,6 +143,28 @@ public class TableQueryAuthResult implements Serializable {
         return retained == null
                 ? Collections.emptySet()
                 : new HashSet<>(PredicateVisitor.collectFieldNames(retained));
+    }
+
+    /**
+     * The columns a read projecting {@code readFields} under {@code filter} must additionally
+     * expose: the rule fields, plus the operands of the conjuncts evaluated post-mask. The scan and
+     * the read both widen by this, and must agree — the read schema is fixed on first use.
+     */
+    public Set<String> authFields(List<String> readFields, @Nullable Predicate filter) {
+        Set<String> postMask = postMaskFilterFields(filter, extractColumnMasking().keySet());
+        List<String> visible = readFields;
+        if (!postMask.isEmpty()) {
+            visible = new ArrayList<>(readFields);
+            for (String field : postMask) {
+                if (!visible.contains(field)) {
+                    visible.add(field);
+                }
+            }
+        }
+        Set<String> ruleFields = requiredAuthFields(visible);
+        // requiredAuthFields returns what the rules read, not the operands themselves
+        ruleFields.addAll(postMask);
+        return ruleFields;
     }
 
     /** Appends the missing {@code ruleFields} of {@code tableType} to {@code readType}. */
@@ -344,7 +356,7 @@ public class TableQueryAuthResult implements Serializable {
      * The field names the auth rules read for a query projecting {@code projectedFields}: the
      * row-filter operands, plus transitively the inputs of every mask whose target is readable.
      */
-    public Set<String> requiredAuthFields(List<String> projectedFields) {
+    private Set<String> requiredAuthFields(List<String> projectedFields) {
         Map<String, Transform> masking = extractColumnMasking();
         Set<String> ruleFields = new HashSet<>();
         Set<String> readable = new HashSet<>(projectedFields);

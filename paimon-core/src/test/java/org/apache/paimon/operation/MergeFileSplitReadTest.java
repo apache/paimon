@@ -328,7 +328,6 @@ public class MergeFileSplitReadTest {
 
     @Test
     public void testRepeatedReadTypeResetsOuterProjection() throws Exception {
-        // a second withReadType that needs no adjustment must clear the outer projection
         TestKeyValueGenerator gen = new TestKeyValueGenerator();
         List<KeyValue> data = new ArrayList<>();
         for (int i = 0; i < 100; i++) {
@@ -351,9 +350,7 @@ public class MergeFileSplitReadTest {
                         .collect(Collectors.groupingBy(ManifestEntry::partition));
 
         MergeFileSplitRead read = store.newRead();
-        // adjusted internally to include the sequence field: outer projection set
         read.withReadType(TestKeyValueGenerator.DEFAULT_ROW_TYPE.project("shopId", "dt", "hr"));
-        // contains the sequence field, no adjustment: previous outer projection cleared
         read.withReadType(
                 TestKeyValueGenerator.DEFAULT_ROW_TYPE.project("shopId", "dt", "hr", "orderId"));
 
@@ -448,8 +445,6 @@ public class MergeFileSplitReadTest {
 
     @Test
     public void testIncrementalDiffReadOnProjectedMergeRead() throws Exception {
-        // the diff read projects the merge read's output; when the shared merge read
-        // is itself projected, the projection base must be its actual output type
         TestKeyValueGenerator gen = new TestKeyValueGenerator();
         List<KeyValue> before = new ArrayList<>();
         for (int i = 0; i < 50; i++) {
@@ -476,7 +471,6 @@ public class MergeFileSplitReadTest {
                         .collect(Collectors.groupingBy(ManifestEntry::partition));
 
         MergeFileSplitRead mergeRead = store.newRead();
-        // out-of-table-order projection, pushed into the shared merge read
         RowType projection = TestKeyValueGenerator.DEFAULT_ROW_TYPE.project("shopId", "dt", "hr");
         mergeRead.withReadType(projection);
         SplitRead<InternalRow> diffRead = new IncrementalDiffSplitRead(mergeRead);
@@ -501,7 +495,6 @@ public class MergeFileSplitReadTest {
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
                 assertThat(row.getFieldCount()).isEqualTo(3);
-                // shopId INT, dt STRING(len 8), hr INT: misprojection would misplace types
                 assertThat(row.getString(1).toString()).hasSize(8);
                 row.getInt(0);
                 row.getInt(2);
