@@ -90,6 +90,41 @@ jobs:
           java -version
           mvn -version
 
+      - name: Reject SNAPSHOT project versions and dependencies
+        shell: bash
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+
+          enforcer_goal="org.apache.maven.plugins:maven-enforcer-plugin:3.6.3:enforce"
+          enforcer_rules="requireReleaseVersion,requireReleaseDeps"
+          case "${LANE}" in
+            jdk8)
+              mvn -ntp -B "${enforcer_goal}" \
+                -Denforcer.rules="${enforcer_rules}" \
+                -Papache-release,docs-and-source,spark3,flink1
+              ;;
+            jdk11)
+              mvn -ntp -B "${enforcer_goal}" \
+                -Denforcer.rules="${enforcer_rules}" \
+                -Papache-release,docs-and-source,flink2 \
+                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg \
+                -am
+              ;;
+            jdk17)
+              mvn -ntp -B "${enforcer_goal}" \
+                -Denforcer.rules="${enforcer_rules}" \
+                -Papache-release,docs-and-source,spark4 \
+                -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13 \
+                -am
+              ;;
+            *)
+              echo "Unknown Java release lane: ${LANE}" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Package Java release artifacts
         shell: bash
         env:

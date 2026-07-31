@@ -87,6 +87,12 @@ The workflow has the following contract:
 | Python package | Build and validate the PyPaimon source distribution and universal wheel, then upload them as workflow artifacts |
 | Python publish | Publish an RC to TestPyPI only after all Java and Python packaging jobs pass; publish a final tag to PyPI |
 
+Before packaging, every Java lane runs Maven Enforcer's
+`requireReleaseVersion` and `requireReleaseDeps` rules over its complete reactor
+scope. The latter includes transitive dependencies. Any remaining
+`-SNAPSHOT` project, parent, direct dependency, or transitive dependency is a
+release blocker.
+
 The Java jobs use `-Dgpg.skip=true` and never receive Nexus credentials or a
 GPG private key. Their artifacts are build evidence, not the Maven staging
 repositories used for the vote. The Python RC job uses the protected
