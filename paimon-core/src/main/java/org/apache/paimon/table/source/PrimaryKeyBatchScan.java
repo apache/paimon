@@ -119,6 +119,11 @@ public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
         if (globalIndexSplitResult == null) {
             return null;
         }
+        if (options().queryAuthEnabled()) {
+            // the splits were selected from raw index values, which a mask may invalidate;
+            // plan normally instead, as the index evaluation below already does
+            return null;
+        }
         if (globalIndexSplitResult.snapshotId() > 0) {
             maybeCreateReadProtectionTag(globalIndexSplitResult.snapshotId());
         }

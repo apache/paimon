@@ -145,7 +145,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     protected abstract TableScan.Plan planWithoutAuth();
 
-    private void applyAuthFilter(@Nullable Predicate authPredicate) {
+    protected void applyAuthFilter(@Nullable Predicate authPredicate) {
         if (Objects.equals(authPredicate, appliedAuthPredicate)) {
             return;
         }

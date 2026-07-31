@@ -87,6 +87,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
 
     @Override
     public FullTextRead newFullTextRead() {
+        rejectUnderQueryAuth();
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
         DataField textColumn = textColumn();
         Optional<PrimaryKeyIndexDefinition> definition = primaryKeyFullTextDefinition(textColumn);
