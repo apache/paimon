@@ -20,6 +20,11 @@ name: Release PyPaimon Publish
 
 on:
   workflow_call:
+    secrets:
+      TEST_PYPI_API_TOKEN:
+        required: true
+      PYPI_API_TOKEN:
+        required: true
 
 concurrency:
   group: release-python-publish-${{ github.ref }}
@@ -35,8 +40,6 @@ jobs:
     if: >-
       github.repository == 'apache/paimon' &&
       startsWith(github.ref, 'refs/tags/')
-    environment:
-      name: ${{ contains(github.ref_name, '-rc') && 'testpypi' || 'pypi' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

@@ -127,3 +127,6 @@ jobs:
       (needs.java.result == 'success' ||
        needs.validation.outputs.release_kind == 'final')
     uses: ./.github/workflows/release-python-publish.yml
+    secrets:
+      TEST_PYPI_API_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
