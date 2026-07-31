@@ -59,12 +59,20 @@ class DataEvolutionCompactGlobalIndexDropper {
             return Collections.emptyList();
         }
 
+        // Scan at the latest snapshot, not the compaction's base: a global index
+        // built concurrently and committed after this compaction planned still
+        // references pre-materialization row-ids and must be dropped too.
+        Snapshot scanSnapshot = table.snapshotManager().latestSnapshot();
+        if (scanSnapshot == null) {
+            scanSnapshot = snapshot;
+        }
+
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> deletedIndexes = new LinkedHashMap<>();
         for (IndexManifestEntry entry :
                 table.store()
                         .newIndexFileHandler()
                         .scan(
-                                snapshot,
+                                scanSnapshot,
                                 e ->
                                         partitions.contains(e.partition())
                                                 && e.indexFile().globalIndexMeta() != null)) {
