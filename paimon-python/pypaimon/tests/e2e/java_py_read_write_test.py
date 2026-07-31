@@ -20,6 +20,7 @@ import json
 import os
 import sys
 import unittest
+from decimal import Decimal
 
 import pandas as pd
 import pyarrow as pa
@@ -1552,12 +1553,40 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 {4: b'java-omega'},
             ],
         )
+        expected_additional_payloads = {
+            'boolean_payloads': {True: b'java-boolean'},
+            'compact_decimal_payloads': {
+                Decimal('12.34'): b'java-compact-decimal',
+            },
+            'high_decimal_payloads': {
+                Decimal('123456789012345678.90'): b'java-high-decimal',
+            },
+            'date_payloads': {
+                datetime.date(1969, 12, 31): b'java-date',
+            },
+        }
+        for name, expected in expected_additional_payloads.items():
+            self.assertEqual(
+                [None if value is None else dict(value)
+                 for value in result.column(name).to_pylist()],
+                [expected, None, None, None],
+            )
 
     def test_write_map_blob_for_java(self):
         map_blob_type = pa.map_(pa.int32(), pa.large_binary())
+        boolean_map_blob_type = pa.map_(pa.bool_(), pa.large_binary())
+        compact_decimal_map_blob_type = pa.map_(
+            pa.decimal128(10, 2), pa.large_binary())
+        high_decimal_map_blob_type = pa.map_(
+            pa.decimal128(20, 2), pa.large_binary())
+        date_map_blob_type = pa.map_(pa.date32(), pa.large_binary())
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('payloads', map_blob_type),
+            ('boolean_payloads', boolean_map_blob_type),
+            ('compact_decimal_payloads', compact_decimal_map_blob_type),
+            ('high_decimal_payloads', high_decimal_map_blob_type),
+            ('date_payloads', date_map_blob_type),
         ])
         schema = Schema.from_pyarrow_schema(
             pa_schema,
@@ -1583,6 +1612,29 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 ],
                 type=map_blob_type,
             ),
+            'boolean_payloads': pa.array(
+                [[(True, b'python-boolean')], None, None, None],
+                type=boolean_map_blob_type,
+            ),
+            'compact_decimal_payloads': pa.array(
+                [[(Decimal('12.34'), b'python-compact-decimal')],
+                 None, None, None],
+                type=compact_decimal_map_blob_type,
+            ),
+            'high_decimal_payloads': pa.array(
+                [[(
+                    Decimal('123456789012345678.90'),
+                    b'python-high-decimal',
+                )], None, None, None],
+                type=high_decimal_map_blob_type,
+            ),
+            'date_payloads': pa.array(
+                [[(
+                    datetime.date(1969, 12, 31),
+                    b'python-date',
+                )], None, None, None],
+                type=date_map_blob_type,
+            ),
         }, schema=pa_schema)
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -1607,6 +1659,24 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 {4: b'python-omega'},
             ],
         )
+        expected_additional_payloads = {
+            'boolean_payloads': {True: b'python-boolean'},
+            'compact_decimal_payloads': {
+                Decimal('12.34'): b'python-compact-decimal',
+            },
+            'high_decimal_payloads': {
+                Decimal('123456789012345678.90'): b'python-high-decimal',
+            },
+            'date_payloads': {
+                datetime.date(1969, 12, 31): b'python-date',
+            },
+        }
+        for name, expected in expected_additional_payloads.items():
+            self.assertEqual(
+                [None if value is None else dict(value)
+                 for value in result.column(name).to_pylist()],
+                [expected, None, None, None],
+            )
 
     def test_compact_conflict_shard_update(self):
         """

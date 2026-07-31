@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import datetime
 import io
 import os
 import shutil
@@ -22,6 +23,7 @@ import struct
 import tempfile
 import unittest
 import zlib
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -3049,9 +3051,30 @@ class BlobEndToEndTest(unittest.TestCase):
             (AtomicType("INT"), -2147483648),
             (AtomicType("INTEGER"), 0x01020304),
             (AtomicType("BIGINT"), -9223372036854775808),
+            (AtomicType("BOOLEAN"), True),
+            (AtomicType("DECIMAL(10, 2)"), Decimal("12.34")),
+            (
+                AtomicType("DECIMAL(20, 2)"),
+                Decimal("123456789012345678.90"),
+            ),
+            (AtomicType("DATE"), datetime.date(1969, 12, 31)),
             (AtomicType("STRING"), "string"),
             (AtomicType("CHAR(3)"), "abc"),
             (AtomicType("VARCHAR(10)"), "varchar"),
+        ]
+        serialized_keys = [
+            b"\x80",
+            b"\x00\x80",
+            b"\x00\x00\x00\x80",
+            b"\x04\x03\x02\x01",
+            b"\x00\x00\x00\x00\x00\x00\x00\x80",
+            b"\x01",
+            b"\xd2\x04\x00\x00\x00\x00\x00\x00",
+            b"\x00\xab\x54\xa9\x8c\xeb\x1f\x0a\xd2",
+            b"\xff\xff\xff\xff",
+            b"string",
+            b"abc",
+            b"varchar",
         ]
         for index, (key_type, key) in enumerate(cases):
             with self.subTest(key_type=key_type):
@@ -3079,35 +3102,38 @@ class BlobEndToEndTest(unittest.TestCase):
                 result = next(iterator).values[0]
                 self.assertEqual(result[key].to_data(), b"value")
 
-                if key_type.type == "INTEGER":
-                    with open(blob_file_path, 'rb') as blob_file:
-                        blob_file.seek(BlobRecordIterator.MAGIC_NUMBER_SIZE
-                                       + BlobRecordIterator.MAP_HEADER_SIZE)
-                        self.assertEqual(blob_file.read(4), b"\x04\x03\x02\x01")
-                    reader = FormatBlobReader(
-                        file_io=file_io,
-                        file_path=blob_file_path,
-                        read_fields=["blob_map"],
-                        full_fields=fields,
-                        push_down_predicate=None,
-                        blob_as_descriptor=False,
+                with open(blob_file_path, 'rb') as blob_file:
+                    blob_file.seek(BlobRecordIterator.MAGIC_NUMBER_SIZE
+                                   + BlobRecordIterator.MAP_HEADER_SIZE)
+                    self.assertEqual(
+                        blob_file.read(len(serialized_keys[index])),
+                        serialized_keys[index],
                     )
-                    try:
-                        value = dict(reader.read_arrow_batch().column(0)[0].as_py())
-                        self.assertEqual(value, {key: b"value"})
-                    finally:
-                        reader.close()
+
+                reader = FormatBlobReader(
+                    file_io=file_io,
+                    file_path=blob_file_path,
+                    read_fields=["blob_map"],
+                    full_fields=fields,
+                    push_down_predicate=None,
+                    blob_as_descriptor=False,
+                )
+                try:
+                    value = dict(reader.read_arrow_batch().column(0)[0].as_py())
+                    self.assertEqual(value, {key: b"value"})
+                finally:
+                    reader.close()
 
         output = io.BytesIO()
         unsupported_key_writer = BlobFormatWriter(output)
         unsupported_key_field = DataField(
             0,
             "blob_map",
-            MapType(True, AtomicType("BOOLEAN"), AtomicType("BLOB")),
+            MapType(True, AtomicType("FLOAT"), AtomicType("BLOB")),
         )
         with self.assertRaisesRegex(ValueError, "Unsupported key type"):
             unsupported_key_writer.add_element(GenericRow(
-                [{True: BlobData(b"value")}],
+                [{1.0: BlobData(b"value")}],
                 [unsupported_key_field],
                 RowKind.INSERT,
             ))
