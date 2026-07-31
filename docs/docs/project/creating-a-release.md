@@ -416,11 +416,11 @@ If the vote finds a problem:
 The final tag must point to exactly the approved RC commit:
 
 ```shell
-git tag -s "${RELEASE_TAG}" "${RC_REF}^{commit}" \
+git tag -s "${RELEASE_TAG}" "refs/tags/${RC_REF}^{commit}" \
   -m "Release Apache Paimon ${PAIMON_VERSION}"
 
-test "$(git rev-parse "${RC_REF}^{commit}")" = \
-     "$(git rev-parse "${RELEASE_TAG}^{commit}")"
+test "$(git rev-parse "refs/tags/${RC_REF}^{commit}")" = \
+     "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
 git tag -v "${RELEASE_TAG}"
 git push origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
 ```

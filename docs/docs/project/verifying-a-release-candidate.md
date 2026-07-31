@@ -94,7 +94,7 @@ shasum -a 512 -c "${PYPAIMON_ARCHIVE}.sha512"
 git clone https://github.com/apache/paimon.git paimon-candidate-git
 git -C paimon-candidate-git fetch --tags
 git -C paimon-candidate-git tag -v "${RC_TAG}"
-git -C paimon-candidate-git rev-parse "${RC_TAG}^{commit}"
+git -C paimon-candidate-git rev-parse "refs/tags/${RC_TAG}^{commit}"
 ```
 
 The resolved commit must equal both the SHA in the vote email and the
@@ -164,15 +164,21 @@ and Maven state from one JDK cannot leak into another lane. Record `java
 This lane covers the default reactor, Flink 1.x, and Spark 3.x:
 
 ```shell
-mvn -ntp clean verify -Pspark3,flink1
+(
+  cd "paimon-${PAIMON_VERSION}"
+  mvn -ntp clean verify -Pspark3,flink1
+)
 ```
 
 For supplementary or non-binding verification, you may build the same scope
 used for staging and state explicitly that tests were skipped:
 
 ```shell
-mvn -ntp clean install -DskipTests \
-  -Pdocs-and-source,spark3,flink1
+(
+  cd "paimon-${PAIMON_VERSION}"
+  mvn -ntp clean install -DskipTests \
+    -Pdocs-and-source,spark3,flink1
+)
 ```
 
 ### JDK 11 lane
@@ -180,17 +186,23 @@ mvn -ntp clean install -DskipTests \
 This lane covers Flink 2.x and Iceberg:
 
 ```shell
-mvn -ntp clean verify -Pflink2 \
-  -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-iceberg \
-  -am
+(
+  cd "paimon-${PAIMON_VERSION}"
+  mvn -ntp clean verify -Pflink2 \
+    -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-iceberg \
+    -am
+)
 ```
 
 The packaging-equivalent build is:
 
 ```shell
-mvn -ntp clean install -DskipTests -Pdocs-and-source,flink2 \
-  -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-iceberg \
-  -am
+(
+  cd "paimon-${PAIMON_VERSION}"
+  mvn -ntp clean install -DskipTests -Pdocs-and-source,flink2 \
+    -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-iceberg \
+    -am
+)
 ```
 
 ### JDK 17 lane
@@ -198,17 +210,23 @@ mvn -ntp clean install -DskipTests -Pdocs-and-source,flink2 \
 This lane covers Spark 4.x:
 
 ```shell
-mvn -ntp clean verify -Pspark4 \
-  -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1 \
-  -am
+(
+  cd "paimon-${PAIMON_VERSION}"
+  mvn -ntp clean verify -Pspark4 \
+    -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1 \
+    -am
+)
 ```
 
 The packaging-equivalent build is:
 
 ```shell
-mvn -ntp clean install -DskipTests -Pdocs-and-source,spark4 \
-  -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1 \
-  -am
+(
+  cd "paimon-${PAIMON_VERSION}"
+  mvn -ntp clean install -DskipTests -Pdocs-and-source,spark4 \
+    -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1 \
+    -am
+)
 ```
 
 Investigate warnings and skipped modules. A successful compiler exit does not,
@@ -287,9 +305,12 @@ your environment allows. The project CI selects Python 3.6, 3.7, 3.10, and
 3.11 for its main compatibility lanes:
 
 ```shell
-python -m pip install -r dev/requirements.txt
-python -m pip install -r dev/requirements-dev.txt
-python -m pytest pypaimon/tests -v
+(
+  cd "paimon-${PAIMON_VERSION}/paimon-python"
+  python -m pip install -r dev/requirements.txt
+  python -m pip install -r dev/requirements-dev.txt
+  python -m pytest pypaimon/tests -v
+)
 ```
 
 Some optional integration tests need additional services or packages. Record
