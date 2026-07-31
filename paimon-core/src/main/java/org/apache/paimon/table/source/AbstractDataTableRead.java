@@ -35,7 +35,6 @@ import org.apache.paimon.utils.ProjectedRow;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -178,21 +177,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         // masked filter columns are read and masked like rule fields, then evaluated post-mask
         Set<String> maskedFilterFields =
                 maskedFilterFields(authResult.extractColumnMasking().keySet());
-        // a retained conjunct may also reference unmasked columns; all must be readable
-        Set<String> postMaskFilterFields =
-                TableQueryAuthResult.postMaskFilterFields(
-                        predicate, authResult.extractColumnMasking().keySet());
-        List<String> visibleFields = readFields;
-        if (!postMaskFilterFields.isEmpty()) {
-            visibleFields = new ArrayList<>(readFields);
-            for (String field : postMaskFilterFields) {
-                if (!visibleFields.contains(field)) {
-                    visibleFields.add(field);
-                }
-            }
-        }
-        Set<String> ruleFields = authResult.requiredAuthFields(visibleFields);
-        ruleFields.addAll(postMaskFilterFields);
+        Set<String> ruleFields = authResult.authFields(readFields, predicate);
         RowType widened = widenedReadType(authResult, ruleFields);
         if (widened != null && !widened.equals(appliedReadType)) {
             applyReadType(widened);
