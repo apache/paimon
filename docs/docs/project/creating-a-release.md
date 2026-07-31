@@ -149,8 +149,8 @@ RC_REF="release-${PAIMON_VERSION}-rc${RC_NUMBER}"
 RELEASE_TAG="release-${PAIMON_VERSION}"
 ```
 
-Use these exact values in the branch, tag, workflow inputs, SVN directories,
-vote email, and Java package manifests.
+Use these exact values in the local working branch, tag, workflow inputs, SVN
+directories, vote email, and Java package manifests.
 
 ### Work from a clean clone
 
@@ -164,9 +164,9 @@ git status --short
 
 The last command must produce no output.
 
-### Create the RC branch and set versions
+### Create a local RC branch and set versions
 
-Create the RC branch with the existing helper:
+Create a local RC working branch with the existing helper:
 
 ```shell
 RELEASE_VERSION="${PAIMON_VERSION}" \
@@ -174,7 +174,8 @@ RELEASE_CANDIDATE="${RC_NUMBER}" \
   ./tools/releasing/create_release_branch.sh
 ```
 
-This creates `release-PAIMON_VERSION-rcRC_NUMBER`.
+This creates the local branch `release-PAIMON_VERSION-rcRC_NUMBER`. Use it only
+to prepare the candidate commit; do not push this branch to the remote.
 
 Change all Maven modules from `PAIMON_VERSION-SNAPSHOT` to
 `PAIMON_VERSION`. The helper commits the Maven version change:
@@ -206,16 +207,14 @@ commands must find no release-version marker, and the worktree must be clean.
 
 ### Sign and push the RC tag
 
-The historical Paimon convention uses the same name for the RC branch and tag.
-Use explicit refs when pushing so Git cannot select the wrong one:
+The signed tag is the only RC ref published to the remote. Do not push the
+same-named local RC branch. Use an explicit tag ref when pushing:
 
 ```shell
 git tag -s "${RC_REF}" \
   -m "Apache Paimon ${PAIMON_VERSION} and PyPaimon ${PYPAIMON_VERSION} RC${RC_NUMBER}"
 git tag -v "${RC_REF}"
 
-git push origin \
-  "refs/heads/${RC_REF}:refs/heads/${RC_REF}"
 git push origin \
   "refs/tags/${RC_REF}:refs/tags/${RC_REF}"
 ```
@@ -399,8 +398,9 @@ If the vote finds a problem:
 3. Remove the superseded dist-dev directories, or retain them temporarily when
    useful to the vote discussion. Never replace their contents.
 4. Increment `RC_NUMBER`; never reuse the failed candidate's TestPyPI version.
-5. Create a new RC branch and signed tag, run every workflow lane again, stage
-   new source candidates, and start a new 72-hour vote.
+5. Create a new local RC working branch and signed tag, push only the tag, run
+   every workflow lane again, stage new source candidates, and start a new
+   72-hour vote.
 
 ## Finalize an approved release
 
