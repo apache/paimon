@@ -29,6 +29,7 @@ import org.apache.paimon.index.fulltext.FullTextIndexReader;
 import org.apache.paimon.index.fulltext.FullTextSearchResult;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.IOException;
@@ -112,9 +113,9 @@ public class NativeFullTextGlobalIndexReader implements GlobalIndexReader {
                     try {
                         inputStream = input;
                         reader = new FullTextIndexReader(new PaimonFullTextIndexInput(input));
-                    } catch (RuntimeException e) {
-                        input.close();
+                    } catch (RuntimeException | Error e) {
                         inputStream = null;
+                        closeResource(input, e);
                         throw e;
                     }
                 }
@@ -136,14 +137,34 @@ public class NativeFullTextGlobalIndexReader implements GlobalIndexReader {
 
     @Override
     public void close() throws IOException {
-        if (reader != null) {
-            reader.close();
+        Throwable failure = null;
+        try {
+            failure = closeResource(reader, failure);
+            failure = closeResource(inputStream, failure);
+        } finally {
             reader = null;
-        }
-        if (inputStream != null) {
-            inputStream.close();
             inputStream = null;
         }
+        if (failure instanceof IOException) {
+            throw (IOException) failure;
+        } else if (failure instanceof RuntimeException) {
+            throw (RuntimeException) failure;
+        } else if (failure instanceof Error) {
+            throw (Error) failure;
+        } else if (failure != null) {
+            throw new IOException("Failed to close native full-text index reader", failure);
+        }
+    }
+
+    private static Throwable closeResource(AutoCloseable resource, Throwable failure) {
+        try {
+            if (resource != null) {
+                resource.close();
+            }
+        } catch (Throwable closeFailure) {
+            return ExceptionUtils.firstOrSuppressed(closeFailure, failure);
+        }
+        return failure;
     }
 
     private static class PaimonFullTextIndexInput implements FullTextIndexInput {
