@@ -17,7 +17,7 @@
 ################################################################################
 
 # Build the PyPaimon source distribution and universal wheel. Publishing is
-# handled by release-python-publish.yml after all required release jobs pass.
+# handled by release-python-publish.yml after this package job passes.
 
 name: Release PyPaimon Package
 
