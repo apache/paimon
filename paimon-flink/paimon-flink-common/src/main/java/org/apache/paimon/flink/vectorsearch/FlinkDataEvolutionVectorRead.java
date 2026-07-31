@@ -87,6 +87,8 @@ public class FlinkDataEvolutionVectorRead extends DataEvolutionVectorRead {
 
     @Override
     public GlobalIndexResult read(VectorScan.Plan plan) {
+        // Pin the driver-side live-row / scalar pre-filter to the plan's snapshot.
+        this.planSnapshot = plan.snapshot();
         List<IndexVectorSearchSplit> indexSplits = new ArrayList<>();
         List<RawVectorSearchSplit> rawSplits = new ArrayList<>();
         splitSearchSplits(plan.splits(), indexSplits, rawSplits);
