@@ -18,12 +18,11 @@
 
 package org.apache.paimon.spark.data
 
+import org.apache.paimon.shade.guava30.com.google.common.cache.{CacheBuilder, CacheLoader, LoadingCache}
 import org.apache.paimon.types.{DataTypeRoot, RowType}
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
-
-import java.util.IdentityHashMap
 
 import scala.collection.mutable
 
@@ -35,7 +34,13 @@ abstract class SparkInternalRow extends InternalRow {
 
 object SparkInternalRow {
 
-  private val blobFieldsCache = new IdentityHashMap[RowType, Set[Int]]()
+  private val blobFieldsCache: LoadingCache[RowType, Set[Int]] =
+    CacheBuilder
+      .newBuilder()
+      .weakKeys()
+      .build(new CacheLoader[RowType, Set[Int]] {
+        override def load(rowType: RowType): Set[Int] = findBlobFields(rowType)
+      })
 
   def create(rowType: RowType): SparkInternalRow = {
     create(rowType, blobAsDescriptor = false)
@@ -50,16 +55,7 @@ object SparkInternalRow {
     }
   }
 
-  private def blobFields(rowType: RowType): Set[Int] = blobFieldsCache.synchronized {
-    val cached = blobFieldsCache.get(rowType)
-    if (cached != null) {
-      cached
-    } else {
-      val fields = findBlobFields(rowType)
-      blobFieldsCache.put(rowType, fields)
-      fields
-    }
-  }
+  private def blobFields(rowType: RowType): Set[Int] = blobFieldsCache.getUnchecked(rowType)
 
   private def findBlobFields(rowType: RowType): Set[Int] = {
     var i: Int = 0
