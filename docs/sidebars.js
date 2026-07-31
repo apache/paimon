@@ -318,6 +318,8 @@ const sidebars = {
     },
     "items": [
       "project/download",
+      "project/creating-a-release",
+      "project/verifying-a-release-candidate",
       "project/contributing",
       "project/committer",
       "project/security"
