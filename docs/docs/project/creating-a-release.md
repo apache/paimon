@@ -39,8 +39,8 @@ after the vote.
 
 ## Release model
 
-Paimon contains two independently versioned deliverables. Do not assume that
-their version numbers are equal.
+The combined Paimon and PyPaimon release uses one shared version number. The
+Maven project version and `paimon-python/setup.py` version must be equal.
 
 | Deliverable | Candidate | Published location |
 | --- | --- | --- |
