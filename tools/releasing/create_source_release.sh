@@ -77,6 +77,13 @@ rsync -a \
   --exclude ".travis.yml" \
   . paimon-${RELEASE_VERSION}
 
+UNEXPECTED_BINARY=$(find paimon-${RELEASE_VERSION} -type f \
+  \( -name "*.class" -o -name "*.jar" \) -print -quit)
+if [ -n "${UNEXPECTED_BINARY}" ]; then
+    echo "Source release contains a compiled binary: ${UNEXPECTED_BINARY}" >&2
+    exit 1
+fi
+
 tar czf ${RELEASE_DIR}/apache-paimon-${RELEASE_VERSION}-src.tgz --no-xattrs paimon-${RELEASE_VERSION}
 gpg --armor --detach-sig ${RELEASE_DIR}/apache-paimon-${RELEASE_VERSION}-src.tgz
 cd ${RELEASE_DIR}

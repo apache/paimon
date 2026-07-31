@@ -114,6 +114,9 @@ jobs:
               for required in ("LICENSE", "NOTICE", "README.md", "setup.py"):
                   if prefix + required not in names:
                       raise SystemExit("Missing {} from sdist".format(required))
+              sample_data = "pypaimon/sample/data/data.jsonl"
+              if prefix + sample_data not in names:
+                  raise SystemExit("Missing sample data from sdist")
 
           with zipfile.ZipFile(wheels[0]) as archive:
               names = archive.namelist()
@@ -127,6 +130,8 @@ jobs:
               ]
               if not license_files or not notice_files:
                   raise SystemExit("Wheel is missing LICENSE or NOTICE")
+              if "pypaimon/sample/data/data.jsonl" not in names:
+                  raise SystemExit("Wheel is missing sample data")
           PY
 
       - name: Upload PyPaimon distributions
