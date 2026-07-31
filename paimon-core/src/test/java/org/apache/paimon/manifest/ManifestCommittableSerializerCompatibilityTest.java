@@ -83,7 +83,8 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("asdf", "qwer", "zxcv"));
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
         GlobalIndexMeta globalIndexMeta =
-                new GlobalIndexMeta(1L, 2L, 3, new int[] {5, 6, 7}, new byte[] {0x23, 0x45});
+                new GlobalIndexMeta(
+                        1L, 2L, 3, new int[] {5, 6, 7}, new byte[] {0x23, 0x45}, new byte[] {0x67});
         IndexFileMeta hashIndexFile =
                 new IndexFileMeta(
                         "my_index_type",
@@ -133,6 +134,13 @@ public class ManifestCommittableSerializerCompatibilityTest {
         byte[] bytes = serializer.serialize(manifestCommittable);
         ManifestCommittable deserialized = serializer.deserialize(serializer.getVersion(), bytes);
         assertThat(deserialized).isEqualTo(manifestCommittable);
+        GlobalIndexMeta deserializedGlobalIndexMeta =
+                ((CommitMessageImpl) deserialized.fileCommittables().get(0))
+                        .newFilesIncrement()
+                        .newIndexFiles()
+                        .get(0)
+                        .globalIndexMeta();
+        assertThat(deserializedGlobalIndexMeta.sourceMeta()).containsExactly(0x67);
 
         byte[] oldBytes =
                 IOUtils.readFully(
@@ -142,6 +150,13 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         true);
         deserialized = serializer.deserialize(5, oldBytes);
         assertThat(deserialized).isEqualTo(manifestCommittable);
+        deserializedGlobalIndexMeta =
+                ((CommitMessageImpl) deserialized.fileCommittables().get(0))
+                        .newFilesIncrement()
+                        .newIndexFiles()
+                        .get(0)
+                        .globalIndexMeta();
+        assertThat(deserializedGlobalIndexMeta.sourceMeta()).isNull();
     }
 
     @Test

@@ -21,13 +21,20 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
+import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.Random;
 
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomIndexFile;
@@ -38,7 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<IndexManifestEntry> {
 
     @Test
-    void testReadsGlobalIndexWithoutSourceMeta() {
+    void testReadsGlobalIndexWithoutSourceMeta() throws IOException {
         IndexManifestEntrySerializer serializer = new IndexManifestEntrySerializer();
         IndexManifestEntry entry =
                 new IndexManifestEntry(
@@ -53,18 +60,55 @@ public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<I
                                 new GlobalIndexMeta(0, 9, 7, null, new byte[] {1}),
                                 null));
         GenericRow serialized = (GenericRow) serializer.convertTo(entry);
-        serialized.setField(9, GenericRow.of(0L, 9L, 7, null, new byte[] {1}));
+        InternalRowSerializer legacyGlobalIndexSerializer =
+                InternalSerializers.create(
+                        GlobalIndexMeta.SCHEMA.copy(
+                                GlobalIndexMeta.SCHEMA.getFields().subList(0, 5)));
+        BinaryRow legacyGlobalIndexRow =
+                legacyGlobalIndexSerializer
+                        .toBinaryRow(GenericRow.of(0L, 9L, 7, null, new byte[] {1}))
+                        .copy();
+        serialized.setField(9, legacyGlobalIndexRow);
 
-        InternalRow globalIndexRow = serialized.getRow(9, 5);
-        assertThat(globalIndexRow.getFieldCount()).isEqualTo(5);
+        InternalRow version1Row = new JoinedRow().replace(GenericRow.of(1), serialized);
+        InternalRowSerializer versionedRowSerializer =
+                InternalSerializers.create(
+                        VersionedObjectSerializer.versionType(IndexManifestEntry.SCHEMA));
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        versionedRowSerializer.serialize(version1Row, new DataOutputViewStreamWrapper(out));
+
         GlobalIndexMeta restored =
-                serializer
-                        .convertFrom(serializer.getVersion(), serialized)
-                        .indexFile()
-                        .globalIndexMeta();
+                serializer.deserializeFromBytes(out.toByteArray()).indexFile().globalIndexMeta();
 
         assertThat(restored.indexMeta()).containsExactly(1);
         assertThat(restored.sourceMeta()).isNull();
+    }
+
+    @Test
+    void testGlobalIndexSourceMetaRoundTrip() throws IOException {
+        IndexManifestEntrySerializer serializer = new IndexManifestEntrySerializer();
+        IndexManifestEntry entry =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        new IndexFileMeta(
+                                "ivf-pq",
+                                "index-file",
+                                100,
+                                10,
+                                new GlobalIndexMeta(
+                                        0, 9, 7, null, new byte[] {3, 4}, new byte[] {1, 2}),
+                                null));
+
+        GlobalIndexMeta restored =
+                serializer
+                        .deserializeFromBytes(serializer.serializeToBytes(entry))
+                        .indexFile()
+                        .globalIndexMeta();
+
+        assertThat(restored.indexMeta()).containsExactly(3, 4);
+        assertThat(restored.sourceMeta()).containsExactly(1, 2);
     }
 
     @Override
