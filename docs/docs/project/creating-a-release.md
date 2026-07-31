@@ -73,18 +73,21 @@ compiler target is not a substitute for running the JDK 8 and JDK 11 lanes.
 
 The release process uses the
 [Release workflow](https://github.com/apache/paimon/actions/workflows/release.yml)
-to package Java and PyPaimon from every signed RC tag. The RM signs and stages
-Java locally, and creates and signs the two ASF source archives locally from
-the same tag. The RM's GPG private key is never stored in GitHub Actions.
+to package the JDK 8, JDK 11, and JDK 17 Java lanes and PyPaimon from every
+signed RC tag. The Java lanes are merged into one unsigned Maven repository
+image. The RM downloads that image, signs it, and stages it in Nexus. The RM
+also creates and signs the two ASF source archives locally from the same tag.
+The RM's GPG private key is never stored in GitHub Actions.
 
 The workflow has the following contract:
 
 | Job | Required behavior |
 | --- | --- |
 | Validation | Require an RC tag named `release-PAIMON_VERSION-rcN` or a final tag named `release-PAIMON_VERSION`, where `PAIMON_VERSION` exactly equals the root Maven `project.version` |
-| Java 8 | Use Temurin 8 to package the default reactor with Spark 3 and Flink 1, then upload the package, checksums, manifest, and log |
-| Java 11 | Use Temurin 11 to package Flink 2 and Iceberg, then upload the package, checksums, manifest, and log |
-| Java 17 | Use Temurin 17 to package Spark 4, then upload the package, checksums, manifest, and log |
+| Java 8 | Use Temurin 8 to deploy the default reactor with Spark 3 and Flink 1 into a local Maven repository image |
+| Java 11 | Use Temurin 11 to deploy Flink 2 and Iceberg into a local Maven repository image |
+| Java 17 | Use Temurin 17 to deploy Spark 4 into a local Maven repository image |
+| Java repository | Require every deploy-enabled effective-POM project and its POM, main JAR, source JAR, and Javadoc JAR; merge all three lanes; reject conflicting coordinates; then upload the complete unsigned Maven repository image, checksums, manifests, and logs |
 | Python package | Build and validate the PyPaimon source distribution and universal wheel, then upload them as workflow artifacts |
 | Python publish | Publish an RC to TestPyPI or a final tag to PyPI after Python packaging passes, without waiting for Java packaging |
 
@@ -95,10 +98,11 @@ scope. The latter includes transitive dependencies. Any remaining
 release blocker.
 
 The Java jobs run independently of the common validation and Python jobs. They
-use `-Dgpg.skip=true` and never receive Nexus credentials or a GPG private key.
-Their artifacts are optional build evidence, not a prerequisite for the RM's
-local Java staging and not the Maven staging repositories used for the vote.
-The Python RC job uses the
+use `-Dgpg.skip=true`, deploy only to runner-local file repositories, and never
+receive Nexus credentials or a GPG private key. The combined repository image
+contains POMs, main artifacts, source JARs, Javadoc JARs, and Maven-generated
+checksums. It is the input to the RM's local signing and Nexus
+staging steps, not itself an ASF release. The Python RC job uses the
 `TEST_PYPI_API_TOKEN` repository Actions secret to publish
 `PAIMON_VERSIONrcRC_NUMBER` to TestPyPI. The final job uses the
 `PYPI_API_TOKEN` repository Actions secret to publish to PyPI. The release
@@ -118,9 +122,11 @@ Before managing the first release:
 4. Configure the local Maven server ID `apache.releases.https` with the RM's
    Apache Nexus credentials. Do not copy the GPG key or Nexus credentials into
    GitHub Actions.
-5. Confirm access to the ASF distribution SVN repository, Apache Nexus,
+5. Record Paimon's Apache Nexus staging profile ID. The local repository upload
+   script requires it as `STAGING_PROFILE_ID`.
+6. Confirm access to the ASF distribution SVN repository, Apache Nexus,
    TestPyPI, and PyPI.
-6. Verify that the repository Actions secrets `TEST_PYPI_API_TOKEN` and
+7. Verify that the repository Actions secrets `TEST_PYPI_API_TOKEN` and
    `PYPI_API_TOKEN` are configured without printing their values in an Actions
    log.
 
@@ -221,20 +227,19 @@ git push origin \
   "refs/tags/${RC_REF}:refs/tags/${RC_REF}"
 ```
 
-Pushing the signed tag starts the Release workflow. Java packaging runs
-independently. Python publishing starts as soon as common validation and Python
-packaging succeed; it does not wait for the Java packaging jobs. Record:
+Pushing the signed tag starts all three Java packaging lanes from the exact same
+commit. Python publishing starts as soon as common validation and Python
+packaging succeed; it does not wait for Java packaging. Record:
 
 - the workflow run URL and `head_sha`;
-- any available JDK 8, 11, and 17 package artifacts, manifests, and SHA-512
-  checksums which the RM chooses to use as additional build evidence;
+- the `java-release-repository` artifact name, manifest, and SHA-512 checksum;
 - the TestPyPI project/version URL.
 
-CI status is not an automatic gate for local Java staging or the release vote.
-The RM evaluates the available CI results together with the local release
-checks and decides whether the candidate is ready.
+Unrelated CI status is not an automatic release gate; the RM decides whether a
+failure blocks the candidate. The three Java packaging lanes and repository
+merge must succeed before their repository image can be signed and staged.
 
-## Stage the Java convenience artifacts locally
+## Sign and stage the Java convenience artifacts locally
 
 Check out the exact signed RC tag in a clean clone. Use the RM machine's local
 GPG key and Maven credentials; do not download a private key into a CI runner.
@@ -249,34 +254,76 @@ gpg --list-secret-keys --keyid-format LONG
 mvn -q -DforceStdout help:evaluate -Dexpression=project.version
 ```
 
-If the RM chooses to use the Java workflow artifacts as additional evidence,
-download the available packages, verify each `*-packages.tar.gz.sha512` file,
-and inspect each manifest and artifact inventory. Confirm that the lane,
-version, commit, JDK, and module scope match the signed RC tag. Do not compare
-their individual JAR checksums with the locally built and signed JARs. Archive
-entry order and other build metadata can make independently built JARs differ
-at the byte level.
-
-Run each existing staging script under its required JDK. Confirm the output of
-`java -version` and `mvn -version` before every command:
+Download the combined repository image from the recorded workflow run. With
+GitHub CLI, set `RUN_ID` to the numeric run ID from the workflow URL:
 
 ```shell
-# JDK 8: default reactor, Flink 1.x, and Spark 3.x
-./tools/releasing/deploy_staging_jars.sh
+RUN_ID="<GITHUB_WORKFLOW_RUN_ID>"
+JAVA_REPOSITORY_ARCHIVE="paimon-${PAIMON_VERSION}-maven-repository.tar.gz"
 
-# JDK 11: Flink 2.x and Iceberg
-./tools/releasing/deploy_staging_jars_for_jdk11.sh
-
-# JDK 17: Spark 4.x
-./tools/releasing/deploy_staging_jars_for_jdk17.sh
+gh run download "${RUN_ID}" \
+  --name java-release-repository \
+  --dir java-release-repository
 ```
 
-Maven signs the release artifacts with the RM's local GPG key and deploys them
-using the local `apache.releases.https` server credentials. After each command,
-record the `orgapachepaimon-XXXX` repository ID and confirm that it contains
-only the intended lane. Close each repository and resolve every close-time rule
-failure before starting the vote. Closing freezes the candidate that voters
-inspect. Do not release a repository before the vote passes.
+Verify the archive and every file in the repository image before signing it:
+
+```shell
+(
+  cd java-release-repository
+  sha512sum -c "${JAVA_REPOSITORY_ARCHIVE}.sha512"
+)
+
+mkdir paimon-maven-repository
+tar -xzf "java-release-repository/${JAVA_REPOSITORY_ARCHIVE}" \
+  -C paimon-maven-repository
+(
+  cd paimon-maven-repository
+  sha512sum -c \
+    ../java-release-repository/paimon-maven-repository-sha512.txt
+)
+
+grep -Fx "version=${PAIMON_VERSION}" \
+  java-release-repository/paimon-maven-repository-manifest.txt
+grep -Fx "tag=${RC_REF}" \
+  java-release-repository/paimon-maven-repository-manifest.txt
+grep -Fx "commit=$(git rev-parse HEAD)" \
+  java-release-repository/paimon-maven-repository-manifest.txt
+```
+
+On macOS, replace `sha512sum` with `shasum -a 512`. Sign every JAR and POM in
+the extracted repository with the RM's local key. `GPG_KEY_ID` is optional when
+the default GPG key is the release key:
+
+```shell
+REPOSITORY_DIRECTORY="${PWD}/paimon-maven-repository" \
+GPG_KEY_ID="<RELEASE_GPG_KEY_ID>" \
+  ./tools/releasing/sign_maven_repository.sh
+```
+
+Upload the complete signed image with the Nexus Staging Maven Plugin:
+
+```shell
+REPOSITORY_DIRECTORY="${PWD}/paimon-maven-repository" \
+STAGING_PROFILE_ID="<PAIMON_STAGING_PROFILE_ID>" \
+  ./tools/releasing/deploy_maven_repository.sh
+```
+
+The upload plugin creates one staging repository and closes it after a complete
+upload. The script explicitly disables automatic release. On a transport
+failure it drops the partial staging repository, so a retry starts clean instead
+of splitting coordinates across repositories. On a close-rule failure the
+script keeps the repository for inspection. Record the single
+`orgapachepaimon-XXXX` repository ID. If closing fails, inspect and drop that
+repository, correct the cause, and upload the clean signed image again. Start
+the vote only after one staging repository is closed successfully. Do not
+release it before the vote passes.
+
+If signing is interrupted, discard the extracted repository and extract the
+verified archive again before retrying. If uploading is interrupted, first
+confirm in Nexus that the plugin dropped the partial staging repository; drop
+it manually if necessary, then rerun the upload with the unchanged signed
+repository image.
 
 ## Stage the source candidates
 
@@ -376,10 +423,8 @@ GitHub Actions release run:
 KEYS:
 https://downloads.apache.org/paimon/KEYS
 
-Closed Java staging repositories:
-<JDK_8_NEXUS_URL>
-<JDK_11_NEXUS_URL>
-<JDK_17_NEXUS_URL>
+Closed Java staging repository:
+<JAVA_NEXUS_URL>
 
 PyPaimon RC:
 https://test.pypi.org/project/pypaimon/${PAIMON_VERSION}rc${RC_NUMBER}/
@@ -398,7 +443,7 @@ After the deadline, tally binding and non-binding votes separately and send
 If the vote finds a problem:
 
 1. Fix it through the normal review process.
-2. Drop every Nexus staging repository belonging to the failed RC.
+2. Drop the Nexus staging repository belonging to the failed RC.
 3. Remove the superseded dist-dev directories, or retain them temporarily when
    useful to the vote discussion. Never replace their contents.
 4. Increment `RC_NUMBER`; never reuse the failed candidate's TestPyPI version.
@@ -438,10 +483,10 @@ svn mv -m "Release PyPaimon ${PAIMON_VERSION}" \
 
 ### Promote convenience artifacts
 
-1. In Nexus, confirm that every recorded JDK 8, 11, and 17 staging repository
-   is still closed and has the exact artifact tree approved by the vote.
-2. Release those exact closed repositories to Maven Central. Do not run Maven
-   deploy again.
+1. In Nexus, confirm that the recorded Java staging repository is still closed
+   and has the exact artifact tree approved by the vote.
+2. Release that exact closed repository to Maven Central. Do not upload or
+   rebuild the Java artifacts again.
 3. Confirm that the final tag's PyPI publish job builds
    `pypaimon==PAIMON_VERSION` from the approved tag commit and does not change
    project source.
