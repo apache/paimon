@@ -79,6 +79,15 @@ jobs:
             exit 1
           fi
 
+          python_release_version="$(
+            sed -n 's/^VERSION = "\(.*\)"/\1/p' \
+              paimon-python/setup.py
+          )"
+          if [[ "${python_release_version}" != "${release_version}" ]]; then
+            echo "PyPaimon version ${python_release_version:-missing} does not match Paimon ${release_version}" >&2
+            exit 1
+          fi
+
           final_tag="release-${release_version}"
           rc_prefix="${final_tag}-rc"
           release_kind=""
