@@ -36,7 +36,7 @@ Take all values and URLs from the vote email:
 
 ```shell
 PAIMON_VERSION="2.0.0"
-PYPAIMON_VERSION="1.5.0"
+PYPAIMON_VERSION="2.0.0"
 RC_NUMBER="1"
 RC_TAG="release-${PAIMON_VERSION}-rc${RC_NUMBER}"
 

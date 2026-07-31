@@ -138,11 +138,11 @@ notes. Ensure CI is green on the commit from which the candidate will be cut.
 
 ### Set the release variables
 
-The following example deliberately uses different Java and Python versions:
+For the 2.0.0 release, use matching Java and Python versions:
 
 ```shell
 PAIMON_VERSION="2.0.0"
-PYPAIMON_VERSION="1.5.0"
+PYPAIMON_VERSION="2.0.0"
 RC_NUMBER="1"
 
 RC_REF="release-${PAIMON_VERSION}-rc${RC_NUMBER}"
