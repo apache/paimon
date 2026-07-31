@@ -326,6 +326,8 @@ public class ParquetFilters {
 
             // The literal has to speak whatever the file holds, not what the table declares.
             switch (pushdownTarget(fieldRef, fileSchema, caseSensitive).type) {
+                case BOOLEAN:
+                    return toBoolean(value);
                 case INT32:
                     return toInt(value);
                 case INT64:
@@ -340,6 +342,13 @@ public class ParquetFilters {
                 default:
                     throw new UnsupportedOperationException();
             }
+        }
+
+        private Comparable<?> toBoolean(Object value) {
+            if (value instanceof Boolean) {
+                return (Boolean) value;
+            }
+            throw new UnsupportedOperationException();
         }
 
         private Comparable<?> toInt(Object value) {

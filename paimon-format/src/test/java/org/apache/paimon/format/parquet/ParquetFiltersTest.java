@@ -23,6 +23,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -68,6 +69,28 @@ import java.util.stream.LongStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ParquetFiltersTest {
+
+    @Test
+    public void testBoolean() {
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "flag", new BooleanType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        test(schema, builder.isNull(0), "eq(flag, null)", true);
+
+        test(schema, builder.isNotNull(0), "noteq(flag, null)", true);
+
+        test(schema, builder.equal(0, true), "eq(flag, true)", true);
+
+        test(schema, builder.notEqual(0, false), "noteq(flag, false)", true);
+
+        test(
+                schema,
+                builder.in(0, Arrays.asList(true, false)),
+                "or(eq(flag, true), eq(flag, false))",
+                true);
+    }
 
     @Test
     public void testLong() {
