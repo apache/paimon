@@ -81,6 +81,7 @@ The workflow has the following contract:
 
 | Job | Required behavior |
 | --- | --- |
+| Validation | Require an RC tag named `release-PAIMON_VERSION-rcN` or a final tag named `release-PAIMON_VERSION`, where `PAIMON_VERSION` exactly equals the root Maven `project.version` |
 | Java 8 | Use Temurin 8 to package the default reactor with Spark 3 and Flink 1, then upload the package, checksums, manifest, and log |
 | Java 11 | Use Temurin 11 to package Flink 2 and Iceberg, then upload the package, checksums, manifest, and log |
 | Java 17 | Use Temurin 17 to package Spark 4, then upload the package, checksums, manifest, and log |
@@ -226,8 +227,9 @@ git push origin \
   "refs/tags/${RC_REF}:refs/tags/${RC_REF}"
 ```
 
-Pushing the signed tag starts the Release workflow. Wait for every Java and
-Python job to succeed. Record:
+Pushing the signed tag starts the Release workflow. The common validation job
+must succeed before any Java or Python packaging or publishing job can run.
+Wait for every required job to succeed. Record:
 
 - the workflow run URL and `head_sha`;
 - the JDK 8, 11, and 17 package artifact names, manifests, and SHA-512

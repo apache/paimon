@@ -320,6 +320,9 @@ Open the workflow run linked in the vote email and confirm:
 
 - it was triggered from the signed `RC_TAG`;
 - `head_sha` equals the announced commit;
+- the common validation job confirmed that `RC_TAG` is exactly
+  `release-PAIMON_VERSION-rcRC_NUMBER` and that `PAIMON_VERSION` equals the
+  root Maven `project.version`;
 - JDK 8, JDK 11, JDK 17, Python packaging, and Python publishing jobs all
   succeeded;
 - the logs show the expected JDK and Python versions;
