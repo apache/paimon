@@ -46,8 +46,8 @@ Maven project version and `paimon-python/setup.py` version must be equal.
 | --- | --- | --- |
 | Paimon source | `apache-paimon-PAIMON_VERSION-src.tgz`, `.asc`, `.sha512` | ASF distribution |
 | Java convenience artifacts | Maven artifacts built in the JDK 8, 11, and 17 lanes | Apache Nexus staging, then Maven Central |
-| PyPaimon source | `pypaimon-PYPAIMON_VERSION.tar.gz`, `.asc`, `.sha512` | ASF distribution |
-| Python convenience package | `pypaimon==PYPAIMON_VERSIONrcRC_NUMBER` for an RC | TestPyPI, then `pypaimon==PYPAIMON_VERSION` on PyPI |
+| PyPaimon source | `pypaimon-PAIMON_VERSION.tar.gz`, `.asc`, `.sha512` | ASF distribution |
+| Python convenience package | `pypaimon==PAIMON_VERSIONrcRC_NUMBER` for an RC | TestPyPI, then `pypaimon==PAIMON_VERSION` on PyPI |
 
 A combined release vote covers both signed source candidates. This guide does
 not define an independent PyPaimon release. Before releasing PyPaimon
@@ -98,7 +98,7 @@ The Java jobs use `-Dgpg.skip=true` and never receive Nexus credentials or a
 GPG private key. Their artifacts are build evidence, not the Maven staging
 repositories used for the vote. The Python RC job uses the
 `TEST_PYPI_API_TOKEN` repository Actions secret to publish
-`PYPAIMON_VERSIONrcRC_NUMBER` to TestPyPI. The final job uses the
+`PAIMON_VERSIONrcRC_NUMBER` to TestPyPI. The final job uses the
 `PYPI_API_TOKEN` repository Actions secret to publish to PyPI. The release
 workflow passes only these two secrets to the reusable publishing workflow.
 
@@ -142,7 +142,6 @@ For the 2.0.0 release, use matching Java and Python versions:
 
 ```shell
 PAIMON_VERSION="2.0.0"
-PYPAIMON_VERSION="2.0.0"
 RC_NUMBER="1"
 
 RC_REF="release-${PAIMON_VERSION}-rc${RC_NUMBER}"
@@ -186,7 +185,7 @@ NEW_VERSION="${PAIMON_VERSION}" \
 ```
 
 Set `VERSION` in `paimon-python/setup.py` to the final
-`PYPAIMON_VERSION`, without `.dev` or an RC suffix. The release workflow
+`PAIMON_VERSION`, without `.dev` or an RC suffix. The release workflow
 derives the TestPyPI version by appending `rcRC_NUMBER`; the source candidate
 keeps the final version.
 
@@ -212,7 +211,7 @@ same-named local RC branch. Use an explicit tag ref when pushing:
 
 ```shell
 git tag -s "${RC_REF}" \
-  -m "Apache Paimon ${PAIMON_VERSION} and PyPaimon ${PYPAIMON_VERSION} RC${RC_NUMBER}"
+  -m "Apache Paimon ${PAIMON_VERSION} and PyPaimon ${PAIMON_VERSION} RC${RC_NUMBER}"
 git tag -v "${RC_REF}"
 
 git push origin \
@@ -291,17 +290,17 @@ RELEASE_VERSION="${PAIMON_VERSION}" \
 cd paimon-python
 python3 setup.py sdist
 gpg --armor --detach-sig \
-  "dist/pypaimon-${PYPAIMON_VERSION}.tar.gz"
+  "dist/pypaimon-${PAIMON_VERSION}.tar.gz"
 
 if command -v sha512sum >/dev/null 2>&1; then
-  sha512sum "dist/pypaimon-${PYPAIMON_VERSION}.tar.gz" \
-    > "dist/pypaimon-${PYPAIMON_VERSION}.tar.gz.sha512"
+  sha512sum "dist/pypaimon-${PAIMON_VERSION}.tar.gz" \
+    > "dist/pypaimon-${PAIMON_VERSION}.tar.gz.sha512"
 else
-  shasum -a 512 "dist/pypaimon-${PYPAIMON_VERSION}.tar.gz" \
-    > "dist/pypaimon-${PYPAIMON_VERSION}.tar.gz.sha512"
+  shasum -a 512 "dist/pypaimon-${PAIMON_VERSION}.tar.gz" \
+    > "dist/pypaimon-${PAIMON_VERSION}.tar.gz.sha512"
 fi
 
-cp "dist/pypaimon-${PYPAIMON_VERSION}.tar.gz"* ../release/
+cp "dist/pypaimon-${PAIMON_VERSION}.tar.gz"* ../release/
 cd ..
 ```
 
@@ -316,15 +315,15 @@ mkdir "paimon-dist-dev/paimon-${PAIMON_VERSION}-rc${RC_NUMBER}"
 cp "release/apache-paimon-${PAIMON_VERSION}-src.tgz"* \
   "paimon-dist-dev/paimon-${PAIMON_VERSION}-rc${RC_NUMBER}/"
 
-mkdir "paimon-dist-dev/pypaimon-${PYPAIMON_VERSION}-rc${RC_NUMBER}"
-cp "release/pypaimon-${PYPAIMON_VERSION}.tar.gz"* \
-  "paimon-dist-dev/pypaimon-${PYPAIMON_VERSION}-rc${RC_NUMBER}/"
+mkdir "paimon-dist-dev/pypaimon-${PAIMON_VERSION}-rc${RC_NUMBER}"
+cp "release/pypaimon-${PAIMON_VERSION}.tar.gz"* \
+  "paimon-dist-dev/pypaimon-${PAIMON_VERSION}-rc${RC_NUMBER}/"
 
 svn add \
   "paimon-dist-dev/paimon-${PAIMON_VERSION}-rc${RC_NUMBER}" \
-  "paimon-dist-dev/pypaimon-${PYPAIMON_VERSION}-rc${RC_NUMBER}"
+  "paimon-dist-dev/pypaimon-${PAIMON_VERSION}-rc${RC_NUMBER}"
 svn commit -m \
-  "Stage Paimon ${PAIMON_VERSION} and PyPaimon ${PYPAIMON_VERSION} RC${RC_NUMBER}" \
+  "Stage Paimon ${PAIMON_VERSION} and PyPaimon ${PAIMON_VERSION} RC${RC_NUMBER}" \
   paimon-dist-dev
 ```
 
@@ -341,12 +340,12 @@ Send a plain-text vote to `dev@paimon.apache.org`. Keep it open for at least
 binding `+1` than binding `-1` votes.
 
 ```text
-Subject: [VOTE] Release Apache Paimon ${PAIMON_VERSION} and PyPaimon ${PYPAIMON_VERSION} (RC${RC_NUMBER})
+Subject: [VOTE] Release Apache Paimon ${PAIMON_VERSION} and PyPaimon ${PAIMON_VERSION} (RC${RC_NUMBER})
 
 Hi everyone,
 
 Please review and vote on Apache Paimon ${PAIMON_VERSION} and
-PyPaimon ${PYPAIMON_VERSION}, release candidate ${RC_NUMBER}.
+PyPaimon ${PAIMON_VERSION}, release candidate ${RC_NUMBER}.
 
 [ ] +1 Approve
 [ ]  0 No opinion
@@ -356,7 +355,7 @@ Paimon source candidate:
 https://dist.apache.org/repos/dist/dev/paimon/paimon-${PAIMON_VERSION}-rc${RC_NUMBER}/
 
 PyPaimon source candidate:
-https://dist.apache.org/repos/dist/dev/paimon/pypaimon-${PYPAIMON_VERSION}-rc${RC_NUMBER}/
+https://dist.apache.org/repos/dist/dev/paimon/pypaimon-${PAIMON_VERSION}-rc${RC_NUMBER}/
 
 Signed Git tag:
 release-${PAIMON_VERSION}-rc${RC_NUMBER}
@@ -376,7 +375,7 @@ Closed Java staging repositories:
 <JDK_17_NEXUS_URL>
 
 PyPaimon RC:
-https://test.pypi.org/project/pypaimon/${PYPAIMON_VERSION}rc${RC_NUMBER}/
+https://test.pypi.org/project/pypaimon/${PAIMON_VERSION}rc${RC_NUMBER}/
 
 Verification guide:
 https://github.com/apache/paimon/blob/release-${PAIMON_VERSION}-rc${RC_NUMBER}/docs/docs/project/verifying-a-release-candidate.md
@@ -425,9 +424,9 @@ svn mv -m "Release Apache Paimon ${PAIMON_VERSION}" \
   "https://dist.apache.org/repos/dist/dev/paimon/paimon-${PAIMON_VERSION}-rc${RC_NUMBER}" \
   "https://dist.apache.org/repos/dist/release/paimon/paimon-${PAIMON_VERSION}"
 
-svn mv -m "Release PyPaimon ${PYPAIMON_VERSION}" \
-  "https://dist.apache.org/repos/dist/dev/paimon/pypaimon-${PYPAIMON_VERSION}-rc${RC_NUMBER}" \
-  "https://dist.apache.org/repos/dist/release/paimon/pypaimon-${PYPAIMON_VERSION}"
+svn mv -m "Release PyPaimon ${PAIMON_VERSION}" \
+  "https://dist.apache.org/repos/dist/dev/paimon/pypaimon-${PAIMON_VERSION}-rc${RC_NUMBER}" \
+  "https://dist.apache.org/repos/dist/release/paimon/pypaimon-${PAIMON_VERSION}"
 ```
 
 ### Promote convenience artifacts
@@ -437,7 +436,7 @@ svn mv -m "Release PyPaimon ${PYPAIMON_VERSION}" \
 2. Release those exact closed repositories to Maven Central. Do not run Maven
    deploy again.
 3. Confirm that the final tag's PyPI publish job builds
-   `pypaimon==PYPAIMON_VERSION` from the approved tag commit and does not change
+   `pypaimon==PAIMON_VERSION` from the approved tag commit and does not change
    project source.
 4. Verify Maven Central and PyPI before announcing the release.
 

@@ -36,14 +36,13 @@ Take all values and URLs from the vote email:
 
 ```shell
 PAIMON_VERSION="2.0.0"
-PYPAIMON_VERSION="2.0.0"
 RC_NUMBER="1"
 RC_TAG="release-${PAIMON_VERSION}-rc${RC_NUMBER}"
 
 PAIMON_RC_DIR="paimon-${PAIMON_VERSION}-rc${RC_NUMBER}"
 PAIMON_ARCHIVE="apache-paimon-${PAIMON_VERSION}-src.tgz"
-PYPAIMON_RC_DIR="pypaimon-${PYPAIMON_VERSION}-rc${RC_NUMBER}"
-PYPAIMON_ARCHIVE="pypaimon-${PYPAIMON_VERSION}.tar.gz"
+PYPAIMON_RC_DIR="pypaimon-${PAIMON_VERSION}-rc${RC_NUMBER}"
+PYPAIMON_ARCHIVE="pypaimon-${PAIMON_VERSION}.tar.gz"
 ```
 
 Download the candidates from ASF dist dev, not from a third-party mirror:
@@ -115,7 +114,7 @@ Check at least the following:
 - The Paimon archive has exactly one top-level directory named
   `paimon-PAIMON_VERSION`.
 - The PyPaimon archive has exactly one top-level directory named
-  `pypaimon-PYPAIMON_VERSION`.
+  `pypaimon-PAIMON_VERSION`.
 - `LICENSE`, `NOTICE`, README files, build files, dependency declarations, and
   required source files are present and correct.
 - No Git metadata, IDE state, credentials, Maven `target` directories, Python
@@ -125,7 +124,7 @@ Check at least the following:
   and is recorded in `LICENSE` or `NOTICE` where required.
 - Maven POMs use `PAIMON_VERSION` without `-SNAPSHOT`.
 - `paimon-python/setup.py` and PyPaimon package metadata use
-  `PYPAIMON_VERSION` without `.dev`.
+  `PAIMON_VERSION` without `.dev`.
 
 Extract the Paimon candidate:
 
@@ -285,9 +284,9 @@ python3 -m venv pypaimon-rc-venv
 . pypaimon-rc-venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 
-cd "pypaimon-${PYPAIMON_VERSION}"
+cd "pypaimon-${PAIMON_VERSION}"
 python setup.py sdist bdist_wheel
-python -m pip install "dist/pypaimon-${PYPAIMON_VERSION}"*.whl
+python -m pip install "dist/pypaimon-${PAIMON_VERSION}"*.whl
 python -c "import pypaimon; print('PyPaimon import OK')"
 cd ..
 ```
@@ -326,7 +325,7 @@ python3 -m venv pypaimon-testpypi-venv
 python -m pip install \
   --index-url https://test.pypi.org/simple/ \
   --extra-index-url https://pypi.org/simple/ \
-  "pypaimon==${PYPAIMON_VERSION}rc${RC_NUMBER}"
+  "pypaimon==${PAIMON_VERSION}rc${RC_NUMBER}"
 python -c "import pypaimon; print('TestPyPI package OK')"
 ```
 
