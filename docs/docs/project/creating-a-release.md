@@ -96,15 +96,11 @@ release blocker.
 
 The Java jobs use `-Dgpg.skip=true` and never receive Nexus credentials or a
 GPG private key. Their artifacts are build evidence, not the Maven staging
-repositories used for the vote. The Python RC job uses the protected
-`testpypi` environment to publish `PYPAIMON_VERSIONrcRC_NUMBER` to TestPyPI.
-The final job uses the separate protected `pypi` environment.
-
-Configure both environments with an RM approval and a deployment policy which
-allows only the corresponding signed release tags. Store
-`TEST_PYPI_API_TOKEN` only in `testpypi` and `PYPI_API_TOKEN` only in `pypi`.
-Do not store either token as a repository or organization secret, and do not
-pass unrelated secrets to the reusable publishing workflow.
+repositories used for the vote. The Python RC job uses the
+`TEST_PYPI_API_TOKEN` repository Actions secret to publish
+`PYPAIMON_VERSIONrcRC_NUMBER` to TestPyPI. The final job uses the
+`PYPI_API_TOKEN` repository Actions secret to publish to PyPI. The release
+workflow passes only these two secrets to the reusable publishing workflow.
 
 ## One-time RM setup
 
@@ -122,12 +118,9 @@ Before managing the first release:
    GitHub Actions.
 5. Confirm access to the ASF distribution SVN repository, Apache Nexus,
    TestPyPI, and PyPI.
-6. Create the protected GitHub environments `testpypi` and `pypi`. Configure
-   required RM reviewers and release-tag deployment policies, store only the
-   matching token in each environment, and remove any repository- or
-   organization-level copies of those tokens.
-7. Verify that the Python release secrets are configured without printing
-   their values in an Actions log.
+6. Verify that the repository Actions secrets `TEST_PYPI_API_TOKEN` and
+   `PYPI_API_TOKEN` are configured without printing their values in an Actions
+   log.
 
 ```shell
 gpg --list-secret-keys --keyid-format LONG
@@ -445,8 +438,8 @@ svn mv -m "Release PyPaimon ${PYPAIMON_VERSION}" \
    is still closed and has the exact artifact tree approved by the vote.
 2. Release those exact closed repositories to Maven Central. Do not run Maven
    deploy again.
-3. Approve the protected `pypi` promotion job for the final tag. It must build
-   `pypaimon==PYPAIMON_VERSION` from the approved tag commit and must not change
+3. Confirm that the final tag's PyPI publish job builds
+   `pypaimon==PYPAIMON_VERSION` from the approved tag commit and does not change
    project source.
 4. Verify Maven Central and PyPI before announcing the release.
 
