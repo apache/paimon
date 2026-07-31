@@ -247,9 +247,12 @@ mvn -q -DforceStdout help:evaluate -Dexpression=project.version
 ```
 
 Download the three Java package artifacts from the recorded workflow run and
-verify each `*-packages.tar.gz.sha512` file. Keep the downloaded
-`jdk8-sha512.txt`, `jdk11-sha512.txt`, and `jdk17-sha512.txt` files for the
-reproducibility check after each local build.
+verify each `*-packages.tar.gz.sha512` file. Inspect each manifest and artifact
+inventory to confirm that the lane, version, commit, JDK, and module scope match
+the signed RC tag. The workflow packages are CI build evidence; do not compare
+their individual JAR checksums with the locally built and signed JARs. Archive
+entry order and other build metadata can make independently built JARs differ
+at the byte level.
 
 Run each existing staging script under its required JDK. Confirm the output of
 `java -version` and `mvn -version` before every command:
@@ -257,19 +260,14 @@ Run each existing staging script under its required JDK. Confirm the output of
 ```shell
 # JDK 8: default reactor, Flink 1.x, and Spark 3.x
 ./tools/releasing/deploy_staging_jars.sh
-sha512sum -c /path/to/java-package-jdk8/jdk8-sha512.txt
 
 # JDK 11: Flink 2.x and Iceberg
 ./tools/releasing/deploy_staging_jars_for_jdk11.sh
-sha512sum -c /path/to/java-package-jdk11/jdk11-sha512.txt
 
 # JDK 17: Spark 4.x
 ./tools/releasing/deploy_staging_jars_for_jdk17.sh
-sha512sum -c /path/to/java-package-jdk17/jdk17-sha512.txt
 ```
 
-On macOS, replace `sha512sum -c` with `shasum -a 512 -c`. A checksum mismatch
-between the CI package and the locally signed build is a release blocker.
 Maven signs the release artifacts with the RM's local GPG key and deploys them
 using the local `apache.releases.https` server credentials. After each command,
 record the `orgapachepaimon-XXXX` repository ID and confirm that it contains
