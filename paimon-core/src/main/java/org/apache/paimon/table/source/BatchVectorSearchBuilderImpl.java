@@ -139,6 +139,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
 
     @Override
     public BatchVectorRead newBatchVectorRead() {
+        rejectUnderQueryAuth();
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
         checkNotNull(vectorColumn, "Vector column must be set via withVectorColumn()");
         checkArgument(

@@ -349,6 +349,8 @@ public class MergeFileSplitReadTest {
                 scan.withSnapshot(snapshotId).plan().files().stream()
                         .collect(Collectors.groupingBy(ManifestEntry::partition));
 
+        int rowsRead = 0;
+
         MergeFileSplitRead read = store.newRead();
         read.withReadType(TestKeyValueGenerator.DEFAULT_ROW_TYPE.project("shopId", "dt", "hr"));
         read.withReadType(
@@ -370,9 +372,11 @@ public class MergeFileSplitReadTest {
             RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader);
             while (iterator.hasNext()) {
                 assertThat(iterator.next().value().getFieldCount()).isEqualTo(4);
+                rowsRead++;
             }
             iterator.close();
         }
+        assertThat(rowsRead).isPositive();
     }
 
     @Test
@@ -476,6 +480,8 @@ public class MergeFileSplitReadTest {
         SplitRead<InternalRow> diffRead = new IncrementalDiffSplitRead(mergeRead);
         diffRead.withReadType(projection);
 
+        int rowsRead = 0;
+
         for (Map.Entry<BinaryRow, List<ManifestEntry>> entry : filesByPartition.entrySet()) {
             List<DataFileMeta> files =
                     entry.getValue().stream().map(ManifestEntry::file).collect(Collectors.toList());
@@ -498,9 +504,11 @@ public class MergeFileSplitReadTest {
                 assertThat(row.getString(1).toString()).hasSize(8);
                 row.getInt(0);
                 row.getInt(2);
+                rowsRead++;
             }
             iterator.close();
         }
+        assertThat(rowsRead).isPositive();
     }
 
     private List<KeyValue> writeThenRead(

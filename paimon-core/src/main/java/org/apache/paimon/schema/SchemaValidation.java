@@ -156,6 +156,19 @@ public class SchemaValidation {
 
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
         validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
+        // only a file-store table reads through the auth reader; reject here rather than only at
+        // create time, so ALTER cannot turn the option on for a table type that ignores it
+        TableType tableType = options.type();
+        if (options.queryAuthEnabled()
+                && tableType != TableType.TABLE
+                && tableType != TableType.MATERIALIZED_TABLE) {
+            throw new RuntimeException(
+                    String.format(
+                            "%s is not supported on a %s: its read does not apply row filters or "
+                                    + "column masks.",
+                            CoreOptions.QUERY_AUTH_ENABLED.key(), tableType));
+        }
+
         if (options.primaryKeyNullable() && schema.primaryKeys().isEmpty()) {
             throw new IllegalArgumentException(
                     String.format(
