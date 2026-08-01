@@ -88,16 +88,19 @@ class Predicate:
         if self.method == 'isNotNull':
             return null_count is None or row_count is None or null_count < row_count
 
-        min_value = (
-            stat.min_values.get_field(index)
-            if index < len(stat.min_values)
-            else None
-        )
-        max_value = (
-            stat.max_values.get_field(index)
-            if index < len(stat.max_values)
-            else None
-        )
+        try:
+            min_value = (
+                stat.min_values.get_field(index)
+                if index < len(stat.min_values)
+                else None
+            )
+            max_value = (
+                stat.max_values.get_field(index)
+                if index < len(stat.max_values)
+                else None
+            )
+        except IndexError:
+            return True
 
         if min_value is None or max_value is None or (null_count is not None and null_count == row_count):
             # invalid stats, skip validation

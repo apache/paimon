@@ -43,6 +43,22 @@ class SimpleStatsEvolutionsTest(unittest.TestCase):
         evolution = evolutions.get_or_create(0)
         self.assertIsNone(evolution.index_mapping)
 
+    def test_predicate_with_incomplete_projected_stats(self):
+        fields = self._make_fields([(0, 'a', 'INT'), (1, 'b', 'INT')])
+        evolution = SimpleStatsEvolutions(lambda _: fields, 0).get_or_create(0)
+        predicate = Predicate(method='equal', index=1, field='b', literals=[15])
+
+        for min_values, max_values in (([1], [10, 20]), ([1, 2], [10])):
+            stats = SimpleStats(
+                GenericRow(min_values, fields[:len(min_values)]),
+                GenericRow(max_values, fields[:len(max_values)]),
+                [0, 0],
+            )
+            evolved = evolution.evolution(stats, 10, ['a', 'b'])
+
+            with self.subTest(min_values=min_values, max_values=max_values):
+                self.assertTrue(predicate.test_by_simple_stats(evolved, 10))
+
     def test_added_column(self):
         """New column: mapping is -1, null_count = row_count."""
         data_fields = self._make_fields([(0, 'a', 'INT'), (1, 'b', 'INT')])
