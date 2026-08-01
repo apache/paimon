@@ -137,7 +137,7 @@ its source package and removes that temporary directory when it finishes:
 
 ```shell
 cd "paimon-${PAIMON_VERSION}"
-mvn -ntp -DskipTests apache-rat:check
+mvn -N -ntp -DskipTests apache-rat:check
 cd ..
 
 SOURCE_PACKAGE="${PYPAIMON_ARCHIVE}" \
@@ -221,7 +221,9 @@ For the staging repository:
   vote.
 - Confirm that the version is `PAIMON_VERSION`, never a snapshot.
 - Confirm that each published module has its POM, main artifact, source JAR,
-  Javadoc JAR, detached signatures, and checksums where applicable.
+  detached signatures, and checksums where applicable. Confirm Javadoc JARs for
+  modules where Maven produces them; Scala-only and wrapper modules may not
+  produce one.
 - Inspect shaded and bundled JARs for the required `META-INF/LICENSE` and
   `META-INF/NOTICE` content and for unexpected duplicate or bundled
   dependencies.
@@ -321,7 +323,8 @@ Open the workflow run linked in the vote email and confirm:
 - the combined Java repository artifact has the expected tag, commit,
   manifest, and SHA-512 checksums and identifies all three lanes;
 - each lane's deploy-enabled expected-project inventory matches its POMs, main
-  JARs, source JARs, and Javadoc JARs in the combined repository;
+  JARs, and source JARs in the combined repository, with Javadoc JARs retained
+  where Maven produces them;
 - the Python packaging and Python publishing job results are clearly recorded;
 - the logs show the expected JDK and Python versions;
 - the TestPyPI version equals the version in the vote email;

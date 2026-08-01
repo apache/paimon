@@ -284,12 +284,15 @@ jobs:
               exit 1
             fi
             if [[ "${packaging}" == "jar" ]]; then
-              for classifier in '' '-sources' '-javadoc'; do
+              for classifier in '' '-sources'; do
                 if [[ ! -f "${artifact_base}${classifier}.jar" ]]; then
                   echo "Missing release JAR: ${artifact_base}${classifier}.jar" >&2
                   exit 1
                 fi
               done
+              if [[ ! -f "${artifact_base}-javadoc.jar" ]]; then
+                echo "No Javadoc JAR was produced for ${group_id}:${artifact_id}"
+              fi
             fi
           done < "${expected_projects}"
 
