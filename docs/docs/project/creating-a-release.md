@@ -87,7 +87,7 @@ The workflow has the following contract:
 | Java 8 | Use Temurin 8 to deploy the default reactor with Spark 3 and Flink 1 into a local Maven repository image |
 | Java 11 | Use Temurin 11 to deploy Flink 2 and Iceberg into a local Maven repository image |
 | Java 17 | Use Temurin 17 to deploy Spark 4 into a local Maven repository image |
-| Java repository | Require every deploy-enabled effective-POM project and its POM, main JAR, source JAR, and Javadoc JAR; merge all three lanes; reject conflicting coordinates; then upload the complete unsigned Maven repository image, checksums, manifests, and logs |
+| Java repository | Require every deploy-enabled effective-POM project and its POM, main JAR, and source JAR; retain Javadoc JARs where Maven produces them; merge all three lanes; reject conflicting coordinates; then upload the complete unsigned Maven repository image, checksums, manifests, and logs |
 | Python package | Build and validate the PyPaimon source distribution and universal wheel, then upload them as workflow artifacts |
 | Python publish | Publish an RC to TestPyPI or a final tag to PyPI after Python packaging passes, without waiting for Java packaging |
 
@@ -100,8 +100,9 @@ release blocker.
 The Java jobs run independently of the common validation and Python jobs. They
 use `-Dgpg.skip=true`, deploy only to runner-local file repositories, and never
 receive Nexus credentials or a GPG private key. The combined repository image
-contains POMs, main artifacts, source JARs, Javadoc JARs, and Maven-generated
-checksums. It is the input to the RM's local signing and Nexus
+contains POMs, main artifacts, source JARs, Javadoc JARs produced by Maven, and
+Maven-generated checksums. Scala-only and wrapper modules may not produce a
+Javadoc JAR. The image is the input to the RM's local signing and Nexus
 staging steps, not itself an ASF release. The Python RC job uses the
 `TEST_PYPI_API_TOKEN` repository Actions secret to publish
 `PAIMON_VERSIONrcRC_NUMBER` to TestPyPI. The final job uses the
@@ -152,6 +153,7 @@ For the 2.0.0 release, use matching Java and Python versions:
 ```shell
 PAIMON_VERSION="2.0.0"
 RC_NUMBER="1"
+RELEASE_BRANCH="release-2.0"
 
 RC_REF="release-${PAIMON_VERSION}-rc${RC_NUMBER}"
 RELEASE_TAG="release-${PAIMON_VERSION}"
@@ -165,8 +167,8 @@ directories, vote email, and Java package manifests.
 ```shell
 git clone https://github.com/apache/paimon.git paimon-release
 cd paimon-release
-git checkout master
-git pull --ff-only origin master
+git checkout "${RELEASE_BRANCH}"
+git pull --ff-only origin "${RELEASE_BRANCH}"
 git status --short
 ```
 
