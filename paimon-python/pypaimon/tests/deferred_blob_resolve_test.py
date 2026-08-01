@@ -27,6 +27,7 @@ import pyarrow.compute as pc
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.read.query_auth_split import QueryAuthSplit
+from pypaimon.table.row.blob import BlobRef
 
 
 _ROW_COUNT = 10
@@ -41,8 +42,10 @@ class _BlobCountingFileIO:
     def __init__(self, inner):
         self._inner = inner
         self.blobs_fetched = 0
+        self.concurrent_read_calls = 0
 
     def read_blobs_concurrent(self, blobs, parallelism):
+        self.concurrent_read_calls += 1
         self.blobs_fetched += sum(blob is not None for blob in blobs)
         return self._inner.read_blobs_concurrent(blobs, parallelism)
 
@@ -104,6 +107,17 @@ class DeferredBlobResolveTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tempdir = tempfile.mkdtemp()
+        original_to_data = BlobRef.to_data
+
+        def counted_to_data(blob):
+            file_io = getattr(blob._uri_reader, "_file_io", None)
+            if isinstance(file_io, _BlobCountingFileIO):
+                file_io.blobs_fetched += 1
+            return original_to_data(blob)
+
+        cls.blob_ref_to_data_patch = patch.object(
+            BlobRef, "to_data", counted_to_data)
+        cls.blob_ref_to_data_patch.start()
         cls.catalog = CatalogFactory.create({
             "warehouse": os.path.join(cls.tempdir, "warehouse")
         })
@@ -116,6 +130,7 @@ class DeferredBlobResolveTest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.blob_ref_to_data_patch.stop()
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def _create_table(self, name, extra_options=None, payloads=None,
@@ -182,6 +197,7 @@ class DeferredBlobResolveTest(unittest.TestCase):
 
         self.assertEqual(5, result.num_rows)
         self.assertEqual(5, counting_file_io.blobs_fetched)
+        self.assertEqual(0, counting_file_io.concurrent_read_calls)
         self.assertEqual(
             [bytes([index]) * 1024 for index in range(5)],
             result.column("payload").to_pylist(),
@@ -340,6 +356,29 @@ class DeferredBlobResolveTest(unittest.TestCase):
 
         self.assertEqual(_ROW_COUNT - 1, result.num_rows)
         self.assertEqual(_ROW_COUNT - 1, counting_file_io.blobs_fetched)
+
+    def test_auth_filter_preserves_file_io_for_blob_descriptors(self):
+        table = self._create_table(
+            "auth_blob_descriptor",
+            extra_options={"blob-as-descriptor": "true"},
+        )
+        read_builder = table.new_read_builder().with_projection(
+            ["sample_id", "payload", "score"])
+        splits = [
+            QueryAuthSplit(split, _RejectScoreOneAuthResult())
+            for split in read_builder.new_scan().plan().splits()
+        ]
+
+        payloads = [
+            row.get_blob(1).to_data()
+            for row in read_builder.new_read().to_iterator(splits)
+        ]
+
+        self.assertEqual(_ROW_COUNT - 1, len(payloads))
+        self.assertEqual(
+            [bytes([index]) * 1024 for index in range(_ROW_COUNT) if index != 1],
+            payloads,
+        )
 
     def test_preserves_null_payloads_after_filtering(self):
         payloads = [

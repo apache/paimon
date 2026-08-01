@@ -53,8 +53,11 @@ class DeferredBlobResolveReader(RecordBatchReader):
                 continue
             values = batch.column(column_index).to_pylist()
             blobs = [Blob.from_bytes(value, self._file_io) for value in values]
-            payloads = self._file_io.read_blobs_concurrent(
-                blobs, self._blob_parallelism)
+            if self._blob_parallelism > 1:
+                payloads = self._file_io.read_blobs_concurrent(
+                    blobs, self._blob_parallelism)
+            else:
+                payloads = [blob.to_data() if blob else None for blob in blobs]
             source_field = batch.schema.field(column_index)
             columns[column_index] = pa.array(payloads, type=pa.large_binary())
             fields[column_index] = pa.field(

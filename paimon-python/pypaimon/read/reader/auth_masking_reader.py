@@ -140,8 +140,7 @@ class AuthFilterReader(RecordBatchReader):
     def __init__(self, inner_reader: RecordBatchReader, filter_fn: Callable[[pa.RecordBatch], pa.Array]):
         self._inner = inner_reader
         self._filter_fn = filter_fn
-        self.blob_field_indices = inner_reader.blob_field_indices
-        self.vector_field_indices = inner_reader.vector_field_indices
+        self._adopt_metadata(inner_reader)
 
     def read_arrow_batch(self) -> Optional[pa.RecordBatch]:
         batch = self._inner.read_arrow_batch()
