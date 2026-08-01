@@ -107,6 +107,34 @@ List the archives before extracting them:
 ```shell
 tar tzf "${PAIMON_ARCHIVE}" | sed -n '1,100p'
 tar tzf "${PYPAIMON_ARCHIVE}" | sed -n '1,100p'
+
+# Use Python as well because macOS tar hides AppleDouble (._*) entries.
+python3 - "${PAIMON_ARCHIVE}" "${PYPAIMON_ARCHIVE}" <<'PY'
+import sys
+import tarfile
+
+for archive in sys.argv[1:]:
+    with tarfile.open(archive, "r:*") as source:
+        for member in source.getmembers():
+            parts = [
+                part
+                for part in member.name.split("/")
+                if part not in ("", ".")
+            ]
+            if member.name.startswith("/") or ".." in parts:
+                raise ValueError(
+                    "%s contains an unsafe path: %s"
+                    % (archive, member.name)
+                )
+            if "__MACOSX" in parts or any(
+                part.startswith("._") for part in parts
+            ):
+                raise ValueError(
+                    "%s contains macOS metadata: %s"
+                    % (archive, member.name)
+                )
+    print("Archive metadata check passed: " + archive)
+PY
 ```
 
 Check at least the following:
