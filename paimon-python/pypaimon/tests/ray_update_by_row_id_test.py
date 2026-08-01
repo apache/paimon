@@ -30,7 +30,11 @@ pypaimon = pytest.importorskip("pypaimon")
 ray = pytest.importorskip("ray")
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.ray import update_by_row_id
+from pypaimon.ray import (
+    PaimonOffsetSource,
+    delete_update_by_row_id_checkpoint,
+    update_by_row_id,
+)
 
 
 class RayUpdateByRowIdTest(unittest.TestCase):
@@ -62,16 +66,31 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             pass
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def _create(self, options=None):
+    def _create(self, options=None, partition_keys=None):
         name = f"default.u_{uuid.uuid4().hex[:8]}"
         opts = self.de_options if options is None else options
         self.catalog.create_table(
-            name, Schema.from_pyarrow_schema(self.pa_schema, options=opts), False)
+            name,
+            Schema.from_pyarrow_schema(
+                self.pa_schema,
+                partition_keys=partition_keys,
+                options=opts,
+            ),
+            False,
+        )
         return name
 
     def _write(self, target, data):
         t = self.catalog.get_table(target)
         wb = t.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(data)
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+    def _overwrite(self, target, partition, data):
+        t = self.catalog.get_table(target)
+        wb = t.new_batch_write_builder().overwrite(partition)
         w = wb.new_write()
         w.write_arrow(data)
         wb.new_commit().commit(w.prepare_commit())
@@ -87,6 +106,48 @@ class RayUpdateByRowIdTest(unittest.TestCase):
     def _rowid_by_id(self, target):
         tab = self._read(target, ["_ROW_ID", "id"])
         return dict(zip(tab.column("id").to_pylist(), tab.column("_ROW_ID").to_pylist()))
+
+    @staticmethod
+    def _offset_age_source(target):
+        def transform(dataset):
+            def to_updates(batch):
+                return pa.table(
+                    {
+                        "_ROW_ID": batch["_ROW_ID"],
+                        "age": pa.compute.add(batch["id"], 100),
+                    },
+                    schema=pa.schema([
+                        ("_ROW_ID", pa.int64()),
+                        ("age", pa.int32()),
+                    ]),
+                )
+
+            return dataset.map_batches(
+                to_updates, batch_format="pyarrow")
+
+        return PaimonOffsetSource(
+            target,
+            projection=["_ROW_ID", "id"],
+            transform=transform,
+            rows_per_unit=1,
+            units_per_checkpoint=1,
+        )
+
+    def test_offset_source_fingerprints_unserializable_closure(self):
+        import threading
+
+        lock = threading.Lock()
+
+        def transform(dataset):
+            lock.locked()
+            return dataset
+
+        source = PaimonOffsetSource(
+            "default.source", transform=transform)
+        self.assertEqual(
+            source._transform_identity(),
+            source._transform_identity(),
+        )
 
     @staticmethod
     def _data_files_under(table):
@@ -121,6 +182,578 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         back = self._read(target).sort_by("id").to_pydict()
         self.assertEqual(back["age"], [10, 999, 30, 40, 888, 60])
         self.assertEqual(back["name"], [f"n{i}" for i in range(1, 7)])  # untouched
+
+    def test_offset_source_resumes_from_next_unit(self):
+        import importlib
+
+        module = importlib.import_module(
+            "pypaimon.ray.update_by_row_id")
+        offset_module = importlib.import_module(
+            "pypaimon.ray.offset_source")
+
+        target = self._create()
+        for value in range(4):
+            self._write(target, pa.Table.from_pydict(
+                {
+                    "id": [value],
+                    "name": ["x"],
+                    "age": [0],
+                },
+                schema=self.pa_schema,
+            ))
+
+        operation_id = "offset-resume-" + uuid.uuid4().hex
+        original_read = offset_module._BoundPaimonOffsetSource.read_window
+        first_reads = []
+
+        def fail_second_window(bound, start, end):
+            first_reads.append(start)
+            if start == 1:
+                raise RuntimeError("stop after first source window")
+            return original_read(bound, start, end)
+
+        with mock.patch.object(
+                offset_module._BoundPaimonOffsetSource,
+                "read_window",
+                fail_second_window):
+            with self.assertRaisesRegex(
+                    RuntimeError, "stop after first source window"):
+                update_by_row_id(
+                    target,
+                    self._offset_age_source(target),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=1,
+                    commit_mode="incremental",
+                    operation_id=operation_id,
+                )
+
+        self.assertEqual([0, 1], first_reads)
+        checkpoint_tags = module._operation_checkpoint_tags(operation_id)
+        tagged = [
+            module._get_checkpoint_tag(
+                self.catalog, target, checkpoint_tag)
+            for checkpoint_tag in checkpoint_tags
+        ]
+        checkpoint = max(
+            (tag.snapshot for tag in tagged if tag is not None),
+            key=lambda snapshot: snapshot.id,
+        )
+        self.assertEqual(
+            1, module._offset_checkpoint_state(checkpoint)["next_offset"])
+
+        resumed_reads = []
+
+        def record_window(bound, start, end):
+            resumed_reads.append(start)
+            return original_read(bound, start, end)
+
+        with mock.patch.object(
+                offset_module._BoundPaimonOffsetSource,
+                "read_window",
+                record_window):
+            stats = update_by_row_id(
+                target,
+                self._offset_age_source(target),
+                self.catalog_options,
+                update_cols=["age"],
+                num_partitions=1,
+                commit_mode="incremental",
+                operation_id=operation_id,
+            )
+
+        self.assertEqual({"num_updated": 4}, stats)
+        self.assertEqual([1, 2, 3], resumed_reads)
+        self.assertEqual(
+            [100, 101, 102, 103],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+
+        table = self.catalog.get_table(target)
+        commit_user = module._operation_commit_user(operation_id)
+        latest = table.snapshot_manager().get_latest_snapshot()
+        checkpoint_properties = []
+        for snapshot_id in range(1, latest.id + 1):
+            snapshot = table.snapshot_manager().get_snapshot_by_id(
+                snapshot_id)
+            if (snapshot is not None
+                    and snapshot.commit_user == commit_user):
+                checkpoint_properties.append(
+                    snapshot.properties[module._CHECKPOINT_PROPERTY])
+        self.assertEqual(6, len(checkpoint_properties))
+        self.assertTrue(all(
+            len(encoded) < 2048
+            and "completed_ranges" not in encoded
+            for encoded in checkpoint_properties
+        ))
+        final_state = module._offset_checkpoint_state(latest)
+        self.assertEqual(4, final_state["next_offset"])
+        self.assertTrue(final_state["complete"])
+
+        completed_snapshot_id = latest.id
+        self.assertEqual(
+            {"num_updated": 4},
+            update_by_row_id(
+                target,
+                self._offset_age_source(target),
+                self.catalog_options,
+                update_cols=["age"],
+                num_partitions=1,
+                commit_mode="incremental",
+                operation_id=operation_id,
+            ),
+        )
+        self.assertEqual(
+            completed_snapshot_id,
+            table.snapshot_manager().get_latest_snapshot().id,
+        )
+
+        source_tag = module._operation_source_tag(operation_id, target)
+        self.assertIsNotNone(
+            module._get_checkpoint_tag(
+                self.catalog, target, source_tag))
+        self.assertTrue(delete_update_by_row_id_checkpoint(
+            target, self.catalog_options, operation_id))
+        self.assertIsNone(
+            module._get_checkpoint_tag(
+                self.catalog, target, source_tag))
+
+    def test_offset_source_reads_separate_table(self):
+        import importlib
+
+        module = importlib.import_module(
+            "pypaimon.ray.update_by_row_id")
+
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {
+                "id": [0, 1, 2],
+                "name": ["x", "x", "x"],
+                "age": [0, 0, 0],
+            },
+            schema=self.pa_schema,
+        ))
+        row_ids = self._rowid_by_id(target)
+
+        source_schema = pa.schema([
+            ("target_row_id", pa.int64()),
+            ("new_age", pa.int32()),
+        ])
+        source_table = "default.s_" + uuid.uuid4().hex[:8]
+        self.catalog.create_table(
+            source_table,
+            Schema.from_pyarrow_schema(source_schema),
+            False,
+        )
+        self._write(source_table, pa.Table.from_pydict(
+            {
+                "target_row_id": [
+                    row_ids[value] for value in range(3)],
+                "new_age": [
+                    value + 100 for value in range(3)],
+            },
+            schema=source_schema,
+        ))
+
+        def transform(dataset):
+            def to_updates(batch):
+                return pa.table({
+                    "_ROW_ID": batch["target_row_id"],
+                    "age": batch["new_age"],
+                })
+
+            return dataset.map_batches(
+                to_updates, batch_format="pyarrow")
+
+        source = PaimonOffsetSource(
+            source_table,
+            projection=["target_row_id", "new_age"],
+            transform=transform,
+            rows_per_unit=1,
+            units_per_checkpoint=1,
+        )
+        operation_id = "offset-upstream-" + uuid.uuid4().hex
+        self.assertEqual(
+            {"num_updated": 3},
+            update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+                num_partitions=1,
+                commit_mode="incremental",
+                operation_id=operation_id,
+            ),
+        )
+        self.assertEqual(
+            [100, 101, 102],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+        target_table = self.catalog.get_table(target)
+        commit_user = module._operation_commit_user(operation_id)
+        snapshot_manager = target_table.snapshot_manager()
+        operation_snapshots = []
+        for snapshot_id in range(
+                1, snapshot_manager.get_latest_snapshot().id + 1):
+            snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
+            if snapshot is not None and snapshot.commit_user == commit_user:
+                operation_snapshots.append(snapshot)
+        self.assertEqual(5, len(operation_snapshots))
+
+        source_tag = module._operation_source_tag(operation_id, target)
+        self.assertIsNotNone(module._get_checkpoint_tag(
+            self.catalog, source_table, source_tag))
+        self.assertTrue(delete_update_by_row_id_checkpoint(
+            target, self.catalog_options, operation_id))
+        self.assertIsNone(module._get_checkpoint_tag(
+            self.catalog, source_table, source_tag))
+
+    def test_offset_window_failure_commits_no_partial_group(self):
+        import importlib
+
+        from pypaimon.ray.data_evolution_merge_join import GroupApplyError
+
+        module = importlib.import_module(
+            "pypaimon.ray.update_by_row_id")
+
+        target = self._create(partition_keys=["id"])
+        for value in range(2):
+            self._write(target, pa.Table.from_pydict(
+                {
+                    "id": [value],
+                    "name": ["x"],
+                    "age": [0],
+                },
+                schema=self.pa_schema,
+            ))
+        table = self.catalog.get_table(target)
+        base_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        files_before = self._data_files_under(table)
+        operation_id = "offset-atomic-" + uuid.uuid4().hex
+        failure_marker = tempfile.NamedTemporaryFile(delete=False)
+        failure_marker_path = failure_marker.name
+        failure_marker.close()
+        self.addCleanup(
+            lambda: os.path.exists(failure_marker_path)
+            and os.unlink(failure_marker_path))
+
+        def transform(dataset):
+            def to_updates(batch):
+                row_ids = batch["_ROW_ID"].to_pylist()
+                ages = [value + 100 for value in batch["id"].to_pylist()]
+                if os.path.exists(failure_marker_path) and 101 in ages:
+                    row_ids.append(row_ids[-1])
+                    ages.append(ages[-1])
+                return pa.table({
+                    "_ROW_ID": row_ids,
+                    "age": ages,
+                }, schema=pa.schema([
+                    ("_ROW_ID", pa.int64()),
+                    ("age", pa.int32()),
+                ]))
+
+            return dataset.map_batches(
+                to_updates, batch_format="pyarrow")
+
+        source = PaimonOffsetSource(
+            target,
+            projection=["_ROW_ID", "id"],
+            transform=transform,
+            rows_per_unit=1,
+            units_per_checkpoint=2,
+        )
+
+        with self.assertRaisesRegex(GroupApplyError, "Deduplicate"):
+            update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+                num_partitions=1,
+                commit_mode="incremental",
+                operation_id=operation_id,
+            )
+
+        self.assertEqual(files_before, self._data_files_under(table))
+        self.assertEqual(
+            base_snapshot_id + 1,
+            table.snapshot_manager().get_latest_snapshot().id,
+        )
+        checkpoint_tag = next(
+            tag for tag in (
+                module._get_checkpoint_tag(
+                    self.catalog, target, checkpoint_tag)
+                for checkpoint_tag in
+                module._operation_checkpoint_tags(operation_id)
+            )
+            if tag is not None
+        )
+        self.assertEqual(
+            0,
+            module._offset_checkpoint_state(
+                checkpoint_tag.snapshot)["next_offset"],
+        )
+        self.assertEqual(
+            [0, 0],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+
+        os.unlink(failure_marker_path)
+        self.assertEqual(
+            {"num_updated": 2},
+            update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+                num_partitions=1,
+                commit_mode="incremental",
+                operation_id=operation_id,
+            ),
+        )
+        self.assertEqual(
+            [100, 101],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+
+    def test_offset_resume_rejects_external_overwrite(self):
+        import importlib
+
+        from pypaimon.write.commit.conflict_detection import (
+            CommitConflictError,
+        )
+
+        module = importlib.import_module(
+            "pypaimon.ray.update_by_row_id")
+        offset_module = importlib.import_module(
+            "pypaimon.ray.offset_source")
+
+        target = self._create(partition_keys=["id"])
+        for value in range(3):
+            self._write(target, pa.Table.from_pydict(
+                {
+                    "id": [value],
+                    "name": ["x"],
+                    "age": [0],
+                },
+                schema=self.pa_schema,
+            ))
+        operation_id = "offset-overwrite-" + uuid.uuid4().hex
+        original_read = offset_module._BoundPaimonOffsetSource.read_window
+
+        def fail_second_window(bound, start, end):
+            if start == 1:
+                raise RuntimeError("pause before overwrite")
+            return original_read(bound, start, end)
+
+        with mock.patch.object(
+                offset_module._BoundPaimonOffsetSource,
+                "read_window",
+                fail_second_window):
+            with self.assertRaisesRegex(
+                    RuntimeError, "pause before overwrite"):
+                update_by_row_id(
+                    target,
+                    self._offset_age_source(target),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=1,
+                    commit_mode="incremental",
+                    operation_id=operation_id,
+                )
+
+        self._overwrite(
+            target,
+            {"id": 0},
+            pa.Table.from_pydict(
+                {
+                    "id": [0],
+                    "name": ["external"],
+                    "age": [999],
+                },
+                schema=self.pa_schema,
+            ),
+        )
+        table = self.catalog.get_table(target)
+        files_before_retry = self._data_files_under(table)
+
+        with self.assertRaisesRegex(
+                CommitConflictError, "Concurrent rewrite"):
+            update_by_row_id(
+                target,
+                self._offset_age_source(target),
+                self.catalog_options,
+                update_cols=["age"],
+                num_partitions=1,
+                commit_mode="incremental",
+                operation_id=operation_id,
+            )
+
+        self.assertEqual(
+            files_before_retry, self._data_files_under(table))
+        state = max(
+            (
+                module._get_checkpoint_tag(
+                    self.catalog, target, checkpoint_tag).snapshot
+                for checkpoint_tag in
+                module._operation_checkpoint_tags(operation_id)
+                if module._get_checkpoint_tag(
+                    self.catalog, target, checkpoint_tag) is not None
+            ),
+            key=lambda snapshot: snapshot.id,
+        )
+        self.assertEqual(
+            1, module._offset_checkpoint_state(state)["next_offset"])
+        back = self._read(target).sort_by("id").to_pydict()
+        self.assertEqual(["external", "x", "x"], back["name"])
+        self.assertEqual([999, 0, 0], back["age"])
+
+    def test_offset_final_marker_rejects_late_overwrite(self):
+        import importlib
+
+        from pypaimon.write.commit.conflict_detection import (
+            CommitConflictError,
+        )
+
+        module = importlib.import_module(
+            "pypaimon.ray.update_by_row_id")
+        target = self._create(partition_keys=["id"])
+        self._write(target, pa.Table.from_pydict(
+            {
+                "id": [0],
+                "name": ["x"],
+                "age": [0],
+            },
+            schema=self.pa_schema,
+        ))
+        operation_id = "offset-final-overwrite-" + uuid.uuid4().hex
+        original_finish = module._OffsetUpdateCommitter.finish
+        overwrite_done = False
+
+        def overwrite_before_finish(committer):
+            nonlocal overwrite_done
+            if not overwrite_done:
+                overwrite_done = True
+                self._overwrite(
+                    target,
+                    {"id": 0},
+                    pa.Table.from_pydict(
+                        {
+                            "id": [0],
+                            "name": ["external"],
+                            "age": [999],
+                        },
+                        schema=self.pa_schema,
+                    ),
+                )
+            return original_finish(committer)
+
+        with mock.patch.object(
+                module._OffsetUpdateCommitter,
+                "finish",
+                overwrite_before_finish):
+            with self.assertRaisesRegex(
+                    CommitConflictError, "Concurrent rewrite"):
+                update_by_row_id(
+                    target,
+                    self._offset_age_source(target),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=1,
+                    commit_mode="incremental",
+                    operation_id=operation_id,
+                )
+
+        checkpoint = max(
+            (
+                module._get_checkpoint_tag(
+                    self.catalog, target, checkpoint_tag).snapshot
+                for checkpoint_tag in
+                module._operation_checkpoint_tags(operation_id)
+                if module._get_checkpoint_tag(
+                    self.catalog, target, checkpoint_tag) is not None
+            ),
+            key=lambda snapshot: snapshot.id,
+        )
+        state = module._offset_checkpoint_state(checkpoint)
+        self.assertEqual(1, state["next_offset"])
+        self.assertFalse(state["complete"])
+        back = self._read(target).to_pydict()
+        self.assertEqual(["external"], back["name"])
+        self.assertEqual([999], back["age"])
+
+    def test_offset_checkpoint_recovers_without_updated_tag(self):
+        import importlib
+
+        module = importlib.import_module(
+            "pypaimon.ray.update_by_row_id")
+
+        target = self._create(partition_keys=["id"])
+        for value in range(2):
+            self._write(target, pa.Table.from_pydict(
+                {
+                    "id": [value],
+                    "name": ["x"],
+                    "age": [0],
+                },
+                schema=self.pa_schema,
+            ))
+        operation_id = "offset-tag-failure-" + uuid.uuid4().hex
+        original_store = module._store_operation_checkpoint
+        store_calls = 0
+
+        def fail_initial_tag(*args, **kwargs):
+            nonlocal store_calls
+            store_calls += 1
+            if store_calls == 1:
+                raise RuntimeError("checkpoint tag unavailable")
+            return original_store(*args, **kwargs)
+
+        with mock.patch.object(
+                module,
+                "_store_operation_checkpoint",
+                fail_initial_tag):
+            with self.assertRaisesRegex(
+                    RuntimeError, "checkpoint tag unavailable"):
+                update_by_row_id(
+                    target,
+                    self._offset_age_source(target),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=1,
+                    commit_mode="incremental",
+                    operation_id=operation_id,
+                )
+
+        table = self.catalog.get_table(target)
+        checkpoint_snapshot_id = (
+            table.snapshot_manager().get_latest_snapshot().id)
+        self.assertEqual(
+            0,
+            module._offset_checkpoint_state(
+                table.snapshot_manager().get_latest_snapshot()
+            )["next_offset"],
+        )
+        self.assertEqual(
+            {"num_updated": 2},
+            update_by_row_id(
+                target,
+                self._offset_age_source(target),
+                self.catalog_options,
+                update_cols=["age"],
+                num_partitions=1,
+                commit_mode="incremental",
+                operation_id=operation_id,
+            ),
+        )
+        self.assertEqual(
+            checkpoint_snapshot_id + 3,
+            table.snapshot_manager().get_latest_snapshot().id,
+        )
+        self.assertEqual(
+            [100, 101],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
 
     def test_updates_correct_row_across_files(self):
         # A _ROW_ID owned by a middle data file must update only that row.
@@ -679,6 +1312,35 @@ class RayUpdateByRowIdTest(unittest.TestCase):
                 self.catalog_options,
                 update_cols=["age"],
                 commit_mode="unknown",
+            )
+
+    def test_operation_id_requires_offset_source(self):
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [1]},
+            schema=self.pa_schema))
+        source = pa.table(
+            {"_ROW_ID": [0], "age": [9]},
+            schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]),
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires a PaimonOffsetSource"):
+            update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+                commit_mode="incremental",
+                max_groups_per_commit=1,
+                operation_id="raw-source",
+            )
+        with self.assertRaisesRegex(ValueError, "requires operation_id"):
+            update_by_row_id(
+                target,
+                PaimonOffsetSource(target),
+                self.catalog_options,
+                update_cols=["age"],
+                commit_mode="incremental",
             )
 
     def _run_with_fake_commit(self, *, recorder=None, new_commit_errors=None,

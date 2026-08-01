@@ -571,19 +571,83 @@ metrics = update_by_row_id(
 )
 ```
 
+To resume a multi-day job after a driver restart, use a replayable Paimon
+source with a bounded source-offset checkpoint:
+
+```python
+import pyarrow as pa
+
+from pypaimon.ray import PaimonOffsetSource, update_by_row_id
+
+
+def build_updates(dataset):
+    def transform(batch):
+        return pa.table({
+            "_ROW_ID": batch["_ROW_ID"],
+            "feature": compute_feature(batch["raw_feature"]),
+        })
+
+    return dataset.map_batches(transform, batch_format="pyarrow")
+
+
+source = PaimonOffsetSource(
+    "database_name.table_name",
+    projection=["_ROW_ID", "raw_feature"],
+    transform=build_updates,
+    rows_per_unit=1_000_000,
+    units_per_checkpoint=1,
+)
+
+metrics = update_by_row_id(
+    target="database_name.table_name",
+    source=source,
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    update_cols=["feature"],
+    commit_mode="incremental",
+    operation_id="feature-backfill-2026-07",
+)
+```
+
+The source snapshot is retained by an internal tag. Each unit window is read,
+transformed, and committed atomically with its next offset. A retry with the
+same `operation_id` starts at that offset, so completed source windows are not
+read or computed again. The checkpoint contains a fixed-size source plan and
+one offset; it does not grow with the number of updated target files.
+The source may be the target's pinned pre-update snapshot, as above, or an
+existing upstream Paimon table; no staging table is required.
+The final metadata marker validates concurrent rewrites and records
+`complete=true` before the call returns.
+
+`transform` must be deterministic and window-local. Global aggregations,
+joins, or other state spanning source windows are not checkpointed. If a
+separate source can contain repeated target `_ROW_ID` values, deduplicate it
+upstream; an existing primary-key source table is one option.
+`max_groups_per_commit` is not used with
+`PaimonOffsetSource`; `rows_per_unit` and `units_per_checkpoint` control the
+replay window instead. External target overwrites and deletes are rejected
+while the operation is active. Row slicing applies to append and
+data-evolution sources; other table types use their planned scan splits as
+units.
+
 **Parameters:**
-- `source`: a `ray.data.Dataset`, `pyarrow.Table`, or `pandas.DataFrame` carrying the
-  target `_ROW_ID` and every column in `update_cols`; extra columns are ignored, and
-  values are cast to the target column types. A table-name source is not accepted: a
-  table's system `_ROW_ID` is its own and cannot address the target's rows.
+- `source`: a `ray.data.Dataset`, `pyarrow.Table`, `pandas.DataFrame`, or
+  `PaimonOffsetSource` producing the target `_ROW_ID` and every column in
+  `update_cols`; extra columns are ignored, and values are cast to the target
+  column types. A plain table-name source is not accepted: a table's system
+  `_ROW_ID` is its own and cannot address the target's rows.
 - `update_cols`: the non-blob columns to overwrite. Must be non-empty.
 - `num_partitions`: parallelism for grouping the update rows by target file;
   defaults to `max(1, cluster_cpus * 2)`.
 - `ray_remote_args`: Ray remote options applied to the update tasks.
 - `commit_mode`: `"atomic"` (default) commits all groups together.
   `"incremental"` explicitly opts into non-atomic, windowed commits.
-- `max_groups_per_commit`: required in incremental mode; positive number of
-  completed target file groups per commit. It is rejected in atomic mode.
+- `max_groups_per_commit`: required for an incremental Dataset source; positive
+  number of completed target file groups per commit. It is rejected in atomic
+  mode and with `PaimonOffsetSource`.
+- `operation_id`: required with `PaimonOffsetSource`. It identifies one
+  immutable update input and its durable progress across driver restarts. Do
+  not run two callers concurrently with the same id or reuse an id for another
+  source or `update_cols`.
 
 **Returns:** `{"num_updated": <rows>}`.
 
@@ -604,6 +668,17 @@ metrics = update_by_row_id(
   retry options in `ray_remote_args`. If retries are exhausted, earlier incremental
   commits remain visible. Worker loss may also discard successful results still
   buffered in the failed Ray task.
+- Keep the checkpoint until a successful result has been acknowledged. Afterwards
+  it can be removed explicitly:
+  ```python
+  from pypaimon.ray import delete_update_by_row_id_checkpoint
+
+  delete_update_by_row_id_checkpoint(
+      "database_name.table_name",
+      {"warehouse": "/path/to/warehouse"},
+      "feature-backfill-2026-07",
+  )
+  ```
 
 ## Read By Row Id
 
