@@ -22,6 +22,8 @@ of ``_ROW_ID``s by routing each to its owning data file -- no full-target read, 
 shuffle join. Pairs with ``bucket_join``, which produces the row ids.
 """
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
 import pyarrow as pa
@@ -38,6 +40,20 @@ from pypaimon.ray.data_evolution_merge_join import (
 )
 
 __all__ = ["read_by_row_id"]
+
+_ACTIVE_OFFSET_READ_PLAN = ContextVar(
+    "pypaimon_active_offset_read_plan", default=None)
+
+
+@contextmanager
+def _use_offset_read_plan(
+        target, snapshot_id, files_info, files_info_ref):
+    token = _ACTIVE_OFFSET_READ_PLAN.set(
+        (target, snapshot_id, files_info, files_info_ref))
+    try:
+        yield
+    finally:
+        _ACTIVE_OFFSET_READ_PLAN.reset(token)
 
 
 def _empty_result(table: "FileStoreTable", read_cols: List[str]):
@@ -97,6 +113,7 @@ def read_by_row_id(
     Returns a ``ray.data.Dataset`` of ``(*projection, _ROW_ID)``.
     """
     from pypaimon.catalog.catalog_factory import CatalogFactory
+    from pypaimon.common.options.core_options import CoreOptions
     from pypaimon.snapshot.time_travel_util import SCAN_KEYS
     from pypaimon.table.special_fields import SpecialFields
 
@@ -118,16 +135,32 @@ def read_by_row_id(
         raise ValueError(
             f"read_by_row_id does not support deletion-vectors-enabled tables yet: "
             f"'{target}'.")
-    if dynamic_options:
+    effective_dynamic_options = dict(dynamic_options or {})
+    if effective_dynamic_options:
         # Flipping these would bypass the checks above.
         bad = sorted({"data-evolution.enabled", "row-tracking.enabled",
-                      "deletion-vectors.enabled"} & set(dynamic_options))
+                      "deletion-vectors.enabled"}
+                     & set(effective_dynamic_options))
         if bad:
             raise ValueError(f"dynamic_options cannot override table invariants {bad}.")
         # table.copy's _try_time_travel swallows the multi-key error, so reject it here.
-        if len([k for k in SCAN_KEYS if k in dynamic_options]) > 1:
+        if len([
+                k for k in SCAN_KEYS
+                if k in effective_dynamic_options]) > 1:
             raise ValueError(f"dynamic_options may set at most one time-travel key {SCAN_KEYS}.")
-        table = table.copy(dynamic_options)
+    active_plan = _ACTIVE_OFFSET_READ_PLAN.get()
+    precomputed_files_info = None
+    precomputed_info_ref = None
+    if (active_plan is not None
+            and active_plan[0] == target
+            and not any(
+                key in effective_dynamic_options for key in SCAN_KEYS)):
+        effective_dynamic_options[
+            CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(active_plan[1])
+        precomputed_files_info = active_plan[2]
+        precomputed_info_ref = active_plan[3]
+    if effective_dynamic_options:
+        table = table.copy(effective_dynamic_options)
 
     rid = SpecialFields.ROW_ID.name
     src_rid_col = row_id_col or rid
@@ -155,7 +188,9 @@ def read_by_row_id(
     read_cols = list(projection) + ([rid] if rid not in projection else [])
 
     base = _read_snapshot(table)
-    if base is not None and dynamic_options and any(k in dynamic_options for k in SCAN_KEYS):
+    if (base is not None
+            and any(
+                key in effective_dynamic_options for key in SCAN_KEYS)):
         # A pre-row-tracking snapshot has files without row ids; fail clearly here rather
         # than deep in the planner (the persisted-table check above cannot see this).
         from pypaimon.common.options.core_options import CoreOptions
@@ -173,19 +208,24 @@ def read_by_row_id(
         return _empty_result(table, read_cols)
     # base captures the resolved snapshot; reduce any time-travel key to a plain snapshot-id
     # so the planner's own snapshot-id pin does not read as a second, conflicting one.
-    from pypaimon.common.options.core_options import CoreOptions
     present = [k for k in SCAN_KEYS if table.options.options.contains_key(k)]
     if present:
         overrides = {k: None for k in present}
         overrides[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(base.id)
         table = table.copy(overrides)
     try:
+        read_kwargs = {
+            "num_partitions": num_partitions,
+            "ray_remote_args": ray_remote_args,
+            "base_snapshot_id": base.id,
+        }
+        if precomputed_files_info is not None:
+            read_kwargs["precomputed_files_info"] = (
+                precomputed_files_info)
+            read_kwargs["precomputed_info_ref"] = (
+                precomputed_info_ref)
         result = distributed_read_by_row_id(
-            rid_ds, table, projection,
-            num_partitions=num_partitions,
-            ray_remote_args=ray_remote_args,
-            base_snapshot_id=base.id,
-        )
+            rid_ds, table, projection, **read_kwargs)
     except Exception as e:
         _reraise_inner(e)
         raise  # _reraise_inner always raises

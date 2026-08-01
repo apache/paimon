@@ -32,7 +32,10 @@ from pypaimon.ray.update_by_row_id import (
     delete_update_by_row_id_checkpoint,
     update_by_row_id,
 )
-from pypaimon.ray.offset_source import PaimonOffsetSource
+from pypaimon.ray.offset_source import (
+    PaimonCoBucketedJoinOffsetSource,
+    PaimonOffsetSource,
+)
 from pypaimon.ray.read_by_row_id import read_by_row_id
 
 __all__ = [
@@ -43,6 +46,7 @@ __all__ = [
     "range_join",
     "merge_into",
     "update_by_row_id",
+    "PaimonCoBucketedJoinOffsetSource",
     "PaimonOffsetSource",
     "delete_update_by_row_id_checkpoint",
     "read_by_row_id",

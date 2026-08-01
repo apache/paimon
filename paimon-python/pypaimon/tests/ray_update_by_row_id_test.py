@@ -31,8 +31,11 @@ ray = pytest.importorskip("ray")
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.ray import (
+    PaimonCoBucketedJoinOffsetSource,
     PaimonOffsetSource,
     delete_update_by_row_id_checkpoint,
+    map_with_blobs,
+    read_by_row_id,
     update_by_row_id,
 )
 
@@ -66,13 +69,13 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             pass
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def _create(self, options=None, partition_keys=None):
+    def _create(self, options=None, partition_keys=None, schema=None):
         name = f"default.u_{uuid.uuid4().hex[:8]}"
         opts = self.de_options if options is None else options
         self.catalog.create_table(
             name,
             Schema.from_pyarrow_schema(
-                self.pa_schema,
+                schema or self.pa_schema,
                 partition_keys=partition_keys,
                 options=opts,
             ),
@@ -87,6 +90,23 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         w.write_arrow(data)
         wb.new_commit().commit(w.prepare_commit())
         w.close()
+
+    def _create_bucketed_table(
+            self, schema, data, bucket_count=4, bucket_key="lookup_key"):
+        name = f"default.b_{uuid.uuid4().hex[:8]}"
+        self.catalog.create_table(
+            name,
+            Schema.from_pyarrow_schema(
+                schema,
+                options={
+                    "bucket": str(bucket_count),
+                    "bucket-key": bucket_key,
+                },
+            ),
+            False,
+        )
+        self._write(name, data)
+        return name
 
     def _overwrite(self, target, partition, data):
         t = self.catalog.get_table(target)
@@ -754,6 +774,507 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             [100, 101],
             self._read(target).sort_by("id")["age"].to_pylist(),
         )
+
+    def test_bucket_join_offset_resumes_entire_pipeline(self):
+        import importlib
+
+        offset_module = importlib.import_module(
+            "pypaimon.ray.offset_source")
+        update_module = importlib.import_module(
+            "pypaimon.ray.update_by_row_id")
+        from pypaimon.write.table_update_by_row_id import (
+            TableUpdateByRowId,
+        )
+
+        target = self._create()
+        row_count = 128
+        for start in range(0, row_count, 16):
+            values = list(range(start, start + 16))
+            self._write(target, pa.Table.from_pydict(
+                {
+                    "id": values,
+                    "name": [f"key-{value}" for value in values],
+                    "age": [0] * len(values),
+                },
+                schema=self.pa_schema,
+            ))
+        row_ids = self._rowid_by_id(target)
+        input_schema = pa.schema([("lookup_key", pa.string())])
+        locator_schema = pa.schema([
+            ("lookup_key", pa.string()),
+            ("row_id", pa.int64()),
+        ])
+        input_table = self._create_bucketed_table(
+            input_schema,
+            pa.Table.from_pydict(
+                {"lookup_key": [
+                    f"key-{value}" for value in range(row_count)]},
+                schema=input_schema,
+            ),
+        )
+        locator_table = self._create_bucketed_table(
+            locator_schema,
+            pa.Table.from_pydict(
+                {
+                    "lookup_key": [
+                        f"key-{value}" for value in range(row_count)],
+                    "row_id": [
+                        row_ids[value] for value in range(row_count)],
+                },
+                schema=locator_schema,
+            ),
+        )
+        catalog_options = dict(self.catalog_options)
+
+        def source():
+            def infer(joined):
+                self.assertEqual(["row_id"], joined.schema().names)
+                rows = read_by_row_id(
+                    target,
+                    joined,
+                    catalog_options,
+                    projection=["id"],
+                    row_id_col="row_id",
+                    num_partitions=1,
+                )
+
+                def to_updates(batch):
+                    return pa.table({
+                        "_ROW_ID": batch["_ROW_ID"],
+                        "age": pa.compute.add(
+                            batch["id"], pa.scalar(100)),
+                    })
+
+                return rows.map_batches(
+                    to_updates, batch_format="pyarrow")
+
+            return PaimonCoBucketedJoinOffsetSource(
+                input_table,
+                locator_table,
+                on="lookup_key",
+                left_projection=["lookup_key"],
+                right_projection=["lookup_key", "row_id"],
+                transform=infer,
+                units_per_checkpoint=1,
+                routing_buckets=4,
+                route_units_per_commit=2,
+            )
+
+        operation_id = "bucket-offset-" + uuid.uuid4().hex
+        bound_type = offset_module._BoundPaimonCoBucketedJoinOffsetSource
+        original_read = bound_type.read_window
+        original_route = bound_type.read_join_units
+        original_plan = TableUpdateByRowId._load_existing_files_info
+        plan_calls = []
+
+        def record_plan(planner):
+            plan_calls.append(True)
+            return original_plan(planner)
+
+        first_route_reads = []
+
+        def fail_second_route(bound, unit_indexes):
+            first_route_reads.append(list(unit_indexes))
+            if unit_indexes[0] == 2:
+                raise RuntimeError("stop during routing")
+            return original_route(bound, unit_indexes)
+
+        with mock.patch.object(
+                TableUpdateByRowId,
+                "_load_existing_files_info",
+                record_plan), mock.patch.object(
+                    bound_type, "read_join_units", fail_second_route):
+            with self.assertRaisesRegex(
+                    RuntimeError, "stop during routing"):
+                update_by_row_id(
+                    target,
+                    source(),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=1,
+                    commit_mode="incremental",
+                    operation_id=operation_id,
+                )
+        self.assertEqual([[0, 1], [2, 3]], first_route_reads)
+        self.assertEqual(1, len(plan_calls))
+        self.assertEqual(
+            [0] * row_count,
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+
+        plan_calls.clear()
+        first_reads = []
+        resumed_partial_route_reads = []
+
+        def fail_second_window(bound, start, end):
+            first_reads.append(start)
+            if len(first_reads) == 2:
+                raise RuntimeError("stop after first bucket")
+            return original_read(bound, start, end)
+
+        def record_partial_route(bound, unit_indexes):
+            resumed_partial_route_reads.append(list(unit_indexes))
+            return original_route(bound, unit_indexes)
+
+        with mock.patch.object(
+                TableUpdateByRowId,
+                "_load_existing_files_info",
+                record_plan), mock.patch.object(
+                    bound_type, "read_window", fail_second_window), mock.patch.object(
+                    bound_type, "read_join_units", record_partial_route):
+            with self.assertRaisesRegex(
+                    RuntimeError, "stop after first bucket"):
+                update_by_row_id(
+                    target,
+                    source(),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=1,
+                    commit_mode="incremental",
+                    operation_id=operation_id,
+                )
+        self.assertEqual(2, len(first_reads))
+        self.assertEqual([[2, 3]], resumed_partial_route_reads)
+        self.assertEqual(1, len(plan_calls))
+
+        resumed_reads = []
+        plan_calls.clear()
+        resumed_route_reads = []
+
+        def record_window(bound, start, end):
+            resumed_reads.append(start)
+            return original_read(bound, start, end)
+
+        def record_route(bound, unit_indexes):
+            resumed_route_reads.append(list(unit_indexes))
+            return original_route(bound, unit_indexes)
+
+        with mock.patch.object(
+                TableUpdateByRowId,
+                "_load_existing_files_info",
+                record_plan), mock.patch.object(
+                    bound_type, "read_window", record_window), mock.patch.object(
+                    bound_type, "read_join_units", record_route):
+            self.assertEqual(
+                {"num_updated": row_count},
+                update_by_row_id(
+                    target,
+                    source(),
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=1,
+                    commit_mode="incremental",
+                    operation_id=operation_id,
+                ),
+            )
+        self.assertNotIn(first_reads[0], resumed_reads)
+        self.assertEqual([], resumed_route_reads)
+        self.assertEqual(1, len(plan_calls))
+        self.assertEqual(
+            [value + 100 for value in range(row_count)],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+        latest = self.catalog.get_table(
+            target).snapshot_manager().get_latest_snapshot()
+        files_info = update_module._load_row_id_files_info(
+            self.catalog.get_table(target), latest.id)
+        self.assertTrue(files_info.first_row_id_index)
+        self.assertTrue(all(
+            len(group[1]) == 2
+            for group in files_info.first_row_id_index.values()
+        ))
+
+        checkpoint = update_module._get_checkpoint_tag(
+            self.catalog,
+            target,
+            update_module._operation_checkpoint_tags(operation_id)[0],
+        ) or update_module._get_checkpoint_tag(
+            self.catalog,
+            target,
+            update_module._operation_checkpoint_tags(operation_id)[1],
+        )
+        source_plan = update_module._offset_checkpoint_state(
+            checkpoint.snapshot)["source"]
+        route_table = source_plan["route_table"]
+        planner_tag = update_module._operation_planner_tag(operation_id)
+        retained_target = update_module._get_checkpoint_tag(
+            self.catalog, target, planner_tag)
+        self.assertEqual(
+            source_plan["target_snapshot_id"],
+            retained_target.snapshot.id,
+        )
+        self.assertIn(
+            route_table.rsplit(".", 1)[1],
+            self.catalog.list_tables("default"),
+        )
+
+        for role, table_identifier in (
+                ("source", input_table),
+                ("join-right", locator_table)):
+            self.assertIsNotNone(update_module._get_checkpoint_tag(
+                self.catalog,
+                table_identifier,
+                update_module._operation_source_tag(
+                    operation_id, target, role),
+            ))
+        self.assertTrue(delete_update_by_row_id_checkpoint(
+            target, self.catalog_options, operation_id))
+        self.assertNotIn(
+            route_table.rsplit(".", 1)[1],
+            self.catalog.list_tables("default"),
+        )
+        self.assertIsNone(update_module._get_checkpoint_tag(
+            self.catalog, target, planner_tag))
+        for role, table_identifier in (
+                ("source", input_table),
+                ("join-right", locator_table)):
+            self.assertIsNone(update_module._get_checkpoint_tag(
+                self.catalog,
+                table_identifier,
+                update_module._operation_source_tag(
+                    operation_id, target, role),
+            ))
+        self.assertFalse(delete_update_by_row_id_checkpoint(
+            target, self.catalog_options, operation_id))
+
+    def test_bucket_join_blob_transform_resumes_without_reprocessing(self):
+        import importlib
+
+        offset_module = importlib.import_module(
+            "pypaimon.ray.offset_source")
+
+        target_schema = pa.schema([
+            ("id", pa.int32()),
+            ("payload", pa.large_binary()),
+            ("derived_value", pa.int32()),
+        ])
+        target_options = dict(self.de_options)
+        target_options["blob-field"] = "payload"
+        target = self._create(
+            options=target_options, schema=target_schema)
+
+        row_count = 64
+        payloads = [
+            bytes([(value % 251) + 1]) * ((value % 5) + 1)
+            for value in range(row_count)
+        ]
+        for start in range(0, row_count, 8):
+            values = list(range(start, start + 8))
+            self._write(target, pa.Table.from_pydict(
+                {
+                    "id": values,
+                    "payload": payloads[start:start + 8],
+                    "derived_value": [0] * len(values),
+                },
+                schema=target_schema,
+            ))
+
+        row_ids = self._rowid_by_id(target)
+        key_schema = pa.schema([("lookup_key", pa.string())])
+        locator_schema = pa.schema([
+            ("lookup_key", pa.string()),
+            ("row_id", pa.int64()),
+        ])
+        keys = ["key-{}".format(value) for value in range(row_count)]
+        input_table = self._create_bucketed_table(
+            key_schema,
+            pa.Table.from_pydict(
+                {"lookup_key": keys}, schema=key_schema),
+            bucket_key="lookup_key",
+        )
+        locator_table = self._create_bucketed_table(
+            locator_schema,
+            pa.Table.from_pydict(
+                {
+                    "lookup_key": keys,
+                    "row_id": [row_ids[value] for value in range(row_count)],
+                },
+                schema=locator_schema,
+            ),
+            bucket_key="lookup_key",
+        )
+        catalog_options = dict(self.catalog_options)
+        target_file_io = self.catalog.get_table(target).file_io
+
+        def source():
+            def transform(joined):
+                descriptors = read_by_row_id(
+                    target,
+                    joined,
+                    catalog_options,
+                    projection=["payload"],
+                    row_id_col="row_id",
+                    dynamic_options={"blob-as-descriptor": "true"},
+                    num_partitions=1,
+                )
+
+                def derive(batch, blobs):
+                    return pa.table(
+                        {
+                            "_ROW_ID": batch["_ROW_ID"],
+                            "derived_value": [
+                                sum(value) for value in blobs["payload"]
+                            ],
+                        },
+                        schema=pa.schema([
+                            ("_ROW_ID", pa.int64()),
+                            ("derived_value", pa.int32()),
+                        ]),
+                    )
+
+                return map_with_blobs(
+                    descriptors,
+                    ["payload"],
+                    derive,
+                    file_io=target_file_io,
+                    all_blob_columns=["payload"],
+                    parallelism=2,
+                    batch_size=8,
+                )
+
+            return PaimonCoBucketedJoinOffsetSource(
+                input_table,
+                locator_table,
+                on="lookup_key",
+                left_projection=["lookup_key"],
+                right_projection=["lookup_key", "row_id"],
+                row_id_col="row_id",
+                transform=transform,
+                units_per_checkpoint=1,
+                routing_buckets=8,
+                route_units_per_commit=2,
+            )
+
+        operation_id = "blob-offset-" + uuid.uuid4().hex
+        bound_type = offset_module._BoundPaimonCoBucketedJoinOffsetSource
+        original_read = bound_type.read_window
+        first_reads = []
+
+        def fail_second_window(bound, start, end):
+            first_reads.append(start)
+            if len(first_reads) == 2:
+                raise RuntimeError("stop after first transform window")
+            return original_read(bound, start, end)
+
+        with mock.patch.object(
+                bound_type, "read_window", fail_second_window):
+            with self.assertRaisesRegex(
+                    RuntimeError, "stop after first transform window"):
+                update_by_row_id(
+                    target,
+                    source(),
+                    self.catalog_options,
+                    update_cols=["derived_value"],
+                    num_partitions=1,
+                    commit_mode="incremental",
+                    operation_id=operation_id,
+                )
+
+        partial = self._read(target).sort_by("id")[
+            "derived_value"].to_pylist()
+        self.assertGreater(sum(value != 0 for value in partial), 0)
+        self.assertLess(sum(value != 0 for value in partial), row_count)
+
+        resumed_reads = []
+
+        def record_window(bound, start, end):
+            resumed_reads.append(start)
+            return original_read(bound, start, end)
+
+        with mock.patch.object(bound_type, "read_window", record_window):
+            self.assertEqual(
+                {"num_updated": row_count},
+                update_by_row_id(
+                    target,
+                    source(),
+                    self.catalog_options,
+                    update_cols=["derived_value"],
+                    num_partitions=1,
+                    commit_mode="incremental",
+                    operation_id=operation_id,
+                ),
+            )
+
+        self.assertNotIn(first_reads[0], resumed_reads)
+        result = self._read(target).sort_by("id").to_pydict()
+        self.assertEqual(payloads, result["payload"])
+        self.assertEqual(
+            [sum(payload) for payload in payloads],
+            result["derived_value"],
+        )
+        self.assertTrue(delete_update_by_row_id_checkpoint(
+            target, self.catalog_options, operation_id))
+
+    def test_bucket_join_offset_handles_no_matches(self):
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [0]},
+            schema=self.pa_schema,
+        ))
+        input_table = self._create_bucketed_table(
+            pa.schema([("lookup_key", pa.string())]),
+            pa.table({"lookup_key": ["missing"]}),
+            bucket_count=2,
+        )
+        locator_schema = pa.schema([
+            ("lookup_key", pa.string()),
+            ("row_id", pa.int64()),
+        ])
+        locator_table = self._create_bucketed_table(
+            locator_schema,
+            pa.Table.from_pydict(
+                {"lookup_key": ["present"], "row_id": [0]},
+                schema=locator_schema,
+            ),
+            bucket_count=2,
+        )
+        source = PaimonCoBucketedJoinOffsetSource(
+            input_table,
+            locator_table,
+            on="lookup_key",
+            left_projection=["lookup_key"],
+            right_projection=["lookup_key", "row_id"],
+            transform=lambda rows: rows,
+            routing_buckets=2,
+            route_units_per_commit=1,
+        )
+        operation_id = "bucket-empty-" + uuid.uuid4().hex
+        self.assertEqual(
+            {"num_updated": 0},
+            update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+                commit_mode="incremental",
+                operation_id=operation_id,
+            ),
+        )
+        self.assertEqual([0], self._read(target)["age"].to_pylist())
+        self.assertTrue(delete_update_by_row_id_checkpoint(
+            target, self.catalog_options, operation_id))
+
+    def test_bucket_join_offset_rejects_row_id_outside_window(self):
+        import importlib
+
+        module = importlib.import_module(
+            "pypaimon.ray.update_by_row_id")
+
+        class Extractor:
+            def extract_partition_bucket_row(self, values):
+                return (), values["_TARGET_GROUP"] % 4
+
+        route_table = types.SimpleNamespace(
+            create_row_key_extractor=lambda: Extractor())
+        source = types.SimpleNamespace(_needs_target_read_plan=True)
+        bound = types.SimpleNamespace(
+            source=source, route_table=route_table)
+
+        signature = ((), 0, 0, "file", (), None, None, 6, 1, 0, None)
+        with self.assertRaisesRegex(
+                ValueError, "outside its checkpoint window"):
+            module._validate_routed_target_groups(
+                bound, {signature}, 0, 2)
 
     def test_updates_correct_row_across_files(self):
         # A _ROW_ID owned by a middle data file must update only that row.

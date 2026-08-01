@@ -471,6 +471,8 @@ def distributed_update_apply(
     base_snapshot_id: Optional[int] = None,
     collect_row_ids: bool = False,
     on_group_result: Optional[Callable[[list, int, list, list], None]] = None,
+    precomputed_files_info=None,
+    precomputed_info_ref=None,
 ) -> Tuple[list, int, list]:
     import numpy as np
     import pickle
@@ -481,6 +483,7 @@ def distributed_update_apply(
 
     from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
     from pypaimon.table.special_fields import SpecialFields
+    from pypaimon.utils.range import Range
     from pypaimon.write.commit.conflict_detection import (
         row_id_file_signature,
     )
@@ -503,12 +506,16 @@ def distributed_update_apply(
         table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
         if base_snapshot_id is not None else table
     )
-    planner = TableUpdateByRowId(
-        scan_table,
-        "_merge_into_planner_" + uuid.uuid4().hex[:8],
-        BATCH_COMMIT_IDENTIFIER,
-    )
-    sorted_first_row_ids = list(planner.first_row_ids)
+    if precomputed_files_info is None:
+        planner = TableUpdateByRowId(
+            scan_table,
+            "_merge_into_planner_" + uuid.uuid4().hex[:8],
+            BATCH_COMMIT_IDENTIFIER,
+        )
+        files_info = planner._snapshot_files_info()
+    else:
+        files_info = precomputed_files_info
+    sorted_first_row_ids = list(files_info.first_row_ids)
     if not sorted_first_row_ids:
         return [], 0, []
 
@@ -516,7 +523,7 @@ def distributed_update_apply(
     # so concurrent commits between read and planner are detected.
     check_from_snapshot = (
         base_snapshot_id if base_snapshot_id is not None
-        else planner.snapshot_id
+        else files_info.snapshot_id
     )
 
     # Put file metadata into Ray's object store and pass a single ref to
@@ -525,16 +532,16 @@ def distributed_update_apply(
     # snapshot_id with the join's base snapshot so commit-time conflict
     # detection covers the read→planner window.
     from dataclasses import replace
-    files_info = replace(
-        planner._snapshot_files_info(),
-        snapshot_id=check_from_snapshot,
-    )
-    precomputed_info_ref = ray.put(files_info)
-
+    if precomputed_info_ref is None:
+        files_info = replace(
+            files_info,
+            snapshot_id=check_from_snapshot,
+        )
+        precomputed_info_ref = ray.put(files_info)
     frid_col = "_FIRST_ROW_ID"
     captured_sorted = sorted_first_row_ids
     captured_sorted_arr = np.asarray(captured_sorted, dtype=np.int64)
-    valid_ranges = planner.valid_row_id_ranges
+    valid_ranges = files_info.valid_row_id_ranges
     range_starts = np.asarray([r.from_ for r in valid_ranges], dtype=np.int64)
     range_ends = np.asarray([r.to for r in valid_ranges], dtype=np.int64)
 
@@ -616,19 +623,31 @@ def distributed_update_apply(
                 for_update.column(row_id_name).to_pylist()
                 if collect_row_ids else []
             )
-            files_info = ray.get(precomputed_info_ref)
             first_row_id = group.column(frid_col)[0].as_py()
-            split, target_files = files_info.first_row_id_index[first_row_id]
+            files_info = ray.get(precomputed_info_ref)
+            entry = files_info.first_row_id_index[first_row_id]
+            split, target_files = entry
             planned_file_signatures = [
                 row_id_file_signature(
                     split.partition, split.bucket, data_file)
                 for data_file in target_files
             ]
+            group_ranges = Range.sort_and_merge_overlap([
+                data_file.row_id_range()
+                for data_file in target_files
+                if data_file.first_row_id is not None
+            ], True, True)
+            group_info = type(files_info)(
+                snapshot_id=check_from_snapshot,
+                first_row_ids=[first_row_id],
+                first_row_id_index={first_row_id: entry},
+                valid_row_id_ranges=group_ranges,
+            )
             worker = TableUpdateByRowId(
                 captured_table,
                 "_merge_into_shard_" + uuid.uuid4().hex[:8],
                 BATCH_COMMIT_IDENTIFIER,
-                _precomputed_files_info=files_info,
+                _precomputed_files_info=group_info,
             )
             msgs = worker.update_columns(for_update, list(captured_cols))
         except Exception as error:
@@ -725,6 +744,8 @@ def distributed_read_by_row_id(
     num_partitions: int,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     base_snapshot_id: Optional[int] = None,
+    precomputed_files_info=None,
+    precomputed_info_ref=None,
 ):
     """Read ``projection`` for the ``_ROW_ID``s in ``row_ids_ds``, routing each to its
     owning file and reading only the matched rows via ``IndexedSplit`` slicing (blob
@@ -757,19 +778,24 @@ def distributed_read_by_row_id(
         table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
         if base_snapshot_id is not None else table
     )
-    planner = TableUpdateByRowId(
-        scan_table,
-        "_read_by_row_id_planner_" + uuid.uuid4().hex[:8],
-        BATCH_COMMIT_IDENTIFIER,
-    )
-    sorted_first_row_ids = list(planner.first_row_ids)
+    if precomputed_files_info is None:
+        planner = TableUpdateByRowId(
+            scan_table,
+            "_read_by_row_id_planner_" + uuid.uuid4().hex[:8],
+            BATCH_COMMIT_IDENTIFIER,
+        )
+        files_info = planner._snapshot_files_info()
+    else:
+        files_info = precomputed_files_info
+    sorted_first_row_ids = list(files_info.first_row_ids)
     if not sorted_first_row_ids:
         return None
 
-    precomputed_info_ref = ray.put(planner._snapshot_files_info())
+    if precomputed_info_ref is None:
+        precomputed_info_ref = ray.put(files_info)
     frid_col = "_FIRST_ROW_ID"
     sorted_arr = np.asarray(sorted_first_row_ids, dtype=np.int64)
-    valid_ranges = planner.valid_row_id_ranges
+    valid_ranges = files_info.valid_row_id_ranges
     range_starts = np.asarray([r.from_ for r in valid_ranges], dtype=np.int64)
     range_ends = np.asarray([r.to for r in valid_ranges], dtype=np.int64)
 

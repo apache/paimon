@@ -629,12 +629,34 @@ while the operation is active. Row slicing applies to append and
 data-evolution sources; other table types use their planned scan splits as
 units.
 
+If row ids come from two co-bucketed tables, route the join once and checkpoint
+target file-group windows:
+
+```python
+from pypaimon.ray import PaimonCoBucketedJoinOffsetSource
+
+source = PaimonCoBucketedJoinOffsetSource(
+    "db.input",
+    "db.locator",
+    on="lookup_key",
+    left_projection=["lookup_key"],
+    right_projection=["lookup_key", "row_id"],
+    row_id_col="row_id",
+    transform=build_updates,
+)
+```
+
+The join is routed once into an internal table. Retries resume at the last
+committed target-group window. The transform may filter routed row ids but must
+not add or change them.
+
 **Parameters:**
-- `source`: a `ray.data.Dataset`, `pyarrow.Table`, `pandas.DataFrame`, or
-  `PaimonOffsetSource` producing the target `_ROW_ID` and every column in
-  `update_cols`; extra columns are ignored, and values are cast to the target
-  column types. A plain table-name source is not accepted: a table's system
-  `_ROW_ID` is its own and cannot address the target's rows.
+- `source`: a `ray.data.Dataset`, `pyarrow.Table`, `pandas.DataFrame`,
+  `PaimonOffsetSource`, or `PaimonCoBucketedJoinOffsetSource` producing the target
+  `_ROW_ID` and every column in `update_cols`; extra columns are ignored, and
+  values are cast to the target column types. A plain table-name source is not
+  accepted: a table's system `_ROW_ID` is its own and cannot address the
+  target's rows.
 - `update_cols`: the non-blob columns to overwrite. Must be non-empty.
 - `num_partitions`: parallelism for grouping the update rows by target file;
   defaults to `max(1, cluster_cpus * 2)`.
@@ -643,8 +665,8 @@ units.
   `"incremental"` explicitly opts into non-atomic, windowed commits.
 - `max_groups_per_commit`: required for an incremental Dataset source; positive
   number of completed target file groups per commit. It is rejected in atomic
-  mode and with `PaimonOffsetSource`.
-- `operation_id`: required with `PaimonOffsetSource`. It identifies one
+  mode and with an offset source.
+- `operation_id`: required with an offset source. It identifies one
   immutable update input and its durable progress across driver restarts. Do
   not run two callers concurrently with the same id or reuse an id for another
   source or `update_cols`.

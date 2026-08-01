@@ -56,6 +56,11 @@ _CHECKPOINT_TAG_PREFIX = "_pypaimon_ray_update_"
 _OFFSET_CHECKPOINT_VERSION = 2
 _OFFSET_CHECKPOINT_MODE = "source-offset"
 _CHECKPOINT_TAG_UPDATE_ATTEMPTS = 3
+_ROUTE_KIND = "_ROUTE_KIND"
+_ROUTE_SOURCE_UNIT = "_SOURCE_UNIT"
+_ROUTE_TARGET_GROUP = "_TARGET_GROUP"
+_ROUTE_DATA = "data"
+_ROUTE_MARKER = "marker"
 
 
 def _blob_col_names(table: "FileStoreTable") -> set:
@@ -84,7 +89,9 @@ def update_by_row_id(
     ``ray >= 2.50`` and a target with ``data-evolution.enabled`` + ``row-tracking.enabled``.
 
     A :class:`PaimonOffsetSource` pins its source snapshot and commits one unit
-    window at a time. Its checkpoint stores only the next source offset.
+    window at a time. :class:`PaimonCoBucketedJoinOffsetSource` first routes joined
+    row ids by target file group, then checkpoints target-group windows. Its
+    transform receives only the routed row-id column.
 
     By default, all file groups are committed atomically. Set
     ``commit_mode="incremental"`` together with ``max_groups_per_commit`` to
@@ -177,6 +184,7 @@ def update_by_row_id(
             target,
             source,
             catalog,
+            catalog_options,
             table,
             update_cols,
             num_partitions,
@@ -267,6 +275,7 @@ def _update_from_offset_source(
         target,
         source,
         catalog,
+        catalog_options,
         table,
         update_cols,
         num_partitions,
@@ -295,29 +304,52 @@ def _update_from_offset_source(
         loaded[1]["source"]
         if loaded is not None and loaded[1] is not None
         else None)
-    source_tag = _operation_source_tag(operation_id, target)
-    retained_source = _get_checkpoint_tag(
-        catalog, source.table_identifier, source_tag)
-    retained_snapshot_id = (
-        retained_source.snapshot.id
-        if retained_source is not None else None)
-    source_snapshot_id = source._resolve_snapshot_id(
-        catalog, saved_plan, retained_snapshot_id)
-    if source_snapshot_id is None:
-        raise ValueError(
-            "PaimonOffsetSource requires a source snapshot.")
+    retention_tags = {}
+    retained_snapshot_ids = {}
+    for role, table_identifier in source._retention_tables().items():
+        tag_name = _operation_source_tag(
+            operation_id, target, role)
+        retention_tags[role] = tag_name
+        retained = _get_checkpoint_tag(
+            catalog, table_identifier, tag_name)
+        if retained is not None:
+            retained_snapshot_ids[role] = retained.snapshot.id
+    bind_kwargs = {
+        "checkpoint_plan": saved_plan,
+        "retention_tags": {
+            role: retention_tags[role]
+            for role in retained_snapshot_ids
+        },
+        "retained_snapshot_ids": retained_snapshot_ids,
+        "catalog_options": catalog_options,
+    }
+    target_read_snapshot_id = None
+    if getattr(source, "_needs_target_read_plan", False):
+        planner_tag = _operation_planner_tag(operation_id)
+        retained_target = _get_checkpoint_tag(
+            catalog, target, planner_tag)
+        target_read_snapshot_id = (
+            retained_target.snapshot.id
+            if retained_target is not None
+            else (saved_plan or {}).get(
+                "target_snapshot_id", initial_snapshot.id)
+        )
+        _ensure_source_tag(
+            catalog, target, planner_tag, target_read_snapshot_id)
+        bind_kwargs["target"] = target
+        bind_kwargs["operation_id"] = operation_id
+        bind_kwargs["target_snapshot_id"] = target_read_snapshot_id
     bound_source = source._bind(
         catalog,
-        checkpoint_plan=saved_plan,
-        tag_name=source_tag if retained_source is not None else None,
-        retained_snapshot_id=retained_snapshot_id,
+        **bind_kwargs,
     )
-    if source_snapshot_id is not None:
+    for retention in bound_source.plan["retentions"]:
+        role = retention["role"]
         _ensure_source_tag(
             catalog,
-            source.table_identifier,
-            source_tag,
-            source_snapshot_id,
+            retention["table"],
+            retention_tags[role],
+            retention["snapshot_id"],
         )
     committer = _OffsetUpdateCommitter(
         table,
@@ -338,11 +370,63 @@ def _update_from_offset_source(
     target_pa = PyarrowFieldParser.from_paimon_schema(
         table.table_schema.fields)
     update_schema = build_update_schema(target_pa, update_cols, rid)
+    target_read_plan = None
+    target_write_plan = None
 
     try:
-        for _, end in bound_source.windows(committer.next_offset):
-            source_ds = bound_source.read_window(
-                committer.next_offset, end)
+        if getattr(source, "_needs_target_read_plan", False):
+            target_read_plan = _OffsetTargetFilesPlan(
+                _load_row_id_files_info(
+                    table, target_read_snapshot_id))
+            _prepare_bucket_join_route(
+                catalog,
+                bound_source,
+                target_read_plan.base_info,
+                operation_id,
+                target,
+            )
+            if not bound_source.route_splits_by_bucket:
+                if committer.next_offset < bound_source.num_units:
+                    committer.commit_window(
+                        [], 0, bound_source.num_units, set())
+                committer.finish()
+                return {"num_updated": committer.num_updated}
+            latest = table.snapshot_manager().get_latest_snapshot()
+            if latest is None:
+                raise RuntimeError(
+                    "Target has no snapshot before offset update.")
+            # Only untouched groups remain; signatures guard concurrent rewrites.
+            target_write_plan = target_read_plan
+            target_write_plan.snapshot_id = latest.id
+
+        for start, end in bound_source.windows(committer.next_offset):
+            latest = table.snapshot_manager().get_latest_snapshot()
+            if latest is None:
+                raise RuntimeError(
+                    "Target has no snapshot before offset update.")
+            if (target_write_plan is not None
+                    and target_write_plan.snapshot_id != latest.id):
+                target_write_plan = None
+            if (getattr(source, "_needs_target_read_plan", False)
+                    and target_write_plan is None):
+                target_write_plan = _OffsetTargetFilesPlan(
+                    _load_row_id_files_info(table, latest.id))
+
+            if target_read_plan is None:
+                source_ds = bound_source.read_window(
+                    committer.next_offset, end)
+            else:
+                from pypaimon.ray.read_by_row_id import (
+                    _use_offset_read_plan,
+                )
+
+                with _use_offset_read_plan(
+                        target,
+                        target_read_plan.base_info.snapshot_id,
+                        target_read_plan.base_info,
+                        target_read_plan.base_ref):
+                    source_ds = bound_source.read_window(
+                        committer.next_offset, end)
 
             def _project_cast(batch: pa.Table) -> pa.Table:
                 missing = [
@@ -358,11 +442,6 @@ def _update_from_offset_source(
 
             update_ds = source_ds.map_batches(
                 _project_cast, batch_format="pyarrow")
-
-            latest = table.snapshot_manager().get_latest_snapshot()
-            if latest is None:
-                raise RuntimeError(
-                    "Target has no snapshot before offset update.")
 
             messages = []
             planned_file_signatures = set()
@@ -384,20 +463,336 @@ def _update_from_offset_source(
                     ray_remote_args=ray_remote_args,
                     base_snapshot_id=latest.id,
                     on_group_result=_collect_group,
+                    precomputed_files_info=(
+                        target_write_plan.base_info
+                        if target_write_plan is not None
+                        and target_write_plan.snapshot_id == latest.id
+                        else None),
+                    precomputed_info_ref=(
+                        target_write_plan.base_ref
+                        if target_write_plan is not None
+                        and target_write_plan.snapshot_id == latest.id
+                        else None),
                 )
             except Exception as error:
                 _abort_pending_update_messages(table, messages)
                 _reraise_inner(error)
-            committer.commit_window(
+            try:
+                _validate_routed_target_groups(
+                    bound_source,
+                    planned_file_signatures,
+                    start,
+                    end,
+                )
+            except Exception:
+                _abort_pending_update_messages(table, messages)
+                raise
+            committed_snapshot = committer.commit_window(
                 messages,
                 num_updated,
                 end,
                 planned_file_signatures,
             )
+            if (target_write_plan is not None
+                    and committed_snapshot.id == latest.id + 1):
+                target_write_plan.snapshot_id = committed_snapshot.id
+            else:
+                target_write_plan = None
         committer.finish()
         return {"num_updated": committer.num_updated}
     finally:
         committer.close()
+
+
+def _prepare_bucket_join_route(
+        catalog,
+        bound_source,
+        target_files_info,
+        operation_id,
+        target):
+    route_table = _ensure_route_table(
+        catalog, bound_source, operation_id, target)
+    route_tag = bound_source.plan["route_tag"]
+    tagged = _get_checkpoint_tag(
+        catalog, bound_source.plan["route_table"], route_tag)
+    if tagged is None:
+        from pypaimon.write.ray_datasink import write_paimon_dataset
+
+        completed = _route_completed_units(route_table)
+        if (bound_source.route_num_units == 0
+                and route_table.snapshot_manager().get_latest_snapshot()
+                is None):
+            write_paimon_dataset(
+                _route_markers(bound_source.source.row_id_col, [-1]),
+                route_table,
+            )
+        for unit_indexes in bound_source.route_windows(completed):
+            joined = bound_source.read_join_units(unit_indexes)
+            routed = _route_joined_rows(
+                joined,
+                bound_source.source.row_id_col,
+                target_files_info,
+                unit_indexes,
+            )
+            write_paimon_dataset(routed, route_table)
+            completed.update(unit_indexes)
+        expected = set(range(bound_source.route_num_units))
+        completed = _route_completed_units(route_table)
+        if completed != expected:
+            missing = sorted(expected - completed)
+            raise RuntimeError(
+                "Row-id routing is incomplete; missing source units {}."
+                .format(missing[:10]))
+        latest = route_table.snapshot_manager().get_latest_snapshot()
+        if latest is None:
+            raise RuntimeError("Row-id routing produced no snapshot.")
+        try:
+            catalog.create_tag(
+                bound_source.plan["route_table"],
+                route_tag,
+                snapshot_id=latest.id,
+            )
+        except Exception:
+            tagged = _get_checkpoint_tag(
+                catalog, bound_source.plan["route_table"], route_tag)
+            if tagged is None or tagged.snapshot.id != latest.id:
+                raise
+        tagged = _get_checkpoint_tag(
+            catalog, bound_source.plan["route_table"], route_tag)
+    route_table, splits_by_bucket, read_type, nested_name_paths = (
+        _plan_route_buckets(
+            catalog,
+            bound_source.plan["route_table"],
+            route_tag,
+            bound_source.source.row_id_col,
+            bound_source.source.routing_buckets,
+        )
+    )
+    bound_source.configure_route(
+        route_table, splits_by_bucket, read_type, nested_name_paths)
+
+
+def _validate_routed_target_groups(
+        bound_source, planned_file_signatures, start, end):
+    if not getattr(bound_source.source, "_needs_target_read_plan", False):
+        return
+    extractor = bound_source.route_table.create_row_key_extractor()
+    for signature in planned_file_signatures:
+        first_row_id = signature[7]
+        _, bucket = extractor.extract_partition_bucket_row({
+            _ROUTE_KIND: _ROUTE_DATA,
+            _ROUTE_TARGET_GROUP: first_row_id,
+        })
+        if bucket < start or bucket >= end:
+            raise ValueError(
+                "PaimonCoBucketedJoinOffsetSource transform changed a row id "
+                "outside its checkpoint window.")
+
+
+def _ensure_route_table(catalog, bound_source, operation_id, target):
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    from pypaimon.schema.schema import Schema
+
+    source = bound_source.source
+    route_schema = pa.schema([
+        pa.field(source.row_id_col, pa.int64()),
+        pa.field(_ROUTE_TARGET_GROUP, pa.int64(), nullable=False),
+        pa.field(_ROUTE_SOURCE_UNIT, pa.int64()),
+        pa.field(_ROUTE_KIND, pa.string(), nullable=False),
+    ])
+    options = {
+        "bucket": str(source.routing_buckets),
+        "bucket-key": _ROUTE_TARGET_GROUP,
+        "pypaimon.ray.route.operation-id": operation_id,
+        "pypaimon.ray.route.target": target,
+        "pypaimon.ray.route.fingerprint": bound_source.plan["fingerprint"],
+    }
+    identifier = bound_source.plan["route_table"]
+    catalog.create_table(
+        identifier,
+        Schema.from_pyarrow_schema(
+            route_schema,
+            partition_keys=[_ROUTE_KIND],
+            options=options,
+        ),
+        True,
+    )
+    table = catalog.get_table(identifier)
+    actual_options = table.table_schema.options
+    for key, value in options.items():
+        if actual_options.get(key) != value:
+            raise RuntimeError(
+                "Routing table {!r} belongs to another operation."
+                .format(identifier))
+    actual_schema = PyarrowFieldParser.from_paimon_schema(
+        table.table_schema.fields)
+    if (not actual_schema.equals(route_schema)
+            or table.partition_keys != [_ROUTE_KIND]):
+        raise RuntimeError(
+            "Routing table {!r} has an incompatible schema."
+            .format(identifier))
+    return table
+
+
+def _route_completed_units(route_table):
+    from pypaimon.common.predicate_builder import PredicateBuilder
+
+    latest = route_table.snapshot_manager().get_latest_snapshot()
+    if latest is None:
+        return set()
+    predicate = PredicateBuilder(route_table.fields).equal(
+        _ROUTE_KIND, _ROUTE_MARKER)
+    builder = (
+        route_table.new_read_builder()
+        .with_partition_filter(predicate)
+        .with_projection([_ROUTE_SOURCE_UNIT])
+    )
+    splits = builder.new_scan().plan().splits()
+    if not splits:
+        return set()
+    result = builder.new_read().to_arrow(splits)
+    if result is None:
+        return set()
+    values = result.column(_ROUTE_SOURCE_UNIT).to_pylist()
+    if any(value is None for value in values):
+        raise RuntimeError("Routing checkpoint contains a null source unit.")
+    return {value for value in values if value >= 0}
+
+
+def _route_joined_rows(joined, row_id_col, files_info, unit_indexes):
+    import numpy as np
+
+    from pypaimon.ray.data_evolution_merge_join import (
+        _sorted_range_membership,
+    )
+
+    sorted_first_row_ids = np.asarray(
+        files_info.first_row_ids, dtype=np.int64)
+    valid_ranges = files_info.valid_row_id_ranges
+    range_starts = np.asarray(
+        [row_range.from_ for row_range in valid_ranges], dtype=np.int64)
+    range_ends = np.asarray(
+        [row_range.to for row_range in valid_ranges], dtype=np.int64)
+    route_schema = pa.schema([
+        pa.field(row_id_col, pa.int64()),
+        pa.field(_ROUTE_TARGET_GROUP, pa.int64(), nullable=False),
+        pa.field(_ROUTE_SOURCE_UNIT, pa.int64()),
+        pa.field(_ROUTE_KIND, pa.string(), nullable=False),
+    ])
+
+    def _route_batch(batch):
+        if row_id_col not in batch.column_names:
+            raise ValueError(
+                "bucket join is missing row_id_col {!r}.".format(row_id_col))
+        row_ids = batch.column(row_id_col)
+        if row_ids.null_count:
+            raise ValueError("bucket join produced a null row id.")
+        row_ids = row_ids.cast(pa.int64())
+        values = row_ids.to_numpy(zero_copy_only=False)
+        in_range = _sorted_range_membership(
+            values, range_starts, range_ends)
+        if not in_range.all():
+            bad = values[~in_range][0]
+            raise ValueError(
+                "_ROW_ID {} does not belong to the target snapshot."
+                .format(bad))
+        indexes = np.searchsorted(
+            sorted_first_row_ids, values, side="right") - 1
+        groups = sorted_first_row_ids[indexes]
+        return pa.Table.from_arrays([
+            row_ids,
+            pa.array(groups, type=pa.int64()),
+            pa.nulls(batch.num_rows, type=pa.int64()),
+            pa.array([_ROUTE_DATA] * batch.num_rows, type=pa.string()),
+        ], schema=route_schema)
+
+    routed = joined.map_batches(_route_batch, batch_format="pyarrow")
+    return routed.union(_route_markers(row_id_col, unit_indexes))
+
+
+def _route_markers(row_id_col, unit_indexes):
+    import ray
+
+    route_schema = pa.schema([
+        pa.field(row_id_col, pa.int64()),
+        pa.field(_ROUTE_TARGET_GROUP, pa.int64(), nullable=False),
+        pa.field(_ROUTE_SOURCE_UNIT, pa.int64()),
+        pa.field(_ROUTE_KIND, pa.string(), nullable=False),
+    ])
+    markers = pa.Table.from_arrays([
+        pa.nulls(len(unit_indexes), type=pa.int64()),
+        pa.array([0] * len(unit_indexes), type=pa.int64()),
+        pa.array(unit_indexes, type=pa.int64()),
+        pa.array([_ROUTE_MARKER] * len(unit_indexes), type=pa.string()),
+    ], schema=route_schema)
+    return ray.data.from_arrow(markers)
+
+
+def _plan_route_buckets(
+        catalog,
+        identifier,
+        tag_name,
+        row_id_col,
+        expected_buckets):
+    from pypaimon.common.options.core_options import CoreOptions
+    from pypaimon.common.predicate_builder import PredicateBuilder
+
+    table = catalog.get_table(identifier).copy({
+        CoreOptions.SCAN_TAG_NAME.key(): tag_name,
+    })
+    predicate = PredicateBuilder(table.fields).equal(
+        _ROUTE_KIND, _ROUTE_DATA)
+    builder = (
+        table.new_read_builder()
+        .with_partition_filter(predicate)
+        .with_projection([row_id_col])
+    )
+    scan = builder.new_scan()
+    entries = scan.file_scanner.plan_files()
+    stale = {
+        entry.total_buckets
+        for entry in entries
+        if entry.total_buckets != expected_buckets
+    }
+    if stale:
+        raise RuntimeError(
+            "Routing table contains unexpected bucket counts {}."
+            .format(sorted(stale)))
+    scan.file_scanner.plan_files = lambda: entries
+    splits_by_bucket = {}
+    for split in scan.plan().splits():
+        splits_by_bucket.setdefault(split.bucket, []).append(split)
+    return (
+        table,
+        splits_by_bucket,
+        builder.read_type(),
+        builder._nested_name_paths(),
+    )
+
+
+def _load_row_id_files_info(table, snapshot_id):
+    from pypaimon.common.options.core_options import CoreOptions
+    from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+    from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+    scan_table = table.copy({
+        CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot_id),
+    })
+    return TableUpdateByRowId(
+        scan_table,
+        "_offset_target_planner_",
+        BATCH_COMMIT_IDENTIFIER,
+    )._snapshot_files_info()
+
+
+class _OffsetTargetFilesPlan:
+
+    def __init__(self, base_info):
+        import ray
+
+        self.base_info = base_info
+        self.base_ref = ray.put(base_info)
+        self.snapshot_id = base_info.snapshot_id
 
 
 class _OffsetUpdateCommitter:
@@ -497,6 +892,7 @@ class _OffsetUpdateCommitter:
             next_offset,
             self._operation_id,
         )
+        return self._checkpoint_snapshot
 
     def finish(self):
         if self._complete:
@@ -660,7 +1056,8 @@ def delete_update_by_row_id_checkpoint(
     catalog = CatalogFactory.create(catalog_options)
     deleted = False
     checkpoint_tags = _operation_checkpoint_tags(operation_id)
-    source_table = None
+    source_retentions = []
+    route_table = None
     offset_snapshots = []
     for checkpoint_tag in checkpoint_tags:
         tagged = _get_checkpoint_tag(catalog, target, checkpoint_tag)
@@ -685,25 +1082,52 @@ def delete_update_by_row_id_checkpoint(
     if offset_snapshots:
         offset_snapshot = max(
             offset_snapshots, key=lambda snapshot: snapshot.id)
-        source_table = _offset_checkpoint_state(
-            offset_snapshot)["source"].get("table")
+        source_plan = _offset_checkpoint_state(
+            offset_snapshot)["source"]
+        route_table = source_plan.get("route_table")
+        source_retentions = source_plan.get("retentions") or [{
+            "role": "source",
+            "table": source_plan.get("table"),
+        }]
 
-    for checkpoint_tag in checkpoint_tags:
+    if route_table is not None:
+        from pypaimon.catalog.catalog_exception import (
+            TableNotExistException,
+        )
+
+        try:
+            catalog.get_table(route_table)
+        except TableNotExistException:
+            pass
+        except Exception:
+            logger.warning(
+                "Failed to inspect update_by_row_id routing table %s.",
+                route_table,
+                exc_info=True,
+            )
+            raise
+        else:
+            catalog.drop_table(route_table, False)
+            deleted = True
+    operation_tags = checkpoint_tags + (_operation_planner_tag(operation_id),)
+    for checkpoint_tag in operation_tags:
         deleted = (
             _delete_checkpoint_tag(
                 catalog, target, checkpoint_tag, ignore_missing=True)
             or deleted
         )
-    if source_table:
-        deleted = (
-            _delete_checkpoint_tag(
-                catalog,
-                source_table,
-                _operation_source_tag(operation_id, target),
-                ignore_missing=True,
+    for retention in source_retentions:
+        if retention.get("table"):
+            deleted = (
+                _delete_checkpoint_tag(
+                    catalog,
+                    retention["table"],
+                    _operation_source_tag(
+                        operation_id, target, retention["role"]),
+                    ignore_missing=True,
+                )
+                or deleted
             )
-            or deleted
-        )
     return deleted
 
 
@@ -720,10 +1144,17 @@ def _operation_checkpoint_tags(operation_id):
     return base + "_0", base + "_1"
 
 
-def _operation_source_tag(operation_id, target):
+def _operation_planner_tag(operation_id):
+    return _CHECKPOINT_TAG_PREFIX + _operation_digest(operation_id) + "_plan"
+
+
+def _operation_source_tag(operation_id, target, role="source"):
+    identity = target + "\0" + operation_id
+    if role != "source":
+        identity += "\0" + role
     return (
         _CHECKPOINT_TAG_PREFIX
-        + _operation_digest(target + "\0" + operation_id)
+        + _operation_digest(identity)
         + "_source"
     )
 
@@ -785,21 +1216,18 @@ def _offset_checkpoint_state(snapshot):
         "snapshot_id",
         "fingerprint",
         "num_units",
-        "rows_per_unit",
         "units_per_checkpoint",
     }
     if not required_source.issubset(state["source"]):
         raise RuntimeError("Incomplete source-offset checkpoint source.")
     source = state["source"]
-    if (source["kind"] != "paimon-units-v1"
+    if (source["kind"] not in (
+            "paimon-units-v1", "paimon-bucket-join-v1")
             or not isinstance(source["table"], str)
             or not isinstance(source["fingerprint"], str)
             or isinstance(source["num_units"], bool)
             or not isinstance(source["num_units"], int)
             or source["num_units"] < 0
-            or isinstance(source["rows_per_unit"], bool)
-            or not isinstance(source["rows_per_unit"], int)
-            or source["rows_per_unit"] <= 0
             or isinstance(source["units_per_checkpoint"], bool)
             or not isinstance(source["units_per_checkpoint"], int)
             or source["units_per_checkpoint"] <= 0
@@ -808,6 +1236,51 @@ def _offset_checkpoint_state(snapshot):
                      or not isinstance(source["snapshot_id"], int)
                      or source["snapshot_id"] <= 0))):
         raise RuntimeError("Invalid source-offset checkpoint source.")
+    if source["kind"] == "paimon-units-v1" and (
+            "rows_per_unit" not in source
+            or isinstance(source["rows_per_unit"], bool)
+            or not isinstance(source["rows_per_unit"], int)
+            or source["rows_per_unit"] <= 0):
+        raise RuntimeError("Invalid source-offset checkpoint source.")
+    if source["kind"] == "paimon-bucket-join-v1" and (
+            not isinstance(source.get("right_table"), str)
+            or isinstance(source.get("right_snapshot_id"), bool)
+            or not isinstance(source.get("right_snapshot_id"), int)
+            or source["right_snapshot_id"] <= 0
+            or isinstance(source.get("route_num_units"), bool)
+            or not isinstance(source.get("route_num_units"), int)
+            or source["route_num_units"] < 0
+            or isinstance(source.get("routing_buckets"), bool)
+            or not isinstance(source.get("routing_buckets"), int)
+            or source["routing_buckets"] <= 0
+            or source["num_units"] != source["routing_buckets"]
+            or isinstance(source.get("route_units_per_commit"), bool)
+            or not isinstance(source.get("route_units_per_commit"), int)
+            or source["route_units_per_commit"] <= 0
+            or not isinstance(source.get("row_id_col"), str)
+            or not source["row_id_col"]
+            or not isinstance(source.get("route_table"), str)
+            or not source["route_table"]
+            or not isinstance(source.get("route_tag"), str)
+            or not source["route_tag"]
+            or isinstance(source.get("target_snapshot_id"), bool)
+            or not isinstance(source.get("target_snapshot_id"), int)
+            or source["target_snapshot_id"] <= 0):
+        raise RuntimeError("Invalid source-offset checkpoint source.")
+    retentions = source.get("retentions")
+    if retentions is not None:
+        roles = set()
+        for retention in retentions:
+            if (not isinstance(retention, dict)
+                    or not isinstance(retention.get("role"), str)
+                    or not isinstance(retention.get("table"), str)
+                    or isinstance(retention.get("snapshot_id"), bool)
+                    or not isinstance(retention.get("snapshot_id"), int)
+                    or retention["snapshot_id"] <= 0
+                    or retention["role"] in roles):
+                raise RuntimeError(
+                    "Invalid source-offset checkpoint retention.")
+            roles.add(retention["role"])
     for name in ("next_offset", "num_updated"):
         value = state[name]
         if (isinstance(value, bool)
