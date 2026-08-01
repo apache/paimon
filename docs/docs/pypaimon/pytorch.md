@@ -59,6 +59,11 @@ when it is false, it will read the full amount of data into memory.
 
 **`prefetch_concurrency`** (default: 1): When streaming is true, number of threads used for parallel prefetch within each DataLoader worker. Set to a value greater than 1 to partition splits across threads and increase read throughput. Has no effect when streaming is false.
 
+For streaming reads, a limit configured on the read builder is shared across
+all DataLoader workers and prefetch threads. Worker and prefetch concurrency
+remain enabled, while the combined dataset yields at most the configured
+number of rows.
+
 ## File Format Metadata Cache
 
 Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated

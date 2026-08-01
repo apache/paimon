@@ -143,6 +143,109 @@ class TorchReadTest(unittest.TestCase):
         self.assertEqual(sorted_user_ids, expected_user_ids)
         self.assertEqual(sorted_behaviors, expected_behaviors)
 
+    def test_torch_streaming_limit_is_global_across_workers(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            options={'source.split.target-size': '1b'},
+        )
+        self.catalog.create_table('default.test_torch_streaming_global_limit', schema, False)
+        table = self.catalog.get_table('default.test_torch_streaming_global_limit')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder() \
+            .with_projection(['user_id']) \
+            .with_limit(5)
+        splits = read_builder.new_scan().plan().splits()
+        dataset = read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            prefetch_concurrency=4,
+        )
+
+        user_ids = self._collect_torch_user_ids(
+            dataset,
+            num_workers=2,
+            multiprocessing_context='spawn',
+        )
+
+        self.assertEqual(5, len(user_ids))
+        self.assertEqual(5, len(set(user_ids)))
+
+    def test_torch_streaming_limit_is_global_across_prefetch_threads(self):
+        table = self._create_shuffle_append_table(
+            'default.test_torch_prefetch_global_limit',
+            total_rows=8,
+            rows_per_commit=2,
+            options={'source.split.target-size': '1b'},
+        )
+        read_builder = table.new_read_builder() \
+            .with_projection(['user_id']) \
+            .with_limit(5)
+        splits = read_builder.new_scan().plan().splits()
+        dataset = read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            prefetch_concurrency=4,
+        )
+
+        user_ids = self._collect_torch_user_ids(dataset)
+
+        self.assertEqual(5, len(user_ids))
+        self.assertEqual(5, len(set(user_ids)))
+
+    def test_torch_streaming_limit_resets_with_persistent_workers(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            options={'source.split.target-size': '1b'},
+        )
+        self.catalog.create_table('default.test_torch_streaming_limit_reset', schema, False)
+        table = self.catalog.get_table('default.test_torch_streaming_limit_reset')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder() \
+            .with_projection(['user_id']) \
+            .with_limit(5)
+        splits = read_builder.new_scan().plan().splits()
+        dataset = read_builder.new_read().to_torch(splits, streaming=True)
+        dataloader = DataLoader(
+            dataset,
+            batch_size=8,
+            num_workers=2,
+            persistent_workers=True,
+            shuffle=False,
+        )
+
+        first = self._collect_torch_user_ids_from_dataloader(dataloader)
+        second = self._collect_torch_user_ids_from_dataloader(dataloader)
+
+        self.assertEqual(5, len(first))
+        self.assertEqual(5, len(second))
+
+    def test_torch_streaming_shuffle_limit_is_global_across_workers(self):
+        table = self._create_shuffle_append_table(
+            'default.test_torch_shuffle_global_limit',
+            total_rows=20,
+            rows_per_commit=4,
+            options={'source.split.target-size': '1b'},
+        )
+        read_builder = table.new_read_builder() \
+            .with_projection(['user_id']) \
+            .with_limit(5)
+        splits = read_builder.new_scan().plan().splits()
+        dataset = read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            shuffle=True,
+            seed=17,
+            buffer_size=7,
+            max_buffer_input_splits=4,
+        )
+
+        user_ids = self._collect_torch_user_ids(dataset, num_workers=2)
+
+        self.assertEqual(5, len(user_ids))
+        self.assertEqual(5, len(set(user_ids)))
+
     def test_blob_torch_read(self):
         """Test end-to-end blob functionality using blob descriptors."""
         import random
@@ -830,10 +933,12 @@ class TorchReadTest(unittest.TestCase):
         total_rows=80,
         rows_per_commit=10,
         partition_keys=None,
+        options=None,
     ):
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,
             partition_keys=partition_keys or [],
+            options=options,
         )
         self.catalog.create_table(identifier, schema, False)
         table = self.catalog.get_table(identifier)
@@ -856,13 +961,16 @@ class TorchReadTest(unittest.TestCase):
         return table
 
     @staticmethod
-    def _collect_torch_user_ids(dataset, num_workers=0):
-        dataloader = DataLoader(
-            dataset,
+    def _collect_torch_user_ids(dataset, num_workers=0, multiprocessing_context=None):
+        dataloader_options = dict(
+            dataset=dataset,
             batch_size=8,
             num_workers=num_workers,
             shuffle=False,
         )
+        if multiprocessing_context is not None:
+            dataloader_options['multiprocessing_context'] = multiprocessing_context
+        dataloader = DataLoader(**dataloader_options)
         all_user_ids = []
         for batch_data in dataloader:
             all_user_ids.extend(batch_data['user_id'].tolist())

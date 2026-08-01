@@ -36,6 +36,78 @@ def _share_epoch_with_torch_workers(value):
     return torch.tensor(value, dtype=torch.long).share_memory_()
 
 
+_ITERATOR_EXHAUSTED = object()
+_LIMIT_EXHAUSTED = object()
+
+
+class _SharedLimit:
+    """A row limit shared by DataLoader workers and prefetch threads."""
+
+    def __init__(self, limit: int):
+        context = torch.multiprocessing.get_context("spawn")
+        self._limit = limit
+        self._condition = context.Condition()
+        self._remaining = context.RawValue("q", 0)
+        self._reserved = context.RawValue("q", 0)
+        self._arrived = context.RawValue("i", 0)
+        self._active = context.RawValue("i", 0)
+        self._participants = context.RawValue("i", 0)
+        self._generation = context.RawValue("q", 0)
+
+    def begin_iteration(self, participants: int) -> None:
+        """Reset the limit after every worker has finished the previous iteration."""
+        with self._condition:
+            while self._active.value > 0:
+                self._condition.wait()
+
+            generation = self._generation.value
+            if self._arrived.value == 0:
+                self._participants.value = participants
+                self._remaining.value = self._limit
+                self._reserved.value = 0
+            elif self._participants.value != participants:
+                raise RuntimeError("DataLoader worker count changed during iteration startup")
+
+            self._arrived.value += 1
+            if self._arrived.value == self._participants.value:
+                self._arrived.value = 0
+                self._active.value = self._participants.value
+                self._generation.value += 1
+                self._condition.notify_all()
+                return
+
+            while self._generation.value == generation:
+                self._condition.wait()
+
+    def end_iteration(self) -> None:
+        with self._condition:
+            self._active.value -= 1
+            if self._active.value == 0:
+                self._condition.notify_all()
+
+    def reserve(self) -> bool:
+        """Reserve one row before reading it, waiting for unfinished reads if needed."""
+        with self._condition:
+            while self._remaining.value <= 0 and self._reserved.value > 0:
+                self._condition.wait()
+            if self._remaining.value <= 0:
+                return False
+            self._remaining.value -= 1
+            self._reserved.value += 1
+            return True
+
+    def commit(self) -> None:
+        with self._condition:
+            self._reserved.value -= 1
+            self._condition.notify_all()
+
+    def release(self) -> None:
+        with self._condition:
+            self._reserved.value -= 1
+            self._remaining.value += 1
+            self._condition.notify_all()
+
+
 class TorchDataset(Dataset):
     """
     PyTorch Dataset implementation for reading Paimon table data.
@@ -92,6 +164,9 @@ class _BaseTorchIterDataset(IterableDataset):
         self.table_read = table_read
         self.splits = splits
         self.field_names = [field.name for field in table_read.read_type]
+        self._shared_limit = (
+            _SharedLimit(table_read.limit) if table_read.limit is not None else None
+        )
 
     def _row_to_dict(self, offset_row) -> dict:
         row_dict = {}
@@ -118,6 +193,41 @@ class _BaseTorchIterDataset(IterableDataset):
             end_idx = start_idx + splits_per_worker
 
         return self.splits[start_idx:end_idx]
+
+    def _begin_iteration(self, worker_info) -> None:
+        if self._shared_limit is not None:
+            participants = worker_info.num_workers if worker_info is not None else 1
+            self._shared_limit.begin_iteration(participants)
+
+    def _end_iteration(self) -> None:
+        if self._shared_limit is not None:
+            self._shared_limit.end_iteration()
+
+    def _next_row(self, row_iter):
+        if self._shared_limit is None:
+            try:
+                return next(row_iter)
+            except StopIteration:
+                return _ITERATOR_EXHAUSTED
+
+        if not self._shared_limit.reserve():
+            return _LIMIT_EXHAUSTED
+        try:
+            row = next(row_iter)
+        except StopIteration:
+            self._shared_limit.release()
+            return _ITERATOR_EXHAUSTED
+        except BaseException:
+            self._shared_limit.release()
+            raise
+        self._shared_limit.commit()
+        return row
+
+    @staticmethod
+    def _close_iterator(row_iter) -> None:
+        close = getattr(row_iter, "close", None)
+        if close is not None:
+            close()
 
 
 class TorchIterDataset(_BaseTorchIterDataset):
@@ -163,16 +273,24 @@ class TorchIterDataset(_BaseTorchIterDataset):
         """
         worker_info = torch.utils.data.get_worker_info()
         splits_to_process = self._worker_splits(worker_info)
+        self._begin_iteration(worker_info)
+        try:
+            if self.prefetch_concurrency > 1:
+                for row in self._iter_rows(splits_to_process):
+                    yield row
+                return
 
-        if self.prefetch_concurrency > 1:
-            for row in self._iter_rows(splits_to_process):
-                yield row
-            return
-
-        worker_iterator = self.table_read.to_iterator(splits_to_process)
-
-        for offset_row in worker_iterator:
-            yield self._row_to_dict(offset_row)
+            worker_iterator = self.table_read.to_iterator(splits_to_process)
+            try:
+                while True:
+                    offset_row = self._next_row(worker_iterator)
+                    if offset_row is _ITERATOR_EXHAUSTED or offset_row is _LIMIT_EXHAUSTED:
+                        return
+                    yield self._row_to_dict(offset_row)
+            finally:
+                self._close_iterator(worker_iterator)
+        finally:
+            self._end_iteration()
 
     def _iter_rows(self, splits: List[Split]):
         n = min(self.prefetch_concurrency, len(splits))
@@ -193,9 +311,13 @@ class TorchIterDataset(_BaseTorchIterDataset):
             return False
 
         def producer(split_group: List):
+            row_iter = self.table_read.to_iterator(split_group)
             try:
-                for offset_row in self.table_read.to_iterator(split_group):
+                while True:
                     if stop.is_set():
+                        break
+                    offset_row = self._next_row(row_iter)
+                    if offset_row is _ITERATOR_EXHAUSTED or offset_row is _LIMIT_EXHAUSTED:
                         break
                     row_dict = self._row_to_dict(offset_row)
                     if not put_item(self._ROW, row_dict):
@@ -203,6 +325,8 @@ class TorchIterDataset(_BaseTorchIterDataset):
                 put_item(self._SENTINEL, None)
             except Exception as e:
                 put_item(self._ERR, e)
+            finally:
+                self._close_iterator(row_iter)
 
         threads = [threading.Thread(target=producer, args=(split_groups[i],), daemon=True)
                    for i in range(n)]
@@ -287,17 +411,27 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         worker_info = torch.utils.data.get_worker_info()
         worker_id = worker_info.id if worker_info is not None else 0
         splits_to_process = self._worker_splits(worker_info)
-
-        if self.max_buffer_input_splits == 1:
-            rows = self._iter_ordered_rows(splits_to_process)
-        else:
-            rows = self._iter_interleaved_rows(splits_to_process)
-        for row in self._iter_buffer_shuffled_rows(rows, worker_id):
-            yield row
+        self._begin_iteration(worker_info)
+        try:
+            if self.max_buffer_input_splits == 1:
+                rows = self._iter_ordered_rows(splits_to_process)
+            else:
+                rows = self._iter_interleaved_rows(splits_to_process)
+            for row in self._iter_buffer_shuffled_rows(rows, worker_id):
+                yield row
+        finally:
+            self._end_iteration()
 
     def _iter_ordered_rows(self, splits: List[Split]) -> Iterator[dict]:
-        for offset_row in self.table_read.to_iterator(splits):
-            yield self._row_to_dict(offset_row)
+        row_iter = self.table_read.to_iterator(splits)
+        try:
+            while True:
+                offset_row = self._next_row(row_iter)
+                if offset_row is _ITERATOR_EXHAUSTED or offset_row is _LIMIT_EXHAUSTED:
+                    return
+                yield self._row_to_dict(offset_row)
+        finally:
+            self._close_iterator(row_iter)
 
     def _iter_interleaved_rows(self, splits: List[Split]) -> Iterator[dict]:
         if not splits:
@@ -323,9 +457,10 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
                 if idx >= len(active):
                     idx = 0
                 row_iter = active[idx]
-                try:
-                    offset_row = next(row_iter)
-                except StopIteration:
+                offset_row = self._next_row(row_iter)
+                if offset_row is _LIMIT_EXHAUSTED:
+                    return
+                if offset_row is _ITERATOR_EXHAUSTED:
                     self._close_iterator(row_iter)
                     del active[idx]
                     add_next_split()
@@ -336,12 +471,6 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         finally:
             for row_iter in active:
                 self._close_iterator(row_iter)
-
-    @staticmethod
-    def _close_iterator(row_iter) -> None:
-        close = getattr(row_iter, "close", None)
-        if close is not None:
-            close()
 
     def _iter_buffer_shuffled_rows(
         self,
