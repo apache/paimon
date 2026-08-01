@@ -31,6 +31,7 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import DataField
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
 from pypaimon.table.row.offset_row import OffsetRow
+from pypaimon.table.row.projected_row import ProjectedRow
 
 
 def _check_filtered_result(read_builder, expected_df):
@@ -505,6 +506,17 @@ class PredicateTest(unittest.TestCase):
             predicate = Predicate(method=method, index=0, field='f0')
             with self.subTest(method=method):
                 self.assertTrue(predicate.test_by_simple_stats(stat, 10))
+
+    def test_by_simple_stats_with_projected_rows(self):
+        fields = [DataField(0, 'f0', 'INT'), DataField(1, 'f1', 'INT')]
+        row = GenericRow([1, 2], fields)
+        min_values = ProjectedRow.from_index_mapping([0]).replace_row(row)
+        max_values = ProjectedRow.from_index_mapping([0]).replace_row(row)
+        stat = SimpleStats(min_values, max_values, [0, 0])
+        predicate = Predicate(method='equal', index=1, field='f1', literals=[2])
+
+        self.assertEqual(len(min_values), 1)
+        self.assertTrue(predicate.test_by_simple_stats(stat, 10))
 
     def test_filter_with_null_and_or(self):
         p_gt = Predicate(method='greaterThan', index=1, field='score', literals=[10])

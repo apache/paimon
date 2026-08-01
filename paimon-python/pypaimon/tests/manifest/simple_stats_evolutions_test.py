@@ -17,6 +17,7 @@
 
 import unittest
 
+from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.schema.data_types import DataField, AtomicType
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -58,6 +59,39 @@ class SimpleStatsEvolutionsTest(unittest.TestCase):
         self.assertIsNone(evolved.min_values.get_field(2))
         self.assertIsNone(evolved.max_values.get_field(2))
         self.assertEqual(evolved.null_counts, [0, 5, 500])
+
+    def test_missing_null_counts_remain_unknown(self):
+        fields = self._make_fields([(0, 'a', 'INT'), (1, 'b', 'INT')])
+        schemas = {0: fields}
+        evolution = SimpleStatsEvolutions(
+            lambda sid: schemas[sid], 0).get_or_create(0)
+        stats = SimpleStats(GenericRow([], []), GenericRow([], []), [])
+        predicate = Predicate(method='isNull', index=0, field='a')
+
+        for stats_fields in ([], ['a', 'b']):
+            evolved = evolution.evolution(
+                stats, row_count=100, stats_fields=stats_fields)
+            with self.subTest(stats_fields=stats_fields):
+                self.assertEqual(evolved.null_counts, [None, None])
+                self.assertTrue(predicate.test_by_simple_stats(evolved, 100))
+
+    def test_schema_evolution_preserves_unknown_null_counts(self):
+        data_fields = self._make_fields([(0, 'a', 'INT')])
+        table_fields = self._make_fields([(0, 'a', 'INT'), (1, 'b', 'INT')])
+        schemas = {0: data_fields, 1: table_fields}
+        evolution = SimpleStatsEvolutions(
+            lambda sid: schemas[sid], 1).get_or_create(0)
+        stats = SimpleStats(
+            GenericRow([1], data_fields), GenericRow([10], data_fields), [])
+
+        evolved = evolution.evolution(
+            stats, row_count=100, stats_fields=None)
+
+        self.assertEqual(evolved.null_counts, [None, 100])
+        self.assertTrue(
+            Predicate(method='isNull', index=0, field='a')
+            .test_by_simple_stats(evolved, 100)
+        )
 
     def test_dropped_column(self):
         """Dropped column is excluded from mapping."""

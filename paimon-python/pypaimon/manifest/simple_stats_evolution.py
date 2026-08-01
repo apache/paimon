@@ -37,7 +37,7 @@ class SimpleStatsEvolution:
 
         # Create empty values for optimization
         self.empty_values = GenericRow([None] * len(self.field_names), data_fields)
-        self.empty_null_counts = [0] * len(self.field_names)
+        self.empty_null_counts = [None] * len(self.field_names)
 
     def evolution(self, stats: SimpleStats, row_count: Optional[int],
                   stats_fields: Optional[List[str]]) -> 'SimpleStats':
@@ -95,28 +95,30 @@ class SimpleStatsEvolution:
         projected_row = ProjectedRow.from_index_mapping(index_mapping)
         return projected_row.replace_row(row)
 
-    def _project_array(self, array: List[Any], index_mapping: List[int]) -> List[Any]:
+    def _project_array(self, array: Optional[List[Any]], index_mapping: List[int]) -> List[Any]:
         """Project array based on index mapping."""
         if not array:
-            return [0] * len(index_mapping)
+            return [None] * len(index_mapping)
 
         projected = []
         for mapped_index in index_mapping:
             if mapped_index >= 0 and mapped_index < len(array):
                 projected.append(array[mapped_index])
             else:
-                projected.append(0)  # Default value for missing fields
+                projected.append(None)
 
         return projected
 
-    def _evolve_null_counts(self, null_counts: List[Any], index_mapping: List[int],
+    def _evolve_null_counts(self, null_counts: Optional[List[Any]], index_mapping: List[int],
                             not_found_value: int) -> List[Any]:
         """Evolve null counts with schema evolution mapping."""
         evolved = []
         for mapped_index in index_mapping:
-            if mapped_index >= 0 and mapped_index < len(null_counts):
+            if mapped_index < 0:
+                evolved.append(not_found_value)
+            elif null_counts is not None and mapped_index < len(null_counts):
                 evolved.append(null_counts[mapped_index])
             else:
-                evolved.append(not_found_value)  # Use row count for missing fields
+                evolved.append(None)
 
         return evolved
