@@ -1595,6 +1595,17 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testBucketKeyWithDynamicBucket() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET_KEY.key(), "f1");
+
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Cannot define 'bucket-key' with bucket = -1, please remove the 'bucket-key' setting or specify a bucket number.");
+    }
+
+    @Test
     public void testMergeOnReadIgnoredWhenDvDisabled() {
         Map<String, String> options = new HashMap<>();
         options.put("deletion-vectors.merge-on-read", "true");
