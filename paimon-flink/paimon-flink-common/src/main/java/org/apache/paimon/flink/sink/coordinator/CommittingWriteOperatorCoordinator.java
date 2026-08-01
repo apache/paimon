@@ -63,8 +63,9 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * {@link OperatorCoordinator} that runs the Paimon committer on the JobManager for the
  * unaware-bucket append write path. Writers stream per-checkpoint committables to this coordinator
  * over the {@link OperatorEvent} channel; on {@link #notifyCheckpointComplete} the coordinator
- * aligns committables across subtasks and commits them from a dedicated single-thread executor, so
- * the JM main thread is never blocked by table I/O.
+ * aligns and commits ordinary committables. Once all writers report end input, the coordinator
+ * commits the final committables directly without waiting for another checkpoint. All commits run
+ * in a dedicated single-thread executor, so the JM main thread is never blocked by table I/O.
  *
  * <p>Wrap this class with a {@link RecreateOnResetOperatorCoordinator} (see {@link Provider}). The
  * wrapper discards this instance on global failover and creates a new one in its place, which keeps
@@ -359,7 +360,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
             }
             updateSubtaskCommittables(
                     subtask, WriterCommittables.from(event, committablesSerializer));
-            commitEndInputIfCheckpointDisabled();
+            commitEndInputIfReady();
         } else {
             throw new IllegalStateException(
                     "Illegal state " + state + " while handling committable event " + event);
@@ -389,7 +390,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                 // region failover will reset
                 updateSubtaskCommittables(
                         subtask, new WriterCommittables(restored.getEndInputCommittables()));
-                commitEndInputIfCheckpointDisabled();
+                commitEndInputIfReady();
             } else {
                 LOG.info(
                         "Ignore restore committables from subtask {} of checkpoint {}, coordinator is running.",
@@ -431,8 +432,8 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         return true;
     }
 
-    private void commitEndInputIfCheckpointDisabled() throws Exception {
-        if (streamingCheckpointEnabled || endInputCommitted || !allSubtasksEndInput()) {
+    private void commitEndInputIfReady() throws Exception {
+        if (endInputCommitted || !allSubtasksEndInput()) {
             return;
         }
 

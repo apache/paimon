@@ -249,12 +249,40 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
         coordinator.handleEventFromOperator(1, 0, event(committable(table, Long.MAX_VALUE, 5)));
         coordinator.waitProcessAllActions();
-        // Streaming mode still waits for a completed checkpoint before the final commit.
-        assertResults(table, "1, 1", "2, 2", "4, 4");
+        // Once all subtasks reach end input, the final commit does not depend on another
+        // checkpoint completion.
+        assertResults(table, "1, 1", "2, 2", "3, 3", "4, 4", "5, 5");
 
         coordinator.notifyCheckpointComplete(3L);
         coordinator.waitProcessAllActions();
         assertResults(table, "1, 1", "2, 2", "3, 3", "4, 4", "5, 5");
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testCheckpointCompletionBeforeEndInputEventTriggersFailover() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 1);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        coordinator.handleEventFromOperator(0, 0, event(committable(table, 1L, 1)));
+        coordinator.notifyCheckpointComplete(1L);
+        coordinator.waitProcessAllActions();
+        assertResults(table, "1, 1");
+
+        // Model a final checkpoint completion overtaking the END_INPUT event. The writer has
+        // completed checkpoint 2, but its event is still in transit when the coordinator receives
+        // the completion notification.
+        coordinator.notifyCheckpointComplete(2L);
+        coordinator.handleEventFromOperator(0, 0, event(committable(table, Long.MAX_VALUE, 2)));
+        coordinator.waitProcessAllActions();
+
+        assertThat(failureCause).isInstanceOf(IllegalStateException.class);
+        assertThat(failureCause).hasMessageContaining("Not all committables reported by writer");
+        failureCause = null;
         coordinator.close();
     }
 
@@ -271,7 +299,6 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         coordinator.handleEventFromOperator(0, 0, repeated);
         coordinator.handleEventFromOperator(0, 0, repeated);
         coordinator.handleEventFromOperator(1, 0, event(committable(table, Long.MAX_VALUE, 2)));
-        coordinator.notifyCheckpointComplete(1L);
         coordinator.waitProcessAllActions();
 
         assertThat(failureCause).isNull();
@@ -313,23 +340,10 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
-    public void testCloseDrainsCheckpointDisabledEndInputCommit() throws Exception {
+    public void testCloseDrainsDirectEndInputCommit() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         TestingContext context = new TestingContext(new OperatorID(), 2);
-        CommittingWriteOperatorCoordinator coordinator =
-                new CommittingWriteOperatorCoordinator(
-                        context,
-                        commitContext ->
-                                new StoreCommitter(
-                                        table,
-                                        table.newStreamWriteBuilder()
-                                                .withCommitUser(commitContext.commitUser())
-                                                .newCommit(),
-                                        commitContext),
-                        false,
-                        commitUser,
-                        false,
-                        null);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
         coordinator.start();
         coordinator.waitProcessAllActions();
 
@@ -353,7 +367,6 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
         coordinator.handleEventFromOperator(0, 0, event(committable(table, Long.MAX_VALUE, 1)));
         coordinator.handleEventFromOperator(1, 0, event(committable(table, Long.MAX_VALUE, 2)));
-        coordinator.notifyCheckpointComplete(1L);
         coordinator.waitProcessAllActions();
         assertResults(table, "1, 1", "2, 2");
 
@@ -391,9 +404,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                                 Long.MIN_VALUE)));
         coordinator.handleEventFromOperator(1, 0, event(committable(table, Long.MAX_VALUE, 2)));
         coordinator.waitProcessAllActions();
-        // Streaming mode must still wait for a completed checkpoint after replay reaches global
-        // EndInput.
-        assertThat(table.latestSnapshot()).isNotPresent();
+        assertResults(table, "1, 1", "2, 2");
 
         coordinator.notifyCheckpointComplete(2L);
         coordinator.waitProcessAllActions();
@@ -403,8 +414,7 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
-    public void testPartialFailoverWhileAllSubtasksEndInputWaitForCheckpointComplete()
-            throws Exception {
+    public void testPartialFailoverAfterAllSubtasksEndInputCommitted() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         TestingContext context = new TestingContext(new OperatorID(), 2);
         CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context, false);
@@ -421,15 +431,14 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         assertResults(table, "2, 2");
         assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
 
-        // The last running subtask now reaches EndInput. All subtasks are at EndInput, but
-        // streaming mode must wait for the next completed checkpoint before the final commit.
+        // The last running subtask now reaches EndInput, which triggers the final commit directly.
         coordinator.handleEventFromOperator(1, 0, event(committable(table, Long.MAX_VALUE, 3)));
         coordinator.waitProcessAllActions();
-        assertResults(table, "2, 2");
-        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+        assertResults(table, "1, 1", "2, 2", "3, 3");
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(2);
 
-        // While waiting for checkpoint completion, subtask 0 fails and restores its MAX entry from
-        // checkpoint 1. Rebuilding allSubtasksEndInput must not commit eagerly in streaming mode.
+        // A subsequent partial failover may replay a MAX entry from checkpoint 1. The coordinator
+        // must ignore it because the final commit has already completed.
         coordinator.executionAttemptFailed(0, 0, new Exception("Fail subtask 0 as expected"));
         coordinator.executionAttemptReady(0, 1, new MockSubtaskGateway());
         coordinator.subtaskReset(0, 1L);
@@ -446,8 +455,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         coordinator.waitProcessAllActions();
 
         assertThat(failureCause).isNull();
-        assertResults(table, "2, 2");
-        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+        assertResults(table, "1, 1", "2, 2", "3, 3");
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(2);
 
         coordinator.notifyCheckpointComplete(2L);
         coordinator.waitProcessAllActions();
@@ -476,8 +485,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         assertResults(table, "2, 2", "3, 3");
 
         coordinator.handleEventFromOperator(1, 0, event(committable(table, Long.MAX_VALUE, 4)));
-        coordinator.notifyCheckpointComplete(3L);
         coordinator.waitProcessAllActions();
+        // The last EndInput event commits MAX directly without another completed checkpoint.
         assertResults(table, "1, 1", "2, 2", "3, 3", "4, 4");
         coordinator.close();
     }
@@ -538,14 +547,14 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         Committable checkpointedSubtaskOne = committable(table, Long.MAX_VALUE, 2);
 
         // The coordinator checkpoint is persisted, but its completion callback is lost when the
-        // JM fails. Both writers have already snapshotted EndInput into this checkpoint.
+        // JM fails. Both writers have already snapshotted EndInput into their operator state, while
+        // only writer-0's event reaches the old coordinator before the JM failure.
         CommittingWriteOperatorCoordinator first = createCoordinator(table, context, true);
         first.start();
         first.waitProcessAllActions();
         CompletableFuture<byte[]> checkpoint = new CompletableFuture<>();
         first.checkpointCoordinator(1L, checkpoint);
         first.handleEventFromOperator(0, 0, event(checkpointedSubtaskZero));
-        first.handleEventFromOperator(1, 0, event(checkpointedSubtaskOne));
         first.waitProcessAllActions();
         byte[] state = checkpoint.get();
         assertResults(table);
@@ -676,11 +685,10 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         assertThat(failureCause).isNull();
         assertResults(table, "2, 2");
 
-        // The retained MAX is committed only after writer-1 reaches EndInput and a later streaming
-        // checkpoint completes.
+        // The retained MAX is committed as soon as writer-1 also reaches EndInput.
         second.handleEventFromOperator(1, 1, event(committable(table, Long.MAX_VALUE, 3)));
         second.waitProcessAllActions();
-        assertResults(table, "2, 2");
+        assertResults(table, "1, 1", "2, 2", "3, 3");
         second.notifyCheckpointComplete(2L);
         second.waitProcessAllActions();
         assertThat(failureCause).isNull();
@@ -744,8 +752,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         assertResults(table, "1, 1", "2, 2");
 
         second.handleEventFromOperator(1, 1, event(committable(table, Long.MAX_VALUE, 4)));
-        second.notifyCheckpointComplete(2L);
         second.waitProcessAllActions();
+        // The retained MAX is committed by the last EndInput event, without another checkpoint.
         assertResults(table, "1, 1", "2, 2", "3, 3", "4, 4");
         second.close();
     }
