@@ -28,6 +28,7 @@ import pyarrow.dataset as ds
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.schema.data_types import DataField
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
 from pypaimon.table.row.offset_row import OffsetRow
 
@@ -442,6 +443,68 @@ class PredicateTest(unittest.TestCase):
             null_counts=[3],
         )
         self.assertTrue(pred.test_by_simple_stats(stat_positive, 10))
+
+    def test_by_simple_stats_with_incomplete_fields(self):
+        fields = [DataField(0, 'f0', 'INT'), DataField(1, 'f1', 'INT')]
+        predicate = Predicate(method='equal', index=1, field='f1', literals=[15])
+        stats = [
+            SimpleStats(
+                min_values=GenericRow([1], fields[:1]),
+                max_values=GenericRow([10, 20], fields),
+                null_counts=[0, 0],
+            ),
+            SimpleStats(
+                min_values=GenericRow([1, 2], fields),
+                max_values=GenericRow([10], fields[:1]),
+                null_counts=[0, 0],
+            ),
+            SimpleStats(
+                min_values=GenericRow([1], fields[:1]),
+                max_values=GenericRow([10], fields[:1]),
+                null_counts=[0],
+            ),
+        ]
+
+        for stat in stats:
+            with self.subTest(stat=stat):
+                self.assertTrue(predicate.test_by_simple_stats(stat, 10))
+
+    def test_by_simple_stats_without_null_counts(self):
+        fields = [DataField(0, 'f0', 'INT')]
+        predicate = Predicate(method='equal', index=0, field='f0', literals=[20])
+        for null_counts in (None, []):
+            stat = SimpleStats(
+                min_values=GenericRow([1], fields),
+                max_values=GenericRow([10], fields),
+                null_counts=null_counts,
+            )
+            with self.subTest(null_counts=null_counts):
+                self.assertFalse(predicate.test_by_simple_stats(stat, 10))
+
+    def test_by_simple_stats_with_invalid_index(self):
+        fields = [DataField(0, 'f0', 'INT')]
+        stat = SimpleStats(
+            min_values=GenericRow([1], fields),
+            max_values=GenericRow([10], fields),
+            null_counts=[0],
+        )
+        for index in (None, -1):
+            predicate = Predicate(
+                method='equal', index=index, field='_ROW_ID', literals=[5])
+            with self.subTest(index=index):
+                self.assertTrue(predicate.test_by_simple_stats(stat, 10))
+
+    def test_by_simple_stats_null_predicate_without_null_counts(self):
+        fields = [DataField(0, 'f0', 'INT')]
+        stat = SimpleStats(
+            min_values=GenericRow([1], fields),
+            max_values=GenericRow([10], fields),
+            null_counts=None,
+        )
+        for method in ('isNull', 'isNotNull'):
+            predicate = Predicate(method=method, index=0, field='f0')
+            with self.subTest(method=method):
+                self.assertTrue(predicate.test_by_simple_stats(stat, 10))
 
     def test_filter_with_null_and_or(self):
         p_gt = Predicate(method='greaterThan', index=1, field='score', literals=[10])
