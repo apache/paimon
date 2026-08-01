@@ -117,6 +117,11 @@ jobs:
               sample_data = "pypaimon/sample/data/data.jsonl"
               if prefix + sample_data not in names:
                   raise SystemExit("Missing sample data from sdist")
+              for forbidden in ("pypaimon/tests/", "pypaimon/acceptance/"):
+                  if any(name.startswith(prefix + forbidden) for name in names):
+                      raise SystemExit(
+                          "Test content must not be packaged: {}".format(forbidden)
+                      )
 
           with zipfile.ZipFile(wheels[0]) as archive:
               names = archive.namelist()
@@ -132,6 +137,11 @@ jobs:
                   raise SystemExit("Wheel is missing LICENSE or NOTICE")
               if "pypaimon/sample/data/data.jsonl" not in names:
                   raise SystemExit("Wheel is missing sample data")
+              for forbidden in ("pypaimon/tests/", "pypaimon/acceptance/"):
+                  if any(name.startswith(forbidden) for name in names):
+                      raise SystemExit(
+                          "Test content must not be packaged: {}".format(forbidden)
+                      )
           PY
 
       - name: Upload PyPaimon distributions
