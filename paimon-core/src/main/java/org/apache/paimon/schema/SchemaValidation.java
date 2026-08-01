@@ -1197,7 +1197,7 @@ public class SchemaValidation {
         int bucket = options.bucket();
         if (bucket == -1) {
             if (options.toMap().get(BUCKET_KEY.key()) != null) {
-                throw new RuntimeException(
+                throw new IllegalArgumentException(
                         "Cannot define 'bucket-key' with bucket = -1, please remove the 'bucket-key' setting or specify a bucket number.");
             }
 
