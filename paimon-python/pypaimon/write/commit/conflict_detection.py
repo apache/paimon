@@ -170,6 +170,27 @@ class RowIdExistenceConflict(RuntimeError):
                 entry.bucket))
 
 
+def row_id_file_signature(partition, bucket, data_file):
+    values = (
+        tuple(partition.values)
+        if hasattr(partition, "values") else tuple(partition)
+    )
+    return (
+        values,
+        bucket,
+        data_file.level,
+        data_file.file_name,
+        tuple(data_file.extra_files) if data_file.extra_files else (),
+        data_file.embedded_index,
+        data_file.external_path,
+        data_file.first_row_id,
+        data_file.row_count,
+        data_file.schema_id,
+        tuple(data_file.write_cols)
+        if data_file.write_cols is not None else None,
+    )
+
+
 class ConflictDetection:
     """Detects conflicts between base and delta files during commit."""
 
@@ -180,7 +201,87 @@ class ConflictDetection:
         self.manifest_list_manager = manifest_list_manager
         self.table = table
         self._row_id_check_from_snapshot = None
+        self._planned_row_id_ranges = []
+        self._planned_row_id_signatures = set()
+        self._rewrite_checkpoint = None
+        self._rewrite_commit_user = None
         self.commit_scanner = commit_scanner
+
+    def protect_from_external_rewrites(
+            self, checkpoint_snapshot, commit_user):
+        self._rewrite_checkpoint = checkpoint_snapshot
+        self._rewrite_commit_user = commit_user
+
+    def check_external_rewrites(self, latest_snapshot):
+        checkpoint = self._rewrite_checkpoint
+        if checkpoint is None:
+            return None
+        if latest_snapshot is None or latest_snapshot.id < checkpoint.id:
+            return RuntimeError(
+                "Offset checkpoint is no longer in the snapshot lineage.")
+        if latest_snapshot.id == checkpoint.id:
+            if self._same_snapshot(checkpoint, latest_snapshot):
+                return None
+            return RuntimeError("Offset checkpoint snapshot was replaced.")
+
+        snapshot_manager = self.table.snapshot_manager()
+        for snapshot_id in range(checkpoint.id + 1, latest_snapshot.id + 1):
+            snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                return RuntimeError(
+                    "Cannot validate external rewrites because snapshot "
+                    "{} expired.".format(snapshot_id))
+            if snapshot.commit_user == self._rewrite_commit_user:
+                continue
+            if snapshot.schema_id != checkpoint.schema_id:
+                return RuntimeError(
+                    "Target schema changed during the offset update.")
+            if snapshot.commit_kind == "COMPACT":
+                continue
+            if (snapshot.commit_kind == "OVERWRITE"
+                    or self.commit_scanner.snapshot_deletes_files(snapshot)):
+                return RuntimeError(
+                    "Concurrent rewrite landed during the offset update.")
+        return None
+
+    def protect_planned_row_id_files(
+            self, row_id_ranges, file_signatures):
+        self._planned_row_id_ranges = Range.sort_and_merge_overlap(
+            list(row_id_ranges or []), True, True)
+        self._planned_row_id_signatures = set(file_signatures or [])
+
+    def clear_planned_row_id_files(self):
+        self._planned_row_id_ranges = []
+        self._planned_row_id_signatures = set()
+
+    def check_planned_row_id_files(self, latest_snapshot):
+        if not self._planned_row_id_ranges:
+            return None
+        latest_entries = self.commit_scanner.read_entries_for_row_id_ranges(
+            latest_snapshot, self._planned_row_id_ranges)
+        if (self._row_id_entry_signatures(latest_entries)
+                != self._planned_row_id_signatures):
+            return RuntimeError(
+                "Target files changed after the resumable update group "
+                "was planned.")
+        return None
+
+    @staticmethod
+    def _same_snapshot(left, right):
+        if left is None or right is None:
+            return left is right
+        if left.uuid is not None or right.uuid is not None:
+            return left.id == right.id and left.uuid == right.uuid
+        return left == right
+
+    @staticmethod
+    def _row_id_entry_signatures(entries):
+        return {
+            row_id_file_signature(
+                entry.partition, entry.bucket, entry.file)
+            for entry in entries
+            if entry.kind == 0
+        }
 
     def should_be_overwrite_commit(self, append_file_entries=None, append_index_files=None):
         for entry in append_file_entries or []:

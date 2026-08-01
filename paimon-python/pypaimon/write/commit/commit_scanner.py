@@ -18,6 +18,8 @@
 """
 Manifest entries scanner for commit operations.
 """
+import bisect
+import os
 from typing import Optional, List
 
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -25,8 +27,51 @@ from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
-from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.read.scanner.file_scanner import (
+    FileScanner,
+    _filter_manifest_files_by_row_ranges,
+)
 from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.utils.range import Range
+
+
+class _RowIdRangeScope:
+    """Table-global row-id ranges for planned update files."""
+
+    def __init__(self, row_id_ranges):
+        self.ranges = Range.sort_and_merge_overlap(
+            list(row_id_ranges or []), True, True)
+        self._range_ends = [row_range.to for row_range in self.ranges]
+
+    def is_empty(self):
+        return not self.ranges
+
+    def matches_record(self, record):
+        file_dict = record.get("_FILE")
+        if file_dict is None:
+            return False
+        first_row_id = file_dict.get("_FIRST_ROW_ID")
+        row_count = file_dict.get("_ROW_COUNT")
+        if first_row_id is None or row_count is None:
+            return False
+        return self.matches_values(
+            int(first_row_id),
+            int(first_row_id) + int(row_count) - 1,
+        )
+
+    def matches_entry(self, entry):
+        row_range = entry.file.row_id_range()
+        return (
+            row_range is not None
+            and self.matches_values(row_range.from_, row_range.to)
+        )
+
+    def matches_values(self, from_, to):
+        index = bisect.bisect_left(self._range_ends, from_)
+        return (
+            index < len(self.ranges)
+            and self.ranges[index].from_ <= to
+        )
 
 
 class CommitScanner:
@@ -73,6 +118,36 @@ class CommitScanner:
         return FileScanner(
             self.table, lambda: ([], None), partition_predicate=partition_filter
         ).read_manifest_entries(all_manifests)
+
+    def read_entries_for_row_id_ranges(
+            self,
+            snapshot: Optional[Snapshot],
+            row_id_ranges):
+        """Read live entries intersecting table-global row-id ranges."""
+        if snapshot is None:
+            return []
+
+        scope = _RowIdRangeScope(row_id_ranges)
+        if scope.is_empty():
+            return []
+
+        manifest_files = self.manifest_list_manager.read_all(snapshot)
+        manifest_files = _filter_manifest_files_by_row_ranges(
+            manifest_files, scope.ranges)
+        max_workers = self.table.options.scan_manifest_parallelism(
+            os.cpu_count() or 8)
+        return ManifestFileManager(self.table).read_entries_parallel(
+            manifest_files,
+            manifest_entry_filter=scope.matches_entry,
+            max_workers=max_workers,
+            early_record_filter=scope.matches_record,
+        )
+
+    def snapshot_deletes_files(self, snapshot: Snapshot) -> bool:
+        return any(
+            manifest.num_deleted_files > 0
+            for manifest in self.manifest_list_manager.read_delta(snapshot)
+        )
 
     def read_incremental_entries_from_changed_partitions(self,
                                                          snapshot: Snapshot,

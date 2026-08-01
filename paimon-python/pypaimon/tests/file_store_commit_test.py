@@ -59,6 +59,19 @@ class TestFileStoreCommit(unittest.TestCase):
             commit_user='test_user'
         )
 
+    def test_commit_metadata_allows_empty_snapshot(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        file_store_commit._try_commit = Mock()
+
+        file_store_commit.commit_metadata(42)
+
+        kwargs = file_store_commit._try_commit.call_args.kwargs
+        self.assertEqual("APPEND", kwargs["commit_kind"])
+        self.assertEqual(42, kwargs["commit_identifier"])
+        self.assertEqual([], kwargs["commit_entries_plan"](None))
+        self.assertTrue(kwargs["allow_empty"])
+
     def test_generate_partition_statistics_single_partition_single_file(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         """Test partition statistics generation with single partition and single file."""

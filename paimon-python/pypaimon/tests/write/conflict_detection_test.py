@@ -26,9 +26,11 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.range import Range
 from pypaimon.write.commit.conflict_detection import (
     ConflictDetection,
     RowIdColumnConflictChecker,
+    row_id_file_signature,
 )
 
 
@@ -314,10 +316,14 @@ class TestOverwriteConflictDetection(unittest.TestCase):
 
 class _FakeSnapshot:
 
-    def __init__(self, snapshot_id, commit_kind, next_row_id=None):
+    def __init__(self, snapshot_id, commit_kind, next_row_id=None,
+                 commit_user="external", schema_id=0, uuid=None):
         self.id = snapshot_id
         self.commit_kind = commit_kind
         self.next_row_id = next_row_id
+        self.commit_user = commit_user
+        self.schema_id = schema_id
+        self.uuid = uuid
 
 
 class _FakeSnapshotManager:
@@ -331,9 +337,12 @@ class _FakeSnapshotManager:
 
 class _FakeCommitScanner:
 
-    def __init__(self, entries_by_snapshot_id, raw_entries_by_snapshot_id=None):
+    def __init__(self, entries_by_snapshot_id, raw_entries_by_snapshot_id=None,
+                 range_entries=None, deleting_snapshot_ids=None):
         self._by_id = entries_by_snapshot_id
         self._raw_by_id = raw_entries_by_snapshot_id or {}
+        self._range_entries = range_entries or []
+        self._deleting_snapshot_ids = set(deleting_snapshot_ids or [])
 
     def read_incremental_entries_from_changed_partitions(self, snapshot, _):
         return self._by_id.get(snapshot.id, [])
@@ -341,11 +350,21 @@ class _FakeCommitScanner:
     def read_incremental_raw_entries_from_changed_partitions(self, snapshot, _):
         return self._raw_by_id.get(snapshot.id, self._by_id.get(snapshot.id, []))
 
+    def read_entries_for_row_id_ranges(self, snapshot, _):
+        return self._range_entries
+
+    def snapshot_deletes_files(self, snapshot):
+        return snapshot.id in self._deleting_snapshot_ids
+
 
 class _FakeTable:
 
-    def __init__(self, schema_manager):
+    def __init__(self, schema_manager, snapshot_manager=None):
         self.schema_manager = schema_manager
+        self._snapshot_manager = snapshot_manager
+
+    def snapshot_manager(self):
+        return self._snapshot_manager
 
 
 class TestCheckRowIdFromSnapshot(unittest.TestCase):
@@ -416,6 +435,67 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
                     [check_snap, compact_snap], {2: compact_entries})
                 self.assertIsNone(
                     detection.check_row_id_from_snapshot(compact_snap, delta))
+
+
+class TestResumableRowIdCommitGuards(unittest.TestCase):
+
+    @staticmethod
+    def _detection(snapshots, scanner):
+        snapshot_manager = _FakeSnapshotManager(snapshots)
+        return ConflictDetection(
+            data_evolution_enabled=True,
+            snapshot_manager=snapshot_manager,
+            manifest_list_manager=None,
+            table=_FakeTable(
+                _FakeSchemaManager([_DEFAULT_SCHEMA]), snapshot_manager),
+            commit_scanner=scanner,
+        )
+
+    def test_rejects_external_rewrite_after_checkpoint(self):
+        checkpoint = _FakeSnapshot(
+            1, "APPEND", commit_user="operation")
+        overwrite = _FakeSnapshot(2, "OVERWRITE")
+        detection = self._detection(
+            [checkpoint, overwrite], _FakeCommitScanner({}))
+        detection.protect_from_external_rewrites(
+            checkpoint, "operation")
+
+        result = detection.check_external_rewrites(overwrite)
+
+        self.assertIsNotNone(result)
+        self.assertIn("Concurrent rewrite", str(result))
+
+    def test_allows_own_snapshots_and_external_appends(self):
+        checkpoint = _FakeSnapshot(
+            1, "APPEND", commit_user="operation")
+        own = _FakeSnapshot(
+            2, "APPEND", commit_user="operation")
+        append = _FakeSnapshot(3, "APPEND")
+        detection = self._detection(
+            [checkpoint, own, append], _FakeCommitScanner({}))
+        detection.protect_from_external_rewrites(
+            checkpoint, "operation")
+
+        self.assertIsNone(detection.check_external_rewrites(append))
+
+    def test_rejects_changed_planned_files(self):
+        expected = _make_entry(
+            "expected", first_row_id=0, row_count=10)
+        scanner = _FakeCommitScanner(
+            {}, range_entries=[_make_entry(
+                "replacement", first_row_id=0, row_count=10)])
+        detection = self._detection([], scanner)
+        detection.protect_planned_row_id_files(
+            [Range(0, 9)],
+            {row_id_file_signature(
+                expected.partition, expected.bucket, expected.file)},
+        )
+
+        result = detection.check_planned_row_id_files(
+            _FakeSnapshot(1, "APPEND"))
+
+        self.assertIsNotNone(result)
+        self.assertIn("Target files changed", str(result))
 
 
 class TestRowIdColumnConflictChecker(unittest.TestCase):

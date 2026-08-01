@@ -100,3 +100,10 @@ class TestTableCommitEmptyOverwrite(unittest.TestCase):
             commit_messages=[],
             commit_identifier=42,
         )
+
+    def test_stream_commit_metadata(self):
+        commit, mock_fsc = self._create_commit(StreamTableCommit)
+
+        commit.commit_metadata(42)
+
+        mock_fsc.commit_metadata.assert_called_once_with(42)

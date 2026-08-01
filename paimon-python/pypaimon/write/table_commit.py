@@ -61,6 +61,22 @@ class TableCommit:
         """Register a callback to be invoked after each successful commit."""
         self._commit_callbacks.append(callback)
 
+    def with_snapshot_properties(self, properties):
+        self.file_store_commit.with_snapshot_properties(properties)
+        return self
+
+    def protect_planned_row_id_files(
+            self, row_id_ranges, file_signatures):
+        self.file_store_commit.protect_planned_row_id_files(
+            row_id_ranges, file_signatures)
+        return self
+
+    def protect_from_external_rewrites(
+            self, checkpoint_snapshot, commit_user):
+        self.file_store_commit.protect_from_external_rewrites(
+            checkpoint_snapshot, commit_user)
+        return self
+
     def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
 
@@ -146,3 +162,6 @@ class StreamTableCommit(TableCommit):
 
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
         self._commit(commit_messages, commit_identifier)
+
+    def commit_metadata(self, commit_identifier: int):
+        self.file_store_commit.commit_metadata(commit_identifier)
