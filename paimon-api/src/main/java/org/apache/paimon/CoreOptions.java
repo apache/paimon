@@ -1397,8 +1397,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to skip compacting partitions that are already expired "
                                     + "according to 'partition.expiration-time'. "
-                                    + "Only effective when 'partition.expiration-time' is set "
-                                    + "and 'partition.expiration-strategy' is 'values-time'. "
+                                    + "Only effective when 'partition.expiration-time' is set. "
                                     + "Note: even when this option is enabled, expired partitions "
                                     + "may still be deleted during the compaction commit phase "
                                     + "as a side effect of partition expiration triggered by "

@@ -36,6 +36,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
@@ -45,6 +46,7 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -171,17 +173,25 @@ public class CompactorSourceBuilder {
             }
             dataStream = new DataStreamSource<>(filterStream);
         }
+        return applySkipExpiredPartitionsFilter(dataStream, compactBucketsTable);
+    }
+
+    private DataStreamSource<RowData> applySkipExpiredPartitionsFilter(
+            DataStreamSource<RowData> dataStream, CompactBucketsTable compactBucketsTable) {
         CoreOptions coreOptions = table.coreOptions();
-        if (coreOptions.compactionSkipExpiredPartitions()
-                && coreOptions.partitionExpireTime() != null
-                && CoreOptions.PartitionExpireStrategy.VALUES_TIME
-                        .toString()
-                        .equals(coreOptions.partitionExpireStrategy())) {
+        if (!coreOptions.compactionSkipExpiredPartitions()
+                || coreOptions.partitionExpireTime() == null) {
+            return dataStream;
+        }
+
+        Duration expireTime = coreOptions.partitionExpireTime();
+        String strategy = coreOptions.partitionExpireStrategy();
+        SingleOutputStreamOperator<RowData> filterStream;
+        if (CoreOptions.PartitionExpireStrategy.VALUES_TIME.toString().equals(strategy)) {
             RowType partitionType = table.schema().logicalPartitionType();
-            Duration expireTime = coreOptions.partitionExpireTime();
             PartitionValuesTimeExpireStrategy expireStrategy =
                     new PartitionValuesTimeExpireStrategy(coreOptions, partitionType);
-            SingleOutputStreamOperator<RowData> filterStream =
+            filterStream =
                     dataStream.filter(
                             rowData -> {
                                 LocalDateTime expireDateTime =
@@ -189,12 +199,24 @@ public class CompactorSourceBuilder {
                                 BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
                                 return !expireStrategy.isExpired(expireDateTime, partition);
                             });
-            if (parallelism != null) {
-                filterStream.setParallelism(parallelism);
+        } else if (CoreOptions.PartitionExpireStrategy.UPDATE_TIME.toString().equals(strategy)) {
+            if (isContinuous) {
+                filterStream =
+                        dataStream.filter(
+                                new UpdateTimePartitionFilter(
+                                        expireTime, () -> getPartitionInfo(compactBucketsTable)));
+            } else {
+                final Map<BinaryRow, Long> partitionInfo = getPartitionInfo(compactBucketsTable);
+                filterStream =
+                        dataStream.filter(
+                                rowData -> shouldKeepPartition(rowData, expireTime, partitionInfo));
             }
-            dataStream = new DataStreamSource<>(filterStream);
+        } else {
+            return dataStream;
         }
-        return dataStream;
+
+        filterStream.setParallelism(dataStream.getParallelism());
+        return new DataStreamSource<>(filterStream);
     }
 
     private Map<String, String> streamingCompactOptions() {
@@ -295,12 +317,61 @@ public class CompactorSourceBuilder {
         }
     }
 
-    private Map<BinaryRow, Long> getPartitionInfo(CompactBucketsTable table) {
+    private static Map<BinaryRow, Long> getPartitionInfo(CompactBucketsTable table) {
         List<PartitionEntry> partitions = table.newSnapshotReader().partitionEntries();
 
         return partitions.stream()
                 .collect(
                         Collectors.toMap(
                                 PartitionEntry::partition, PartitionEntry::lastFileCreationTime));
+    }
+
+    private static boolean shouldKeepPartition(
+            RowData rowData, Duration expireTime, Map<BinaryRow, Long> partitionInfo) {
+        long expireMilli =
+                LocalDateTime.now()
+                        .minus(expireTime)
+                        .atZone(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli();
+        BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
+        Long lastUpdateTime = partitionInfo.get(partition);
+        return shouldKeepPartition(lastUpdateTime, expireMilli);
+    }
+
+    static boolean shouldKeepPartition(@Nullable Long lastUpdateTime, long expireMilli) {
+        return lastUpdateTime == null || lastUpdateTime >= expireMilli;
+    }
+
+    @FunctionalInterface
+    interface PartitionInfoLoader extends Serializable {
+
+        Map<BinaryRow, Long> load();
+    }
+
+    static class UpdateTimePartitionFilter implements FilterFunction<RowData> {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Duration expireTime;
+        private final PartitionInfoLoader partitionInfoLoader;
+
+        private transient long cachedSnapshotId = Long.MIN_VALUE;
+        private transient Map<BinaryRow, Long> partitionInfo;
+
+        UpdateTimePartitionFilter(Duration expireTime, PartitionInfoLoader partitionInfoLoader) {
+            this.expireTime = expireTime;
+            this.partitionInfoLoader = partitionInfoLoader;
+        }
+
+        @Override
+        public boolean filter(RowData rowData) {
+            long snapshotId = rowData.getLong(0);
+            if (partitionInfo == null || cachedSnapshotId != snapshotId) {
+                partitionInfo = partitionInfoLoader.load();
+                cachedSnapshotId = snapshotId;
+            }
+            return shouldKeepPartition(rowData, expireTime, partitionInfo);
+        }
     }
 }

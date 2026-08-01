@@ -454,16 +454,15 @@ Example: compact historical partitions for tables in database
 
 ## Skip Expired Partitions in Compaction Job
 
-When [partition expiration](./manage-partitions#expiring-partitions) is configured with
-`partition.expiration-strategy = values-time`, a compaction job may waste resources compacting
-partitions that are already expired and will soon be deleted.
+When [partition expiration](./manage-partitions#expiring-partitions) is configured, a compaction job
+may waste resources compacting partitions that are already expired and will soon be deleted.
 
 You can set `compaction.skip-expired-partitions = true` to make the compaction job skip these
 already-expired partitions, avoiding unnecessary compaction work on data that will be deleted shortly.
 
 :::info
 
-This option requires `partition.expiration-strategy = values-time` to be configured on the table.
+This option supports both `values-time` and `update-time` partition expiration strategies.
 It only supports primary key tables with fixed or dynamic bucket mode. Unaware bucket (append-only) tables
 and `compact_database` in `combined` mode are not supported — the option will be silently ignored in those cases.
 

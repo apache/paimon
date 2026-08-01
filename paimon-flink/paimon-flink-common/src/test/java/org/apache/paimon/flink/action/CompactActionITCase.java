@@ -24,6 +24,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -1001,6 +1002,74 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
     @Test
     @Timeout(60)
+    public void testSkipExpiredPartitionsWithUpdateTime() throws Exception {
+        String expiredPartition = "expired";
+        String activePartition = "active";
+
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), "7 d");
+        tableOptions.put(
+                CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(),
+                CoreOptions.PartitionExpireStrategy.UPDATE_TIME.toString());
+        // Prevent partition expiration from running during the compact commit.
+        tableOptions.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "999 d");
+
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("dt"),
+                        Arrays.asList("dt", "k"),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        long expiredCreationTime = System.currentTimeMillis() - Duration.ofDays(30).toMillis();
+        writeDataWithCreationTime(
+                0L,
+                expiredPartition,
+                expiredCreationTime,
+                rowData(1, 100, 15, BinaryString.fromString(expiredPartition)),
+                rowData(1, 100, 15, BinaryString.fromString(activePartition)));
+        writeDataWithCreationTime(
+                1L,
+                expiredPartition,
+                expiredCreationTime,
+                rowData(2, 100, 15, BinaryString.fromString(expiredPartition)),
+                rowData(2, 100, 15, BinaryString.fromString(activePartition)));
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+
+        CompactAction action =
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--table_conf",
+                        CoreOptions.COMPACTION_SKIP_EXPIRED_PARTITIONS.key() + "=true");
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        action.withStreamExecutionEnvironment(env).build();
+        env.execute();
+
+        checkLatestSnapshot(table, 3, Snapshot.CommitKind.COMPACT);
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        for (DataSplit split : splits) {
+            String partition = split.partition().getString(0).toString();
+            if (partition.equals(activePartition)) {
+                assertThat(split.dataFiles()).hasSize(1);
+            } else {
+                assertThat(partition).isEqualTo(expiredPartition);
+                assertThat(split.dataFiles()).hasSize(2);
+            }
+        }
+    }
+
+    @Test
+    @Timeout(60)
     public void testNotSkipExpiredPartitionsByDefault() throws Exception {
         String expiredDt =
                 LocalDate.now().minusDays(30).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
@@ -1055,6 +1124,58 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         for (DataSplit split : splits) {
             assertThat(split.dataFiles().size()).isEqualTo(1);
         }
+    }
+
+    private void writeDataWithCreationTime(
+            long commitIdentifier, String partition, long creationTime, InternalRow... data)
+            throws Exception {
+        for (InternalRow row : data) {
+            write.write(row);
+        }
+        List<CommitMessage> commitMessages = write.prepareCommit(true, commitIdentifier);
+        commitMessages.stream()
+                .map(CommitMessageImpl.class::cast)
+                .filter(message -> message.partition().getString(0).toString().equals(partition))
+                .forEach(
+                        message -> {
+                            List<DataFileMeta> newFiles =
+                                    new ArrayList<>(message.newFilesIncrement().newFiles());
+                            message.newFilesIncrement().newFiles().clear();
+                            message.newFilesIncrement()
+                                    .newFiles()
+                                    .addAll(
+                                            newFiles.stream()
+                                                    .map(
+                                                            file ->
+                                                                    copyWithCreationTime(
+                                                                            file, creationTime))
+                                                    .collect(Collectors.toList()));
+                        });
+        commit.commit(commitIdentifier, commitMessages);
+    }
+
+    private static DataFileMeta copyWithCreationTime(DataFileMeta file, long creationTime) {
+        return DataFileMeta.create(
+                file.fileName(),
+                file.fileSize(),
+                file.rowCount(),
+                file.minKey(),
+                file.maxKey(),
+                file.keyStats(),
+                file.valueStats(),
+                file.minSequenceNumber(),
+                file.maxSequenceNumber(),
+                file.schemaId(),
+                file.level(),
+                file.extraFiles(),
+                Timestamp.fromEpochMillis(creationTime),
+                file.deleteRowCount().orElse(null),
+                file.embeddedIndex(),
+                file.fileSource().orElse(null),
+                file.valueStatsCols(),
+                file.externalPath().orElse(null),
+                file.firstRowId(),
+                file.writeCols());
     }
 
     private void setFirstRowId(List<CommitMessage> commitables, long firstRowId) {

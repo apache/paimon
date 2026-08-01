@@ -26,13 +26,17 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.source.DataSplit;
 
+import org.apache.flink.table.data.GenericRowData;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -117,6 +121,36 @@ public class CompactorSourceBuilderTest {
                         dataFile("file-2", 25L));
 
         assertThat(CompactorSourceBuilder.bucketFileSize(split)).isEqualTo(35L);
+    }
+
+    @Test
+    public void testUpdateTimePartitionFilterRefreshesOncePerSnapshot() throws Exception {
+        AtomicInteger loadCount = new AtomicInteger();
+        Map<BinaryRow, Long> partitionInfo =
+                Collections.singletonMap(BinaryRow.EMPTY_ROW, Long.MAX_VALUE);
+        CompactorSourceBuilder.UpdateTimePartitionFilter filter =
+                new CompactorSourceBuilder.UpdateTimePartitionFilter(
+                        Duration.ofDays(1),
+                        () -> {
+                            loadCount.incrementAndGet();
+                            return partitionInfo;
+                        });
+
+        assertThat(filter.filter(compactBucketRow(1L))).isTrue();
+        assertThat(filter.filter(compactBucketRow(1L))).isTrue();
+        assertThat(filter.filter(compactBucketRow(2L))).isTrue();
+        assertThat(loadCount).hasValue(2);
+    }
+
+    @Test
+    public void testUpdateTimePartitionFilterKeepsExpirationBoundary() {
+        assertThat(CompactorSourceBuilder.shouldKeepPartition(100L, 100L)).isTrue();
+        assertThat(CompactorSourceBuilder.shouldKeepPartition(99L, 100L)).isFalse();
+        assertThat(CompactorSourceBuilder.shouldKeepPartition(null, 100L)).isTrue();
+    }
+
+    private static GenericRowData compactBucketRow(long snapshotId) {
+        return GenericRowData.of(snapshotId, serializeBinaryRow(BinaryRow.EMPTY_ROW));
     }
 
     private static Options optionsWithParallelism(int scanParallelism, int sinkParallelism) {
