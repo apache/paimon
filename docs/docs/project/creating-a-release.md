@@ -331,6 +331,7 @@ repository image.
 
 Create both source candidates locally from the exact signed tag in a fresh
 clone. The Paimon helper creates, signs, and checksums the main source archive.
+It also rejects unsafe archive paths and hidden macOS AppleDouble metadata.
 Build the PyPaimon source distribution separately and sign it with the same RM
 key:
 
