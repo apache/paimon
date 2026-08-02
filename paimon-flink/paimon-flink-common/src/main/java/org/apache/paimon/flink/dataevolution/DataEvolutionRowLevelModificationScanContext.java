@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.dataevolution;
 
+import org.apache.paimon.utils.Pair;
+
 import org.apache.flink.table.connector.RowLevelModificationScanContext;
 
 import javax.annotation.Nullable;
@@ -32,32 +34,36 @@ public class DataEvolutionRowLevelModificationScanContext
 
     public static final long EMPTY_TABLE_SNAPSHOT = -1L;
 
-    private final Map<String, Long> snapshotIds;
+    private final Map<Pair<String, String>, Long> snapshotIds;
 
-    private DataEvolutionRowLevelModificationScanContext(Map<String, Long> snapshotIds) {
+    private DataEvolutionRowLevelModificationScanContext(
+            Map<Pair<String, String>, Long> snapshotIds) {
         this.snapshotIds = Collections.unmodifiableMap(snapshotIds);
     }
 
     public static DataEvolutionRowLevelModificationScanContext addSnapshot(
             @Nullable RowLevelModificationScanContext previous,
             String tableLocation,
+            String branch,
             long snapshotId) {
-        Map<String, Long> snapshotIds = new HashMap<>();
+        Map<Pair<String, String>, Long> snapshotIds = new HashMap<>();
         if (previous instanceof DataEvolutionRowLevelModificationScanContext) {
             snapshotIds.putAll(
                     ((DataEvolutionRowLevelModificationScanContext) previous).snapshotIds);
         }
-        snapshotIds.put(tableLocation, snapshotId);
+        snapshotIds.put(Pair.of(tableLocation, branch), snapshotId);
         return new DataEvolutionRowLevelModificationScanContext(snapshotIds);
     }
 
     @Nullable
     public static Long snapshotId(
-            @Nullable RowLevelModificationScanContext context, String tableLocation) {
+            @Nullable RowLevelModificationScanContext context,
+            String tableLocation,
+            String branch) {
         if (!(context instanceof DataEvolutionRowLevelModificationScanContext)) {
             return null;
         }
         return ((DataEvolutionRowLevelModificationScanContext) context)
-                .snapshotIds.get(tableLocation);
+                .snapshotIds.get(Pair.of(tableLocation, branch));
     }
 }

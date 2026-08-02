@@ -96,18 +96,72 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testDeleteWithSameTableBranchSubquery() {
+        createTable();
+        sql("INSERT INTO T VALUES (1, 'one', 'A'), (2, 'two', 'A')");
+        sql("CALL sys.create_tag('default.T', 'tag1')");
+        sql("CALL sys.create_branch('default.T', 'test', 'tag1')");
+        sql("INSERT INTO `T$branch_test` VALUES (3, 'three', 'A')");
+
+        assertThat(sql("SELECT id FROM `T$branch_test` WHERE id = 2")).containsExactly(Row.of(2));
+
+        sql("DELETE FROM T WHERE id IN (SELECT id FROM `T$branch_test` WHERE id = 2)");
+
+        assertThat(sql("SELECT id FROM T ORDER BY id")).containsExactly(Row.of(1));
+        assertThat(sql("SELECT id FROM `T$branch_test` ORDER BY id"))
+                .containsExactly(Row.of(1), Row.of(2), Row.of(3));
+    }
+
+    @Test
+    public void testDeletePartitionRemovesGlobalIndex() throws Exception {
+        createTable();
+        sql("INSERT INTO T VALUES (1, 'one', 'A'), (2, 'two', 'B')");
+        createGlobalIndex();
+
+        FileStoreTable table = paimonTable("T");
+        assertThat(globalIndexPartitions(table)).containsExactlyInAnyOrder("A", "B");
+
+        sql("DELETE FROM T WHERE dt = 'A'");
+
+        assertThat(sql("SELECT id, name, dt FROM T")).containsExactly(Row.of(2, "two", "B"));
+        assertThat(table.latestSnapshot().get().operation()).isEqualTo(Snapshot.Operation.TRUNCATE);
+        assertThat(globalIndexPartitions(table)).containsExactly("B");
+    }
+
+    @Test
+    public void testDeleteWholeTableRemovesGlobalIndex() throws Exception {
+        createTable();
+        sql("INSERT INTO T VALUES (1, 'one', 'A'), (2, 'two', 'B')");
+        createGlobalIndex();
+
+        FileStoreTable table = paimonTable("T");
+        assertThat(globalIndexPartitions(table)).containsExactlyInAnyOrder("A", "B");
+
+        sql("DELETE FROM T");
+
+        assertThat(sql("SELECT * FROM T")).isEmpty();
+        assertThat(table.latestSnapshot().get().operation()).isEqualTo(Snapshot.Operation.TRUNCATE);
+        assertThat(plannedFiles(table)).isEmpty();
+        assertThat(table.store().newIndexFileHandler().scanEntries()).isEmpty();
+    }
+
+    @Test
     public void testDeleteUsesFullScalarIndexSearch() {
         createTable();
         sql("INSERT INTO T VALUES (1, 'old', 'A')");
-        sql(
-                "CALL sys.create_global_index(`table` => 'default.T', "
-                        + "index_column => 'name', index_type => 'btree')");
+        createGlobalIndex();
         sql("INSERT INTO T VALUES (2, 'new', 'A')");
         sql("ALTER TABLE T SET ('scalar-index.search-mode' = 'fast')");
 
         sql("DELETE FROM T WHERE name = 'new'");
 
         assertThat(sql("SELECT id, name, dt FROM T")).containsExactly(Row.of(1, "old", "A"));
+    }
+
+    private void createGlobalIndex() {
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T', "
+                        + "index_column => 'name', index_type => 'btree')");
     }
 
     private void createTable() {
@@ -135,6 +189,14 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
                 .flatMap(index -> index.dvRanges().values().stream())
                 .mapToLong(DeletionVectorMeta::cardinality)
                 .sum();
+    }
+
+    private static List<String> globalIndexPartitions(FileStoreTable table) {
+        return table.store().newIndexFileHandler().scan("btree").stream()
+                .map(entry -> entry.partition().getString(0).toString())
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     private static void assertDeleteSnapshot(

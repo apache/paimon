@@ -167,11 +167,13 @@ public class DataTableSource extends BaseDataTableSource
         return DataEvolutionRowLevelModificationScanContext.addSnapshot(
                 previousContext,
                 fileStoreTable.location().toString(),
+                fileStoreTable.snapshotManager().branch(),
                 rowLevelModificationSnapshotId);
     }
 
     @Override
     public Map<String, DataType> listReadableMetadata() {
+        // Flink calls this after applyRowLevelModificationScan for row-level operations.
         if (rowLevelModificationSnapshotId == null || !isDataEvolutionTable()) {
             return Collections.emptyMap();
         }

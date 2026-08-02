@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.flink.PredicateConverter;
@@ -144,7 +145,9 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
             DataEvolutionDeleteSink.validateTable(fileStoreTable);
             Long snapshotId =
                     DataEvolutionRowLevelModificationScanContext.snapshotId(
-                            rowLevelModificationScanContext, fileStoreTable.location().toString());
+                            rowLevelModificationScanContext,
+                            fileStoreTable.location().toString(),
+                            fileStoreTable.snapshotManager().branch());
             if (snapshotId == null) {
                 throw new IllegalStateException(
                         "Data Evolution DELETE requires a snapshot from the Paimon table source.");
@@ -202,7 +205,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         int sinkParallelism =
                 Options.fromMap(table.options())
-                        .getOptional(org.apache.paimon.flink.FlinkConnectorOptions.SINK_PARALLELISM)
+                        .getOptional(FlinkConnectorOptions.SINK_PARALLELISM)
                         .orElse(1);
         return new PaimonDataStreamSinkProvider(
                 dataStream -> {
