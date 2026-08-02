@@ -34,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.PrimitiveIterator;
+import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -96,6 +97,33 @@ public class RowIndexGeneratorTest {
         assertThat(indexes.nextIndex).isEqualTo(7);
     }
 
+    @Test
+    public void testRowGroupResetDropsPendingPositions() {
+        CountingRowIndexes firstGroup = new CountingRowIndexes(3);
+        RowIndexGenerator generator = newGenerator(firstGroup);
+        ColumnarBatch batch = newBatch();
+        generator.populateRowIndex(batch);
+
+        CountingRowIndexes secondGroup = new CountingRowIndexes(3);
+        initGenerator(generator, secondGroup, 100);
+        generator.populateRowIndex(batch);
+
+        assertThat(firstGroup.nextIndex).isZero();
+        assertThat(generator.next()).isEqualTo(100);
+    }
+
+    @Test
+    public void testNonContinuousRowIndexes() {
+        PrimitiveIterator.OfLong indexes = LongStream.of(1, 4, 9, 12, 20, 30).iterator();
+        RowIndexGenerator generator = newGenerator(indexes, 6);
+        ColumnarBatch batch = newBatch();
+
+        generator.populateRowIndex(batch);
+        generator.populateRowIndex(batch);
+
+        assertThat(generator.next()).isEqualTo(12);
+    }
+
     private static ColumnarBatch newBatch() {
         ColumnarBatch batch =
                 new ColumnarBatch(
@@ -105,6 +133,25 @@ public class RowIndexGeneratorTest {
     }
 
     private static RowIndexGenerator newGenerator(CountingRowIndexes indexes) {
+        return newGenerator(indexes, indexes.end);
+    }
+
+    private static RowIndexGenerator newGenerator(PrimitiveIterator.OfLong indexes, long rowCount) {
+        RowIndexGenerator generator = new RowIndexGenerator();
+        initGenerator(generator, indexes, rowCount, 0);
+        return generator;
+    }
+
+    private static void initGenerator(
+            RowIndexGenerator generator, CountingRowIndexes indexes, long rowIndexOffset) {
+        initGenerator(generator, indexes, indexes.end, rowIndexOffset);
+    }
+
+    private static void initGenerator(
+            RowIndexGenerator generator,
+            PrimitiveIterator.OfLong indexes,
+            long rowCount,
+            long rowIndexOffset) {
         PageReadStore page =
                 new PageReadStore() {
                     @Override
@@ -114,7 +161,12 @@ public class RowIndexGeneratorTest {
 
                     @Override
                     public long getRowCount() {
-                        return indexes.end;
+                        return rowCount;
+                    }
+
+                    @Override
+                    public Optional<Long> getRowIndexOffset() {
+                        return Optional.of(rowIndexOffset);
                     }
 
                     @Override
@@ -122,9 +174,7 @@ public class RowIndexGeneratorTest {
                         return Optional.of(indexes);
                     }
                 };
-        RowIndexGenerator generator = new RowIndexGenerator();
         generator.initFromPageReadStore(page);
-        return generator;
     }
 
     private static class CountingRowIndexes implements PrimitiveIterator.OfLong {
