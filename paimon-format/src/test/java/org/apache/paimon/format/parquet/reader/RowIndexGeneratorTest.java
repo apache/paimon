@@ -34,7 +34,6 @@ import org.junit.jupiter.api.Test;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.PrimitiveIterator;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -43,22 +42,7 @@ public class RowIndexGeneratorTest {
 
     @Test
     public void testLazyRowIdAcrossBatches() {
-        AtomicInteger consumed = new AtomicInteger();
-        PrimitiveIterator.OfLong indexes =
-                new PrimitiveIterator.OfLong() {
-                    private long next;
-
-                    @Override
-                    public long nextLong() {
-                        consumed.incrementAndGet();
-                        return next++;
-                    }
-
-                    @Override
-                    public boolean hasNext() {
-                        return next < 6;
-                    }
-                };
+        CountingRowIndexes indexes = new CountingRowIndexes(6);
         HeapLongVector rowIds = new HeapLongVector(3);
         rowIds.fillWithNulls();
         ColumnarBatch batch =
@@ -68,25 +52,7 @@ public class RowIndexGeneratorTest {
         iterator.assignRowTracking(
                 500_000L, 1L, Collections.singletonMap(SpecialFields.ROW_ID.name(), 1));
 
-        PageReadStore page =
-                new PageReadStore() {
-                    @Override
-                    public PageReader getPageReader(ColumnDescriptor descriptor) {
-                        return null;
-                    }
-
-                    @Override
-                    public long getRowCount() {
-                        return 6;
-                    }
-
-                    @Override
-                    public Optional<PrimitiveIterator.OfLong> getRowIndexes() {
-                        return Optional.of(indexes);
-                    }
-                };
-        RowIndexGenerator generator = new RowIndexGenerator();
-        generator.initFromPageReadStore(page);
+        RowIndexGenerator generator = newGenerator(indexes);
 
         batch.setNumRows(3);
         generator.populateRowIndex(batch);
@@ -97,9 +63,87 @@ public class RowIndexGeneratorTest {
 
         batch.setNumRows(3);
         generator.populateRowIndex(batch);
-        assertThat(consumed).hasValue(0);
+        assertThat(indexes.nextIndex).isZero();
         row = iterator.next();
         assertThat(row.getLong(1)).isEqualTo(500_003L);
-        assertThat(consumed).hasValue(4);
+        assertThat(indexes.nextIndex).isEqualTo(4);
+    }
+
+    @Test
+    public void testPartiallyConsumedBatch() {
+        CountingRowIndexes indexes = new CountingRowIndexes(6);
+        RowIndexGenerator generator = newGenerator(indexes);
+        ColumnarBatch batch = newBatch();
+
+        generator.populateRowIndex(batch);
+        assertThat(generator.next()).isZero();
+
+        generator.populateRowIndex(batch);
+        assertThat(generator.next()).isEqualTo(3);
+    }
+
+    @Test
+    public void testMultipleUnconsumedBatchesStayLazy() {
+        CountingRowIndexes indexes = new CountingRowIndexes(9);
+        RowIndexGenerator generator = newGenerator(indexes);
+        ColumnarBatch batch = newBatch();
+
+        generator.populateRowIndex(batch);
+        generator.populateRowIndex(batch);
+        generator.populateRowIndex(batch);
+        assertThat(indexes.nextIndex).isZero();
+        assertThat(generator.next()).isEqualTo(6);
+        assertThat(indexes.nextIndex).isEqualTo(7);
+    }
+
+    private static ColumnarBatch newBatch() {
+        ColumnarBatch batch =
+                new ColumnarBatch(
+                        new Path("test"), new ColumnVector[] {new HeapIntVector(3)}, null);
+        batch.setNumRows(3);
+        return batch;
+    }
+
+    private static RowIndexGenerator newGenerator(CountingRowIndexes indexes) {
+        PageReadStore page =
+                new PageReadStore() {
+                    @Override
+                    public PageReader getPageReader(ColumnDescriptor descriptor) {
+                        return null;
+                    }
+
+                    @Override
+                    public long getRowCount() {
+                        return indexes.end;
+                    }
+
+                    @Override
+                    public Optional<PrimitiveIterator.OfLong> getRowIndexes() {
+                        return Optional.of(indexes);
+                    }
+                };
+        RowIndexGenerator generator = new RowIndexGenerator();
+        generator.initFromPageReadStore(page);
+        return generator;
+    }
+
+    private static class CountingRowIndexes implements PrimitiveIterator.OfLong {
+
+        private final long end;
+        private long nextIndex;
+
+        private CountingRowIndexes(long end) {
+            this.end = end;
+        }
+
+        @Override
+        public long nextLong() {
+            return nextIndex++;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return nextIndex < end;
+        }
     }
 }
