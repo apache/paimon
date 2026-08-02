@@ -157,6 +157,10 @@ class FileStoreCommit:
         self.conflict_detection.protect_from_external_rewrites(
             checkpoint_snapshot, commit_user)
 
+    def _clear_commit_context(self):
+        self.snapshot_properties = {}
+        self.conflict_detection.clear_resumable_commit_guards()
+
     def commit_metadata(self, commit_identifier: int):
         self._try_commit(
             commit_kind="APPEND",
@@ -415,6 +419,7 @@ class FileStoreCommit:
                     and not commit_entries
                     and not index_deletes
                     and not index_adds):
+                self._clear_commit_context()
                 break
 
             result = self._try_commit_once(
@@ -461,6 +466,7 @@ class FileStoreCommit:
                         self.table.identifier,
                         commit_duration_ms,
                     )
+                self._clear_commit_context()
                 break
             else:
                 retry_result = result

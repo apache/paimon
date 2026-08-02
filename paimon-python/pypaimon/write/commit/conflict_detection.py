@@ -254,6 +254,11 @@ class ConflictDetection:
         self._planned_row_id_ranges = []
         self._planned_row_id_signatures = set()
 
+    def clear_resumable_commit_guards(self):
+        self.clear_planned_row_id_files()
+        self._rewrite_checkpoint = None
+        self._rewrite_commit_user = None
+
     def check_planned_row_id_files(self, latest_snapshot):
         if not self._planned_row_id_ranges:
             return None

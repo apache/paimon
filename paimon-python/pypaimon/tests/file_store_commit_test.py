@@ -24,6 +24,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.range import Range
 from pypaimon.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import (
@@ -71,6 +72,38 @@ class TestFileStoreCommit(unittest.TestCase):
         self.assertEqual(42, kwargs["commit_identifier"])
         self.assertEqual([], kwargs["commit_entries_plan"](None))
         self.assertTrue(kwargs["allow_empty"])
+
+    def test_success_clears_commit_context(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        checkpoint = Mock()
+        file_store_commit.with_snapshot_properties({"offset": "1"})
+        file_store_commit.protect_planned_row_id_files(
+            [Range(0, 9)], {"file"})
+        file_store_commit.protect_from_external_rewrites(
+            checkpoint, "operation")
+
+        result = Mock()
+        result.is_success.return_value = True
+        file_store_commit._try_commit_once = Mock(return_value=result)
+        file_store_commit._try_commit(
+            commit_kind="APPEND",
+            commit_identifier=42,
+            commit_entries_plan=lambda _snapshot: [],
+            allow_empty=True,
+        )
+
+        self.assertEqual({}, file_store_commit.snapshot_properties)
+        self.assertEqual(
+            [], file_store_commit.conflict_detection._planned_row_id_ranges)
+        self.assertEqual(
+            set(),
+            file_store_commit.conflict_detection._planned_row_id_signatures,
+        )
+        self.assertIsNone(
+            file_store_commit.conflict_detection._rewrite_checkpoint)
+        self.assertIsNone(
+            file_store_commit.conflict_detection._rewrite_commit_user)
 
     def test_generate_partition_statistics_single_partition_single_file(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
