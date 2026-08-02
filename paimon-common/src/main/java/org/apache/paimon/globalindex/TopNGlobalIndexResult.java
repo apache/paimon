@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.globalindex.btree.BTreeIndexReader.KeyRowIds;
 import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RoaringNavigableMap64;

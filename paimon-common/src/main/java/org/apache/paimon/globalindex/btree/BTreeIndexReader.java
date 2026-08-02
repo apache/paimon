@@ -22,7 +22,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.KeyRowIds;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedFileMetaSelector;
 import org.apache.paimon.globalindex.SortedIndexFileMeta;
@@ -70,6 +69,25 @@ public class BTreeIndexReader implements Closeable {
     private final LazyField<RoaringNavigableMap64> nullBitmap;
     private final Object minKey;
     private final Object maxKey;
+
+    /** A key and its local row ids stored in one btree entry. */
+    public static class KeyRowIds {
+        private final Object key;
+        private final long[] rowIds;
+
+        public KeyRowIds(Object key, long[] rowIds) {
+            this.key = key;
+            this.rowIds = rowIds;
+        }
+
+        public Object key() {
+            return key;
+        }
+
+        public long[] rowIds() {
+            return rowIds;
+        }
+    }
 
     /**
      * Sequential iterator over all non-null key entries.

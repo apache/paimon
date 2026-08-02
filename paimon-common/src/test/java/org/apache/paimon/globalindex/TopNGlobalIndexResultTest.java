@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.globalindex.btree.BTreeIndexReader.KeyRowIds;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;

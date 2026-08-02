@@ -360,6 +360,14 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                     new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a7"));
             table.newReadBuilder().withFilter(predicate).newScan().plan();
 
+            TopN topN =
+                    new TopN(
+                            new FieldRef(1, "f1", table.rowType().getTypeAt(1)),
+                            DESCENDING,
+                            NULLS_LAST,
+                            1);
+            table.newReadBuilder().withTopN(topN).newScan().plan();
+
             PredicateBuilder rowIdBuilder =
                     new PredicateBuilder(SpecialFields.rowTypeWithRowId(table.rowType()));
             int rowIdIndex = table.rowType().getFieldCount();
@@ -375,6 +383,10 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                             "INFO Scan table '[^']+' with global index\\. "
                                     + "searchMode='fast', total=\\d+ ms, metadata=\\d+ ms, "
                                     + "lookup=\\d+ ms, coverage=\\d+ ms\\.")
+                    .containsPattern(
+                            "INFO Scan table '[^']+' with BTree global index TopN\\. "
+                                    + "searchMode='fast', topN='[^']+', total=\\d+ ms, "
+                                    + "metadata=\\d+ ms, lookup=\\d+ ms, coverage=\\d+ ms\\.")
                     .containsPattern(
                             "INFO Global index lookup table='[^']+', type='btree', "
                                     + "fields='\\[f1\\]', lookup=\\d+ ms\\.")

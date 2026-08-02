@@ -369,7 +369,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             LOG.info(
                     "Scan table '{}' with BTree global index TopN. searchMode='{}', topN='{}', total={} ms, metadata={} ms, lookup={} ms, coverage={} ms.",
                     table.name(),
-                    options.globalIndexSearchMode(),
+                    options.scalarIndexSearchMode(),
                     topN,
                     totalDuration / 1_000_000,
                     metadataDuration / 1_000_000,
