@@ -75,7 +75,6 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     private final RowType rowType;
     private final ExecutorService executor;
     private final GlobalIndexEvaluator globalIndexEvaluator;
-    private final Map<Integer, IndexMetaFileGroup> primaryIndexMetas;
     private final IndexPathFactory indexPathFactory;
     private final DataEvolutionGlobalIndexCoverage coverage;
     private final FileStoreTable table;
@@ -153,8 +152,6 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             }
             group.addFile(indexType, range, indexFile);
         }
-        this.primaryIndexMetas = indexMetas;
-
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
                 fId -> {
                     List<IndexMetaFileGroup> groups = new ArrayList<>();
@@ -381,10 +378,6 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         if (!rowType.containsField(fieldName)) {
             return Optional.empty();
         }
-        int fieldId = rowType.getField(fieldName).id();
-        if (!primaryIndexMetas.containsKey(fieldId)) {
-            return Optional.empty();
-        }
         return globalIndexEvaluator.evaluateTopN(topN);
     }
 
@@ -398,9 +391,6 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
 
     public GlobalIndexResult unindexedRows(TopN topN) {
         String fieldName = topN.orders().get(0).field().name();
-        if (!rowType.containsField(fieldName)) {
-            return GlobalIndexResult.createEmpty();
-        }
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
         for (Range range : coverage.unindexedRanges(rowType.getField(fieldName).id())) {
             rows.addRange(range);
