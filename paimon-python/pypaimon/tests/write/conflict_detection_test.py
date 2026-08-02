@@ -497,6 +497,12 @@ class TestResumableRowIdCommitGuards(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("Target files changed", str(result))
 
+        detection.refresh_planned_row_id_files(
+            _FakeSnapshot(1, "APPEND"))
+
+        self.assertIsNone(detection.check_planned_row_id_files(
+            _FakeSnapshot(1, "APPEND")))
+
 
 class TestRowIdColumnConflictChecker(unittest.TestCase):
 

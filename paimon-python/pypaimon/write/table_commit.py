@@ -96,6 +96,7 @@ class TableCommit:
                 )
             else:
                 if not non_empty_messages:
+                    self.file_store_commit.clear_commit_context()
                     return
                 logger.info(
                     "Committing table %s, %d non-empty messages",

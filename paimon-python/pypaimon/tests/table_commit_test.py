@@ -87,6 +87,7 @@ class TestTableCommitEmptyOverwrite(unittest.TestCase):
         else:
             mock_fsc.commit.assert_not_called()
             mock_fsc.overwrite.assert_not_called()
+            mock_fsc.clear_commit_context.assert_called_once_with()
 
     # -- StreamTableCommit overwrite should also reach overwrite() with empty messages --
 

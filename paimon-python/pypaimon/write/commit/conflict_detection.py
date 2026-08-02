@@ -259,17 +259,25 @@ class ConflictDetection:
         self._rewrite_checkpoint = None
         self._rewrite_commit_user = None
 
+    def refresh_planned_row_id_files(self, latest_snapshot):
+        if self._planned_row_id_ranges:
+            self._planned_row_id_signatures = (
+                self._current_planned_row_id_signatures(latest_snapshot))
+
     def check_planned_row_id_files(self, latest_snapshot):
         if not self._planned_row_id_ranges:
             return None
-        latest_entries = self.commit_scanner.read_entries_for_row_id_ranges(
-            latest_snapshot, self._planned_row_id_ranges)
-        if (self._row_id_entry_signatures(latest_entries)
+        if (self._current_planned_row_id_signatures(latest_snapshot)
                 != self._planned_row_id_signatures):
             return RuntimeError(
                 "Target files changed after the resumable update group "
                 "was planned.")
         return None
+
+    def _current_planned_row_id_signatures(self, snapshot):
+        entries = self.commit_scanner.read_entries_for_row_id_ranges(
+            snapshot, self._planned_row_id_ranges)
+        return self._row_id_entry_signatures(entries)
 
     @staticmethod
     def _same_snapshot(left, right):

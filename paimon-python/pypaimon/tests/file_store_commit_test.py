@@ -573,6 +573,9 @@ class TestFileStoreCommit(unittest.TestCase):
             rewrite,
             AssertionError("rewrite retry budget was not enforced"),
         ])
+        refresh_guard = Mock()
+        file_store_commit.conflict_detection.refresh_planned_row_id_files = (
+            refresh_guard)
 
         with self.assertRaises(RuntimeError) as ctx:
             file_store_commit._try_commit(
@@ -583,6 +586,8 @@ class TestFileStoreCommit(unittest.TestCase):
 
         self.assertIn("with 1 retries", str(ctx.exception))
         self.assertEqual(2, file_store_commit._try_commit_once.call_count)
+        self.assertEqual(2, refresh_guard.call_count)
+        refresh_guard.assert_called_with(latest_snapshot)
         file_store_commit._commit_retry_wait.assert_called_once_with(0)
 
     @staticmethod

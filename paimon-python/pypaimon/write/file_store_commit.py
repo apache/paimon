@@ -157,7 +157,7 @@ class FileStoreCommit:
         self.conflict_detection.protect_from_external_rewrites(
             checkpoint_snapshot, commit_user)
 
-    def _clear_commit_context(self):
+    def clear_commit_context(self):
         self.snapshot_properties = {}
         self.conflict_detection.clear_resumable_commit_guards()
 
@@ -172,6 +172,7 @@ class FileStoreCommit:
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in normal append mode."""
         if not commit_messages:
+            self.clear_commit_context()
             return
 
         # Extract the minimum check_from_snapshot from commit messages
@@ -295,6 +296,8 @@ class FileStoreCommit:
                 index_adds=index_adds,
                 hash_index_base_snapshot=hash_index_base_snapshot,
             )
+        else:
+            self.clear_commit_context()
 
     @staticmethod
     def _hash_index_base_snapshot(
@@ -419,7 +422,7 @@ class FileStoreCommit:
                     and not commit_entries
                     and not index_deletes
                     and not index_adds):
-                self._clear_commit_context()
+                self.clear_commit_context()
                 break
 
             result = self._try_commit_once(
@@ -441,7 +444,8 @@ class FileStoreCommit:
                 self.conflict_detection._row_id_check_from_snapshot = (
                     latest_snapshot.id
                 )
-                self.conflict_detection.clear_planned_row_id_files()
+                self.conflict_detection.refresh_planned_row_id_files(
+                    latest_snapshot)
                 # No snapshot commit was attempted for the conflicting files,
                 # so the rewritten attempt is still deterministic.
                 retry_result = None
@@ -466,7 +470,7 @@ class FileStoreCommit:
                         self.table.identifier,
                         commit_duration_ms,
                     )
-                self._clear_commit_context()
+                self.clear_commit_context()
                 break
             else:
                 retry_result = result
