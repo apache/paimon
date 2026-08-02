@@ -18,25 +18,42 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.PaimonDataStreamScanProvider;
+import org.apache.paimon.flink.Projection;
+import org.apache.paimon.flink.dataevolution.DataEvolutionRowLevelModificationScanContext;
 import org.apache.paimon.flink.source.aggregate.PushedAggregateResult;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.system.RowTrackingTable;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.connector.RowLevelModificationScanContext;
+import org.apache.flink.table.connector.source.ScanTableSource.ScanContext;
+import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
 import org.apache.flink.table.connector.source.abilities.SupportsDynamicFiltering;
+import org.apache.flink.table.connector.source.abilities.SupportsReadingMetadata;
+import org.apache.flink.table.connector.source.abilities.SupportsRowLevelModificationScan;
 import org.apache.flink.table.connector.source.abilities.SupportsStatisticReport;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.plan.stats.ColumnStats;
 import org.apache.flink.table.plan.stats.TableStats;
+import org.apache.flink.table.types.DataType;
 
 import javax.annotation.Nullable;
 
 import java.util.AbstractMap;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -49,9 +66,14 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * SupportsDynamicFiltering}.
  */
 public class DataTableSource extends BaseDataTableSource
-        implements SupportsStatisticReport, SupportsDynamicFiltering {
+        implements SupportsStatisticReport,
+                SupportsDynamicFiltering,
+                SupportsReadingMetadata,
+                SupportsRowLevelModificationScan {
 
     @Nullable private List<String> dynamicPartitionFilteringFields;
+    @Nullable private Long rowLevelModificationSnapshotId;
+    private List<String> metadataKeys = Collections.emptyList();
 
     public DataTableSource(
             ObjectIdentifier tableIdentifier,
@@ -110,17 +132,138 @@ public class DataTableSource extends BaseDataTableSource
 
     @Override
     public DataTableSource copy() {
-        return new DataTableSource(
-                tableIdentifier,
-                table,
-                unbounded,
-                context,
-                predicate,
-                projectFields,
-                limit,
-                watermarkStrategy,
-                dynamicPartitionFilteringFields,
-                pushedAggregateResult);
+        DataTableSource copied =
+                new DataTableSource(
+                        tableIdentifier,
+                        table,
+                        unbounded,
+                        context,
+                        predicate,
+                        projectFields,
+                        limit,
+                        watermarkStrategy,
+                        dynamicPartitionFilteringFields,
+                        pushedAggregateResult);
+        copied.rowLevelModificationSnapshotId = rowLevelModificationSnapshotId;
+        copied.metadataKeys = metadataKeys;
+        return copied;
+    }
+
+    @Override
+    public RowLevelModificationScanContext applyRowLevelModificationScan(
+            RowLevelModificationType rowLevelModificationType,
+            @Nullable RowLevelModificationScanContext previousContext) {
+        if (rowLevelModificationType != RowLevelModificationType.DELETE
+                || !isDataEvolutionTable()) {
+            return previousContext;
+        }
+
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        Long snapshotId = fileStoreTable.snapshotManager().latestSnapshotId();
+        rowLevelModificationSnapshotId =
+                snapshotId == null
+                        ? DataEvolutionRowLevelModificationScanContext.EMPTY_TABLE_SNAPSHOT
+                        : snapshotId;
+        return DataEvolutionRowLevelModificationScanContext.addSnapshot(
+                previousContext,
+                fileStoreTable.location().toString(),
+                rowLevelModificationSnapshotId);
+    }
+
+    @Override
+    public Map<String, DataType> listReadableMetadata() {
+        if (rowLevelModificationSnapshotId == null || !isDataEvolutionTable()) {
+            return Collections.emptyMap();
+        }
+        Map<String, DataType> metadata = new LinkedHashMap<>();
+        metadata.put(SpecialFields.ROW_ID.name(), DataTypes.BIGINT().notNull());
+        return metadata;
+    }
+
+    @Override
+    public void applyReadableMetadata(List<String> metadataKeys, DataType producedDataType) {
+        for (String metadataKey : metadataKeys) {
+            if (!SpecialFields.ROW_ID.name().equals(metadataKey)) {
+                throw new UnsupportedOperationException(
+                        "Unsupported Paimon metadata column: " + metadataKey);
+            }
+        }
+        this.metadataKeys = metadataKeys;
+    }
+
+    @Override
+    public ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext) {
+        if (rowLevelModificationSnapshotId == null
+                || rowLevelModificationSnapshotId
+                        != DataEvolutionRowLevelModificationScanContext.EMPTY_TABLE_SNAPSHOT) {
+            return super.getScanRuntimeProvider(scanContext);
+        }
+
+        Table scanTable = tableForScan();
+        org.apache.paimon.types.RowType rowType = scanTable.rowType();
+        int[][] projection = projectFieldsForScan();
+        if (projection != null) {
+            rowType = Projection.of(projection).project(rowType);
+        }
+        StaticRowDataSource source = new StaticRowDataSource(Collections.emptyList(), rowType);
+        return new PaimonDataStreamScanProvider(
+                true,
+                env ->
+                        env.fromSource(
+                                        source,
+                                        WatermarkStrategy.noWatermarks(),
+                                        tableIdentifier.asSummaryString())
+                                .setParallelism(1),
+                tableIdentifier.asSummaryString(),
+                table);
+    }
+
+    @Override
+    protected Table tableForScan() {
+        if (rowLevelModificationSnapshotId == null) {
+            return table;
+        }
+
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        if (rowLevelModificationSnapshotId
+                != DataEvolutionRowLevelModificationScanContext.EMPTY_TABLE_SNAPSHOT) {
+            Map<String, String> options = new HashMap<>();
+            options.put(
+                    CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                    String.valueOf(rowLevelModificationSnapshotId));
+            options.put(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full");
+            fileStoreTable = (FileStoreTable) fileStoreTable.copy(options);
+        }
+
+        return metadataKeys.isEmpty() ? fileStoreTable : new RowTrackingTable(fileStoreTable);
+    }
+
+    @Override
+    protected int[][] projectFieldsForScan() {
+        if (metadataKeys.isEmpty()) {
+            return projectFields;
+        }
+
+        int physicalFieldCount = table.rowType().getFieldCount();
+        int[][] physicalProjection = projectFields;
+        if (physicalProjection == null) {
+            physicalProjection = new int[physicalFieldCount][];
+            for (int i = 0; i < physicalFieldCount; i++) {
+                physicalProjection[i] = new int[] {i};
+            }
+        }
+
+        int[][] projection =
+                Arrays.copyOf(physicalProjection, physicalProjection.length + metadataKeys.size());
+        for (int i = 0; i < metadataKeys.size(); i++) {
+            projection[physicalProjection.length + i] = new int[] {physicalFieldCount};
+        }
+        return projection;
+    }
+
+    private boolean isDataEvolutionTable() {
+        return table instanceof FileStoreTable
+                && ((FileStoreTable) table).coreOptions().dataEvolutionEnabled();
     }
 
     @Override

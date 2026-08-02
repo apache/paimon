@@ -275,8 +275,15 @@ WHEN NOT MATCHED BY SOURCE AND t.id > 10 THEN DELETE;
 
 The `WHEN NOT MATCHED BY SOURCE` clause requires Spark 3.4 or later.
 
-Flink SQL does not currently support `DELETE FROM` for Data Evolution tables,
-but Flink users can submit the
+Flink SQL supports `DELETE FROM` for Data Evolution tables in batch mode. For
+row-level predicates, matching rows are recorded in deletion vectors, so data
+files are not rewritten:
+
+```sql
+DELETE FROM target_table WHERE id = 1;
+```
+
+Flink users can also submit the
 [`delete` action](../flink/action-jars#deleting-from-a-data-evolution-table).
 
 ## Self Updates

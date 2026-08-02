@@ -21,14 +21,23 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.flink.LogicalTypeConversion;
+import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.flink.PredicateConverter;
+import org.apache.paimon.flink.dataevolution.DataEvolutionDeleteSink;
+import org.apache.paimon.flink.dataevolution.DataEvolutionRowLevelModificationScanContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 
+import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.RowLevelModificationScanContext;
@@ -36,6 +45,7 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsDeletePushDown;
 import org.apache.flink.table.connector.sink.abilities.SupportsRowLevelDelete;
 import org.apache.flink.table.connector.sink.abilities.SupportsRowLevelUpdate;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.types.logical.RowType;
@@ -63,6 +73,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
         implements SupportsRowLevelUpdate, SupportsRowLevelDelete, SupportsDeletePushDown {
 
     @Nullable protected Predicate deletePredicate;
+    @Nullable protected Long dataEvolutionDeleteSnapshotId;
 
     public SupportsRowLevelOperationFlinkTableSink(
             ObjectIdentifier tableIdentifier, Table table, DynamicTableFactory.Context context) {
@@ -75,6 +86,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.deletePredicate = deletePredicate;
+        copied.dataEvolutionDeleteSnapshotId = dataEvolutionDeleteSnapshotId;
         return copied;
     }
 
@@ -127,6 +139,30 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     @Override
     public RowLevelDeleteInfo applyRowLevelDelete(
             @Nullable RowLevelModificationScanContext rowLevelModificationScanContext) {
+        if (isDataEvolutionTable()) {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            DataEvolutionDeleteSink.validateTable(fileStoreTable);
+            Long snapshotId =
+                    DataEvolutionRowLevelModificationScanContext.snapshotId(
+                            rowLevelModificationScanContext, fileStoreTable.location().toString());
+            if (snapshotId == null) {
+                throw new IllegalStateException(
+                        "Data Evolution DELETE requires a snapshot from the Paimon table source.");
+            }
+            dataEvolutionDeleteSnapshotId = snapshotId;
+            return new RowLevelDeleteInfo() {
+                @Override
+                public Optional<List<Column>> requiredColumns() {
+                    return Optional.of(
+                            Collections.singletonList(
+                                    Column.metadata(
+                                            SpecialFields.ROW_ID.name(),
+                                            DataTypes.BIGINT().notNull(),
+                                            SpecialFields.ROW_ID.name(),
+                                            true)));
+                }
+            };
+        }
         validatePKUpsertDeletable(table);
         return new RowLevelDeleteInfo() {};
     }
@@ -135,7 +171,9 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
 
     @Override
     public boolean applyDeleteFilters(List<ResolvedExpression> list) {
-        validatePKUpsertDeletable(table);
+        if (!isDataEvolutionTable()) {
+            validatePKUpsertDeletable(table);
+        }
         List<Predicate> predicates = new ArrayList<>();
         RowType rowType = LogicalTypeConversion.toLogicalType(table.rowType());
         for (ResolvedExpression filter : list) {
@@ -149,6 +187,35 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
         }
         deletePredicate = predicates.isEmpty() ? null : PredicateBuilder.and(predicates);
         return canPushDownDeleteFilter();
+    }
+
+    @Override
+    public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
+        if (dataEvolutionDeleteSnapshotId == null) {
+            return super.getSinkRuntimeProvider(context);
+        }
+        if (!context.isBounded()) {
+            throw new UnsupportedOperationException(
+                    "Data Evolution DELETE only supports batch mode.");
+        }
+
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        int sinkParallelism =
+                Options.fromMap(table.options())
+                        .getOptional(org.apache.paimon.flink.FlinkConnectorOptions.SINK_PARALLELISM)
+                        .orElse(1);
+        return new PaimonDataStreamSinkProvider(
+                dataStream -> {
+                    DataStream<Long> rowIds =
+                            dataStream.map(
+                                    (MapFunction<RowData, Long>) row -> row.getLong(0),
+                                    TypeInformation.of(Long.class));
+                    return new DataEvolutionDeleteSink(
+                                    fileStoreTable, dataEvolutionDeleteSnapshotId, sinkParallelism)
+                            .sinkFrom(rowIds);
+                },
+                tableIdentifier.asSummaryString(),
+                table);
     }
 
     @Override
@@ -187,5 +254,10 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                 new OnlyPartitionKeyEqualVisitor(table.partitionKeys());
         deletePredicate.visit(visitor);
         return visitor.partitions();
+    }
+
+    private boolean isDataEvolutionTable() {
+        return table instanceof FileStoreTable
+                && ((FileStoreTable) table).coreOptions().dataEvolutionEnabled();
     }
 }
