@@ -29,9 +29,11 @@ import java.util.PrimitiveIterator;
 public class RowIndexGenerator implements LongIterator {
 
     private LongIterator rowIndexIterator;
+    private long pendingSkips;
     private int remainingIndexes;
 
     public void initFromPageReadStore(PageReadStore pageReadStore) {
+        pendingSkips = 0;
         remainingIndexes = 0;
         long startingRowIdx = pageReadStore.getRowIndexOffset().orElse(0L);
         PrimitiveIterator.OfLong rowIndexes = pageReadStore.getRowIndexes().orElse(null);
@@ -56,10 +58,7 @@ public class RowIndexGenerator implements LongIterator {
     }
 
     public void populateRowIndex(ColumnarBatch columnarBatch) {
-        // Positions are consumed lazily, so finish the previous batch first.
-        while (remainingIndexes > 0) {
-            next();
-        }
+        pendingSkips += remainingIndexes;
         remainingIndexes = columnarBatch.numRows();
         columnarBatch.resetPositions(this);
     }
@@ -73,6 +72,10 @@ public class RowIndexGenerator implements LongIterator {
     public long next() {
         if (remainingIndexes == 0) {
             throw new NoSuchElementException();
+        }
+        while (pendingSkips > 0) {
+            rowIndexIterator.next();
+            pendingSkips--;
         }
         long index = rowIndexIterator.next();
         remainingIndexes--;

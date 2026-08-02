@@ -32,6 +32,9 @@ import org.apache.parquet.column.page.PageReader;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.Optional;
+import java.util.PrimitiveIterator;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,6 +43,22 @@ public class RowIndexGeneratorTest {
 
     @Test
     public void testLazyRowIdAcrossBatches() {
+        AtomicInteger consumed = new AtomicInteger();
+        PrimitiveIterator.OfLong indexes =
+                new PrimitiveIterator.OfLong() {
+                    private long next;
+
+                    @Override
+                    public long nextLong() {
+                        consumed.incrementAndGet();
+                        return next++;
+                    }
+
+                    @Override
+                    public boolean hasNext() {
+                        return next < 6;
+                    }
+                };
         HeapLongVector rowIds = new HeapLongVector(3);
         rowIds.fillWithNulls();
         ColumnarBatch batch =
@@ -60,6 +79,11 @@ public class RowIndexGeneratorTest {
                     public long getRowCount() {
                         return 6;
                     }
+
+                    @Override
+                    public Optional<PrimitiveIterator.OfLong> getRowIndexes() {
+                        return Optional.of(indexes);
+                    }
                 };
         RowIndexGenerator generator = new RowIndexGenerator();
         generator.initFromPageReadStore(page);
@@ -73,7 +97,9 @@ public class RowIndexGeneratorTest {
 
         batch.setNumRows(3);
         generator.populateRowIndex(batch);
+        assertThat(consumed).hasValue(0);
         row = iterator.next();
         assertThat(row.getLong(1)).isEqualTo(500_003L);
+        assertThat(consumed).hasValue(4);
     }
 }
