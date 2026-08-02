@@ -23,12 +23,14 @@ import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.Projection;
 import org.apache.paimon.flink.dataevolution.DataEvolutionRowLevelModificationScanContext;
 import org.apache.paimon.flink.source.aggregate.PushedAggregateResult;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.table.system.RowTrackingTable;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -154,7 +156,8 @@ public class DataTableSource extends BaseDataTableSource
             RowLevelModificationType rowLevelModificationType,
             @Nullable RowLevelModificationScanContext previousContext) {
         if (rowLevelModificationType != RowLevelModificationType.DELETE
-                || !isDataEvolutionTable()) {
+                || !isDataEvolutionTable()
+                || TimeTravelUtil.hasTimeTravelOptions(Options.fromMap(table.options()))) {
             return previousContext;
         }
 

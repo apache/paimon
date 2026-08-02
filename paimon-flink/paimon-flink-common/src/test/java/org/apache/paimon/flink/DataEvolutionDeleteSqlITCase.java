@@ -113,6 +113,20 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testDeleteWithSameTableTagSubquery() {
+        createTable();
+        sql("INSERT INTO T VALUES (1, 'one', 'A'), (2, 'two', 'A')");
+        sql("CALL sys.create_tag('default.T', 'tag1')");
+        sql("INSERT INTO T VALUES (3, 'three', 'A')");
+
+        sql(
+                "DELETE FROM T WHERE id IN (SELECT id FROM T "
+                        + "/*+ OPTIONS('scan.tag-name'='tag1') */ WHERE id = 2)");
+
+        assertThat(sql("SELECT id FROM T ORDER BY id")).containsExactly(Row.of(1), Row.of(3));
+    }
+
+    @Test
     public void testDeletePartitionRemovesGlobalIndex() throws Exception {
         createTable();
         sql("INSERT INTO T VALUES (1, 'one', 'A'), (2, 'two', 'B')");

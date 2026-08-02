@@ -140,11 +140,10 @@ public class DataEvolutionDeleteSink implements Serializable {
                         .setParallelism(1)
                         .setMaxParallelism(1);
 
-        return committed
-                .sinkTo(new DiscardingSink<>())
-                .name("END")
-                .setParallelism(1)
-                .setMaxParallelism(1);
+        DataStreamSink<Committable> end =
+                committed.sinkTo(new DiscardingSink<>()).name("END").setParallelism(1);
+        end.getTransformation().setMaxParallelism(1);
+        return end;
     }
 
     public static void validateTable(FileStoreTable table) {
