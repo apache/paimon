@@ -71,7 +71,7 @@ public class GlobalIndexEvaluator implements Closeable {
         if (predicate == null) {
             return Optional.empty();
         }
-        return await(visitAsync(predicate));
+        return awaitGlobalIndexResult(visitAsync(predicate));
     }
 
     public Optional<GlobalIndexResult> evaluateTopN(TopN topN) {
@@ -84,10 +84,10 @@ public class GlobalIndexEvaluator implements Closeable {
             return Optional.empty();
         }
         checkArgument(readers.size() == 1, "TopN expects one aggregated global index reader.");
-        return await(readers.iterator().next().visitTopN(topN));
+        return awaitGlobalIndexResult(readers.iterator().next().visitTopN(topN));
     }
 
-    private Optional<GlobalIndexResult> await(
+    private Optional<GlobalIndexResult> awaitGlobalIndexResult(
             CompletableFuture<Optional<GlobalIndexResult>> future) {
         try {
             return future.get();

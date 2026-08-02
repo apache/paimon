@@ -25,7 +25,6 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -141,7 +140,6 @@ public final class TopNGlobalIndexResult implements GlobalIndexResult {
 
     private List<KeyRowIds> mergeAndLimit(List<KeyRowIds> sorted) {
         List<KeyRowIds> result = new ArrayList<>(Math.min(limit, sorted.size()));
-        RoaringNavigableMap64 seenRowIds = new RoaringNavigableMap64();
         int remaining = limit;
         int position = 0;
         while (remaining > 0 && position < sorted.size()) {
@@ -154,25 +152,17 @@ public final class TopNGlobalIndexResult implements GlobalIndexResult {
                 position++;
             } while (position < sorted.size() && compareKeys(key, sorted.get(position).key()) == 0);
 
-            int capacity = (int) Math.min((long) remaining, sameKeyRowIds.getLongCardinality());
-            long[] limitedRowIds = new long[capacity];
-            int count = 0;
-            for (long rowId : sameKeyRowIds) {
-                if (!seenRowIds.contains(rowId)) {
-                    seenRowIds.add(rowId);
-                    limitedRowIds[count++] = rowId;
-                    if (count == remaining) {
+            int count = (int) Math.min((long) remaining, sameKeyRowIds.getLongCardinality());
+            if (count > 0) {
+                long[] limitedRowIds = new long[count];
+                int index = 0;
+                for (long rowId : sameKeyRowIds) {
+                    limitedRowIds[index++] = rowId;
+                    if (index == count) {
                         break;
                     }
                 }
-            }
-            if (count > 0) {
-                result.add(
-                        new KeyRowIds(
-                                key,
-                                count == limitedRowIds.length
-                                        ? limitedRowIds
-                                        : Arrays.copyOf(limitedRowIds, count)));
+                result.add(new KeyRowIds(key, limitedRowIds));
                 remaining -= count;
             }
         }
