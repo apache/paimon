@@ -40,8 +40,7 @@ import org.apache.flink.table.connector.RowLevelModificationScanContext;
 import org.apache.flink.table.connector.source.ScanTableSource.ScanContext;
 import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
 import org.apache.flink.table.connector.source.abilities.SupportsDynamicFiltering;
-import org.apache.flink.table.connector.source.abilities.SupportsReadingMetadata;
-import org.apache.flink.table.connector.source.abilities.SupportsRowLevelModificationScan;
+import org.apache.flink.table.connector.source.abilities.SupportsRowLevelModificationScan.RowLevelModificationType;
 import org.apache.flink.table.connector.source.abilities.SupportsStatisticReport;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
@@ -68,12 +67,9 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * SupportsDynamicFiltering}.
  */
 public class DataTableSource extends BaseDataTableSource
-        implements SupportsStatisticReport,
-                SupportsDynamicFiltering,
-                SupportsReadingMetadata,
-                SupportsRowLevelModificationScan {
+        implements SupportsStatisticReport, SupportsDynamicFiltering {
 
-    @Nullable private List<String> dynamicPartitionFilteringFields;
+    @Nullable protected List<String> dynamicPartitionFilteringFields;
     @Nullable private Long rowLevelModificationSnapshotId;
     private List<String> metadataKeys = Collections.emptyList();
 
@@ -134,24 +130,26 @@ public class DataTableSource extends BaseDataTableSource
 
     @Override
     public DataTableSource copy() {
-        DataTableSource copied =
-                new DataTableSource(
-                        tableIdentifier,
-                        table,
-                        unbounded,
-                        context,
-                        predicate,
-                        projectFields,
-                        limit,
-                        watermarkStrategy,
-                        dynamicPartitionFilteringFields,
-                        pushedAggregateResult);
+        DataTableSource copied = newSource();
         copied.rowLevelModificationSnapshotId = rowLevelModificationSnapshotId;
         copied.metadataKeys = metadataKeys;
         return copied;
     }
 
-    @Override
+    protected DataTableSource newSource() {
+        return new DataTableSource(
+                tableIdentifier,
+                table,
+                unbounded,
+                context,
+                predicate,
+                projectFields,
+                limit,
+                watermarkStrategy,
+                dynamicPartitionFilteringFields,
+                pushedAggregateResult);
+    }
+
     public RowLevelModificationScanContext applyRowLevelModificationScan(
             RowLevelModificationType rowLevelModificationType,
             @Nullable RowLevelModificationScanContext previousContext) {
@@ -174,7 +172,6 @@ public class DataTableSource extends BaseDataTableSource
                 rowLevelModificationSnapshotId);
     }
 
-    @Override
     public Map<String, DataType> listReadableMetadata() {
         // Flink calls this after applyRowLevelModificationScan for row-level operations.
         if (rowLevelModificationSnapshotId == null || !isDataEvolutionTable()) {
@@ -185,7 +182,6 @@ public class DataTableSource extends BaseDataTableSource
         return metadata;
     }
 
-    @Override
     public void applyReadableMetadata(List<String> metadataKeys, DataType producedDataType) {
         for (String metadataKey : metadataKeys) {
             if (!SpecialFields.ROW_ID.name().equals(metadataKey)) {
