@@ -59,7 +59,7 @@ jobs:
           cache: maven
 
       - name: Set up Maven
-        uses: stCarolas/setup-maven@d6af6abeda15e98926a57b5aa970a96bb37f97d1 # v5
+        uses: stCarolas/setup-maven@12eb41b233df95d49b0c11fc1b5bc8312e5d4ce0 # v5.1
         with:
           maven-version: 3.8.8
 
@@ -166,9 +166,12 @@ jobs:
               capture_expected_projects \
                 -Papache-release,docs-and-source,flink2 \
                 -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg
+              # This install only supplies reactor dependencies for the deploy
+              # below. Their Javadocs are built by the owning release lane.
               mvn clean install -ntp -B \
                 -Pdocs-and-source,flink2 \
-                -DskipTests -Dstyle.color=never \
+                -DskipTests -Dmaven.javadoc.skip=true \
+                -Dstyle.color=never \
                 -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-iceberg \
                 -am \
                 2>&1 | tee "${log}"
@@ -184,9 +187,12 @@ jobs:
               capture_expected_projects \
                 -Papache-release,docs-and-source,spark4 \
                 -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13
+              # This install only supplies reactor dependencies for the deploy
+              # below. Their Javadocs are built by the owning release lane.
               mvn clean install -ntp -B \
                 -Pdocs-and-source,spark4 \
-                -DskipTests -Dstyle.color=never \
+                -DskipTests -Dmaven.javadoc.skip=true \
+                -Dstyle.color=never \
                 -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1 \
                 -am \
                 2>&1 | tee "${log}"
@@ -349,7 +355,7 @@ jobs:
           } > "release-java/${LANE}-manifest.txt"
 
       - name: Upload Java repository lane
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: java-repository-${{ matrix.lane }}
           path: release-java/
@@ -361,7 +367,7 @@ jobs:
     needs: package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           pattern: java-repository-*
           path: release-java/lanes
@@ -488,7 +494,7 @@ jobs:
           } > release-java/final/paimon-maven-repository-manifest.txt
 
       - name: Upload combined Java repository
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: java-release-repository
           path: release-java/final/

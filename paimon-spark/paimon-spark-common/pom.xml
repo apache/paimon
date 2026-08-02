@@ -35,6 +35,8 @@ under the License.
 
     <properties>
         <spark.version>${paimon-spark-common.spark.version}</spark.version>
+        <!-- Javadoc cannot resolve the generated Spark and Scala shim classes. -->
+        <maven.javadoc.skip>true</maven.javadoc.skip>
     </properties>
 
     <dependencies>

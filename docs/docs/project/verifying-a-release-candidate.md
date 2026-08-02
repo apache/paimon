@@ -98,7 +98,10 @@ git -C paimon-candidate-git rev-parse "refs/tags/${RC_TAG}^{commit}"
 
 The resolved commit must equal both the SHA in the vote email and the
 `head_sha` of the successful Release workflow run. Inspect the commits since the
-previous release and confirm that the RC tag is attached to the intended branch.
+previous release and confirm that the RC tag was prepared from the intended
+release branch. The release branch may advance after the RC is tagged and does
+not need to remain equal to the RC commit; verify the immutable tag and candidate
+artifacts announced for the vote.
 
 ## Inspect the source archives
 

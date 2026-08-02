@@ -187,6 +187,12 @@ RELEASE_CANDIDATE="${RC_NUMBER}" \
 This creates the local branch `release-PAIMON_VERSION-rcRC_NUMBER`. Use it only
 to prepare the candidate commit; do not push this branch to the remote.
 
+The remote release branch is not frozen by an RC. It may continue receiving
+fixes for a later RC or maintenance release, and its head does not need to stay
+equal to the published RC tag. If a later branch change must be included in the
+release currently under vote, create a new RC from that updated branch state;
+never move or replace the existing RC tag.
+
 Change all Maven modules from `PAIMON_VERSION-SNAPSHOT` to
 `PAIMON_VERSION`. The helper commits the Maven version change:
 
