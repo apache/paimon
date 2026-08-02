@@ -51,7 +51,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-_CHECKPOINT_PROPERTY = "pypaimon.ray.update-by-row-id.checkpoint"
+_CHECKPOINT_PROPERTY = "data-evolution.update-by-row-id.checkpoint"
 _CHECKPOINT_TAG_PREFIX = "_pypaimon_ray_update_"
 _OFFSET_CHECKPOINT_VERSION = 2
 _OFFSET_CHECKPOINT_MODE = "source-offset"
