@@ -150,8 +150,9 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
 
         arrow_row = row_values_to_arrow_table(
             values_by_name, self.table.table_schema.fields, column_names)
+        size = self._planner.input_partition_stats(arrow_row)[partition][1]
         self._pending_inputs.append(
-            ("row", (row, partition, arrow_row.nbytes)))
+            ("row", (row, partition, size)))
 
     def _flush_pending_inputs(self):
         if not self._pending_inputs:

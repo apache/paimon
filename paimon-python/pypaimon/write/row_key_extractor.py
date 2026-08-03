@@ -603,6 +603,15 @@ class PostponeFixedBucketRowKeyExtractor(RowKeyExtractor):
                     table.options.bucket()
                 )
             )
+        bucket_function = str(
+            table.table_schema.options.get("bucket-function.type", "default")
+        ).strip().lower()
+        if bucket_function != "default":
+            raise ValueError(
+                "Postpone fixed bucket writes only support "
+                "bucket-function.type=default, got {}"
+                .format(bucket_function)
+            )
         self.bucket_keys = table.table_schema.bucket_keys
         self.bucket_key_indices = self._get_field_indices(self.bucket_keys)
         self._bucket_key_fields = table.table_schema.logical_bucket_key_fields

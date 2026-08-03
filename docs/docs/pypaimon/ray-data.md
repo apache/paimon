@@ -252,8 +252,9 @@ By default, postpone-bucket primary-key tables (`bucket = -2`) are
 written to real buckets and are immediately visible. Existing partitions
 reuse their bucket count; new partitions infer one from the configured target
 row count or size. Ray groups rows by `(partition, bucket)`, so each group must
-fit in one worker's memory. Set `postpone.batch-write-fixed-bucket` to `false`
-to write to `bucket-postpone` instead. HASH_DYNAMIC and
+fit in one worker's memory. This path supports `bucket-function.type=default`
+only. Set `postpone.batch-write-fixed-bucket` to `false` to write to
+`bucket-postpone` instead. HASH_DYNAMIC and
 CROSS_PARTITION primary-key Ray writes are not supported and fail fast,
 including the default dynamic-bucket primary-key table (`bucket = -1`).
 Ray write tasks create independent Paimon writers, which can assign

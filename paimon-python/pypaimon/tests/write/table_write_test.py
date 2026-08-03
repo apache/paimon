@@ -590,6 +590,90 @@ class TableWriteTest(unittest.TestCase):
             [1, 2], self._read_sorted(table, 'id').column('id').to_pylist()
         )
 
+    def test_postpone_size_inference_matches_java_binary_row(self):
+        from pypaimon.write.postpone_bucket import PostponeBucketPlanner
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            pa.field('key', pa.string(), nullable=False),
+            pa.field('value', pa.string(), nullable=False),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={
+                'bucket': -2,
+                'postpone.target-size-per-bucket': '20 kb',
+                'postpone.batch-write-fixed-bucket.max-parallelism': 3,
+            },
+        )
+        identifier = 'default.test_postpone_java_size_fixture'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        data = pa.RecordBatch.from_pydict({
+            'id': list(range(1000)),
+            'key': ['k'] * 1000,
+            'value': ['v'] * 1000,
+        }, schema=pa_schema)
+
+        planner = PostponeBucketPlanner(
+            table, known_num_buckets={}, postpone_row_counts={})
+        stats = planner.input_partition_stats(data)
+        self.assertEqual((1000, 32000), stats[()])
+        self.assertEqual(2, planner.plan(stats).num_buckets(()))
+
+    def test_postpone_default_bucket_function_matches_java(self):
+        from pypaimon.write.postpone_bucket import PostponeBucketPlan
+        from pypaimon.write.row_key_extractor import (
+            PostponeFixedBucketRowKeyExtractor,
+        )
+
+        pa_schema = pa.schema([
+            pa.field('key', pa.string(), nullable=False),
+            pa.field('value', pa.string(), nullable=False),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['key'],
+            options={'bucket': -2},
+        )
+        identifier = 'default.test_postpone_java_bucket_fixture'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        extractor = PostponeFixedBucketRowKeyExtractor(
+            table, PostponeBucketPlan({(): 4}))
+        data = pa.RecordBatch.from_pydict({
+            'key': ['hello-java'],
+            'value': ['v'],
+        }, schema=pa_schema)
+
+        # Java BinaryRow hash -201703277 maps to bucket 1 of 4.
+        self.assertEqual([1], extractor.extract_partition_bucket_batch(data)[1])
+
+    @parameterized.expand([('mod',), ('hive',)])
+    def test_postpone_rejects_unsupported_bucket_function(
+            self, bucket_function):
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            pa.field('value', pa.string(), nullable=False),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={
+                'bucket': -2,
+                'bucket-function.type': bucket_function,
+            },
+        )
+        identifier = (
+            'default.test_postpone_bucket_function_' + bucket_function)
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+
+        with self.assertRaisesRegex(
+                ValueError, 'only support bucket-function.type=default'):
+            table.new_postpone_fixed_bucket_write_builder().new_write()
+
     def test_postpone_batch_plans_all_record_batches(self):
         pa_schema = pa.schema([
             pa.field('id', pa.int32(), nullable=False),
@@ -979,6 +1063,66 @@ class TableWriteTest(unittest.TestCase):
         actual = self._read_sorted(fixed, 'user_id')
         self.assertEqual([2], actual.column('user_id').to_pylist())
 
+    def test_postpone_overwrite_updates_catalog_bucket_count(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pk_pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['user_id', 'dt'],
+            options={'bucket': -2},
+        )
+        identifier = 'default.test_postpone_overwrite_bucket_statistics'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+
+        legacy_builder = table.new_batch_write_builder()
+        legacy_write = legacy_builder.new_write()
+        legacy_commit = legacy_builder.new_commit()
+        legacy_write.write_arrow(pa.Table.from_pydict({
+            'user_id': [1],
+            'item_id': [1001],
+            'behavior': ['legacy'],
+            'dt': ['p1'],
+        }, schema=self.pk_pa_schema))
+        legacy_commit.commit(legacy_write.prepare_commit())
+        legacy_write.close()
+        legacy_commit.close()
+
+        fixed = table.copy({
+            'postpone.target-size-per-bucket': '1 b',
+            'postpone.batch-write-fixed-bucket.max-parallelism': 2,
+        })
+        builder = (
+            fixed.new_postpone_fixed_bucket_write_builder()
+            .overwrite({'dt': 'p1'})
+        )
+        write = builder.new_write()
+        commit = builder.new_commit()
+        write.write_arrow(pa.Table.from_pydict({
+            'user_id': [2],
+            'item_id': [1002],
+            'behavior': ['fixed'],
+            'dt': ['p1'],
+        }, schema=self.pk_pa_schema))
+        messages = write.prepare_commit()
+        captured_statistics = []
+        real_commit = commit.file_store_commit.snapshot_commit.commit
+
+        def capture_statistics(base_snapshot_uuid, snapshot, statistics):
+            captured_statistics.extend(statistics)
+            return real_commit(base_snapshot_uuid, snapshot, statistics)
+
+        commit.file_store_commit.snapshot_commit.commit = capture_statistics
+        try:
+            commit.commit(messages)
+        finally:
+            write.close()
+            commit.close()
+
+        self.assertEqual(2, captured_statistics[0].total_buckets)
+        self.assertEqual(
+            [2], self._read_sorted(fixed, 'user_id').column('user_id').to_pylist()
+        )
+
     def test_postpone_concurrent_new_partition_bucket_num_conflict(self):
         from pypaimon.write.commit.conflict_detection import CommitConflictError
 
@@ -1026,9 +1170,33 @@ class TableWriteTest(unittest.TestCase):
             self.assertEqual({2}, {m.total_buckets for m in messages_two})
             self.assertEqual({3}, {m.total_buckets for m in messages_three})
 
-            commit_two.commit(messages_two)
+            losing_paths = [
+                file.external_path or file.file_path
+                for message in messages_three
+                for file in message.new_files
+            ]
+            self.assertTrue(all(
+                table_three_buckets.file_io.exists(path)
+                for path in losing_paths
+            ))
+            concurrent_commit = {'done': False}
+
+            def fail_cas_after_concurrent_commit(*_):
+                if not concurrent_commit['done']:
+                    concurrent_commit['done'] = True
+                    commit_two.commit(messages_two)
+                    return False
+                raise AssertionError('Bucket conflict should precede another CAS')
+
+            commit_three.file_store_commit.snapshot_commit.commit = (
+                fail_cas_after_concurrent_commit)
             with self.assertRaisesRegex(CommitConflictError, "Total buckets"):
                 commit_three.commit(messages_three)
+            self.assertTrue(concurrent_commit['done'])
+            self.assertTrue(all(
+                not table_three_buckets.file_io.exists(path)
+                for path in losing_paths
+            ))
         finally:
             write_two.close()
             write_three.close()

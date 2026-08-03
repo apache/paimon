@@ -462,6 +462,8 @@ class FileStoreCommit:
                     f"after {elapsed_ms} millis with {retry_count} retries, "
                     f"there maybe exist commit conflicts between multiple jobs."
                 )
+                if retry_result is not None and retry_result.exception is None:
+                    raise CommitConflictError(error_msg)
                 if retry_result is not None and retry_result.exception:
                     raise RuntimeError(error_msg) from retry_result.exception
                 else:
@@ -495,7 +497,7 @@ class FileStoreCommit:
                     hash_index_base_snapshot, latest_snapshot_id
                 )
             )
-            if retry_result is None:
+            if retry_result is None or retry_result.exception is None:
                 raise CommitConflictError(str(conflict)) from conflict
             raise conflict
 
@@ -563,7 +565,7 @@ class FileStoreCommit:
                         # Rolled back: base/snapshot no longer valid; next attempt
                         # re-scans from scratch (matches Java RollbackRetryResult).
                         return RetryResult(None, conflict_exception)
-                if retry_result is None:
+                if retry_result is None or retry_result.exception is None:
                     raise CommitConflictError(
                         str(conflict_exception)
                     ) from conflict_exception
@@ -1008,6 +1010,8 @@ class FileStoreCommit:
                     'last_file_creation_time': 0,
                     'total_buckets': entry.total_buckets
                 }
+            partition_stats[partition_key]['total_buckets'] = (
+                entry.total_buckets)
 
             # Following Java implementation: PartitionEntry.fromDataFile()
             file_meta = entry.file

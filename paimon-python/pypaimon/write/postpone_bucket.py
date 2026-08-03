@@ -17,9 +17,9 @@
 
 from typing import Dict, Tuple
 
-import pyarrow as pa
-
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
+from pypaimon.table.row.internal_row import RowKind
 
 
 class PostponeBucketPlan:
@@ -56,6 +56,15 @@ class PostponeBucketPlanner:
                 "Postpone fixed bucket writes require bucket = -2, got {}"
                 .format(options.bucket())
             )
+        bucket_function = str(
+            table.table_schema.options.get("bucket-function.type", "default")
+        ).strip().lower()
+        if bucket_function != "default":
+            raise ValueError(
+                "Postpone fixed bucket writes only support "
+                "bucket-function.type=default, got {}"
+                .format(bucket_function)
+            )
 
         self.max_num_buckets = (
             options.postpone_batch_write_fixed_bucket_max_parallelism()
@@ -85,9 +94,8 @@ class PostponeBucketPlanner:
                     "{}".format(self.target_size_per_bucket)
                 )
 
-        self._partition_indices = [
-            table.field_names.index(key) for key in table.partition_keys
-        ]
+        self._partition_keys = list(table.partition_keys)
+        self._field_dict = dict(table.field_dict)
         if known_num_buckets is None:
             known_num_buckets, loaded_postpone_counts = (
                 self._load_bucket_metadata(table)
@@ -128,8 +136,8 @@ class PostponeBucketPlanner:
         return PostponeBucketPlan(self._known_num_buckets)
 
     def input_partition_stats(self, data) -> Dict[Tuple, Tuple[int, int]]:
-        if self._partition_indices:
-            columns = [data.column(i) for i in self._partition_indices]
+        if self._partition_keys:
+            columns = [data.column(key) for key in self._partition_keys]
             partitions = [
                 tuple(column[row].as_py() for column in columns)
                 for row in range(data.num_rows)
@@ -137,18 +145,19 @@ class PostponeBucketPlanner:
         else:
             partitions = [()] * data.num_rows
 
-        row_indices = {}
-        for index, partition in enumerate(partitions):
-            row_indices.setdefault(partition, []).append(index)
-
         stats = {}
-        for partition, indices in row_indices.items():
-            partition_data = (
-                data
-                if len(indices) == data.num_rows
-                else pa.compute.take(data, pa.array(indices, type=pa.int64()))
-            )
-            stats[partition] = (len(indices), partition_data.nbytes)
+        fields = [self._field_dict[name] for name in data.schema.names]
+        columns = [data.column(i) for i in range(len(fields))]
+        collect_size = self.target_row_num_per_bucket is None
+        for row, partition in enumerate(partitions):
+            data_size = 0
+            if collect_size:
+                values = [column[row].as_py() for column in columns]
+                data_size = len(GenericRowSerializer.to_bytes(
+                    GenericRow(values, fields, RowKind.INSERT)
+                )) - 4
+            row_count, total_size = stats.get(partition, (0, 0))
+            stats[partition] = (row_count + 1, total_size + data_size)
         return stats
 
     def plan(
