@@ -53,7 +53,8 @@ public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<I
                                 new GlobalIndexMeta(0, 9, 7, null, new byte[] {1}),
                                 null));
         GenericRow serialized = (GenericRow) serializer.convertTo(entry);
-        serialized.setField(9, GenericRow.of(0L, 9L, 7, null, new byte[] {1}));
+        assertThat(serialized.getRow(9, GlobalIndexMeta.SCHEMA.getFieldCount()).getFieldCount())
+                .isEqualTo(6);
 
         GlobalIndexMeta restored =
                 serializer
