@@ -164,7 +164,8 @@ public class ResolvingFileIOTest {
 
         resolvingFileIO.close();
 
-        // both resolved delegates, and the throwaway probes FileIO.get made along the way
+        // one delegate per authority, each of them released exactly once
+        assertEquals(2, loaded.size());
         for (FileIO fileIO : loaded) {
             verify(fileIO, times(1)).close();
         }
@@ -203,9 +204,8 @@ public class ResolvingFileIOTest {
     }
 
     /**
-     * Hands out a fresh delegate per load, the way a real loader does. FileIO.get loads one
-     * throwaway instance to probe access and another one to return, so a single shared mock cannot
-     * tell the two apart.
+     * Hands out a fresh delegate per load, the way a real loader does, so the test can tell one
+     * resolved delegate from another.
      */
     private void configureWithFreshDelegates(List<FileIO> loaded, boolean failOnClose)
             throws IOException {

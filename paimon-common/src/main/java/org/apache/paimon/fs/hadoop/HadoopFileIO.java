@@ -64,7 +64,8 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
 
     private org.apache.paimon.options.Options options;
 
-    protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
+    /** Value is the file system paired with the ownership recorded when it was created. */
+    protected transient volatile Map<Pair<String, String>, Pair<FileSystem, Boolean>> fsMap;
 
     /**
      * Transient so that a deserialized copy starts out usable: closing one instance must not
@@ -80,7 +81,8 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
 
     @VisibleForTesting
     public void setFileSystem(FileSystem fs) throws IOException {
-        getFileSystem(path(path), p -> fs);
+        // handed in from outside, so it stays the caller's to close whatever the scheme says
+        getFileSystem(path(path), p -> fs, false);
     }
 
     @Override
@@ -201,12 +203,13 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
 
     @VisibleForTesting
     FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
-        return getFileSystem(path, this::createFileSystem);
+        return getFileSystem(path, this::createFileSystem, true);
     }
 
     private FileSystem getFileSystem(
             org.apache.hadoop.fs.Path path,
-            FunctionWithException<org.apache.hadoop.fs.Path, FileSystem, IOException> creator)
+            FunctionWithException<org.apache.hadoop.fs.Path, FileSystem, IOException> creator,
+            boolean mayOwn)
             throws IOException {
         if (closed) {
             throw new IOException("This FileIO is closed.");
@@ -220,43 +223,70 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
             }
         }
 
-        Map<Pair<String, String>, FileSystem> map = fsMap;
+        Map<Pair<String, String>, Pair<FileSystem, Boolean>> map = fsMap;
 
         URI uri = path.toUri();
         String scheme = uri.getScheme();
         String authority = uri.getAuthority();
         Pair<String, String> key = Pair.of(scheme, authority);
-        FileSystem fs = map.get(key);
-        if (fs == null) {
-            fs = creator.apply(path);
-            boolean owned = isOwnedScheme(scheme);
+        Pair<FileSystem, Boolean> entry = map.get(key);
+        if (entry == null) {
+            // pin the ownership Hadoop decided on for this instance, the configuration is mutable
+            // and may well answer differently by the time close() asks
+            Pair<FileSystem, Boolean> created =
+                    Pair.of(creator.apply(path), mayOwn && isOwnedScheme(scheme));
+            entry = created;
+            boolean rejected = false;
             // publish under the same monitor close() takes, otherwise an instance created here can
             // land in the map after close() drained it and then nobody would ever release it
             synchronized (this) {
                 if (closed) {
-                    if (owned) {
-                        IOUtils.closeQuietly(fs);
+                    rejected = true;
+                } else {
+                    Pair<FileSystem, Boolean> previous = map.putIfAbsent(key, created);
+                    if (previous != null) {
+                        // another thread won the race, use theirs
+                        entry = previous;
                     }
-                    throw new IOException("This FileIO is closed.");
-                }
-                FileSystem previous = map.putIfAbsent(key, fs);
-                if (previous != null) {
-                    // another thread won the race, release the instance we own and use theirs
-                    if (owned) {
-                        IOUtils.closeQuietly(fs);
-                    }
-                    fs = previous;
                 }
             }
+            // compare the file systems, not the pairs holding them: releasing ours because the
+            // winner merely wrapped the same instance would close what we are about to hand out
+            if (rejected || entry.getLeft() != created.getLeft()) {
+                // outside the monitor on purpose: tearing down an object store client can block
+                // for a long time and everyone else needs this lock
+                closeIfOwned(created);
+            }
+            if (rejected) {
+                throw new IOException("This FileIO is closed.");
+            }
         }
-        return fs;
+        return entry.getLeft();
+    }
+
+    private static void closeIfOwned(Pair<FileSystem, Boolean> entry) {
+        if (entry.getRight()) {
+            IOUtils.closeQuietly(entry.getLeft());
+        }
     }
 
     protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
         Configuration conf = hadoopConf.get();
         FileSystem fileSystem = path.getFileSystem(conf);
-        fileSystem = HadoopSecuredFileSystem.trySecureFileSystem(fileSystem, options, conf);
-        return fileSystem;
+        boolean handedOver = false;
+        try {
+            // a Kerberos login failure in here would otherwise strand the instance above, which
+            // with the cache disabled nobody else can reach. This runs only for the creator that
+            // owns what it builds, so the scheme alone decides, as it does at publication time
+            FileSystem secured =
+                    HadoopSecuredFileSystem.trySecureFileSystem(fileSystem, options, conf);
+            handedOver = true;
+            return secured;
+        } finally {
+            if (!handedOver && isOwnedScheme(path.toUri().getScheme())) {
+                IOUtils.closeQuietly(fileSystem);
+            }
+        }
     }
 
     /**
@@ -273,6 +303,12 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
      * <p>The scheme is the one taken from the path, not from {@code FileSystem#getUri()}, and it is
      * matched as written rather than lower cased, because that is what Hadoop looks up. Any
      * deviation could report a cached, shared instance as owned.
+     *
+     * <p>Asked while the instance is being created, and the answer is kept next to it in {@link
+     * #fsMap}. The configuration is shared with the caller and can change underneath us, so asking
+     * again at close time could contradict what Hadoop actually did. A flip concurrent with the
+     * creation itself can still be missed; that window is a few instructions rather than the whole
+     * lifetime of the instance, and nothing short of Hadoop reporting its own decision closes it.
      */
     @VisibleForTesting
     boolean isOwnedScheme(@Nullable String scheme) {
@@ -297,13 +333,13 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
         List<FileSystem> owned = new ArrayList<>();
         synchronized (this) {
             closed = true;
-            Map<Pair<String, String>, FileSystem> map = fsMap;
+            Map<Pair<String, String>, Pair<FileSystem, Boolean>> map = fsMap;
             if (map == null) {
                 return;
             }
-            for (Map.Entry<Pair<String, String>, FileSystem> entry : map.entrySet()) {
-                if (isOwnedScheme(entry.getKey().getLeft())) {
-                    owned.add(entry.getValue());
+            for (Pair<FileSystem, Boolean> entry : map.values()) {
+                if (entry.getRight()) {
+                    owned.add(entry.getLeft());
                 }
             }
             // drop the cached instances as well, a closed one must never be handed out again

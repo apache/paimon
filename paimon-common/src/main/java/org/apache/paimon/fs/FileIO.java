@@ -23,8 +23,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.utils.IOUtils;
 
-import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -409,7 +409,7 @@ public interface FileIO extends Serializable, Closeable {
     default void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
         try (SeekableInputStream is = newInputStream(sourcePath);
                 PositionOutputStream os = newOutputStream(targetPath, overwrite)) {
-            IOUtils.copy(is, os);
+            org.apache.commons.io.IOUtils.copy(is, os);
         }
     }
 
@@ -503,132 +503,164 @@ public interface FileIO extends Serializable, Closeable {
         }
 
         FileIOLoader loader = null;
+        // the instance the access check already built and configured, carried through selection and
+        // handed back as the result, see checkAccess
+        FileIO checked = null;
         List<IOException> ioExceptionList = new ArrayList<>();
+        // the checked instance stays live until it is handed over, so any failure in the selection
+        // below, checked or not, has to release it
+        boolean handedOver = false;
 
-        // load preferIO
-        FileIOLoader preferIOLoader = config.preferIO();
         try {
-            loader = checkAccess(preferIOLoader, path, config);
-            if (loader != null && LOG.isDebugEnabled()) {
-                LOG.debug(
-                        "Found preferIOLoader {} with scheme {}.",
-                        loader.getClass().getName(),
-                        loader.getScheme());
-            }
-        } catch (IOException ioException) {
-            ioExceptionList.add(ioException);
-        }
-
-        if (loader == null) {
-            Map<String, FileIOLoader> loaders = discoverLoaders();
-            loader = loaders.get(uri.getScheme());
-            if (!loaders.isEmpty() && LOG.isDebugEnabled()) {
-                LOG.debug(
-                        "Discovered FileIOLoaders: {}.",
-                        loaders.entrySet().stream()
-                                .map(
-                                        e ->
-                                                String.format(
-                                                        "{%s,%s}",
-                                                        e.getKey(),
-                                                        e.getValue().getClass().getName()))
-                                .collect(Collectors.joining(",")));
-            }
-        }
-
-        // load fallbackIO
-        FileIOLoader fallbackIO = config.fallbackIO();
-
-        if (loader != null) {
-            Set<String> options =
-                    config.options().keySet().stream()
-                            .map(String::toLowerCase)
-                            .collect(Collectors.toSet());
-            Set<String> missOptions = new HashSet<>();
-            for (String[] keys : loader.requiredOptions()) {
-                boolean found = false;
-                for (String key : keys) {
-                    if (options.contains(key.toLowerCase())) {
-                        found = true;
-                        break;
+            // load preferIO
+            FileIOLoader preferIOLoader = config.preferIO();
+            try {
+                checked = checkAccess(preferIOLoader, path, config);
+                if (checked != null) {
+                    loader = preferIOLoader;
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug(
+                                "Found preferIOLoader {} with scheme {}.",
+                                loader.getClass().getName(),
+                                loader.getScheme());
                     }
                 }
-                if (!found) {
-                    missOptions.add(keys[0]);
-                }
+            } catch (IOException ioException) {
+                ioExceptionList.add(ioException);
             }
-            if (missOptions.size() > 0) {
-                IOException exception =
-                        new IOException(
-                                String.format(
-                                        "One or more required options are missing.\n\n"
-                                                + "Missing required options are:\n\n"
-                                                + "%s",
-                                        String.join("\n", missOptions)));
-                ioExceptionList.add(exception);
-                if (LOG.isDebugEnabled()) {
+
+            if (loader == null) {
+                Map<String, FileIOLoader> loaders = discoverLoaders();
+                loader = loaders.get(uri.getScheme());
+                if (!loaders.isEmpty() && LOG.isDebugEnabled()) {
                     LOG.debug(
-                            "Got {} but miss options. Will try to get fallback IO and Hadoop IO respectively.",
-                            loader.getClass().getName());
+                            "Discovered FileIOLoaders: {}.",
+                            loaders.entrySet().stream()
+                                    .map(
+                                            e ->
+                                                    String.format(
+                                                            "{%s,%s}",
+                                                            e.getKey(),
+                                                            e.getValue().getClass().getName()))
+                                    .collect(Collectors.joining(",")));
                 }
-                loader = null;
             }
-        }
 
-        if (loader == null) {
-            try {
-                loader = checkAccess(fallbackIO, path, config);
-                if (loader != null && LOG.isDebugEnabled()) {
-                    LOG.debug("Got fallback FileIOLoader: {}.", loader.getClass().getName());
+            // load fallbackIO
+            FileIOLoader fallbackIO = config.fallbackIO();
+
+            if (loader != null) {
+                Set<String> options =
+                        config.options().keySet().stream()
+                                .map(String::toLowerCase)
+                                .collect(Collectors.toSet());
+                Set<String> missOptions = new HashSet<>();
+                for (String[] keys : loader.requiredOptions()) {
+                    boolean found = false;
+                    for (String key : keys) {
+                        if (options.contains(key.toLowerCase())) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        missOptions.add(keys[0]);
+                    }
                 }
-            } catch (IOException ioException) {
-                ioExceptionList.add(ioException);
-            }
-        }
-
-        // load hadoopIO
-        if (loader == null) {
-            try {
-                loader = checkAccess(new HadoopFileIOLoader(), path, config);
-                if (loader != null && LOG.isDebugEnabled()) {
-                    LOG.debug("Got hadoop FileIOLoader: {}.", loader.getClass().getName());
+                if (missOptions.size() > 0) {
+                    IOException exception =
+                            new IOException(
+                                    String.format(
+                                            "One or more required options are missing.\n\n"
+                                                    + "Missing required options are:\n\n"
+                                                    + "%s",
+                                            String.join("\n", missOptions)));
+                    ioExceptionList.add(exception);
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug(
+                                "Got {} but miss options. Will try to get fallback IO and Hadoop IO respectively.",
+                                loader.getClass().getName());
+                    }
+                    loader = null;
+                    // this candidate is out of the running, so release whatever we checked for it
+                    IOUtils.closeQuietly(checked);
+                    checked = null;
                 }
-            } catch (IOException ioException) {
-                ioExceptionList.add(ioException);
+            }
+
+            if (loader == null) {
+                try {
+                    checked = checkAccess(fallbackIO, path, config);
+                    if (checked != null) {
+                        loader = fallbackIO;
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug(
+                                    "Got fallback FileIOLoader: {}.", loader.getClass().getName());
+                        }
+                    }
+                } catch (IOException ioException) {
+                    ioExceptionList.add(ioException);
+                }
+            }
+
+            // load hadoopIO
+            if (loader == null) {
+                FileIOLoader hadoopIOLoader = new HadoopFileIOLoader();
+                try {
+                    checked = checkAccess(hadoopIOLoader, path, config);
+                    if (checked != null) {
+                        loader = hadoopIOLoader;
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("Got hadoop FileIOLoader: {}.", loader.getClass().getName());
+                        }
+                    }
+                } catch (IOException ioException) {
+                    ioExceptionList.add(ioException);
+                }
+            }
+
+            if (loader == null) {
+                String fallbackMsg = "";
+                String preferMsg = "";
+                if (preferIOLoader != null) {
+                    preferMsg =
+                            " "
+                                    + preferIOLoader.getClass().getSimpleName()
+                                    + " also cannot access this path.";
+                }
+                if (fallbackIO != null) {
+                    fallbackMsg =
+                            " "
+                                    + fallbackIO.getClass().getSimpleName()
+                                    + " also cannot access this path.";
+                }
+                UnsupportedSchemeException ex =
+                        new UnsupportedSchemeException(
+                                String.format(
+                                        "Could not find a file io implementation for scheme '%s' in the classpath."
+                                                + "%s %s Hadoop FileSystem also cannot access this path '%s'.",
+                                        uri.getScheme(), preferMsg, fallbackMsg, path));
+                for (IOException ioException : ioExceptionList) {
+                    ex.addSuppressed(ioException);
+                }
+
+                throw ex;
+            }
+
+            if (checked != null) {
+                // already configured by the access check
+                handedOver = true;
+                return checked;
+            }
+
+            FileIO fileIO = loader.load(path);
+            fileIO.configure(config);
+            return fileIO;
+        } finally {
+            if (!handedOver) {
+                IOUtils.closeQuietly(checked);
             }
         }
-
-        if (loader == null) {
-            String fallbackMsg = "";
-            String preferMsg = "";
-            if (preferIOLoader != null) {
-                preferMsg =
-                        " "
-                                + preferIOLoader.getClass().getSimpleName()
-                                + " also cannot access this path.";
-            }
-            if (fallbackIO != null) {
-                fallbackMsg =
-                        " "
-                                + fallbackIO.getClass().getSimpleName()
-                                + " also cannot access this path.";
-            }
-            UnsupportedSchemeException ex =
-                    new UnsupportedSchemeException(
-                            String.format(
-                                    "Could not find a file io implementation for scheme '%s' in the classpath."
-                                            + "%s %s Hadoop FileSystem also cannot access this path '%s'.",
-                                    uri.getScheme(), preferMsg, fallbackMsg, path));
-            for (IOException ioException : ioExceptionList) {
-                ex.addSuppressed(ioException);
-            }
-
-            throw ex;
-        }
-
-        FileIO fileIO = loader.load(path);
-        fileIO.configure(config);
-        return fileIO;
     }
 
     /** Discovers all {@link FileIOLoader} by service loader. */
@@ -654,22 +686,34 @@ public interface FileIO extends Serializable, Closeable {
         return results;
     }
 
-    static FileIOLoader checkAccess(FileIOLoader fileIO, Path path, CatalogContext config)
+    /**
+     * Loads and configures a {@link FileIO} from the given loader and checks that it can reach the
+     * path. Returns the very instance it checked, or null when there is no loader.
+     *
+     * <p>The instance is returned rather than discarded because {@link FileIOLoader#load} is under
+     * no obligation to hand out a fresh one: a loader that caches or returns a singleton would give
+     * back the instance we just released. It also saves building the file system twice, since the
+     * check already built one. A failed check releases it here, and a caller that ends up rejecting
+     * this loader releases it there; with the Hadoop file system cache disabled that matters,
+     * because nobody else can reach what the check created.
+     */
+    static FileIO checkAccess(FileIOLoader fileIO, Path path, CatalogContext config)
             throws IOException {
         if (fileIO == null) {
             return null;
         }
 
-        // check access, the probe is thrown away afterwards so it has to be released here: with
-        // the Hadoop file system cache disabled its exists() call creates a file system that no
-        // one else can reach
         FileIO io = fileIO.load(path);
+        boolean accessible = false;
         try {
             io.configure(config);
             io.exists(path);
+            accessible = true;
         } finally {
-            IOUtils.closeQuietly(io);
+            if (!accessible) {
+                IOUtils.closeQuietly(io);
+            }
         }
-        return fileIO;
+        return io;
     }
 }

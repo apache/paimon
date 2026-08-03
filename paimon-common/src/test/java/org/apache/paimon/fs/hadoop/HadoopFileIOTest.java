@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.hadoop.conf.Configuration;
@@ -145,9 +146,11 @@ public class HadoopFileIOTest {
 
     @Test
     public void testInjectedFileSystemIsNotClosed() throws Exception {
-        // an unconfigured FileIO owns nothing, and a file system handed in from the outside stays
-        // the caller's to close
-        HadoopFileIO fileIO = new HadoopFileIO(new Path("testfs://injected/warehouse"));
+        // a file system handed in from the outside stays the caller's to close, even where the
+        // scheme says an instance we built ourselves would have been ours
+        Configuration conf = conf("testfs");
+        conf.setBoolean("fs.testfs.impl.disable.cache", true);
+        HadoopFileIO fileIO = fileIO(conf, "testfs://injected/warehouse");
         RecordingFileSystem fs = new RecordingFileSystem();
         fileIO.setFileSystem(fs);
 
@@ -249,8 +252,36 @@ public class HadoopFileIOTest {
         FileSystem returned =
                 fileIO.getFileSystem(new org.apache.hadoop.fs.Path("testfs://cachedrace/a"));
 
-        assertThat(((RecordingFileSystem) returned).closeCount()).isZero();
-        ((RecordingFileSystem) returned).close();
+        try {
+            assertThat(((RecordingFileSystem) returned).closeCount()).isZero();
+        } finally {
+            ((RecordingFileSystem) returned).close();
+        }
+    }
+
+    @Test
+    public void testADeserializedCopyOutlivesTheInstanceItCameFrom() throws Exception {
+        // closing one instance must not disable the copies shipped to other processes, which is
+        // what the transient closed flag buys
+        Configuration conf = conf("testfs");
+        conf.setBoolean("fs.testfs.impl.disable.cache", true);
+        HadoopFileIO fileIO = fileIO(conf, "testfs://serialized/warehouse");
+        RecordingFileSystem fs = fileSystem(fileIO, "testfs://serialized/a");
+
+        byte[] shipped = InstantiationUtil.serializeObject(fileIO);
+        fileIO.close();
+        assertThat(fs.closeCount()).isEqualTo(1);
+
+        HadoopFileIO copy =
+                InstantiationUtil.deserializeObject(shipped, HadoopFileIO.class.getClassLoader());
+
+        // the copy starts out usable and owns a file system of its own
+        RecordingFileSystem copyFs = fileSystem(copy, "testfs://serialized/a");
+        assertThat(copyFs).isNotSameAs(fs);
+        assertThat(copyFs.closeCount()).isZero();
+
+        copy.close();
+        assertThat(copyFs.closeCount()).isEqualTo(1);
     }
 
     @Test
@@ -271,9 +302,46 @@ public class HadoopFileIOTest {
     }
 
     @Test
+    public void testOwnedFileSystemIsStillClosedAfterTheFlagIsFlippedOff() throws Exception {
+        // the configuration is shared with the caller and can be edited at any time; ownership was
+        // settled when Hadoop handed out this instance and must not be re-litigated at close time
+        Configuration conf = conf("testfs");
+        conf.setBoolean("fs.testfs.impl.disable.cache", true);
+        HadoopFileIO fileIO = fileIO(conf, "testfs://flippedoff/warehouse");
+
+        RecordingFileSystem fs = fileSystem(fileIO, "testfs://flippedoff/a");
+        conf.setBoolean("fs.testfs.impl.disable.cache", false);
+
+        fileIO.close();
+
+        assertThat(fs.closeCount()).isEqualTo(1);
+    }
+
+    @Test
+    public void testSharedFileSystemIsStillSparedAfterTheFlagIsFlippedOn() throws Exception {
+        // the mirror case: this instance came out of Hadoop's global cache and other readers hold
+        // it, so a flag flip must not turn it into something we may close
+        Configuration conf = conf("testfs");
+        HadoopFileIO fileIO = fileIO(conf, "testfs://flippedon/warehouse");
+
+        RecordingFileSystem fs = fileSystem(fileIO, "testfs://flippedon/a");
+        conf.setBoolean("fs.testfs.impl.disable.cache", true);
+
+        try {
+            fileIO.close();
+
+            assertThat(fs.closeCount()).isZero();
+        } finally {
+            // Hadoop's cache is static and this fork is reused, so never leave it behind
+            fs.close();
+        }
+    }
+
+    @Test
     public void testMalformedDefaultFileSystemDoesNotBreakClose() throws Exception {
-        // Hadoop 3 throws IllegalArgumentException out of getDefaultUri for a scheme-less
-        // fs.defaultFS, which must not escape close() and strand everything else
+        // a scheme-less fs.defaultFS must not make ownership blow up. Hadoop 2, which this build
+        // compiles against, rewrites it to hdfs://; Hadoop 3 throws IllegalArgumentException out of
+        // getDefaultUri instead, which is what the catch in isOwnedScheme is there for
         Configuration conf = new Configuration();
         conf.set("fs.defaultFS", "no-scheme-here");
         HadoopFileIO fileIO = fileIO(conf, "testfs://malformed/warehouse");
@@ -283,9 +351,10 @@ public class HadoopFileIOTest {
     }
 
     @Test
-    public void testAccessProbeFileSystemIsNotLeakedByFileIOGet() throws Exception {
-        // FileIO.get probes a loader by calling exists() on a throwaway FileIO; with the Hadoop
-        // cache disabled that probe creates a file system nobody else can reach
+    public void testAccessProbeFileSystemIsReusedAndNotLeakedByFileIOGet() throws Exception {
+        // FileIO.get probes a loader by calling exists() on a FileIO it then hands back. With the
+        // Hadoop cache disabled a discarded probe would strand a file system nobody can reach, and
+        // reloading instead of reusing would build a second one for no reason
         Configuration conf = conf("testfs");
         conf.setBoolean("fs.testfs.impl.disable.cache", true);
         RecordingFileSystem.resetCounters();
@@ -294,11 +363,11 @@ public class HadoopFileIOTest {
         FileIO fileIO = FileIO.get(path, CatalogContext.create(new Options(), conf));
         try {
             fileIO.exists(path);
+            assertThat(RecordingFileSystem.created()).isEqualTo(1);
         } finally {
             fileIO.close();
         }
 
-        assertThat(RecordingFileSystem.created()).isGreaterThan(1);
         assertThat(RecordingFileSystem.closed()).isEqualTo(RecordingFileSystem.created());
     }
 
@@ -344,7 +413,8 @@ public class HadoopFileIOTest {
             // stand in for a concurrent thread that published its own instance first
             URI uri = path.toUri();
             fsMap.put(
-                    Pair.of(uri.getScheme(), uri.getAuthority()), winner == null ? loser : winner);
+                    Pair.of(uri.getScheme(), uri.getAuthority()),
+                    Pair.of(winner == null ? loser : winner, isOwnedScheme(uri.getScheme())));
             return loser;
         }
     }
