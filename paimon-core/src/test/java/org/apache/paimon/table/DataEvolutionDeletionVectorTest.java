@@ -53,6 +53,7 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -79,6 +80,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.errors.ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
@@ -599,6 +601,143 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testStaleMaterializeCompactionRejectedAfterConcurrentUpdate() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        commitDeletionVectors(table, DEFAULT_DV_SPECS);
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
+        FileStoreTable compactTable = table.copy(dynamicOptions);
+        Snapshot compactSnapshot = compactTable.latestSnapshot().get();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(compactTable, false, false, compactSnapshot);
+        List<CommitMessage> staleMaterializeMessages = new ArrayList<>();
+        try {
+            while (true) {
+                for (DataEvolutionCompactTask task : coordinator.plan()) {
+                    staleMaterializeMessages.add(
+                            task.doCompact(compactTable, "test-stale-materialize"));
+                }
+            }
+        } catch (EndOfScanException ignored) {
+        }
+        assertThat(staleMaterializeMessages).isNotEmpty();
+        staleMaterializeMessages.addAll(
+                new DataEvolutionCompactionCommitPreparation(compactTable, compactSnapshot)
+                        .prepare(staleMaterializeMessages));
+
+        RowType writeType = table.rowType().project(Collections.singletonList("f2"));
+        List<CommitMessage> concurrentUpdateMessages = new ArrayList<>();
+        for (int batch = 0; batch < 3; batch++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite().withWriteType(writeType)) {
+                for (int rowId = batch * 5; rowId < batch * 5 + 5; rowId++) {
+                    write.write(GenericRow.of(BinaryString.fromString("concurrent-" + rowId)));
+                }
+                List<CommitMessage> messages = write.prepareCommit();
+                setFirstRowId(messages, batch * 5L);
+                concurrentUpdateMessages.addAll(messages);
+            }
+        }
+        commit(table, concurrentUpdateMessages);
+
+        assertThat(readProjectedStrings(table.newReadBuilder().withProjection(new int[] {2})))
+                .containsExactlyElementsOf(expectedProjectedStrings("concurrent", FULL_RANGE));
+        long updateSnapshotId = table.latestSnapshot().get().id();
+
+        assertThatThrownBy(
+                        () -> {
+                            try (TableCommitImpl commit =
+                                    compactTable.newCommit("test-stale-materialize")) {
+                                commit.rowIdCheckConflictForMaterializeDvCompaction(
+                                                compactSnapshot.id())
+                                        .commit(staleMaterializeMessages);
+                            }
+                        })
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
+
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(updateSnapshotId);
+        assertThat(readProjectedStrings(table.newReadBuilder().withProjection(new int[] {2})))
+                .containsExactlyElementsOf(expectedProjectedStrings("concurrent", FULL_RANGE));
+    }
+
+    @Test
+    public void testStaleMaterializeCompactionAllowsNonOverlappingConcurrentUpdate()
+            throws Exception {
+        FileStoreTable table =
+                createPartitionedReassignTable("non_overlapping_materialize_update_table", false);
+        writePartitionRows(table, "a", 0, 1, 2, 3, 4);
+        writePartitionRows(table, "b", 5, 6, 7, 8, 9);
+
+        BinaryRow partitionA = partition(table, "a");
+        BinaryRow partitionB = partition(table, "b");
+        assertThat(anchorFilesByRange(table, partitionA).keySet()).containsExactly(new Range(0, 4));
+        assertThat(anchorFilesByRange(table, partitionB).keySet()).containsExactly(new Range(5, 9));
+        commitDeletionVectors(
+                table, partitionA, Collections.singletonList(new DvSpec(new Range(0, 4), 1)));
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
+        FileStoreTable compactTable = table.copy(dynamicOptions);
+        Snapshot compactSnapshot = compactTable.latestSnapshot().get();
+        PartitionPredicate partitionPredicate =
+                PartitionPredicate.fromMaps(
+                        table.schema().logicalPartitionType(),
+                        Collections.singletonList(Collections.singletonMap("pt", "a")),
+                        table.coreOptions().partitionDefaultName());
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        compactTable, partitionPredicate, false, false, compactSnapshot);
+        List<CommitMessage> staleMaterializeMessages = new ArrayList<>();
+        try {
+            while (true) {
+                for (DataEvolutionCompactTask task : coordinator.plan()) {
+                    assertThat(task.type())
+                            .isEqualTo(DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
+                    staleMaterializeMessages.add(
+                            task.doCompact(compactTable, "test-stale-materialize"));
+                }
+            }
+        } catch (EndOfScanException ignored) {
+        }
+        assertThat(staleMaterializeMessages).isNotEmpty();
+        staleMaterializeMessages.addAll(
+                new DataEvolutionCompactionCommitPreparation(compactTable, compactSnapshot)
+                        .prepare(staleMaterializeMessages));
+
+        writePartialStrings(table, "b", 5L, 5, 6, 7, 8, 9);
+        long updateSnapshotId = table.latestSnapshot().get().id();
+
+        try (TableCommitImpl commit = compactTable.newCommit("test-stale-materialize")) {
+            commit.rowIdCheckConflictForMaterializeDvCompaction(compactSnapshot.id())
+                    .commit(staleMaterializeMessages);
+        }
+
+        assertThat(table.latestSnapshot().get().id()).isGreaterThan(updateSnapshotId);
+        assertThat(table.latestSnapshot().get().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(anchorFilesByRange(table, partitionA).keySet())
+                .containsExactly(new Range(10, 13));
+        assertThat(anchorFilesByRange(table, partitionB).keySet()).containsExactly(new Range(5, 9));
+        assertThat(readPartitionedRows(table))
+                .containsExactlyInAnyOrder(
+                        "a|0|base-0",
+                        "a|2|base-2",
+                        "a|3|base-3",
+                        "a|4|base-4",
+                        "b|5|updated-5",
+                        "b|6|updated-6",
+                        "b|7|updated-7",
+                        "b|8|updated-8",
+                        "b|9|updated-9");
+    }
+
+    @Test
     public void testMaterializeCompactionUsesRemainingSizeForLargeDeletedRange() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -864,6 +1003,23 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         rows.sort(
                 Comparator.comparingLong(
                         row -> Long.parseLong(row.substring(row.lastIndexOf('|') + 1))));
+        return rows;
+    }
+
+    private static List<String> readPartitionedRows(FileStoreTable table) throws IOException {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<String> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row ->
+                            rows.add(
+                                    row.getString(0)
+                                            + "|"
+                                            + row.getInt(1)
+                                            + "|"
+                                            + row.getString(2)));
+        }
         return rows;
     }
 

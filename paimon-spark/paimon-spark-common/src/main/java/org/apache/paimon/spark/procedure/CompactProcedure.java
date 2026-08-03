@@ -536,6 +536,7 @@ public class CompactProcedure extends BaseProcedure {
                     LOG.info("Task plan is empty, no compact job to execute.");
                     continue;
                 }
+                boolean containsMaterializeDeletion = containsMaterializeDeletion(compactionTasks);
 
                 DataEvolutionCompactTaskSerializer serializer =
                         new DataEvolutionCompactTaskSerializer();
@@ -576,6 +577,9 @@ public class CompactProcedure extends BaseProcedure {
 
                 List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
                 try (TableCommitImpl commit = table.newCommit(commitUser)) {
+                    if (containsMaterializeDeletion) {
+                        commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id());
+                    }
                     List<CommitMessage> messages =
                             deserializeCommitMessagesAndReleaseSerializedBytes(
                                     messageSerializerser, serializedMessages);
@@ -590,6 +594,14 @@ public class CompactProcedure extends BaseProcedure {
         } catch (EndOfScanException e) {
             LOG.info("Catching EndOfScanException, the compact job is finishing.");
         }
+    }
+
+    static boolean containsMaterializeDeletion(List<DataEvolutionCompactTask> compactionTasks) {
+        return compactionTasks.stream()
+                .anyMatch(
+                        task ->
+                                task.type()
+                                        == DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
     }
 
     private static List<CommitMessage> deserializeCommitMessagesAndReleaseSerializedBytes(
