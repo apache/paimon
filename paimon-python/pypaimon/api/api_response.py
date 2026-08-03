@@ -21,7 +21,7 @@ from typing import Dict, Generic, List, Optional
 
 from pypaimon.api.api_request import RESTRequest
 from pypaimon.common.identifier import Identifier
-from pypaimon.common.json_util import T, json_field
+from pypaimon.common.json_util import T, json_field, optional_json_field
 from pypaimon.common.options import Options
 from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
@@ -336,13 +336,20 @@ class GetDatabaseResponse(AuditRESTResponse):
 @dataclass
 class ConfigResponse(RESTResponse):
     FILED_DEFAULTS = "defaults"
+    FIELD_OVERRIDES = "overrides"
 
     defaults: Dict[str, str] = json_field(FILED_DEFAULTS)
+    overrides: Optional[Dict[str, str]] = optional_json_field(FIELD_OVERRIDES, "non_null")
 
     def merge(self, options: Options) -> Options:
-        merged = options.copy()
-        merged.data.update(self.defaults)
-        return merged
+        # Priority from low to high: server defaults, client options, server overrides.
+        # Server defaults can be overridden by the client, while server overrides are
+        # enforced and win over any client value (e.g. "data-token.enabled").
+        merged = dict(self.defaults or {})
+        merged.update(options.data)
+        if self.overrides:
+            merged.update(self.overrides)
+        return Options({key: value for key, value in merged.items() if value is not None})
 
 
 @dataclass
