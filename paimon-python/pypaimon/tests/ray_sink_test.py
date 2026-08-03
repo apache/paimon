@@ -304,6 +304,48 @@ class RaySinkTest(unittest.TestCase):
             mock_write.prepare_commit.assert_called_once()
             mock_write.abort.assert_called_once()
 
+    def test_postpone_worker_uses_driver_bucket_plan_without_manifest_scan(self):
+        from pypaimon.write.postpone_bucket import (
+            PostponeBucketPlan,
+            PostponeBucketPlanner,
+        )
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('value', pa.float64()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={
+                'bucket': '-2',
+            },
+        )
+        identifier = 'test_db.test_postpone_worker_plan'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        datasink = PaimonDatasink(
+            table,
+            postpone_bucket_plan=PostponeBucketPlan({(): 2}),
+        )
+        data = pa.Table.from_pydict({
+            'id': list(range(20)),
+            'name': ['name-{}'.format(i) for i in range(20)],
+            'value': [float(i) for i in range(20)],
+        }, schema=pa_schema)
+
+        with patch.object(
+            PostponeBucketPlanner,
+            '_load_bucket_metadata',
+            side_effect=AssertionError("worker must not scan manifests"),
+        ) as load:
+            messages = datasink.write([data], Mock(spec=TaskContext))
+
+        load.assert_not_called()
+        self.assertEqual({0, 1}, {message.bucket for message in messages})
+        self.assertEqual({2}, {message.total_buckets for message in messages})
+
     def test_write_does_not_return_prepared_messages_when_dedicated_close_aborts(self):
         from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
 

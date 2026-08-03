@@ -37,7 +37,7 @@ explicitly selected. These tests cover:
     ``__paimon_bucket__`` still works (collision-safe column name).
   * non-HASH_FIXED append-only tables pass through unchanged.
   * dynamic-bucket primary-key tables fail fast, while postpone-bucket
-    primary-key tables pass through.
+    primary-key tables plan once and group multi-block input by real bucket.
 """
 
 import glob
@@ -241,7 +241,7 @@ class RayShuffleTest(unittest.TestCase):
         finally:
             writer.close()
 
-    def test_primary_key_postpone_bucket_roundtrip_to_postpone_files(self):
+    def test_primary_key_postpone_bucket_multi_block_single_writer_per_bucket(self):
         from pypaimon.ray import write_paimon
 
         pa_schema = pa.schema([
@@ -253,24 +253,34 @@ class RayShuffleTest(unittest.TestCase):
         identifier = self._make_table(
             table_name, pa_schema,
             primary_keys=['id', 'dt'], partition_keys=['dt'],
-            options={'bucket': '-2'},
+            options={
+                'bucket': '-2',
+                'postpone.target-size-per-bucket': '1000 b',
+                'postpone.batch-write-fixed-bucket.max-parallelism': '2',
+            },
         )
 
         rows = pa.Table.from_pydict({
-            'id': list(range(10)),
-            'dt': ['2026-01-01'] * 5 + ['2026-01-02'] * 5,
-            'value': list(range(10)),
+            'id': list(range(100)),
+            'dt': ['2026-01-01'] * 50 + ['2026-01-02'] * 50,
+            'value': list(range(100)),
         }, schema=pa_schema)
+        dataset = ray.data.from_arrow(rows).repartition(8).materialize()
+        self.assertEqual(8, dataset.num_blocks())
         write_paimon(
-            ray.data.from_arrow(rows).repartition(2),
+            dataset,
             identifier,
             self.catalog_options,
+            concurrency=4,
         )
 
         files = self._count_data_files(table_name)
-        self.assertGreater(len(files), 0)
-        self.assertTrue(all('/bucket-postpone/' in path for path in files))
-        self.assertEqual(len(self._read_table(identifier)), 0)
+        self.assertEqual(4, len(files))
+        self.assertEqual(
+            {'bucket-0', 'bucket-1'},
+            {os.path.basename(os.path.dirname(path)) for path in files},
+        )
+        self.assertEqual(len(self._read_table(identifier)), 100)
 
     def test_partitioned_fixed_bucket_roundtrip(self):
         """Partitioned table — confirms the post-groupby schema does not

@@ -126,9 +126,11 @@ def maybe_apply_repartition(
 def _group_by_partition_bucket(
         dataset: "ray.data.Dataset",
         table: "Table",
+        extractor=None,
 ):
     partition_keys = list(table.table_schema.partition_keys or [])
-    extractor = table.create_row_key_extractor()
+    if extractor is None:
+        extractor = table.create_row_key_extractor()
     col_names = set(f.name for f in table.table_schema.fields)
     bucket_col = _pick_bucket_col_name(col_names)
     bucket_udf = _make_bucket_udf(extractor, bucket_col)

@@ -321,6 +321,10 @@ table_write.close()
 table_commit.close()
 ```
 
+For postpone-bucket tables (`bucket = -2`) with fixed-bucket batch writes
+enabled, inputs for new partitions are buffered until `prepare_commit()`.
+Memory grows with buffered input; existing-bucket partitions remain incremental.
+
 By default, the data will be appended to table. If you want to overwrite table, you should use `TableWrite#overwrite`
 API:
 

@@ -39,7 +39,7 @@ from pypaimon.table.bucket_mode import BucketMode
 class FileStoreWrite:
     """Base class for file store write operations."""
 
-    def __init__(self, table, commit_user):
+    def __init__(self, table, commit_user, postpone_fixed_bucket=False):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -50,7 +50,8 @@ class FileStoreWrite:
         self.commit_identifier = 0
         self.options = CoreOptions.copy(table.options)
         self.changelog_producer = self.options.changelog_producer()
-        if self.table.bucket_mode() == BucketMode.POSTPONE_MODE:
+        if (self.table.bucket_mode() == BucketMode.POSTPONE_MODE
+                and not postpone_fixed_bucket):
             self.options.set(CoreOptions.DATA_FILE_PREFIX,
                              (f"{self.options.data_file_prefix()}-u-{commit_user}"
                               f"-s-{random.randint(0, 2 ** 31 - 2)}-w-"))

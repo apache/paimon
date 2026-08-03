@@ -23,7 +23,10 @@ import pyarrow as pa
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
-from pypaimon.write.row_utils import require_columns, row_to_named_values
+from pypaimon.write.row_utils import (
+    require_columns,
+    row_to_named_values,
+)
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 
@@ -37,14 +40,21 @@ class TableWrite:
 
         self.table: FileStoreTable = table
         self.table_pyarrow_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
-        self.file_store_write = FileStoreWrite(self.table, commit_user)
-        self.row_key_extractor = self.table.create_row_key_extractor(
-            ignore_existing=static_partition is not None
-        )
         self.commit_user = commit_user
         self.static_partition = static_partition
+        self.file_store_write = self._create_file_store_write(commit_user)
+        self.row_key_extractor = self._create_row_key_extractor(static_partition)
+
+    def _create_file_store_write(self, commit_user):
+        return FileStoreWrite(self.table, commit_user)
+
+    def _create_row_key_extractor(self, static_partition):
+        return self.table.create_row_key_extractor(
+            ignore_existing=static_partition is not None
+        )
 
     def write_arrow(self, table: pa.Table):
+        self._validate_pyarrow_schema(table.schema)
         batches_iterator = table.to_batches()
         for batch in batches_iterator:
             self.write_arrow_batch(batch)
@@ -245,7 +255,11 @@ class TableWrite:
             concurrency=concurrency,
             ray_remote_args=ray_remote_args,
             hash_fixed_precluster=hash_fixed_precluster,
+            **self._distributed_write_options(),
         )
+
+    def _distributed_write_options(self) -> Dict[str, Any]:
+        return {}
 
     def close(self):
         try:

@@ -295,9 +295,10 @@ def write_paimon(
     writer. For primary-key tables, ``map_groups`` writes each complete
     ``(partition_keys..., bucket)`` group in one Ray task and returns
     commit messages to the driver. It should only be used when every
-    group fits in memory. HASH_DYNAMIC and CROSS_PARTITION primary-key
-    Ray writes are rejected because Ray write tasks create independent
-    Paimon writers.
+    group fits in memory. Postpone-bucket batch writes resolve existing
+    bucket counts once on the driver and always use this grouped path.
+    HASH_DYNAMIC and CROSS_PARTITION primary-key Ray writes are rejected
+    because Ray write tasks create independent Paimon writers.
 
     Args:
         dataset: The Ray Dataset to write.

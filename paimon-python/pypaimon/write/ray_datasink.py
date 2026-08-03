@@ -73,10 +73,12 @@ class PaimonDatasink(_DatasinkBase):
         table: "Table",
         overwrite: bool = False,
         static_partition: Optional[Dict[str, Any]] = None,
+        postpone_bucket_plan=None,
     ):
         self.table = table
         self.overwrite = overwrite
         self.static_partition = static_partition
+        self._postpone_bucket_plan = postpone_bucket_plan
         self._table_name = table.identifier.get_full_name()
         self._writer_builder: Optional["WriteBuilder"] = None
         self._pending_commit_messages: List["CommitMessage"] = []
@@ -97,6 +99,8 @@ class PaimonDatasink(_DatasinkBase):
             self._table_name = self.table.identifier.get_full_name()
         if not hasattr(self, 'static_partition'):
             self.static_partition = None
+        if not hasattr(self, '_postpone_bucket_plan'):
+            self._postpone_bucket_plan = None
 
     def on_write_start(self, schema=None) -> None:
         logger.info(f"Starting write job for table {self._table_name}")
@@ -118,6 +122,8 @@ class PaimonDatasink(_DatasinkBase):
             if self._is_overwrite():
                 writer_builder = writer_builder.overwrite(self.static_partition)
             
+            if self._postpone_bucket_plan is not None:
+                writer_builder.with_bucket_plan(self._postpone_bucket_plan)
             table_write = writer_builder.new_write()
 
             table_schema = self.table.table_schema
@@ -256,13 +262,62 @@ def write_paimon_dataset(
     concurrency: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     hash_fixed_precluster: str = "auto",
+    postpone_bucket_planner=None,
 ) -> None:
     """Write a Ray Dataset through the safe path for the table's bucket mode."""
     from pypaimon.ray.shuffle import (
         HASH_FIXED_PRECLUSTER_MAP_GROUPS,
+        HASH_FIXED_PRECLUSTER_MODES,
         maybe_apply_repartition,
     )
     from pypaimon.table.bucket_mode import BucketMode
+
+    if hash_fixed_precluster not in HASH_FIXED_PRECLUSTER_MODES:
+        raise ValueError(
+            "hash_fixed_precluster must be one of {}, got {!r}".format(
+                sorted(HASH_FIXED_PRECLUSTER_MODES),
+                hash_fixed_precluster,
+            )
+        )
+
+    if (
+        table.bucket_mode() == BucketMode.POSTPONE_MODE
+        and table.options.postpone_batch_write_fixed_bucket()
+    ):
+        from pypaimon.write.postpone_bucket import (
+            PostponeBucketPlanner,
+        )
+        from pypaimon.write.row_key_extractor import (
+            PostponeFixedBucketRowKeyExtractor,
+        )
+
+        planner = (
+            postpone_bucket_planner
+            if postpone_bucket_planner is not None
+            else PostponeBucketPlanner(table)
+        )
+        plan = planner.current_plan()
+        if table.partition_keys or not plan.contains(()):
+            dataset, partition_stats = _collect_partition_stats(
+                dataset, planner
+            )
+            plan = planner.plan(
+                partition_stats,
+                include_postpone_rows=not (
+                    overwrite or static_partition is not None
+                ),
+            )
+        _write_primary_key_groups(
+            dataset,
+            table,
+            overwrite=overwrite,
+            static_partition=static_partition,
+            concurrency=concurrency,
+            ray_remote_args=ray_remote_args,
+            bucket_extractor=PostponeFixedBucketRowKeyExtractor(table, plan),
+            postpone_bucket_plan=plan,
+        )
+        return
 
     if (
         hash_fixed_precluster == HASH_FIXED_PRECLUSTER_MAP_GROUPS
@@ -291,6 +346,48 @@ def write_paimon_dataset(
     )
 
 
+def _collect_partition_stats(dataset, planner):
+    import pickle
+
+    partition_col = "__paimon_partition__"
+    rows_col = "__paimon_rows__"
+    size_col = "__paimon_size__"
+
+    def _stats(batch: pa.Table) -> pa.Table:
+        stats = planner.input_partition_stats(batch)
+        return pa.table({
+            partition_col: pa.array(
+                [pickle.dumps(partition) for partition in stats],
+                type=pa.binary(),
+            ),
+            rows_col: pa.array(
+                [value[0] for value in stats.values()], type=pa.int64()
+            ),
+            size_col: pa.array(
+                [value[1] for value in stats.values()], type=pa.int64()
+            ),
+        })
+
+    materialized = dataset.materialize()
+    stats_dataset = materialized.map_batches(
+        _stats, batch_format="pyarrow", zero_copy_batch=True
+    )
+    combined = {}
+    for batch in stats_dataset.iter_batches(batch_format="pyarrow"):
+        for partition, rows, size in zip(
+            batch.column(partition_col).to_pylist(),
+            batch.column(rows_col).to_pylist(),
+            batch.column(size_col).to_pylist(),
+        ):
+            key = pickle.loads(partition)
+            previous_rows, previous_size = combined.get(key, (0, 0))
+            combined[key] = (
+                previous_rows + rows,
+                previous_size + size,
+            )
+    return materialized, combined
+
+
 def _write_primary_key_groups(
     dataset,
     table,
@@ -299,6 +396,8 @@ def _write_primary_key_groups(
     static_partition: Optional[Dict[str, Any]],
     concurrency: Optional[int],
     ray_remote_args: Optional[Dict[str, Any]],
+    bucket_extractor=None,
+    postpone_bucket_plan=None,
 ) -> None:
     import inspect
     import pickle
@@ -308,7 +407,9 @@ def _write_primary_key_groups(
         _group_by_partition_bucket,
     )
 
-    grouped, bucket_col = _group_by_partition_bucket(dataset, table)
+    grouped, bucket_col = _group_by_partition_bucket(
+        dataset, table, extractor=bucket_extractor
+    )
     message_col = "__paimon_commit_messages__"
     captured_table = table
 
@@ -325,6 +426,7 @@ def _write_primary_key_groups(
             captured_table,
             overwrite=overwrite,
             static_partition=static_partition,
+            postpone_bucket_plan=postpone_bucket_plan,
         )
         commit_messages = worker_sink.write([rows], None)
         return pa.table({

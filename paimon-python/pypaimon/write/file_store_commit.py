@@ -211,6 +211,10 @@ class FileStoreCommit:
         if self.conflict_detection.has_hash_index_changes(
                 index_adds + index_deletes):
             detect_conflicts = True
+        if any(message.total_buckets is not None
+               for message in commit_messages):
+            # Detect concurrent bucket-count changes in postpone APPENDs.
+            detect_conflicts = True
 
         self._try_commit(commit_kind=commit_kind,
                          commit_identifier=commit_identifier,
@@ -839,12 +843,17 @@ class FileStoreCommit:
         changelog_entries = []
         for msg in commit_messages:
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            total_buckets = (
+                msg.total_buckets
+                if msg.total_buckets is not None
+                else self.table.total_buckets
+            )
             for file in msg.changelog_files:
                 changelog_entries.append(ManifestEntry(
                     kind=0,
                     partition=partition,
                     bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
+                    total_buckets=total_buckets,
                     file=file
                 ))
         return changelog_entries
@@ -853,12 +862,17 @@ class FileStoreCommit:
         commit_entries = []
         for msg in commit_messages:
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            total_buckets = (
+                msg.total_buckets
+                if msg.total_buckets is not None
+                else self.table.total_buckets
+            )
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,
                     partition=partition,
                     bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
+                    total_buckets=total_buckets,
                     file=file,
                 ))
             for file in msg.deleted_files:
@@ -866,7 +880,7 @@ class FileStoreCommit:
                     kind=1,
                     partition=partition,
                     bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
+                    total_buckets=total_buckets,
                     file=file,
                 ))
         return commit_entries
