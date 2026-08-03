@@ -18,6 +18,7 @@
 
 package org.apache.paimon.s3;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.MultiPartUploadStore;
 
 import org.apache.hadoop.conf.Configuration;
@@ -89,16 +90,27 @@ public class S3MultiPartUpload
             String objectName, String uploadId, int partNumber, File file, int byteLength)
             throws IOException {
         UploadPartRequest request =
-                UploadPartRequest.builder()
-                        .bucket(s3a.getBucket())
-                        .key(objectName)
-                        .uploadId(uploadId)
-                        .partNumber(partNumber)
-                        .contentLength((long) byteLength)
-                        .build();
+                newUploadPartRequest(objectName, uploadId, partNumber, byteLength);
         RequestBody body = RequestBody.fromBytes(Files.readAllBytes(file.toPath()));
         UploadPartResponse response = s3accessHelper.uploadPart(request, body, null);
         return CompletedPart.builder().partNumber(partNumber).eTag(response.eTag()).build();
+    }
+
+    /**
+     * Builds the part request through the S3A request factory, the same way the multipart upload is
+     * initiated. Hand-assembling the request would drop the SSE-C encryption parameters, which S3
+     * requires on every part when the upload was initiated with a customer-provided key.
+     *
+     * <p>{@code isLastPart} is always {@code false}: the caller does not know in advance which part
+     * is the last one, and the factory only uses the flag to set {@code sdkPartType}, which the
+     * hand-assembled request never set either.
+     */
+    @VisibleForTesting
+    UploadPartRequest newUploadPartRequest(
+            String objectName, String uploadId, int partNumber, int byteLength) throws IOException {
+        return s3accessHelper
+                .newUploadPartRequestBuilder(objectName, uploadId, partNumber, false, byteLength)
+                .build();
     }
 
     @Override
