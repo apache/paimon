@@ -83,7 +83,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 isStreamingMode,
                 memoryPoolFactory,
                 metricGroup,
-                (t, user, writeId) -> t.newWrite(user, writeId));
+                FileStoreTable::newWrite);
     }
 
     StoreSinkWriteImpl(
