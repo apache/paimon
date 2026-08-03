@@ -228,6 +228,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 commitUser,
                                                 scanSupplier,
                                                 indexManifestFile,
+                                                options.dataEvolutionEnabled(),
                                                 id))
                         .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
