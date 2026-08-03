@@ -75,7 +75,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class ConflictDetection {
 
     private static final Logger LOG = LoggerFactory.getLogger(ConflictDetection.class);
-    private static final int SAME_BUCKET_CHECK_CACHE_MAX_SIZE = 1000;
+    private static final int FIXED_BUCKET_CHECK_CACHE_MAX_SIZE = 1000;
 
     private final String tableName;
     private final String commitUser;
@@ -89,13 +89,15 @@ public class ConflictDetection {
     private final IndexFileHandler indexFileHandler;
     private final SnapshotManager snapshotManager;
     private final CommitScanner commitScanner;
-    private final Map<BinaryRow, Boolean> sameBucketCheckedPartitions =
-            new LinkedHashMap<BinaryRow, Boolean>(SAME_BUCKET_CHECK_CACHE_MAX_SIZE, 0.75f, false) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<BinaryRow, Boolean> eldest) {
-                    return size() > SAME_BUCKET_CHECK_CACHE_MAX_SIZE;
-                }
-            };
+    private final Set<BinaryRow> checkedFixedBucketPartitions =
+            Collections.newSetFromMap(
+                    new LinkedHashMap<BinaryRow, Boolean>(
+                            FIXED_BUCKET_CHECK_CACHE_MAX_SIZE, 0.75f, false) {
+                        @Override
+                        protected boolean removeEldestEntry(Map.Entry<BinaryRow, Boolean> eldest) {
+                            return size() > FIXED_BUCKET_CHECK_CACHE_MAX_SIZE;
+                        }
+                    });
 
     private @Nullable PartitionExpire partitionExpire;
     private @Nullable Long rowIdCheckFromSnapshot = null;
@@ -248,12 +250,10 @@ public class ConflictDetection {
                 latestSnapshot, deltaEntries, deltaIndexEntries, rowIdColumnConflictChecker);
     }
 
-    public <T extends FileEntry> Map<BinaryRow, Integer> collectUncheckedBucketPartitions(
+    public <T extends FileEntry> Map<BinaryRow, Integer> collectUncheckedFixedBucketPartitions(
             List<T> deltaEntries) {
         Map<BinaryRow, Integer> totalBuckets = collectBucketPartitions(deltaEntries);
-        if (useSameBucketCheckCache()) {
-            totalBuckets.keySet().removeAll(sameBucketCheckedPartitions.keySet());
-        }
+        totalBuckets.keySet().removeAll(checkedFixedBucketPartitions);
         return totalBuckets;
     }
 
@@ -277,7 +277,7 @@ public class ConflictDetection {
         return totalBuckets;
     }
 
-    public Optional<RuntimeException> checkSameBucketByTotalBuckets(
+    public Optional<RuntimeException> checkSameFixedBucketByTotalBuckets(
             Map<BinaryRow, Integer> expectedTotalBuckets,
             Map<BinaryRow, Integer> previousTotalBuckets) {
         for (Map.Entry<BinaryRow, Integer> entry : expectedTotalBuckets.entrySet()) {
@@ -286,11 +286,7 @@ public class ConflictDetection {
                 return Optional.of(bucketNumMismatch(entry.getKey(), entry.getValue(), previous));
             }
         }
-        if (useSameBucketCheckCache()) {
-            for (BinaryRow partition : expectedTotalBuckets.keySet()) {
-                sameBucketCheckedPartitions.put(partition, Boolean.TRUE);
-            }
-        }
+        checkedFixedBucketPartitions.addAll(expectedTotalBuckets.keySet());
         return Optional.empty();
     }
 
@@ -310,11 +306,6 @@ public class ConflictDetection {
             if (entry.totalBuckets() <= 0) {
                 continue;
             }
-            if (useSameBucketCheckCache()
-                    && sameBucketCheckedPartitions.containsKey(entry.partition())) {
-                continue;
-            }
-
             if (!totalBuckets.containsKey(entry.partition())) {
                 totalBuckets.put(entry.partition(), entry.totalBuckets());
                 continue;
@@ -341,17 +332,7 @@ public class ConflictDetection {
             LOG.warn("", conflictException.getLeft());
             return Optional.of(conflictException.getRight());
         }
-        if (useSameBucketCheckCache()) {
-            for (BinaryRow partition : totalBuckets.keySet()) {
-                sameBucketCheckedPartitions.put(partition, Boolean.TRUE);
-            }
-        }
         return Optional.empty();
-    }
-
-    private boolean useSameBucketCheckCache() {
-        // Postpone bucket counts are supplied at runtime and may change after overwrite.
-        return bucketMode != BucketMode.POSTPONE_MODE;
     }
 
     private void throwBucketNumMismatch(

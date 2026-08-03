@@ -804,14 +804,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return retryCount + 1;
     }
 
-    private void checkSameBucketFromSnapshot(
+    private void checkSameFixedBucketFromSnapshot(
             List<ManifestEntry> deltaFiles, @Nullable Snapshot latestSnapshot) {
         if (latestSnapshot == null) {
             return;
         }
 
         Map<BinaryRow, Integer> expectedTotalBuckets =
-                conflictDetection.collectUncheckedBucketPartitions(deltaFiles);
+                conflictDetection.collectUncheckedFixedBucketPartitions(deltaFiles);
         if (expectedTotalBuckets.isEmpty()) {
             return;
         }
@@ -820,14 +820,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 scanner.readTotalBuckets(
                         latestSnapshot, new ArrayList<>(expectedTotalBuckets.keySet()));
         Optional<RuntimeException> exception =
-                conflictDetection.checkSameBucketByTotalBuckets(
+                conflictDetection.checkSameFixedBucketByTotalBuckets(
                         expectedTotalBuckets, previousTotalBuckets);
         if (exception.isPresent()) {
             throw exception.get();
         }
     }
 
-    private boolean shouldCheckSameBucket(CommitKind commitKind) {
+    private boolean shouldCheckSameFixedBucket(CommitKind commitKind) {
         return commitKind == CommitKind.APPEND
                 && bucketMode == BucketMode.HASH_FIXED
                 && (isUnorderedWriteOnlyAppend() || isWriteOnlySnapshotSequenceAppend());
@@ -968,8 +968,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         boolean checkConflicts = latestSnapshot != null && (discardDuplicate || detectConflicts);
         // By default, if checkConflicts is required, we do not have to do the extra check bucket
         // here.
-        if (!checkConflicts && shouldCheckSameBucket(commitKind)) {
-            checkSameBucketFromSnapshot(deltaFiles, latestSnapshot);
+        if (!checkConflicts && shouldCheckSameFixedBucket(commitKind)) {
+            checkSameFixedBucketFromSnapshot(deltaFiles, latestSnapshot);
         }
         if (checkConflicts) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
