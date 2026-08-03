@@ -87,7 +87,8 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
             try {
                 this.dataSource = DataSource.open(session, path.toUri().toString(), storageOptions);
                 try {
-                    ImmutableScanOptions.Builder scanBuilder = ImmutableScanOptions.builder();
+                    ImmutableScanOptions.Builder scanBuilder =
+                            ImmutableScanOptions.builder().ordered(true);
 
                     java.util.List<String> columns = physicalReadRowType.getFieldNames();
                     scanBuilder.projection(
