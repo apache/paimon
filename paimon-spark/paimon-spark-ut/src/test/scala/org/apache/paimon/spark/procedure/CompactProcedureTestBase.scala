@@ -24,6 +24,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.table.source.snapshot.SnapshotReader
 
 import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted}
 import org.apache.spark.sql.{Dataset, Row}
@@ -33,7 +34,9 @@ import org.assertj.core.api.Assertions
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.scalatest.time.Span
 
+import java.lang.reflect.{InvocationHandler, Method, Proxy}
 import java.util
+import java.util.concurrent.atomic.AtomicBoolean
 
 import scala.collection.JavaConverters._
 import scala.util.Random
@@ -44,6 +47,29 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
   import testImplicits._
 
   // ----------------------- Minor Compact -----------------------
+
+  test("Paimon Procedure: skip partition entries scan without partition idle time") {
+    val partitionEntriesScanned = new AtomicBoolean(false)
+    val snapshotReader = Proxy
+      .newProxyInstance(
+        classOf[SnapshotReader].getClassLoader,
+        Array(classOf[SnapshotReader]),
+        new InvocationHandler {
+          override def invoke(proxy: Any, method: Method, args: Array[AnyRef]): AnyRef = {
+            if (method.getName == "partitionEntries") {
+              partitionEntriesScanned.set(true)
+            }
+            null
+          }
+        }
+      )
+      .asInstanceOf[SnapshotReader]
+
+    val partitions = CompactProcedure.getPartitionsToCompact(snapshotReader, null)
+
+    Assertions.assertThat(partitions.isEmpty).isTrue
+    Assertions.assertThat(partitionEntriesScanned.get()).isFalse
+  }
 
   test("Paimon Procedure: compact aware bucket pk table with minor compact strategy") {
     withTable("T") {
