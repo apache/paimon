@@ -33,6 +33,8 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 
+import javax.annotation.Nullable;
+
 import java.util.Map;
 
 /** An {@link AppendTableSink} which handles {@link InternalRow}. */
@@ -48,16 +50,24 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
     @Override
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
+        return createWriteOperatorFactory(writeProvider, commitUser, true, null);
+    }
+
+    @Override
+    protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
+            StoreSinkWrite.Provider writeProvider,
+            String commitUser,
+            boolean streamingCheckpointEnabled,
+            @Nullable Long endInputWatermark) {
         if (coordinatorCommitEnabled()) {
             return createCoordinatorCommittingRowWriteOperatorFactory(
                     table,
                     writeProvider,
                     commitUser,
-                    // checkpointing on by default for the JM-side committer; bounded sources will
-                    // be handled by end-input support in a follow-up PR
+                    streamingCheckpointEnabled,
                     true,
-                    true,
-                    createCommitterFactory());
+                    createCommitterFactory(),
+                    endInputWatermark);
         }
         return createNoStateRowWriteOperatorFactory(table, writeProvider, commitUser);
     }
@@ -84,14 +94,16 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                     String commitUser,
                     boolean streamingCheckpointEnabled,
                     boolean failoverAfterRecovery,
-                    Committer.Factory<Committable, ManifestCommittable> committerFactory) {
+                    Committer.Factory<Committable, ManifestCommittable> committerFactory,
+                    @Nullable Long endInputWatermark) {
         return new CoordinatorCommittingFactory(
                 table,
                 writeProvider,
                 commitUser,
                 streamingCheckpointEnabled,
                 failoverAfterRecovery,
-                committerFactory);
+                committerFactory,
+                endInputWatermark);
     }
 
     private static class CoordinatorCommittingFactory extends RowDataStoreWriteOperator.Factory
@@ -102,6 +114,7 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
         private final boolean streamingCheckpointEnabled;
         private final boolean failoverAfterRecovery;
         private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
+        private final Long endInputWatermark;
 
         CoordinatorCommittingFactory(
                 FileStoreTable table,
@@ -109,11 +122,13 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                 String initialCommitUser,
                 boolean streamingCheckpointEnabled,
                 boolean failoverAfterRecovery,
-                Committer.Factory<Committable, ManifestCommittable> committerFactory) {
+                Committer.Factory<Committable, ManifestCommittable> committerFactory,
+                @Nullable Long endInputWatermark) {
             super(table, storeSinkWriteProvider, initialCommitUser);
             this.streamingCheckpointEnabled = streamingCheckpointEnabled;
             this.failoverAfterRecovery = failoverAfterRecovery;
             this.committerFactory = committerFactory;
+            this.endInputWatermark = endInputWatermark;
         }
 
         @Override
@@ -124,7 +139,8 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                     committerFactory,
                     streamingCheckpointEnabled,
                     initialCommitUser,
-                    failoverAfterRecovery);
+                    failoverAfterRecovery,
+                    endInputWatermark);
         }
 
         @Override

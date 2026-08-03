@@ -48,16 +48,23 @@ public class FlinkSinkTest extends CommitterOperatorTestBase {
     @Test
     public void testCoordinatorCommitPreconditionsHappyPath() throws Exception {
         FileStoreTable table = createUnawareBucketTable(options -> {});
-        FlinkSink.checkCoordinatorCommitPreconditions(table, newCheckpointConfig(1), true);
+        FlinkSink.checkCoordinatorCommitPreconditions(table, newCheckpointConfig(1), true, true);
     }
 
     @Test
-    public void testCoordinatorCommitPreconditionsRejectsBatchOrNoCheckpoint() throws Exception {
+    public void testCoordinatorCommitPreconditionsAllowsBatchWithoutCheckpoint() throws Exception {
+        FileStoreTable table = createUnawareBucketTable(options -> {});
+        FlinkSink.checkCoordinatorCommitPreconditions(table, newCheckpointConfig(1), false, false);
+    }
+
+    @Test
+    public void testCoordinatorCommitPreconditionsRejectsStreamingWithoutCheckpoint()
+            throws Exception {
         FileStoreTable table = createUnawareBucketTable(options -> {});
         assertThatThrownBy(
                         () ->
                                 FlinkSink.checkCoordinatorCommitPreconditions(
-                                        table, newCheckpointConfig(1), false))
+                                        table, newCheckpointConfig(1), true, false))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -67,7 +74,7 @@ public class FlinkSinkTest extends CommitterOperatorTestBase {
         assertThatThrownBy(
                         () ->
                                 FlinkSink.checkCoordinatorCommitPreconditions(
-                                        table, newCheckpointConfig(1), true))
+                                        table, newCheckpointConfig(1), true, true))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -77,7 +84,7 @@ public class FlinkSinkTest extends CommitterOperatorTestBase {
         assertThatThrownBy(
                         () ->
                                 FlinkSink.checkCoordinatorCommitPreconditions(
-                                        table, newCheckpointConfig(1), true))
+                                        table, newCheckpointConfig(1), true, true))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -88,7 +95,7 @@ public class FlinkSinkTest extends CommitterOperatorTestBase {
         assertThatThrownBy(
                         () ->
                                 FlinkSink.checkCoordinatorCommitPreconditions(
-                                        table, newCheckpointConfig(1), true))
+                                        table, newCheckpointConfig(1), true, true))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -100,7 +107,7 @@ public class FlinkSinkTest extends CommitterOperatorTestBase {
         assertThatThrownBy(
                         () ->
                                 FlinkSink.checkCoordinatorCommitPreconditions(
-                                        table, newCheckpointConfig(1), true))
+                                        table, newCheckpointConfig(1), true, true))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -114,7 +121,7 @@ public class FlinkSinkTest extends CommitterOperatorTestBase {
         assertThatThrownBy(
                         () ->
                                 FlinkSink.checkCoordinatorCommitPreconditions(
-                                        table, newCheckpointConfig(1), true))
+                                        table, newCheckpointConfig(1), true, true))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -124,7 +131,7 @@ public class FlinkSinkTest extends CommitterOperatorTestBase {
         assertThatThrownBy(
                         () ->
                                 FlinkSink.checkCoordinatorCommitPreconditions(
-                                        table, newCheckpointConfig(2), true))
+                                        table, newCheckpointConfig(2), true, true))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

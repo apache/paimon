@@ -255,6 +255,68 @@ public class WriterCommittablesTest {
     }
 
     @Test
+    public void testEndInputCoversLaterCheckpointAndDoesNotConstrainWatermark() {
+        CheckpointCommittables endInput =
+                new CheckpointCommittables(Long.MAX_VALUE, Collections.emptyList(), 1234L);
+        WriterCommittables committables = new WriterCommittables(endInput);
+
+        assertThat(committables.isEndInput()).isTrue();
+        assertThat(committables.getMaxCheckpointId()).isEqualTo(-1L);
+        assertThat(committables.coversCheckpoint(100L)).isTrue();
+        assertThat(committables.watermarkAt(100L)).isEqualTo(Long.MAX_VALUE);
+        assertThat(committables.watermarkAt(Long.MAX_VALUE)).isEqualTo(1234L);
+    }
+
+    @Test
+    public void testRestoreMayContainEndInputNewerThanRestoredCheckpoint() {
+        CheckpointCommittables ordinary =
+                new CheckpointCommittables(2L, Collections.emptyList(), 100L);
+        CheckpointCommittables endInput =
+                new CheckpointCommittables(Long.MAX_VALUE, Collections.emptyList(), 200L);
+
+        WriterCommittables committables =
+                new WriterCommittables(2L, Arrays.asList(ordinary, endInput));
+
+        assertThat(committables.getMaxCheckpointId()).isEqualTo(2L);
+        assertThat(committables.isEndInput()).isTrue();
+        assertThat(committables.getEndInputCommittables()).isSameAs(endInput);
+    }
+
+    @Test
+    public void testRepeatedEndInputReplacesAuthoritativeEntry() {
+        CheckpointCommittables first =
+                new CheckpointCommittables(Long.MAX_VALUE, Collections.emptyList(), 100L);
+        CheckpointCommittables second =
+                new CheckpointCommittables(Long.MAX_VALUE, Collections.emptyList(), 200L);
+        WriterCommittables committables = new WriterCommittables(first);
+
+        committables.mergeWith(new WriterCommittables(second));
+
+        assertThat(committables.isEndInput()).isTrue();
+        assertThat(committables.getEndInputCommittables()).isSameAs(second);
+        assertThat(committables.getCommittablesPerCheckpoint()).hasSize(1);
+    }
+
+    @Test
+    public void testFiniteClearKeepsEndInputUntilFinalCommit() {
+        WriterCommittables committables =
+                new WriterCommittables(
+                        2L,
+                        Arrays.asList(
+                                new CheckpointCommittables(2L, Collections.emptyList(), 100L),
+                                new CheckpointCommittables(
+                                        Long.MAX_VALUE, Collections.emptyList(), 200L)));
+
+        committables.clearCommittablesBeforeCheckpoint(2L, true);
+        assertThat(committables.isEndInput()).isTrue();
+        assertThat(committables.getCommittablesPerCheckpoint()).containsOnlyKeys(Long.MAX_VALUE);
+
+        committables.clearCommittablesBeforeCheckpoint(Long.MAX_VALUE, true);
+        assertThat(committables.isEndInput()).isFalse();
+        assertThat(committables.getCommittablesPerCheckpoint()).isEmpty();
+    }
+
+    @Test
     public void testClearCommittablesBeforeCheckpoint() {
         CommitMessage commitMessage = createEmptyCommitMessage();
         Committable committableCp1 = new Committable(1L, commitMessage);

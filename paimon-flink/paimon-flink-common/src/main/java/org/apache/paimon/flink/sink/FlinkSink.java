@@ -53,6 +53,7 @@ import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Set;
 
+import static org.apache.paimon.CoreOptions.TAG_AUTOMATIC_CREATION;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
@@ -135,6 +136,9 @@ public abstract class FlinkSink<T> implements Serializable {
             DataStream<T> input, String commitUser, @Nullable Integer parallelism) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         boolean isStreaming = isStreaming(input);
+        boolean streamingCheckpointEnabled =
+                isStreaming && env.getCheckpointConfig().isCheckpointingEnabled();
+        Options options = Options.fromMap(table.options());
 
         boolean writeOnly = writeOnly();
         StoreSinkWrite.Provider writeProvider =
@@ -148,14 +152,16 @@ public abstract class FlinkSink<T> implements Serializable {
                 input.transform(
                         (writeOnly ? WRITER_WRITE_ONLY_NAME : WRITER_NAME) + " : " + table.name(),
                         new CommittableTypeInfo(),
-                        createWriteOperatorFactory(writeProvider, commitUser));
+                        createWriteOperatorFactory(
+                                writeProvider,
+                                commitUser,
+                                streamingCheckpointEnabled,
+                                options.get(END_INPUT_WATERMARK)));
         if (parallelism == null) {
             forwardParallelism(written, input);
         } else {
             written.setParallelism(parallelism);
         }
-
-        Options options = Options.fromMap(table.options());
 
         String uidSuffix = options.get(SINK_OPERATOR_UID_SUFFIX);
         if (options.get(SINK_OPERATOR_UID_SUFFIX) != null) {
@@ -212,14 +218,16 @@ public abstract class FlinkSink<T> implements Serializable {
     public DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
         StreamExecutionEnvironment env = written.getExecutionEnvironment();
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
+        boolean isStreaming = isStreaming(written);
         boolean streamingCheckpointEnabled =
-                isStreaming(written) && checkpointConfig.isCheckpointingEnabled();
+                isStreaming && checkpointConfig.isCheckpointingEnabled();
         if (streamingCheckpointEnabled) {
             assertStreamingConfiguration(env);
         }
 
         if (coordinatorCommitEnabled()) {
-            return doCoordinatorCommit(written, checkpointConfig, streamingCheckpointEnabled);
+            return doCoordinatorCommit(
+                    written, checkpointConfig, isStreaming, streamingCheckpointEnabled);
         }
         return doOperatorCommit(written, commitUser, streamingCheckpointEnabled);
     }
@@ -227,8 +235,10 @@ public abstract class FlinkSink<T> implements Serializable {
     private DataStreamSink<?> doCoordinatorCommit(
             DataStream<Committable> written,
             CheckpointConfig checkpointConfig,
+            boolean isStreaming,
             boolean streamingCheckpointEnabled) {
-        checkCoordinatorCommitPreconditions(table, checkpointConfig, streamingCheckpointEnabled);
+        checkCoordinatorCommitPreconditions(
+                table, checkpointConfig, isStreaming, streamingCheckpointEnabled);
         // The commit runs inside the writer's OperatorCoordinator on the JobManager, so there
         // is no global committer operator. Committables are still forwarded by the writer for
         // observability and are discarded here.
@@ -351,6 +361,14 @@ public abstract class FlinkSink<T> implements Serializable {
                 endInputWatermark);
     }
 
+    protected OneInputStreamOperatorFactory<T, Committable> createWriteOperatorFactory(
+            StoreSinkWrite.Provider writeProvider,
+            String commitUser,
+            boolean streamingCheckpointEnabled,
+            @Nullable Long endInputWatermark) {
+        return createWriteOperatorFactory(writeProvider, commitUser);
+    }
+
     protected abstract OneInputStreamOperatorFactory<T, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser);
 
@@ -378,15 +396,15 @@ public abstract class FlinkSink<T> implements Serializable {
     static void checkCoordinatorCommitPreconditions(
             FileStoreTable table,
             CheckpointConfig checkpointConfig,
+            boolean isStreaming,
             boolean streamingCheckpointEnabled) {
         Options options = Options.fromMap(table.options());
 
-        // Region failover only benefits streaming jobs. A batch job persists its shuffle data and
-        // has no region-failover concern, so coordinator commit brings no benefit and batch is not
-        // supported. The commit is driven by checkpoint completion, so checkpointing must be on.
+        // Streaming commits are driven by checkpoint completion. Batch jobs commit when every
+        // writer reaches endInput, so they do not require checkpointing.
         checkArgument(
-                streamingCheckpointEnabled,
-                "Could not enable coordinator commit because it requires streaming mode with checkpointing enabled.");
+                !isStreaming || streamingCheckpointEnabled,
+                "Could not enable coordinator commit in streaming mode without checkpointing.");
 
         // The checks below reject configurations that introduce an all-to-all shuffle. Such a
         // shuffle places every operator into a single failover region, which defeats the region
@@ -417,6 +435,12 @@ public abstract class FlinkSink<T> implements Serializable {
                 "Could not enable coordinator commit because "
                         + SINK_AUTO_TAG_FOR_SAVEPOINT.key()
                         + " is enabled, which is not supported yet.");
+        // TODO support batch tag create.
+        checkArgument(
+                table.coreOptions().tagCreationMode() != TagCreationMode.BATCH,
+                "Could not enable coordinator commit because "
+                        + TAG_AUTOMATIC_CREATION.key()
+                        + " = batch is not supported yet.");
 
         // TODO concurrent checkpoints are not supported yet.
         checkArgument(
