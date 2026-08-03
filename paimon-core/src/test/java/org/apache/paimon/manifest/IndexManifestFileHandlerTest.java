@@ -20,19 +20,28 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomDeletionVectorIndexFile;
+import static org.apache.paimon.utils.FileUtils.createFormatReader;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -116,6 +125,48 @@ public class IndexManifestFileHandlerTest {
         assertThat(entries.contains(entry2)).isFalse();
         assertThat(entries.contains(entry3)).isTrue();
         assertThat(entries.contains(entry4)).isTrue();
+    }
+
+    @Test
+    public void testNewIndexManifestReadableWithLegacySchema() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        FileFormat fileFormat = FileFormat.manifestFormat(fileStore.options());
+        IndexManifestFile indexManifestFile =
+                new IndexManifestFile.Factory(
+                                fileStore.fileIO(),
+                                fileFormat,
+                                "zstd",
+                                fileStore.pathFactory(),
+                                null)
+                        .create();
+        IndexManifestFileHandler handler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.HASH_FIXED);
+
+        String manifestFile = handler.write(null, Arrays.asList(pkVectorEntry("btree", "index")));
+
+        RowType legacyGlobalIndexSchema =
+                GlobalIndexMeta.SCHEMA.copy(GlobalIndexMeta.SCHEMA.getFields().subList(0, 5));
+        List<DataField> legacyEntryFields = new ArrayList<>(IndexManifestEntry.SCHEMA.getFields());
+        legacyEntryFields.set(9, legacyEntryFields.get(9).newType(legacyGlobalIndexSchema));
+        RowType legacySchema =
+                VersionedObjectSerializer.versionType(new RowType(false, legacyEntryFields));
+        FormatReaderFactory legacyReaderFactory =
+                fileFormat.createReaderFactory(legacySchema, legacySchema, new ArrayList<>());
+        Path path = fileStore.pathFactory().indexManifestFileFactory().toPath(manifestFile);
+
+        try (CloseableIterator<InternalRow> iterator =
+                createFormatReader(fileStore.fileIO(), legacyReaderFactory, path, null)
+                        .toCloseableIterator()) {
+            InternalRow row = iterator.next();
+            assertThat(row.getInt(0)).isEqualTo(1);
+            InternalRow globalIndex = row.getRow(10, 5);
+            assertThat(globalIndex.getLong(0)).isEqualTo(0);
+            assertThat(globalIndex.getLong(1)).isEqualTo(1);
+            assertThat(globalIndex.getInt(2)).isEqualTo(1);
+            assertThat(globalIndex.isNullAt(4)).isTrue();
+            assertThat(iterator.hasNext()).isFalse();
+        }
     }
 
     @Test
