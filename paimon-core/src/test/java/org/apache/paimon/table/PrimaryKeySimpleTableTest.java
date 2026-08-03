@@ -2134,6 +2134,85 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
+    public void testForceUpLevel0CompactionConsidersLevel2() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CoreOptions.NUM_LEVELS, 3);
+                            options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+                            options.set(CoreOptions.COMPACTION_FORCE_UP_LEVEL_0, true);
+                        });
+        FileStoreTable writeOnlyTable =
+                table.copy(singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
+
+        // Build a large level 2 file.
+        writeRowsWithoutCompaction(writeOnlyTable, 0, 0, 1000);
+        compactPartition(table, 1, true);
+
+        List<DataFileMeta> files = currentDataFiles(table);
+        assertThat(files).singleElement().satisfies(file -> assertThat(file.level()).isEqualTo(2));
+
+        // Build a slightly smaller level 1 file without including level 2.
+        writeRowsWithoutCompaction(writeOnlyTable, 2, 1000, 900);
+        compactPartition(table, 3, false);
+
+        files = currentDataFiles(table);
+        assertThat(files).extracting(DataFileMeta::level).containsExactlyInAnyOrder(1, 2);
+
+        // Add a small level 0 file. Level 0 alone cannot pick level 1, but level 0 and level 1
+        // together are large enough to pick level 2.
+        writeRowsWithoutCompaction(writeOnlyTable, 4, 1900, 200);
+
+        files = currentDataFiles(table);
+        assertThat(files).extracting(DataFileMeta::level).containsExactlyInAnyOrder(0, 1, 2);
+        Map<Integer, Long> fileSizeByLevel =
+                files.stream()
+                        .collect(Collectors.toMap(DataFileMeta::level, DataFileMeta::fileSize));
+        long level0Size = fileSizeByLevel.get(0);
+        long level1Size = fileSizeByLevel.get(1);
+        long level2Size = fileSizeByLevel.get(2);
+        assertThat(level0Size * 101).isLessThan(level1Size * 100);
+        assertThat((level0Size + level1Size) * 101).isGreaterThanOrEqualTo(level2Size * 100);
+
+        compactPartition(table, 5, false);
+
+        files = currentDataFiles(table);
+        assertThat(files)
+                .singleElement()
+                .satisfies(
+                        file -> {
+                            assertThat(file.level()).isEqualTo(2);
+                            assertThat(file.rowCount()).isEqualTo(2100);
+                        });
+    }
+
+    private void writeRowsWithoutCompaction(
+            FileStoreTable table, long commitIdentifier, int start, int count) throws Exception {
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int i = start; i < start + count; i++) {
+                write.write(rowData(1, i, (long) i));
+            }
+            commit.commit(commitIdentifier, write.prepareCommit(true, commitIdentifier));
+        }
+    }
+
+    private void compactPartition(
+            FileStoreTable table, long commitIdentifier, boolean fullCompaction) throws Exception {
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.compact(binaryRow(1), 0, fullCompaction);
+            commit.commit(commitIdentifier, write.prepareCommit(true, commitIdentifier));
+        }
+    }
+
+    private List<DataFileMeta> currentDataFiles(FileStoreTable table) throws Exception {
+        return table.newSnapshotReader().read().dataSplits().stream()
+                .flatMap(split -> split.dataFiles().stream())
+                .collect(Collectors.toList());
+    }
+
+    @Test
     public void testStreamingReadOptimizedTable() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(options -> options.set(TARGET_FILE_SIZE, new MemorySize(1)));
