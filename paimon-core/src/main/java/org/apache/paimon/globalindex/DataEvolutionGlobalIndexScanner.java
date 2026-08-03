@@ -68,6 +68,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /** Scanner for shard-based global indexes on data-evolution tables. */
 public class DataEvolutionGlobalIndexScanner implements Closeable {
 
+    private static final int MAX_TOP_N_LIMIT = 100;
+
     private static final Logger LOG =
             LoggerFactory.getLogger(DataEvolutionGlobalIndexScanner.class);
 
@@ -306,7 +308,10 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     }
 
     private static boolean isSupportedTopN(TopN topN) {
-        return topN != null && topN.limit() >= 0 && topN.orders().size() == 1;
+        return topN != null
+                && topN.limit() >= 0
+                && topN.limit() <= MAX_TOP_N_LIMIT
+                && topN.orders().size() == 1;
     }
 
     private static Filter<IndexManifestEntry> topNIndexFileFilter(

@@ -312,6 +312,38 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testBTreeGlobalIndexTopNFallsBackForLargeLimit() throws Exception {
+        write(200L);
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        TopN maxSupportedTopN =
+                new TopN(
+                        new FieldRef(1, "f1", table.rowType().getTypeAt(1)),
+                        DESCENDING,
+                        NULLS_LAST,
+                        100);
+        assertThat(table.newReadBuilder().withTopN(maxSupportedTopN).newScan().plan().splits())
+                .isNotEmpty()
+                .allMatch(IndexedSplit.class::isInstance);
+
+        TopN topN =
+                new TopN(
+                        new FieldRef(1, "f1", table.rowType().getTypeAt(1)),
+                        DESCENDING,
+                        NULLS_LAST,
+                        101);
+
+        assertThat(
+                        DataEvolutionGlobalIndexScanner.createForTopN(
+                                table, PartitionPredicate.ALWAYS_TRUE, topN))
+                .isEmpty();
+
+        TableScan.Plan plan = table.newReadBuilder().withTopN(topN).newScan().plan();
+        assertThat(plan.splits()).isNotEmpty().allMatch(DataSplit.class::isInstance);
+    }
+
+    @Test
     public void testMixedRowIdOrSkipsGlobalIndexScan() throws Exception {
         write(10L);
         createIndex("f1");
