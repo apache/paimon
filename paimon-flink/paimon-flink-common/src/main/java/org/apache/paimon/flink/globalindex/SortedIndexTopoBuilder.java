@@ -101,6 +101,36 @@ public class SortedIndexTopoBuilder {
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
+        Optional<DataStream<Committable>> written =
+                buildIndexStream(
+                        env,
+                        indexBuilderSupplier,
+                        table,
+                        indexColumns,
+                        partitionPredicate,
+                        userOptions);
+        if (!written.isPresent()) {
+            return false;
+        }
+
+        commit(table, written.get(), CoreOptions.createCommitUser(userOptions));
+        return true;
+    }
+
+    /**
+     * Builds sorted indexes and returns their committables without attaching a committer.
+     *
+     * <p>This allows callers which combine multiple maintenance topologies to send all committables
+     * to one shared committer.
+     */
+    public static Optional<DataStream<Committable>> buildIndexStream(
+            StreamExecutionEnvironment env,
+            Supplier<SortedGlobalIndexBuilder> indexBuilderSupplier,
+            FileStoreTable table,
+            List<String> indexColumns,
+            PartitionPredicate partitionPredicate,
+            Options userOptions)
+            throws Exception {
         List<DataStream<Committable>> allStreams = new ArrayList<>();
         for (String indexColumn : indexColumns) {
             SortedGlobalIndexBuilder indexBuilder =
@@ -175,7 +205,7 @@ public class SortedIndexTopoBuilder {
             }
 
             if (buildTasks.isEmpty()) {
-                return false;
+                return Optional.empty();
             }
 
             DataStream<Committable> commitMessages =
@@ -198,15 +228,13 @@ public class SortedIndexTopoBuilder {
 
             allStreams.add(commitMessages);
         }
-        if (!allStreams.isEmpty()) {
-            @SuppressWarnings("unchecked")
-            DataStream<Committable>[] rest =
-                    allStreams.subList(1, allStreams.size()).toArray(new DataStream[0]);
-            commit(table, allStreams.get(0).union(rest), CoreOptions.createCommitUser(userOptions));
-            return true;
+        if (allStreams.isEmpty()) {
+            return Optional.empty();
         }
-
-        return false;
+        @SuppressWarnings("unchecked")
+        DataStream<Committable>[] rest =
+                allStreams.subList(1, allStreams.size()).toArray(new DataStream[0]);
+        return Optional.of(allStreams.get(0).union(rest));
     }
 
     public static void buildIndexAndExecute(

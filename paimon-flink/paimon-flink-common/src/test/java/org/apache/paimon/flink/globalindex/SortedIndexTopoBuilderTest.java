@@ -118,6 +118,26 @@ public class SortedIndexTopoBuilderTest {
     }
 
     @Test
+    public void testBuildIndexStreamReturnsEmptyWhenNoBuildTask() throws Exception {
+        SortedGlobalIndexBuilder indexBuilder = mock(SortedGlobalIndexBuilder.class);
+        when(indexBuilder.withIndexField("id")).thenReturn(indexBuilder);
+        when(indexBuilder.incrementalScan()).thenReturn(Optional.empty());
+        StreamExecutionEnvironment env = mock(StreamExecutionEnvironment.class);
+
+        assertThat(
+                        SortedIndexTopoBuilder.buildIndexStream(
+                                env,
+                                () -> indexBuilder,
+                                mock(FileStoreTable.class),
+                                Collections.singletonList("id"),
+                                null,
+                                new Options()))
+                .isEmpty();
+        verify(indexBuilder).incrementalScan();
+        verifyNoInteractions(env);
+    }
+
+    @Test
     public void testCalculateParallelismByTotalRowsInsteadOfRangeCount() {
         List<SortedBuildTask> tasks = new ArrayList<>();
         for (int i = 0; i < 100; i++) {
