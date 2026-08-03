@@ -31,14 +31,16 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
 /**
  * Selects BTree index files which may contain a single-column TopN result.
  *
- * <p>Files without usable sorted metadata are always retained. For files with usable metadata,
- * retaining the first {@code N} files ordered by their best value is safe because every non-empty
- * BTree file contributes at least one row at that value. Fewer files can be retained when one file
- * alone contains at least {@code N} rows and its worst value is not worse than the best value of
- * every remaining file.
+ * <p>Every BTree file must have sorted metadata, matching the predicate reader contract. Retaining
+ * the first {@code N} files ordered by their best value is safe because every BTree file
+ * contributes at least one row at that value. Fewer files can be retained when one file alone
+ * contains at least {@code N} rows and its worst value is not worse than the best value of every
+ * remaining file.
  */
 class BTreeTopNIndexFileSelector {
 
@@ -64,13 +66,7 @@ class BTreeTopNIndexFileSelector {
         List<IndexFileMeta> selected = new ArrayList<>();
         List<RankedIndexFile> rankedFiles = new ArrayList<>();
         for (IndexFileMeta file : files) {
-            RankedIndexFile rankedFile = selector.tryRank(file);
-            if (rankedFile == null) {
-                // Match TopNDataSplitEvaluator: unknown sources cannot be pruned.
-                selected.add(file);
-            } else {
-                rankedFiles.add(rankedFile);
-            }
+            rankedFiles.add(selector.rank(file));
         }
 
         rankedFiles.sort(selector::compare);
@@ -88,37 +84,31 @@ class BTreeTopNIndexFileSelector {
         return selected;
     }
 
-    @Nullable
-    private RankedIndexFile tryRank(IndexFileMeta file) {
-        GlobalIndexMeta globalIndex = file.globalIndexMeta();
-        if (file.rowCount() <= 0 || globalIndex == null || globalIndex.indexMeta() == null) {
-            return null;
-        }
+    private RankedIndexFile rank(IndexFileMeta file) {
+        GlobalIndexMeta globalIndex =
+                checkNotNull(
+                        file.globalIndexMeta(),
+                        "BTree index file '%s' is missing global index metadata.",
+                        file.fileName());
+        byte[] indexMeta =
+                checkNotNull(
+                        globalIndex.indexMeta(),
+                        "BTree index file '%s' is missing sorted metadata.",
+                        file.fileName());
+        SortedIndexFileMeta sortedMeta = SortedIndexFileMeta.deserialize(indexMeta);
+        byte[] firstKey = sortedMeta.firstKey();
+        byte[] lastKey = sortedMeta.lastKey();
+        boolean hasNonNulls = lastKey != null;
 
-        try {
-            SortedIndexFileMeta sortedMeta =
-                    SortedIndexFileMeta.deserialize(globalIndex.indexMeta());
-            byte[] firstKey = sortedMeta.firstKey();
-            byte[] lastKey = sortedMeta.lastKey();
-            boolean hasNonNulls = lastKey != null;
-            if (hasNonNulls != (firstKey != null) || !hasNonNulls && !sortedMeta.hasNulls()) {
-                return null;
-            }
-
-            byte[] nonNullBestKey = ascending ? firstKey : lastKey;
-            byte[] nonNullWorstKey = ascending ? lastKey : firstKey;
-            boolean bestIsNull = nullsFirst ? sortedMeta.hasNulls() : !hasNonNulls;
-            Object bestKey =
-                    bestIsNull ? null : keySerializer.deserialize(MemorySlice.wrap(nonNullBestKey));
-            boolean worstIsNull = nullsFirst ? !hasNonNulls : sortedMeta.hasNulls();
-            Object worstKey =
-                    worstIsNull
-                            ? null
-                            : keySerializer.deserialize(MemorySlice.wrap(nonNullWorstKey));
-            return new RankedIndexFile(file, bestIsNull, bestKey, worstIsNull, worstKey);
-        } catch (RuntimeException e) {
-            return null;
-        }
+        byte[] nonNullBestKey = ascending ? firstKey : lastKey;
+        byte[] nonNullWorstKey = ascending ? lastKey : firstKey;
+        boolean bestIsNull = nullsFirst ? sortedMeta.hasNulls() : !hasNonNulls;
+        Object bestKey =
+                bestIsNull ? null : keySerializer.deserialize(MemorySlice.wrap(nonNullBestKey));
+        boolean worstIsNull = nullsFirst ? !hasNonNulls : sortedMeta.hasNulls();
+        Object worstKey =
+                worstIsNull ? null : keySerializer.deserialize(MemorySlice.wrap(nonNullWorstKey));
+        return new RankedIndexFile(file, bestIsNull, bestKey, worstIsNull, worstKey);
     }
 
     private int compare(RankedIndexFile left, RankedIndexFile right) {

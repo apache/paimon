@@ -37,6 +37,7 @@ import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link BTreeTopNIndexFileSelector}. */
 public class BTreeTopNIndexFileSelectorTest {
@@ -104,16 +105,24 @@ public class BTreeTopNIndexFileSelectorTest {
     }
 
     @Test
-    public void testUnknownMetadataIsRetained() {
-        List<IndexFileMeta> files =
-                Arrays.asList(
-                        fileWithoutMetadata("unknown"),
-                        file("empty", 100, 200, false, 0),
-                        file("max-10", 0, 10, false),
-                        file("max-20", 10, 20, false));
+    public void testMissingMetadataFailsFast() {
+        assertThatThrownBy(
+                        () -> select(Arrays.asList(fileWithoutMetadata("missing")), NULLS_LAST, 1))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("BTree index file 'missing' is missing sorted metadata.");
+    }
 
-        assertThat(fileNames(select(files, NULLS_LAST, 1)))
-                .containsExactly("unknown", "empty", "max-20");
+    @Test
+    public void testCorruptMetadataFailsFast() {
+        assertThatThrownBy(
+                        () ->
+                                select(
+                                        Arrays.asList(
+                                                fileWithMetadata(
+                                                        "corrupt", new byte[] {-1, -1, -1, -1})),
+                                        NULLS_LAST,
+                                        1))
+                .isInstanceOf(RuntimeException.class);
     }
 
     @Test
@@ -205,8 +214,17 @@ public class BTreeTopNIndexFileSelectorTest {
     }
 
     private IndexFileMeta fileWithoutMetadata(String fileName) {
+        return fileWithMetadata(fileName, null);
+    }
+
+    private IndexFileMeta fileWithMetadata(String fileName, byte[] metadata) {
         return new IndexFileMeta(
-                "btree", fileName, 1, 1, new GlobalIndexMeta(0, 0, FIELD.id(), null, null), null);
+                "btree",
+                fileName,
+                1,
+                1,
+                new GlobalIndexMeta(0, 0, FIELD.id(), null, metadata),
+                null);
     }
 
     private byte[] serialize(Integer value) {
