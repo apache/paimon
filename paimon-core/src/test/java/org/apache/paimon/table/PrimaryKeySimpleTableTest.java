@@ -219,6 +219,22 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
         PostponeFixedBucketWriteBuilder builder = table.newPostponeFixedBucketWriteBuilder();
 
+        List<CommitMessage> conflictingMessages = new ArrayList<>();
+        try (TableWriteImpl<?> write = builder.newWrite()) {
+            write.writeAndReturn(rowData(1, 1, 1L), 0, 2);
+            conflictingMessages.addAll(write.prepareCommit());
+        }
+        try (TableWriteImpl<?> write = builder.newWrite()) {
+            write.writeAndReturn(rowData(1, 2, 2L), 1, 3);
+            conflictingMessages.addAll(write.prepareCommit());
+        }
+        try (BatchTableCommit commit = builder.newCommit()) {
+            assertThatThrownBy(() -> commit.commit(conflictingMessages))
+                    .hasMessageContaining("new bucket num 3")
+                    .hasMessageContaining("previous bucket num is 2");
+        }
+        assertThat(table.latestSnapshot()).isEmpty();
+
         List<CommitMessage> messages;
         try (TableWriteImpl<?> write = builder.newWrite();
                 BatchTableCommit commit = builder.newCommit()) {

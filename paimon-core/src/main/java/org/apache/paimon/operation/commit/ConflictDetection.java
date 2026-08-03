@@ -250,11 +250,22 @@ public class ConflictDetection {
 
     public <T extends FileEntry> Map<BinaryRow, Integer> collectUncheckedBucketPartitions(
             List<T> deltaEntries) {
+        Map<BinaryRow, Integer> totalBuckets = collectBucketPartitions(deltaEntries);
+        if (useSameBucketCheckCache()) {
+            totalBuckets.keySet().removeAll(sameBucketCheckedPartitions.keySet());
+        }
+        return totalBuckets;
+    }
+
+    public <T extends FileEntry> void checkSameBucketWithinDelta(List<T> deltaEntries) {
+        collectBucketPartitions(deltaEntries);
+    }
+
+    private <T extends FileEntry> Map<BinaryRow, Integer> collectBucketPartitions(
+            List<T> deltaEntries) {
         Map<BinaryRow, Integer> totalBuckets = new HashMap<>();
         for (T entry : deltaEntries) {
-            if (entry.kind() != FileKind.ADD
-                    || entry.totalBuckets() <= 0
-                    || sameBucketCheckedPartitions.containsKey(entry.partition())) {
+            if (entry.kind() != FileKind.ADD || entry.totalBuckets() <= 0) {
                 continue;
             }
 
@@ -275,8 +286,10 @@ public class ConflictDetection {
                 return Optional.of(bucketNumMismatch(entry.getKey(), entry.getValue(), previous));
             }
         }
-        for (BinaryRow partition : expectedTotalBuckets.keySet()) {
-            sameBucketCheckedPartitions.put(partition, Boolean.TRUE);
+        if (useSameBucketCheckCache()) {
+            for (BinaryRow partition : expectedTotalBuckets.keySet()) {
+                sameBucketCheckedPartitions.put(partition, Boolean.TRUE);
+            }
         }
         return Optional.empty();
     }
@@ -297,7 +310,8 @@ public class ConflictDetection {
             if (entry.totalBuckets() <= 0) {
                 continue;
             }
-            if (sameBucketCheckedPartitions.containsKey(entry.partition())) {
+            if (useSameBucketCheckCache()
+                    && sameBucketCheckedPartitions.containsKey(entry.partition())) {
                 continue;
             }
 
@@ -327,10 +341,17 @@ public class ConflictDetection {
             LOG.warn("", conflictException.getLeft());
             return Optional.of(conflictException.getRight());
         }
-        for (BinaryRow partition : totalBuckets.keySet()) {
-            sameBucketCheckedPartitions.put(partition, Boolean.TRUE);
+        if (useSameBucketCheckCache()) {
+            for (BinaryRow partition : totalBuckets.keySet()) {
+                sameBucketCheckedPartitions.put(partition, Boolean.TRUE);
+            }
         }
         return Optional.empty();
+    }
+
+    private boolean useSameBucketCheckCache() {
+        // Postpone bucket counts are supplied at runtime and may change after overwrite.
+        return bucketMode != BucketMode.POSTPONE_MODE;
     }
 
     private void throwBucketNumMismatch(

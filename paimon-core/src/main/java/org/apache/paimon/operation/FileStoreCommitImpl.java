@@ -940,6 +940,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        if (latestSnapshot == null) {
+            conflictDetection.checkSameBucketWithinDelta(deltaFiles);
+        }
+
         List<BinaryRow> changedPartitions = null;
         if (strictModeChecker != null) {
             changedPartitions = changedPartitions(deltaFiles, indexFiles);
