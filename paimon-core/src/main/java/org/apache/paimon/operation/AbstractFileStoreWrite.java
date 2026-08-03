@@ -477,17 +477,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     protected WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
-        return getWriterWrapper(partition, bucket, null);
+        Map<Integer, WriterContainer<T>> buckets = getWriterContainers(partition);
+        return buckets.computeIfAbsent(
+                bucket, k -> createWriterContainer(partition.copy(), bucket));
     }
 
-    private WriterContainer<T> getWriterWrapper(
-            BinaryRow partition, int bucket, @Nullable Integer totalBuckets) {
-        Map<Integer, WriterContainer<T>> buckets = writers.get(partition);
-        if (buckets == null) {
-            buckets = new HashMap<>();
-            writers.put(partition.copy(), buckets);
-        }
-        if (totalBuckets != null && !buckets.isEmpty()) {
+    private WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket, int totalBuckets) {
+        Map<Integer, WriterContainer<T>> buckets = getWriterContainers(partition);
+        if (!buckets.isEmpty()) {
             checkNumBuckets(
                     partition, totalBuckets, buckets.values().iterator().next().totalBuckets);
         }
@@ -495,16 +492,30 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 bucket, k -> createWriterContainer(partition.copy(), bucket, totalBuckets));
     }
 
+    private Map<Integer, WriterContainer<T>> getWriterContainers(BinaryRow partition) {
+        Map<Integer, WriterContainer<T>> buckets = writers.get(partition);
+        if (buckets == null) {
+            buckets = new HashMap<>();
+            writers.put(partition.copy(), buckets);
+        }
+        return buckets;
+    }
+
     public RecordWriter<T> createWriter(BinaryRow partition, int bucket) {
         return createWriterContainer(partition, bucket).writer;
     }
 
     public WriterContainer<T> createWriterContainer(BinaryRow partition, int bucket) {
-        return createWriterContainer(partition, bucket, null);
+        return createWriterContainer(partition, bucket, numBuckets, !ignoreNumBucketCheck);
     }
 
     private WriterContainer<T> createWriterContainer(
-            BinaryRow partition, int bucket, @Nullable Integer totalBuckets) {
+            BinaryRow partition, int bucket, int totalBuckets) {
+        return createWriterContainer(partition, bucket, totalBuckets, true);
+    }
+
+    private WriterContainer<T> createWriterContainer(
+            BinaryRow partition, int bucket, int expectedTotalBuckets, boolean validateNumBuckets) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
@@ -527,7 +538,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         partition, bucket, latestSnapshot, ignorePreviousFiles);
         RestoreFiles restored = RestoreFiles.empty();
         if (!actualIgnorePreviousFiles) {
-            restored = scanExistingFileMetas(partition, bucket, totalBuckets);
+            restored =
+                    scanExistingFileMetas(
+                            partition, bucket, expectedTotalBuckets, validateNumBuckets);
         }
 
         DynamicBucketIndexMaintainer indexMaintainer =
@@ -572,8 +585,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         Snapshot previousSnapshot = restored.snapshot();
         return new WriterContainer<>(
                 writer,
-                firstNonNull(
-                        restored.totalBuckets(), totalBuckets == null ? numBuckets : totalBuckets),
+                firstNonNull(restored.totalBuckets(), expectedTotalBuckets),
                 indexMaintainer,
                 dvMaintainer,
                 primaryKeyIndexMaintainer,
@@ -621,7 +633,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private RestoreFiles scanExistingFileMetas(
-            BinaryRow partition, int bucket, @Nullable Integer expectedTotalBuckets) {
+            BinaryRow partition, int bucket, int expectedTotalBuckets, boolean validateNumBuckets) {
         Supplier<String> partInfo =
                 () ->
                         partitionType.getFieldCount() > 0
@@ -648,12 +660,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             partInfo.get(), bucket),
                     e);
         }
-        if (restored.totalBuckets() != null
-                && (expectedTotalBuckets != null || !ignoreNumBucketCheck)) {
-            checkNumBuckets(
-                    partInfo.get(),
-                    expectedTotalBuckets == null ? numBuckets : expectedTotalBuckets,
-                    restored.totalBuckets());
+        if (restored.totalBuckets() != null && validateNumBuckets) {
+            checkNumBuckets(partInfo.get(), expectedTotalBuckets, restored.totalBuckets());
         }
         return restored;
     }
