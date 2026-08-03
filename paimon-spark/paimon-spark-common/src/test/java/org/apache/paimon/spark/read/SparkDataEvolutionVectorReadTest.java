@@ -49,6 +49,7 @@ import org.apache.paimon.table.source.VectorSearchSplit;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.SerializableFunction;
@@ -77,7 +78,7 @@ public class SparkDataEvolutionVectorReadTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testRawSearchUsesSparkPath() {
+    public void testRawSearchUsesSparkPath() throws Exception {
         TestingSparkVectorRead read = new TestingSparkVectorRead();
         Snapshot snapshot = snapshot(1L);
         RawVectorSearchSplit rawSplit =
@@ -103,6 +104,12 @@ public class SparkDataEvolutionVectorReadTest {
         assertThat(read.rawSparkPathUsed).isTrue();
         assertThat(read.plannedSnapshot()).isSameAs(snapshot);
         assertThat(result.results().contains(42L)).isTrue();
+
+        byte[] serialized = InstantiationUtil.serializeObject(read);
+        TestingSparkVectorRead restored =
+                InstantiationUtil.deserializeObject(
+                        serialized, Thread.currentThread().getContextClassLoader());
+        assertThat(restored.plannedSnapshot().id()).isEqualTo(snapshot.id());
     }
 
     private static Snapshot snapshot(long id) {

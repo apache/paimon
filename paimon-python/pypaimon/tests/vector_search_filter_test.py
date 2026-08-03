@@ -403,6 +403,7 @@ class GlobalIndexLiveRowFilterTest(unittest.TestCase):
 
         class _Table:
             options = _Options()
+            table_schema = _StubSchema()
             file_io = object()
 
             def copy(self_inner, options):
@@ -2804,12 +2805,42 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         table.copy.assert_called_once_with({
             CoreOptions.SCAN_MODE.key(): "from-snapshot",
             CoreOptions.SCAN_SNAPSHOT_ID.key(): "7",
-            CoreOptions.SCAN_TAG_NAME.key(): None,
-            CoreOptions.SCAN_WATERMARK.key(): None,
-            CoreOptions.SCAN_TIMESTAMP.key(): None,
-            CoreOptions.SCAN_TIMESTAMP_MILLIS.key(): None,
         })
         self.assertEqual([0], sorted(list(result.results())))
+
+    def test_read_plan_clears_conflicting_time_travel_options(self):
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+        from pypaimon.table.source.vector_search_scan import VectorSearchScanPlan
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+
+        snapshot = types.SimpleNamespace(id=7)
+        embedding_field = _field(1, "embedding", "FLOAT")
+        table = _StubTable(fields=[embedding_field], entries=[])
+        table.table_schema.options = {
+            CoreOptions.SCAN_TAG_NAME.key(): "tag-1",
+            CoreOptions.SCAN_TIMESTAMP.key(): "2026-08-03 12:00:00",
+        }
+        read_table = _StubTable(fields=[embedding_field], entries=[])
+        _install_raw_vector_read_builder(
+            read_table, "embedding", {0: [1.0]})
+        table.copy = mock.Mock(return_value=read_table)
+
+        DataEvolutionVectorRead(
+            table,
+            limit=1,
+            vector_column=embedding_field,
+            query_vector=[1.0],
+        ).read_plan(VectorSearchScanPlan(
+            [RawVectorSearchSplit([Range(0, 0)], [], "ivf-flat")],
+            snapshot,
+        ))
+
+        table.copy.assert_called_once_with({
+            CoreOptions.SCAN_MODE.key(): "from-snapshot",
+            CoreOptions.SCAN_SNAPSHOT_ID.key(): "7",
+            CoreOptions.SCAN_TAG_NAME.key(): None,
+            CoreOptions.SCAN_TIMESTAMP.key(): None,
+        })
 
     def tearDown(self):
         mock.patch.stopall()

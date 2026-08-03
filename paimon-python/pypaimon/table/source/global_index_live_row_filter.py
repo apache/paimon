@@ -67,14 +67,17 @@ def table_at_snapshot(table, snapshot):
     if snapshot is None:
         return table
 
-    return table.copy({
+    pin_options = {
         CoreOptions.SCAN_MODE.key(): "from-snapshot",
         CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id),
-        CoreOptions.SCAN_TAG_NAME.key(): None,
-        CoreOptions.SCAN_WATERMARK.key(): None,
-        CoreOptions.SCAN_TIMESTAMP.key(): None,
-        CoreOptions.SCAN_TIMESTAMP_MILLIS.key(): None,
-    })
+    }
+    for option in (CoreOptions.SCAN_TAG_NAME,
+                   CoreOptions.SCAN_WATERMARK,
+                   CoreOptions.SCAN_TIMESTAMP,
+                   CoreOptions.SCAN_TIMESTAMP_MILLIS):
+        if option.key() in table.table_schema.options:
+            pin_options[option.key()] = None
+    return table.copy(pin_options)
 
 
 def for_range(live_row_ids: Optional[RoaringBitmap64],

@@ -19,6 +19,10 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -280,6 +284,52 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
         GlobalIndexResult result = builder.newVectorRead().read(plan);
         assertThat(result.results()).contains(0L);
+    }
+
+    @Test
+    public void testRawFallbackPinsDataReadToPlanSnapshot() throws Exception {
+        catalog.createTable(
+                identifier("vector_raw_search_pinned_snapshot"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .option(CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_raw_search_pinned_snapshot"));
+
+        writeVectors(table, new float[][] {{0.0f, 0.0f}, {1.0f, 0.0f}});
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME);
+        VectorScan.Plan plan = builder.newVectorScan().scan();
+
+        commitDeletionVectors(table, 0L);
+        Map<String, String> compactOptions = new HashMap<>();
+        compactOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
+        FileStoreTable compactTable = table.copy(compactOptions);
+        Snapshot compactSnapshot = compactTable.latestSnapshot().get();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(compactTable, false, false, compactSnapshot);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks)
+                .singleElement()
+                .extracting(DataEvolutionCompactTask::type)
+                .isEqualTo(DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
+        List<CommitMessage> messages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            messages.add(task.doCompact(compactTable, "test-vector-snapshot-pin"));
+        }
+        messages.addAll(
+                new DataEvolutionCompactionCommitPreparation(compactTable, compactSnapshot)
+                        .prepare(messages));
+        try (BatchTableCommit commit = compactTable.newBatchWriteBuilder().newCommit()) {
+            commit.commit(messages);
+        }
+
+        GlobalIndexResult result = builder.newVectorRead().read(plan);
+        assertThat(result.results()).containsExactlyInAnyOrder(0L, 1L);
     }
 
     @Test
