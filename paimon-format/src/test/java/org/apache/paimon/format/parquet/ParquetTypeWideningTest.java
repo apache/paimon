@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -74,6 +75,8 @@ class ParquetTypeWideningTest {
                     .build();
 
     private static final long[] ECPM_VALUES = {10L, 150L, 3000L};
+
+    private static final String[] PAGEVIEW_IDS = {"a", "b", "c"};
 
     // ------------------------------------------------------------------
     // Widening INT32 -> BIGINT, the shape reported from production.
@@ -183,7 +186,9 @@ class ParquetTypeWideningTest {
                                 + "  optional binary pageviewId (UTF8);\n"
                                 + "  optional float rate;\n"
                                 + "}",
-                        (group, i) -> group.append("rate", (float) (i + 1)));
+                        (group, i) ->
+                                group.append("pageviewId", PAGEVIEW_IDS[i])
+                                        .append("rate", (float) (i + 1)));
 
         List<Object[]> rows = read(readType, path, null);
 
@@ -205,7 +210,9 @@ class ParquetTypeWideningTest {
                                 + "  optional binary pageviewId (UTF8);\n"
                                 + "  optional float rate;\n"
                                 + "}",
-                        (group, i) -> group.append("rate", (float) (i + 1)));
+                        (group, i) ->
+                                group.append("pageviewId", PAGEVIEW_IDS[i])
+                                        .append("rate", (float) (i + 1)));
         PredicateBuilder builder = new PredicateBuilder(readType);
 
         List<Object[]> rows =
@@ -278,6 +285,69 @@ class ParquetTypeWideningTest {
     }
 
     // ------------------------------------------------------------------
+    // Case-insensitive resolution. The metastore lowercases column names while a
+    // Spark-written file keeps the original spelling, so a predicate carrying the
+    // metastore's spelling names a column the file does not have - which parquet-mr
+    // takes for all-null and prunes away, losing every row without a word.
+    // ------------------------------------------------------------------
+
+    @Test
+    void testCaseInsensitivePushdownKeepsRows() throws Exception {
+        Path path =
+                writeSchema(
+                        "message root {\n"
+                                + "  optional binary PageviewId (UTF8);\n"
+                                + "  optional int32 Ecpm;\n"
+                                + "}",
+                        (group, i) ->
+                                group.append("PageviewId", "id" + i).append("Ecpm", (i + 1) * 100));
+        RowType readType =
+                RowType.builder()
+                        .field("pageviewId", DataTypes.STRING())
+                        .field("ecpm", DataTypes.BIGINT())
+                        .build();
+        PredicateBuilder builder = new PredicateBuilder(readType);
+
+        List<Object[]> rows =
+                read(
+                        readType,
+                        path,
+                        Collections.singletonList(builder.lessThan(1, 100_000L)),
+                        false);
+
+        assertThat(longs(rows, 1)).containsExactly(100L, 200L, 300L);
+    }
+
+    /** Same, with no type widening in play at all, so only the spelling is at stake. */
+    @Test
+    void testCaseInsensitivePushdownKeepsRowsWithoutWidening() throws Exception {
+        Path path =
+                writeSchema(
+                        "message root {\n"
+                                + "  optional binary PageviewId (UTF8);\n"
+                                + "  optional int64 Ecpm;\n"
+                                + "}",
+                        (group, i) ->
+                                group.append("PageviewId", "id" + i)
+                                        .append("Ecpm", (long) ((i + 1) * 100)));
+        RowType readType =
+                RowType.builder()
+                        .field("pageviewId", DataTypes.STRING())
+                        .field("ecpm", DataTypes.BIGINT())
+                        .build();
+        PredicateBuilder builder = new PredicateBuilder(readType);
+
+        List<Object[]> rows =
+                read(
+                        readType,
+                        path,
+                        Collections.singletonList(builder.lessThan(1, 100_000L)),
+                        false);
+
+        assertThat(longs(rows, 1)).containsExactly(100L, 200L, 300L);
+    }
+
+    // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
 
@@ -302,8 +372,15 @@ class ParquetTypeWideningTest {
 
     private List<Object[]> read(RowType readType, Path path, List<Predicate> filters)
             throws Exception {
-        return read(
-                new ParquetReaderFactory(new Options(), readType, 1024, filters), readType, path);
+        return read(readType, path, filters, true);
+    }
+
+    private List<Object[]> read(
+            RowType readType, Path path, List<Predicate> filters, boolean caseSensitive)
+            throws Exception {
+        Options options = new Options();
+        options.set(CatalogOptions.CASE_SENSITIVE, caseSensitive);
+        return read(new ParquetReaderFactory(options, readType, 1024, filters), readType, path);
     }
 
     private List<Object[]> read(ParquetReaderFactory factory, RowType readType, Path path)
@@ -362,6 +439,7 @@ class ParquetTypeWideningTest {
         return writeGroups(
                 schema,
                 (group, i) -> {
+                    group.append("pageviewId", PAGEVIEW_IDS[i]);
                     if (ecpmAppender != null) {
                         ecpmAppender.accept(group, i);
                     } else if (ecpmIsLong) {
@@ -390,10 +468,8 @@ class ParquetTypeWideningTest {
                         .withConf(conf)
                         .withWriterVersion(ParquetProperties.WriterVersion.PARQUET_1_0)
                         .build()) {
-            String[] ids = {"a", "b", "c"};
-            for (int i = 0; i < ids.length; i++) {
+            for (int i = 0; i < 3; i++) {
                 Group group = new SimpleGroupFactory(schema).newGroup();
-                group.append("pageviewId", ids[i]);
                 appender.accept(group, i);
                 writer.write(group);
             }

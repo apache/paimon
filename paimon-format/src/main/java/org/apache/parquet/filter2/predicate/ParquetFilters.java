@@ -325,7 +325,7 @@ public class ParquetFilters {
             }
 
             // The literal has to speak whatever the file holds, not what the table declares.
-            switch (pushdownType(fieldRef, fileSchema, caseSensitive)) {
+            switch (pushdownTarget(fieldRef, fileSchema, caseSensitive).type) {
                 case INT32:
                     return toInt(value);
                 case INT64:
@@ -529,12 +529,12 @@ public class ParquetFilters {
      * without changing what the predicate means. {@link #convert} swallows that and drops the
      * predicate, which costs pruning but never rows.
      */
-    private static PrimitiveType.PrimitiveTypeName pushdownType(
+    private static PushdownTarget pushdownTarget(
             FieldRef fieldRef, MessageType fileSchema, boolean caseSensitive) {
         PrimitiveType.PrimitiveTypeName[] acceptable = acceptableTypes(fieldRef.type());
         PrimitiveType fileType = findPrimitiveType(fieldRef, fileSchema, caseSensitive);
         if (fileType == null) {
-            return acceptable[0];
+            return new PushdownTarget(fieldRef.name(), acceptable[0]);
         }
 
         if (ParquetSchemaConverter.isUnsignedInt(fileType)) {
@@ -545,10 +545,28 @@ public class ParquetFilters {
 
         for (PrimitiveType.PrimitiveTypeName candidate : acceptable) {
             if (fileType.getPrimitiveTypeName() == candidate) {
-                return candidate;
+                return new PushdownTarget(fileType.getName(), candidate);
             }
         }
         throw new UnsupportedOperationException();
+    }
+
+    /**
+     * The file column a predicate has to name and the type it has to speak. The name matters in
+     * case-insensitive mode: parquet-mr resolves a predicate against the file by exact column path,
+     * so a predicate carrying the metastore's spelling of a column that the file spells differently
+     * reads as a column the file does not have - which the statistics filter takes for all-null and
+     * prunes away, silently losing every row.
+     */
+    private static class PushdownTarget {
+
+        private final String name;
+        private final PrimitiveType.PrimitiveTypeName type;
+
+        private PushdownTarget(String name, PrimitiveType.PrimitiveTypeName type) {
+            this.name = name;
+            this.type = type;
+        }
     }
 
     /**
@@ -614,34 +632,33 @@ public class ParquetFilters {
             implements DataTypeVisitor<Operators.Column<?>> {
 
         private final FieldRef fieldRef;
-        private final String name;
         private final MessageType fileSchema;
         private final boolean caseSensitive;
 
         public ConvertToColumnTypeVisitor(
                 FieldRef fieldRef, MessageType fileSchema, boolean caseSensitive) {
             this.fieldRef = fieldRef;
-            this.name = fieldRef.name();
             this.fileSchema = fileSchema;
             this.caseSensitive = caseSensitive;
         }
 
         /** The column typed after the file, not after what the table declares. */
         private Operators.Column<?> column() {
-            switch (pushdownType(fieldRef, fileSchema, caseSensitive)) {
+            PushdownTarget target = pushdownTarget(fieldRef, fileSchema, caseSensitive);
+            switch (target.type) {
                 case BOOLEAN:
-                    return FilterApi.booleanColumn(name);
+                    return FilterApi.booleanColumn(target.name);
                 case INT32:
-                    return FilterApi.intColumn(name);
+                    return FilterApi.intColumn(target.name);
                 case INT64:
-                    return FilterApi.longColumn(name);
+                    return FilterApi.longColumn(target.name);
                 case FLOAT:
-                    return FilterApi.floatColumn(name);
+                    return FilterApi.floatColumn(target.name);
                 case DOUBLE:
-                    return FilterApi.doubleColumn(name);
+                    return FilterApi.doubleColumn(target.name);
                 case BINARY:
                 case FIXED_LEN_BYTE_ARRAY:
-                    return FilterApi.binaryColumn(name);
+                    return FilterApi.binaryColumn(target.name);
                 default:
                     throw new UnsupportedOperationException();
             }
@@ -717,12 +734,12 @@ public class ParquetFilters {
             PrimitiveType primitiveType = decimalPrimitiveType(fieldRef, fileSchema, caseSensitive);
             switch (primitiveType.getPrimitiveTypeName()) {
                 case INT32:
-                    return FilterApi.intColumn(fieldRef.name());
+                    return FilterApi.intColumn(primitiveType.getName());
                 case INT64:
-                    return FilterApi.longColumn(fieldRef.name());
+                    return FilterApi.longColumn(primitiveType.getName());
                 case BINARY:
                 case FIXED_LEN_BYTE_ARRAY:
-                    return FilterApi.binaryColumn(fieldRef.name());
+                    return FilterApi.binaryColumn(primitiveType.getName());
                 default:
                     throw new UnsupportedOperationException();
             }
@@ -732,8 +749,8 @@ public class ParquetFilters {
         public Operators.Column<?> visit(TimestampType timestampType) {
             int precision = timestampType.getPrecision();
             if (precision <= 6) {
-                timestampPrimitiveType(fieldRef, fileSchema, caseSensitive);
-                return FilterApi.longColumn(name);
+                return FilterApi.longColumn(
+                        timestampPrimitiveType(fieldRef, fileSchema, caseSensitive).getName());
             }
             // precision > 6 uses INT96, not supported for filter pushdown
             throw new UnsupportedOperationException();
@@ -743,8 +760,8 @@ public class ParquetFilters {
         public Operators.Column<?> visit(LocalZonedTimestampType localZonedTimestampType) {
             int precision = localZonedTimestampType.getPrecision();
             if (precision <= 6) {
-                timestampPrimitiveType(fieldRef, fileSchema, caseSensitive);
-                return FilterApi.longColumn(name);
+                return FilterApi.longColumn(
+                        timestampPrimitiveType(fieldRef, fileSchema, caseSensitive).getName());
             }
             // precision > 6 uses INT96, not supported for filter pushdown
             throw new UnsupportedOperationException();
