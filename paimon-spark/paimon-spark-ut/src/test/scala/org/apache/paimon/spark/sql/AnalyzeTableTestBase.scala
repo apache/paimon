@@ -52,6 +52,26 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertTrue(stats.colStats().isEmpty)
   }
 
+  test("Paimon analyze: mergedRecordSize should not truncate to zero") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING)
+                 |USING PAIMON
+                 |TBLPROPERTIES ('primary-key'='id')
+                 |""".stripMargin)
+
+    spark.sql(s"INSERT INTO T VALUES ('1', 'a')")
+    spark.sql(s"INSERT INTO T VALUES ('1', 'bb')")
+    spark.sql(s"INSERT INTO T VALUES ('1', 'ccc')")
+
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+
+    val stats = loadTable("T").statistics().get()
+    Assertions.assertEquals(1L, stats.mergedRecordCount().getAsLong)
+
+    Assertions.assertTrue(stats.mergedRecordSize().isPresent)
+    Assertions.assertTrue(stats.mergedRecordSize().getAsLong > 0)
+  }
+
   test("Paimon analyze: test statistic system table") {
     spark.sql(s"""
                  |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)

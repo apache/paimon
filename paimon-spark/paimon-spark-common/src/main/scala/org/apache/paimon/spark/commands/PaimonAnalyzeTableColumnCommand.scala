@@ -70,7 +70,7 @@ case class PaimonAnalyzeTableColumnCommand(
 
     val totalRecordCount = currentSnapshot.totalRecordCount()
     checkState(totalRecordCount >= mergedRecordCount)
-    val mergedRecordSize = totalSize * (mergedRecordCount.toDouble / totalRecordCount).toLong
+    val mergedRecordSize = (totalSize.toDouble * mergedRecordCount / totalRecordCount).toLong
 
     // convert to paimon stats
     val tableSchema = table.schema()
