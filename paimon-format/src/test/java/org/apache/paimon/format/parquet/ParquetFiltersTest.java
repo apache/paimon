@@ -100,6 +100,22 @@ class ParquetFiltersTest {
     }
 
     @Test
+    public void testBigIntPredicateIsNotPushedToDecimalInt32() {
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "long1", new BigIntType())));
+        MessageType schema =
+                new MessageType(
+                        "paimon_schema",
+                        Collections.singletonList(
+                                Types.optional(PrimitiveTypeName.INT32)
+                                        .as(LogicalTypeAnnotation.decimalType(2, 9))
+                                        .named("long1")));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        test(schema, builder.equal(0, 12345L), "", false);
+    }
+
+    @Test
     public void testString() {
         RowType rowType =
                 new RowType(

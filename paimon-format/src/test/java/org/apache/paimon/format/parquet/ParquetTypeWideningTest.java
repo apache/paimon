@@ -37,8 +37,11 @@ import org.apache.parquet.example.data.simple.SimpleGroupFactory;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.MessageTypeParser;
+import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
+import org.apache.parquet.schema.Types;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -51,6 +54,7 @@ import java.util.UUID;
 import java.util.function.BiConsumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Reads where the declared type is wider than the type stored in the Parquet file.
@@ -167,6 +171,63 @@ class ParquetTypeWideningTest {
                 read(ECPM_BIGINT, path, Collections.singletonList(builder.greaterThan(1, 5L)));
 
         assertThat(longs(rows, 1)).containsExactly(10L, 3_000_000_000L, 4_294_967_295L);
+    }
+
+    /** A DECIMAL annotation changes the meaning of the stored INT32 and cannot be widened. */
+    @Test
+    void testDecimalInt32CannotReadAsBigInt() throws Exception {
+        Path path =
+                write(
+                        ecpmSchema("int32 ecpm (DECIMAL(9,2))"),
+                        (group, i) -> group.append("ecpm", 12_345));
+
+        assertThatThrownBy(() -> read(ECPM_BIGINT, path, null))
+                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
+                .rootCause()
+                .hasMessageContaining("DECIMAL");
+    }
+
+    /** A DATE annotation stores epoch days, not an integer that may be widened to BIGINT. */
+    @Test
+    void testDateInt32CannotReadAsBigInt() throws Exception {
+        Path path =
+                write(ecpmSchema("int32 ecpm (DATE)"), (group, i) -> group.append("ecpm", 20_000));
+
+        assertThatThrownBy(() -> read(ECPM_BIGINT, path, null))
+                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
+                .rootCause()
+                .hasMessageContaining("DATE");
+    }
+
+    /** A TIME annotation stores milliseconds since midnight, not a generic integer. */
+    @Test
+    void testTimeInt32CannotReadAsBigInt() throws Exception {
+        MessageType schema =
+                new MessageType(
+                        "root",
+                        Arrays.asList(
+                                Types.optional(PrimitiveTypeName.BINARY)
+                                        .as(LogicalTypeAnnotation.stringType())
+                                        .named("pageviewId"),
+                                Types.optional(PrimitiveTypeName.INT32)
+                                        .as(
+                                                LogicalTypeAnnotation.timeType(
+                                                        true,
+                                                        LogicalTypeAnnotation.TimeUnit.MILLIS))
+                                        .named("ecpm"),
+                                Types.optional(PrimitiveTypeName.INT64).named("revenue")));
+        Path path =
+                writeGroups(
+                        schema,
+                        (group, i) ->
+                                group.append("pageviewId", PAGEVIEW_IDS[i])
+                                        .append("ecpm", 12_345)
+                                        .append("revenue", (long) i));
+
+        assertThatThrownBy(() -> read(ECPM_BIGINT, path, null))
+                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
+                .rootCause()
+                .hasMessageContaining("TIME");
     }
 
     // ------------------------------------------------------------------

@@ -32,6 +32,7 @@ import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypeVisitor;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
@@ -543,6 +544,7 @@ public class ParquetFilters {
             throw new UnsupportedOperationException();
         }
 
+        validateBigIntWidening(fieldRef, fileType);
         validateNarrowIntegerPushdown(fieldRef, fileType);
 
         for (PrimitiveType.PrimitiveTypeName candidate : acceptable) {
@@ -551,6 +553,20 @@ public class ParquetFilters {
             }
         }
         throw new UnsupportedOperationException();
+    }
+
+    /** Reject INT32 logical values whose meaning changes when the column is declared BIGINT. */
+    private static void validateBigIntWidening(FieldRef fieldRef, PrimitiveType fileType) {
+        if (fieldRef.type().getTypeRoot() != DataTypeRoot.BIGINT
+                || fileType.getPrimitiveTypeName() != PrimitiveType.PrimitiveTypeName.INT32) {
+            return;
+        }
+
+        LogicalTypeAnnotation logicalType = fileType.getLogicalTypeAnnotation();
+        if (logicalType != null
+                && !(logicalType instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation)) {
+            throw new UnsupportedOperationException();
+        }
     }
 
     /** Reject physical integer ranges that the declared narrow type cannot preserve on read. */

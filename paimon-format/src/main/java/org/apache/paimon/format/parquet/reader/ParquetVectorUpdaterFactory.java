@@ -182,12 +182,19 @@ public class ParquetVectorUpdaterFactory {
         @Override
         public UpdaterFactory visit(BigIntType bigIntType) {
             return c -> {
-                if (c.getPrimitiveType().getPrimitiveTypeName()
-                        == PrimitiveType.PrimitiveTypeName.INT32) {
+                PrimitiveType parquetType = c.getPrimitiveType();
+                if (parquetType.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.INT32) {
+                    LogicalTypeAnnotation annotation = parquetType.getLogicalTypeAnnotation();
+                    if (annotation != null
+                            && !(annotation
+                                    instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation)) {
+                        throw new UnsupportedOperationException(
+                                "Cannot read INT32 logical type " + annotation + " as BIGINT");
+                    }
                     // The file kept the narrower int, either because the column was widened in
                     // the metastore after the data was written, or because it is unsigned and
                     // BIGINT is the only Paimon type that can hold every value.
-                    return isUnsignedInt(c.getPrimitiveType())
+                    return isUnsignedInt(parquetType)
                             ? new LongFromUnsignedIntegerUpdater()
                             : new LongFromIntegerUpdater();
                 }
