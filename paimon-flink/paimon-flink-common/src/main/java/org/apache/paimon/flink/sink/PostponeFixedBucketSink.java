@@ -22,7 +22,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.PostponeFixedBucketWriteBuilder;
 
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
@@ -83,7 +82,7 @@ public class PostponeFixedBucketSink extends FlinkWriteSink<InternalRow> {
         return context ->
                 new StoreCommitter(
                         table,
-                        new PostponeFixedBucketWriteBuilder(table)
+                        table.newPostponeFixedBucketWriteBuilder()
                                 .withOverwrite(overwritePartition)
                                 .newCommit(
                                         context.commitUser(),

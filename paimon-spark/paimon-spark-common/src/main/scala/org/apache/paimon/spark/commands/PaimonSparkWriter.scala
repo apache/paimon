@@ -89,7 +89,7 @@ case class PaimonSparkWriter(
 
   val writeBuilder: BatchWriteBuilder = {
     if (postponeBatchWriteFixedBucket) {
-      new PostponeFixedBucketWriteBuilder(table)
+      table.newPostponeFixedBucketWriteBuilder()
     } else {
       table.newBatchWriteBuilder()
     }

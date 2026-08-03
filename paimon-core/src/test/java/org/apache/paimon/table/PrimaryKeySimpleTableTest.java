@@ -217,7 +217,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     public void testPostponeFixedBucketWriteBuilder() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
-        PostponeFixedBucketWriteBuilder builder = new PostponeFixedBucketWriteBuilder(table);
+        PostponeFixedBucketWriteBuilder builder = table.newPostponeFixedBucketWriteBuilder();
 
         List<CommitMessage> messages;
         try (TableWriteImpl<?> write = builder.newWrite();

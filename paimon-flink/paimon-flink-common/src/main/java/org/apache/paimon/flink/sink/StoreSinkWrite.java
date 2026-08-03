@@ -26,7 +26,6 @@ import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.PostponeFixedBucketWriteBuilder;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.utils.Preconditions;
@@ -229,7 +228,7 @@ public interface StoreSinkWrite {
                     memoryPoolFactory,
                     metricGroup,
                     (t, user, writeId) ->
-                            new PostponeFixedBucketWriteBuilder(t).newWrite(user, writeId));
+                            t.newPostponeFixedBucketWriteBuilder().newWrite(user, writeId));
         };
     }
 }

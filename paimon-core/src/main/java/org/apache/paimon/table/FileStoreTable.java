@@ -29,6 +29,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.PostponeFixedBucketWriteBuilder;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -130,6 +131,11 @@ public interface FileStoreTable extends DataTable {
 
     @Override
     TableWriteImpl<?> newWrite(String commitUser);
+
+    /** Returns a builder for fixed-bucket batch writes to a postpone-bucket table. */
+    default PostponeFixedBucketWriteBuilder newPostponeFixedBucketWriteBuilder() {
+        return new PostponeFixedBucketWriteBuilder(this);
+    }
 
     TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId);
 
