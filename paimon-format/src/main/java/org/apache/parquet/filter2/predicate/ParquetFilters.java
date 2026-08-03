@@ -543,12 +543,40 @@ public class ParquetFilters {
             throw new UnsupportedOperationException();
         }
 
+        validateNarrowIntegerPushdown(fieldRef, fileType);
+
         for (PrimitiveType.PrimitiveTypeName candidate : acceptable) {
             if (fileType.getPrimitiveTypeName() == candidate) {
                 return new PushdownTarget(fileType.getName(), candidate);
             }
         }
         throw new UnsupportedOperationException();
+    }
+
+    /** Reject physical integer ranges that the declared narrow type cannot preserve on read. */
+    private static void validateNarrowIntegerPushdown(FieldRef fieldRef, PrimitiveType fileType) {
+        int maxBitWidth;
+        switch (fieldRef.type().getTypeRoot()) {
+            case TINYINT:
+                maxBitWidth = 8;
+                break;
+            case SMALLINT:
+                maxBitWidth = 16;
+                break;
+            default:
+                return;
+        }
+
+        LogicalTypeAnnotation logicalType = fileType.getLogicalTypeAnnotation();
+        if (!(logicalType instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation)) {
+            throw new UnsupportedOperationException();
+        }
+
+        LogicalTypeAnnotation.IntLogicalTypeAnnotation intType =
+                (LogicalTypeAnnotation.IntLogicalTypeAnnotation) logicalType;
+        if (!intType.isSigned() || intType.getBitWidth() > maxBitWidth) {
+            throw new UnsupportedOperationException();
+        }
     }
 
     /**
@@ -584,8 +612,7 @@ public class ParquetFilters {
                 };
             case TINYINT:
             case SMALLINT:
-                // Their INT64 readers cast values outside the target range, so a predicate on the
-                // converted value cannot safely prune the original long value.
+                // INT64 is lossy; INT32 annotations are validated by pushdownTarget.
                 return new PrimitiveType.PrimitiveTypeName[] {
                     PrimitiveType.PrimitiveTypeName.INT32
                 };
