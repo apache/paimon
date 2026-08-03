@@ -68,7 +68,13 @@ public class StrictModeChecker {
             }
             if (snapshot.commitKind() == CommitKind.COMPACT
                     || snapshot.commitKind() == CommitKind.OVERWRITE) {
-                if (hasOverlappedPartition(snapshot, newPartitions)) {
+                boolean hasOverlap = hasOverlappedDataPartition(snapshot, newPartitions);
+                // OVERWRITE may contain logical changes represented only by deletion vectors,
+                // while index-only COMPACT does not change table data.
+                if (!hasOverlap && snapshot.commitKind() == CommitKind.OVERWRITE) {
+                    hasOverlap = hasOverlappedIndexPartition(snapshot, newPartitions);
+                }
+                if (hasOverlap) {
                     throw new RuntimeException(
                             String.format(
                                     "When trying to commit snapshot %d, "
@@ -109,7 +115,7 @@ public class StrictModeChecker {
         }
     }
 
-    private boolean hasOverlappedPartition(Snapshot snapshot, Set<BinaryRow> newPartitions) {
+    private boolean hasOverlappedDataPartition(Snapshot snapshot, Set<BinaryRow> newPartitions) {
         if (newPartitions.isEmpty()) {
             return false;
         }
@@ -120,10 +126,13 @@ public class StrictModeChecker {
                         .withKind(ScanMode.DELTA)
                         .dropStats()
                         .readFileIterator();
-        if (hasOverlappedPartition(entries, newPartitions)) {
-            return true;
-        }
+        return hasOverlappedPartition(entries, newPartitions);
+    }
 
+    private boolean hasOverlappedIndexPartition(Snapshot snapshot, Set<BinaryRow> newPartitions) {
+        if (newPartitions.isEmpty()) {
+            return false;
+        }
         String indexManifest = snapshot.indexManifest();
         if (indexManifest == null) {
             return false;
