@@ -542,8 +542,9 @@ public class TableCommitTest {
         commit2.close();
     }
 
-    @Test
-    public void testStrictModeIgnoresIndexOnlyCompact() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testStrictModeForIndexOnlyCompact(boolean dataEvolutionEnabled) throws Exception {
         String path = tempDir.toString();
         RowType rowType =
                 RowType.of(
@@ -552,9 +553,13 @@ public class TableCommitTest {
 
         Options options = new Options();
         options.set(CoreOptions.PATH, path);
-        options.set(CoreOptions.BUCKET, 1);
-        options.set(CoreOptions.BUCKET_KEY, "k");
+        options.set(CoreOptions.BUCKET, dataEvolutionEnabled ? -1 : 1);
+        if (!dataEvolutionEnabled) {
+            options.set(CoreOptions.BUCKET_KEY, "k");
+        }
         options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, dataEvolutionEnabled);
+        options.set(CoreOptions.DATA_EVOLUTION_ENABLED, dataEvolutionEnabled);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), new Path(path)),
@@ -584,7 +589,6 @@ public class TableCommitTest {
         TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
         TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
         write2.write(GenericRow.of(1, 1, 1L));
-        write2.compact(pt1, 0, true);
 
         IndexFileMeta btreeIndex =
                 new IndexFileMeta(
@@ -609,8 +613,15 @@ public class TableCommitTest {
                                         Collections.singletonList(btreeIndex),
                                         Collections.emptyList()))));
 
-        assertThatCode(() -> commit2.commit(1, write2.prepareCommit(true, 1)))
-                .doesNotThrowAnyException();
+        if (dataEvolutionEnabled) {
+            assertThatCode(() -> commit2.commit(1, write2.prepareCommit(true, 1)))
+                    .doesNotThrowAnyException();
+        } else {
+            assertThatThrownBy(() -> commit2.commit(1, write2.prepareCommit(true, 1)))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining(
+                            "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+        }
 
         write1.close();
         commit1.close();

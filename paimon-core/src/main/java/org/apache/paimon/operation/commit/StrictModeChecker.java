@@ -42,6 +42,7 @@ public class StrictModeChecker {
     private final String commitUser;
     private final Supplier<FileStoreScan> scanSupplier;
     private final IndexManifestFile indexManifestFile;
+    private final boolean dataEvolutionEnabled;
 
     private long strictModeLastSafeSnapshot;
 
@@ -50,11 +51,13 @@ public class StrictModeChecker {
             String commitUser,
             Supplier<FileStoreScan> scanSupplier,
             IndexManifestFile indexManifestFile,
+            boolean dataEvolutionEnabled,
             long strictModeLastSafeSnapshot) {
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
         this.scanSupplier = scanSupplier;
         this.indexManifestFile = indexManifestFile;
+        this.dataEvolutionEnabled = dataEvolutionEnabled;
         this.strictModeLastSafeSnapshot = strictModeLastSafeSnapshot;
     }
 
@@ -70,8 +73,10 @@ public class StrictModeChecker {
                     || snapshot.commitKind() == CommitKind.OVERWRITE) {
                 boolean hasOverlap = hasOverlappedDataPartition(snapshot, newPartitions);
                 // OVERWRITE may contain logical changes represented only by deletion vectors,
-                // while index-only COMPACT does not change table data.
-                if (!hasOverlap && snapshot.commitKind() == CommitKind.OVERWRITE) {
+                // while an index-only COMPACT on a data evolution table does not change data.
+                if (!hasOverlap
+                        && (snapshot.commitKind() == CommitKind.OVERWRITE
+                                || !dataEvolutionEnabled)) {
                     hasOverlap = hasOverlappedIndexPartition(snapshot, newPartitions);
                 }
                 if (hasOverlap) {
