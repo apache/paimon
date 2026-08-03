@@ -58,6 +58,7 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
     private final MergeFunction<KeyValue> mergeFunction;
     private final KeyValueFileWriterFactory writerFactory;
     private final List<DataFileMeta> files;
+    private final List<DataFileMeta> uncommittedFiles;
     private final IOFunction<List<DataFileMeta>, RecordReaderIterator<KeyValue>> fileRead;
     private final @Nullable IOManager ioManager;
     private final CompressOptions spillCompression;
@@ -86,6 +87,7 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
         this.spillCompression = spillCompression;
         this.maxDiskSize = maxDiskSize;
         this.files = new ArrayList<>();
+        this.uncommittedFiles = new ArrayList<>();
         if (restoreIncrement != null) {
             files.addAll(restoreIncrement.newFilesIncrement().newFiles());
         }
@@ -142,7 +144,9 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
     }
 
     private void flush() throws Exception {
-        files.addAll(sinkWriter.flush());
+        List<DataFileMeta> flushedFiles = sinkWriter.flush();
+        files.addAll(flushedFiles);
+        uncommittedFiles.addAll(flushedFiles);
     }
 
     @Override
@@ -227,11 +231,16 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
         flush();
         writerFactory.prepareCommit();
         List<DataFileMeta> result = new ArrayList<>(files);
+        CommitIncrement increment =
+                new CommitIncrement(
+                        new DataIncrement(result, Collections.emptyList(), Collections.emptyList()),
+                        CompactIncrement.emptyIncrement(),
+                        null);
         files.clear();
-        return new CommitIncrement(
-                new DataIncrement(result, Collections.emptyList(), Collections.emptyList()),
-                CompactIncrement.emptyIncrement(),
-                null);
+        // Ownership transfers to the returned commit increment. Its abort/commit path is now
+        // responsible for these files; close must not delete them.
+        uncommittedFiles.clear();
+        return increment;
     }
 
     @VisibleForTesting
@@ -252,7 +261,17 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
         try {
             writerFactory.abortManagedBlobWrites();
         } finally {
-            sinkWriter.close();
+            try {
+                sinkWriter.close();
+            } finally {
+                // Only files produced by this writer and not yet handed to prepareCommit are owned
+                // here. Files restored from an increment or supplied through addNewFiles are merely
+                // referenced and must not be deleted.
+                for (DataFileMeta file : uncommittedFiles) {
+                    writerFactory.deleteFile(file);
+                }
+                uncommittedFiles.clear();
+            }
         }
     }
 }

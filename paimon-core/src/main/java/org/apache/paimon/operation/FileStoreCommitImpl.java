@@ -692,6 +692,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         DataFilePathFactories dataFactories = new DataFilePathFactories(pathFactory);
         IndexFilePathFactories indexFactories = new IndexFilePathFactories(pathFactory);
         for (CommitMessage message : commitMessages) {
+            if (message == null) {
+                continue;
+            }
             DataFilePathFactory dataPathFactory =
                     dataFactories.get(message.partition(), message.bucket());
             IndexPathFactory indexPathFactory =
@@ -704,14 +707,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             dataFilesToDelete.addAll(commitMessage.compactIncrement().changelogFiles());
 
             for (DataFileMeta file : dataFilesToDelete) {
-                fileIO.deleteQuietly(dataPathFactory.toPath(file));
+                fileIO.deleteQuietlyIgnoringInterrupt(dataPathFactory.toPath(file));
             }
 
             List<IndexFileMeta> indexFilesToDelete = new ArrayList<>();
             indexFilesToDelete.addAll(commitMessage.newFilesIncrement().newIndexFiles());
             indexFilesToDelete.addAll(commitMessage.compactIncrement().newIndexFiles());
             for (IndexFileMeta file : indexFilesToDelete) {
-                fileIO.deleteQuietly(indexPathFactory.toPath(file));
+                fileIO.deleteQuietlyIgnoringInterrupt(indexPathFactory.toPath(file));
             }
         }
     }

@@ -192,7 +192,8 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
                 return Pair.of(path.getName(), pos);
             }
         } catch (Throwable e) {
-            fileIO.deleteQuietly(path);
+            // Interrupt-tolerant cleanup of the unfinished objects/manifest file.
+            fileIO.deleteQuietlyIgnoringInterrupt(path);
             throw new RuntimeException(
                     "Exception occurs when writing records to " + path + ". Clean up.", e);
         }
@@ -214,7 +215,8 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
     }
 
     public void delete(String fileName) {
-        fileIO.deleteQuietly(pathFactory.toPath(fileName));
+        // Interrupt-tolerant: used to clean tmp manifests after failed commit prep.
+        fileIO.deleteQuietlyIgnoringInterrupt(pathFactory.toPath(fileName));
     }
 
     public static <V> List<V> readFromIterator(

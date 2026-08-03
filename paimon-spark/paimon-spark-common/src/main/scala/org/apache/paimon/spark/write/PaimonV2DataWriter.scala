@@ -30,6 +30,8 @@ import org.apache.spark.sql.catalyst.expressions.JoinedRow
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.types.StructType
 
+import java.util.function.Consumer
+
 import scala.collection.JavaConverters._
 
 case class PaimonV2DataWriter(
@@ -73,6 +75,23 @@ case class PaimonV2DataWriter(
     }
   }
 
+  private val cleanup = new SparkAttemptCleanup(
+    writeBuilder.tableName(),
+    SparkAttemptCleanup.commitUserOrUnknown(writeBuilder),
+    writeBuilder,
+    () => closeLocalResources())
+
+  override protected def attemptCleanup: Option[SparkAttemptCleanup] = Some(cleanup)
+
+  private def closeLocalResources(): Unit = {
+    try {
+      val closeables = Seq[AutoCloseable](write) ++ plainWrite.toSeq ++ Seq(ioManager)
+      IOUtils.closeAll(closeables.asJava)
+    } catch {
+      case e: Exception => throw new RuntimeException(e)
+    }
+  }
+
   private def createRowConverter(
       writeSchema: StructType,
       schema: StructType): InternalRow => SparkInternalRowWrapper = {
@@ -95,6 +114,7 @@ case class PaimonV2DataWriter(
   private val joinedRow = new JoinedRow()
 
   override def write(record: InternalRow): Unit = {
+    cleanup.checkInterruptedPeriodically()
     plainRowConverter match {
       case Some(converter) =>
         postWrite(getPlainWrite.writeAndReturn(converter.apply(record)))
@@ -113,21 +133,27 @@ case class PaimonV2DataWriter(
   }
 
   override def commitImpl(): Seq[CommitMessage] = {
-    val metadataMessages = write.prepareCommit().asScala.toSeq
-    val plainMessages = plainWrite.map(_.prepareCommit().asScala.toSeq).getOrElse(Seq.empty)
-    metadataMessages ++ plainMessages
-  }
-
-  override def abort(): Unit = close()
-
-  override def close(): Unit = {
-    try {
-      val closeables = Seq[AutoCloseable](write) ++ plainWrite.toSeq ++ Seq(ioManager)
-      IOUtils.closeAll(closeables.asJava)
-    } catch {
-      case e: Exception => throw new RuntimeException(e)
+    val result = scala.collection.mutable.ListBuffer[CommitMessage]()
+    val onPrepared = new Consumer[CommitMessage] {
+      override def accept(msg: CommitMessage): Unit = {
+        registerPrepared(Seq(msg))
+        result += msg
+      }
     }
+    write.prepareCommit(onPrepared)
+    plainWrite.foreach(_.prepareCommit(onPrepared))
+    result.toSeq
   }
+
+  override def abort(): Unit = {
+    // abortPrepared deletes prepared files (or closes the writer if still writing). Delegate
+    // residual writer/ioManager close to cleanup.close() so failures are swallowed consistently
+    // and we do not double-close outside the cleanup state machine.
+    cleanup.abortPrepared()
+    cleanup.close()
+  }
+
+  override def close(): Unit = cleanup.close()
 
   override def currentMetricsValues(): Array[CustomTaskMetric] = {
     metricRegistry.buildSparkWriteMetrics()
