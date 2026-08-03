@@ -26,6 +26,7 @@ import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.PostponeFixedBucketWriteBuilder;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.utils.Preconditions;
@@ -58,6 +59,9 @@ public interface StoreSinkWrite {
 
     @Nullable
     SinkRecord write(InternalRow rowData, int bucket) throws Exception;
+
+    @Nullable
+    SinkRecord write(InternalRow rowData, int bucket, int totalBuckets) throws Exception;
 
     void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
 
@@ -201,6 +205,31 @@ public interface StoreSinkWrite {
                     isStreaming,
                     memoryPoolFactory,
                     metricGroup);
+        };
+    }
+
+    static StoreSinkWrite.Provider createPostponeFixedBucketWriteProvider(
+            boolean ignorePreviousFiles, boolean isStreaming, boolean hasSinkMaterializer) {
+        return (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) -> {
+            Preconditions.checkArgument(
+                    !hasSinkMaterializer,
+                    String.format(
+                            "Sink materializer must not be used with Paimon sink. "
+                                    + "Please set '%s' to '%s' in Flink's config.",
+                            ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE.key(),
+                            ExecutionConfigOptions.UpsertMaterialize.NONE.name()));
+            return new StoreSinkWriteImpl(
+                    table,
+                    commitUser,
+                    state,
+                    ioManager,
+                    ignorePreviousFiles,
+                    false,
+                    isStreaming,
+                    memoryPoolFactory,
+                    metricGroup,
+                    (t, user, writeId) ->
+                            new PostponeFixedBucketWriteBuilder(t).newWrite(user, writeId));
         };
     }
 }

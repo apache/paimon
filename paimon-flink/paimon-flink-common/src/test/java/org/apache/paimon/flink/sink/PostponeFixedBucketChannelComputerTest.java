@@ -166,4 +166,34 @@ public class PostponeFixedBucketChannelComputerTest {
             assertThat(computer.channel(row1)).isEqualTo(computer.channel(row2));
         }
     }
+
+    @Test
+    public void testDefaultBucketNumberRespectsMaxParallelism() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k"});
+
+        SchemaManager schemaManager =
+                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "-2");
+        options.put("postpone.batch-write-fixed-bucket.max-parallelism", "2");
+        TableSchema schema =
+                schemaManager.createTable(
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "k"),
+                                options,
+                                ""));
+
+        Map<BinaryRow, Integer> knownNumBuckets = new HashMap<>();
+        PostponeFixedBucketChannelComputer computer =
+                new PostponeFixedBucketChannelComputer(schema, knownNumBuckets);
+        computer.setup(8);
+        computer.channel(GenericRow.of(1, 1L));
+
+        assertThat(knownNumBuckets).containsValue(2);
+    }
 }

@@ -133,6 +133,13 @@ public interface FileStoreTable extends DataTable {
 
     TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId);
 
+    /** Creates a fixed-bucket merge-tree write for a postpone-bucket batch write. */
+    default TableWriteImpl<?> newPostponeFixedBucketWrite(
+            String commitUser, @Nullable Integer writeId) {
+        throw new UnsupportedOperationException(
+                "Postpone fixed-bucket writes are only supported by primary-key tables.");
+    }
+
     @Override
     TableCommitImpl newCommit(String commitUser);
 

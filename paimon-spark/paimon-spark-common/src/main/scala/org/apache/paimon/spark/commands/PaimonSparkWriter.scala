@@ -88,12 +88,11 @@ case class PaimonSparkWriter(
     table.bucketMode() == POSTPONE_MODE && coreOptions.postponeBatchWriteFixedBucket()
 
   val writeBuilder: BatchWriteBuilder = {
-    val tableForWrite = if (postponeBatchWriteFixedBucket) {
-      PostponeUtils.tableForFixBucketWrite(table)
+    if (postponeBatchWriteFixedBucket) {
+      new PostponeFixedBucketWriteBuilder(table)
     } else {
-      table
+      table.newBatchWriteBuilder()
     }
-    tableForWrite.newBatchWriteBuilder()
   }
 
   def writeOnly(): PaimonSparkWriter = {
@@ -438,16 +437,7 @@ case class PaimonSparkWriter(
   }
 
   def commit(commitMessages: Seq[CommitMessage], operation: Snapshot.Operation): Unit = {
-    val finalWriteBuilder = if (postponeBatchWriteFixedBucket) {
-      writeBuilder
-        .asInstanceOf[BatchWriteBuilderImpl]
-        .copyWithNewTable(PostponeUtils.tableForCommit(table))
-        // Need to check conflict
-        .appendCommitCheckConflict(true)
-    } else {
-      writeBuilder
-    }
-    val tableCommit = finalWriteBuilder.newCommit()
+    val tableCommit = writeBuilder.newCommit()
     if (operation != null) {
       tableCommit.withOperation(operation)
     }
