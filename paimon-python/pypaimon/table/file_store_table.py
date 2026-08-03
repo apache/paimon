@@ -426,9 +426,6 @@ class FileStoreTable(Table):
         return StreamReadBuilder(self)
 
     def new_batch_write_builder(self) -> BatchWriteBuilder:
-        if (self.bucket_mode() == BucketMode.POSTPONE_MODE
-                and self.options.postpone_batch_write_fixed_bucket()):
-            return self.new_postpone_fixed_bucket_write_builder()
         return BatchWriteBuilder(self)
 
     def new_postpone_fixed_bucket_write_builder(self):

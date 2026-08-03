@@ -195,15 +195,9 @@ class PaimonDataSink(DataSink[list[Any]]):
         self._table = table
 
         from pypaimon.schema.data_types import PyarrowFieldParser
-        from pypaimon.table.bucket_mode import BucketMode
 
         self._target_schema: pa.Schema = PyarrowFieldParser.from_paimon_schema(table.fields)
-        write_table = table
-        if table.bucket_mode() == BucketMode.POSTPONE_MODE:
-            write_table = table.copy({
-                "postpone.batch-write-fixed-bucket": "false",
-            })
-        self._write_builder = write_table.new_batch_write_builder()
+        self._write_builder = table.new_batch_write_builder()
         if (
             self._commit_user is not None
             and hasattr(self._write_builder, "commit_user")

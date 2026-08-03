@@ -446,7 +446,7 @@ class TableWriteTest(unittest.TestCase):
         }
         expect = pa.Table.from_pydict(data, schema=self.pk_pa_schema)
 
-        write_builder = table.new_batch_write_builder()
+        write_builder = table.new_postpone_fixed_bucket_write_builder()
         table_write = write_builder.new_write()
         from pypaimon.write.postpone_batch_table_write import (
             PostponeFixedBucketBatchTableWrite,
@@ -508,18 +508,16 @@ class TableWriteTest(unittest.TestCase):
         finally:
             write.abort()
 
-    def test_postpone_batch_fixed_bucket_disabled(self):
+    def test_postpone_batch_write_builder_keeps_postpone_mode(self):
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,
             partition_keys=['user_id'],
             primary_keys=['user_id', 'dt'],
-            options={
-                'bucket': -2,
-                'postpone.batch-write-fixed-bucket': False,
-            },
+            options={'bucket': -2},
         )
-        self.catalog.create_table('default.test_postpone_disabled', schema, False)
-        table = self.catalog.get_table('default.test_postpone_disabled')
+        identifier = 'default.test_postpone_default_builder'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
         expected = pa.Table.from_pydict({
             'user_id': [1],
             'item_id': [1001],
@@ -539,7 +537,7 @@ class TableWriteTest(unittest.TestCase):
             1,
             len(glob.glob(
                 self.warehouse
-                + "/default.db/test_postpone_disabled/user_id=1/"
+                + "/default.db/test_postpone_default_builder/user_id=1/"
                 + "bucket-postpone/*.avro"
             )),
         )
@@ -571,7 +569,7 @@ class TableWriteTest(unittest.TestCase):
             'value': ['x', 'x' * 500],
         }, schema=pa_schema)
 
-        builder = table.new_batch_write_builder()
+        builder = table.new_postpone_fixed_bucket_write_builder()
         write = builder.new_write()
         commit = builder.new_commit()
         try:
@@ -612,7 +610,7 @@ class TableWriteTest(unittest.TestCase):
         self.catalog.create_table(identifier, schema, False)
         table = self.catalog.get_table(identifier)
 
-        builder = table.new_batch_write_builder()
+        builder = table.new_postpone_fixed_bucket_write_builder()
         write = builder.new_write()
         commit = builder.new_commit()
         try:
@@ -658,7 +656,7 @@ class TableWriteTest(unittest.TestCase):
         self.catalog.create_table(identifier, schema, False)
         table = self.catalog.get_table(identifier)
 
-        builder = table.new_batch_write_builder()
+        builder = table.new_postpone_fixed_bucket_write_builder()
         write = builder.new_write()
         commit = builder.new_commit()
         try:
@@ -697,7 +695,7 @@ class TableWriteTest(unittest.TestCase):
         self.catalog.create_table(identifier, schema, False)
         table = self.catalog.get_table(identifier)
 
-        builder = table.new_batch_write_builder()
+        builder = table.new_postpone_fixed_bucket_write_builder()
         write = builder.new_write()
         commit = builder.new_commit()
         try:
@@ -783,8 +781,8 @@ class TableWriteTest(unittest.TestCase):
         identifier = 'default.test_postpone_worker_plan_mismatch'
         self.catalog.create_table(identifier, schema, False)
         table = self.catalog.get_table(identifier)
-        small_builder = table.new_batch_write_builder()
-        large_builder = table.new_batch_write_builder()
+        small_builder = table.new_postpone_fixed_bucket_write_builder()
+        large_builder = table.new_postpone_fixed_bucket_write_builder()
         small_write = small_builder.new_write()
         large_write = large_builder.new_write()
         commit = small_builder.new_commit()
@@ -826,7 +824,7 @@ class TableWriteTest(unittest.TestCase):
             'dt': ['p1'],
         }, schema=self.pk_pa_schema)
 
-        write_builder = table.new_batch_write_builder()
+        write_builder = table.new_postpone_fixed_bucket_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
         table_write.write_arrow(expected)
@@ -842,7 +840,7 @@ class TableWriteTest(unittest.TestCase):
         planner = PostponeBucketPlanner(copied_table)
         plan = planner.plan({('p2',): (1, 10)})
         copied_write = (
-            copied_table.new_batch_write_builder()
+            copied_table.new_postpone_fixed_bucket_write_builder()
             .with_bucket_plan(plan)
             .new_write()
         )
@@ -872,7 +870,7 @@ class TableWriteTest(unittest.TestCase):
         table = self.catalog.get_table(identifier)
         day = datetime.date(2026, 8, 1)
 
-        first_builder = table.new_batch_write_builder()
+        first_builder = table.new_postpone_fixed_bucket_write_builder()
         first_write = first_builder.new_write()
         first_commit = first_builder.new_commit()
         first_write.write_arrow(pa.Table.from_pydict({
@@ -889,7 +887,7 @@ class TableWriteTest(unittest.TestCase):
         reopened = self.catalog.get_table(identifier).copy({
             'postpone.batch-write-fixed-bucket.max-parallelism': 3,
         })
-        second_builder = reopened.new_batch_write_builder()
+        second_builder = reopened.new_postpone_fixed_bucket_write_builder()
         second_write = second_builder.new_write()
         second_commit = second_builder.new_commit()
         try:
@@ -945,7 +943,7 @@ class TableWriteTest(unittest.TestCase):
             'postpone.target-size-per-bucket': '1 b',
             'postpone.batch-write-fixed-bucket.max-parallelism': 2,
         })
-        fixed_builder = fixed.new_batch_write_builder()
+        fixed_builder = fixed.new_postpone_fixed_bucket_write_builder()
         fixed_write = fixed_builder.new_write()
         fixed_commit = fixed_builder.new_commit()
         try:
@@ -1001,8 +999,10 @@ class TableWriteTest(unittest.TestCase):
             'postpone.batch-write-fixed-bucket.max-parallelism': 3,
         })
 
-        builder_two = table_two_buckets.new_batch_write_builder()
-        builder_three = table_three_buckets.new_batch_write_builder()
+        builder_two = (
+            table_two_buckets.new_postpone_fixed_bucket_write_builder())
+        builder_three = (
+            table_three_buckets.new_postpone_fixed_bucket_write_builder())
         write_two = builder_two.new_write()
         write_three = builder_three.new_write()
         commit_two = builder_two.new_commit()

@@ -118,10 +118,14 @@ class PaimonDatasink(_DatasinkBase):
         table_write = None
 
         try:
-            writer_builder = self.table.new_batch_write_builder()
+            writer_builder = (
+                self.table.new_postpone_fixed_bucket_write_builder()
+                if self._postpone_bucket_plan is not None
+                else self.table.new_batch_write_builder()
+            )
             if self._is_overwrite():
                 writer_builder = writer_builder.overwrite(self.static_partition)
-            
+
             if self._postpone_bucket_plan is not None:
                 writer_builder.with_bucket_plan(self._postpone_bucket_plan)
             table_write = writer_builder.new_write()
