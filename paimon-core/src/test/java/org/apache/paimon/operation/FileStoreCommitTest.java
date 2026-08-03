@@ -107,6 +107,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
+import static org.apache.paimon.table.BucketMode.POSTPONE_BUCKET;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -256,6 +257,69 @@ public class FileStoreCommitTest {
                                             null))
                     .hasMessageContaining("new bucket num 4")
                     .hasMessageContaining("previous bucket num is 2");
+        }
+    }
+
+    @Test
+    public void testPostponeBucketCheckIsNotSkippedByCache() throws Exception {
+        TestFileStore store = createStore(false, POSTPONE_BUCKET);
+        BinaryRow partition =
+                gen.getPartition(gen.nextInsert("20201110", 10, 1L, new int[] {1, 1}, "first"));
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(
+                            commit.tryCommitOnce(
+                                            null,
+                                            Collections.singletonList(addFile(partition, 0, 2, 0)),
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            0,
+                                            null,
+                                            new HashMap<>(),
+                                            Snapshot.CommitKind.APPEND,
+                                            false,
+                                            null,
+                                            true,
+                                            null)
+                                    .isSuccess())
+                    .isTrue();
+
+            Snapshot latestSnapshot = store.snapshotManager().latestSnapshot();
+            assertThat(
+                            commit.tryCommitOnce(
+                                            null,
+                                            Collections.singletonList(addFile(partition, 1, 2, 1)),
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            1,
+                                            null,
+                                            new HashMap<>(),
+                                            Snapshot.CommitKind.APPEND,
+                                            false,
+                                            latestSnapshot,
+                                            true,
+                                            null)
+                                    .isSuccess())
+                    .isTrue();
+
+            latestSnapshot = store.snapshotManager().latestSnapshot();
+            Snapshot finalLatestSnapshot = latestSnapshot;
+            assertThatThrownBy(
+                            () ->
+                                    commit.tryCommitOnce(
+                                            null,
+                                            Collections.singletonList(addFile(partition, 2, 3, 2)),
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            2,
+                                            null,
+                                            new HashMap<>(),
+                                            Snapshot.CommitKind.APPEND,
+                                            false,
+                                            finalLatestSnapshot,
+                                            true,
+                                            null))
+                    .hasMessageContaining("changed from 2 to 3 without overwrite");
         }
     }
 

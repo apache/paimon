@@ -265,6 +265,13 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public TableWriteImpl<?> newPostponeFixedBucketWrite(
+            String commitUser, @Nullable Integer writeId) {
+        privilegeChecker.assertCanInsert(identifier);
+        return wrapped.newPostponeFixedBucketWrite(commitUser, writeId);
+    }
+
+    @Override
     public TableCommitImpl newCommit(String commitUser) {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newCommit(commitUser);

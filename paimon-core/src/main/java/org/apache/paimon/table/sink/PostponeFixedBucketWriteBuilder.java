@@ -20,7 +20,8 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.InnerTable;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -29,19 +30,22 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Implementation for {@link WriteBuilder}. */
-public class BatchWriteBuilderImpl implements BatchWriteBuilder {
+/** Write builder for assigning fixed buckets at runtime to a postpone-bucket table. */
+public class PostponeFixedBucketWriteBuilder implements BatchWriteBuilder {
 
     private static final long serialVersionUID = 1L;
 
-    private final InnerTable table;
+    private final FileStoreTable table;
     private final String commitUser;
 
-    private Map<String, String> staticPartition;
-    private @Nullable Long rowIdCheckFromSnapshot = null;
+    @Nullable private Map<String, String> staticPartition;
 
-    public BatchWriteBuilderImpl(InnerTable table) {
+    public PostponeFixedBucketWriteBuilder(FileStoreTable table) {
+        checkArgument(
+                table.bucketMode() == BucketMode.POSTPONE_MODE,
+                "Postpone fixed-bucket write requires a postpone-bucket table.");
         this.table = table;
         this.commitUser = createCommitUser(new Options(table.options()));
     }
@@ -62,31 +66,34 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     }
 
     @Override
-    public BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition) {
+    public PostponeFixedBucketWriteBuilder withOverwrite(
+            @Nullable Map<String, String> staticPartition) {
         this.staticPartition = staticPartition;
         return this;
     }
 
     @Override
-    public BatchTableWrite newWrite() {
-        return table.newWrite(commitUser).withIgnorePreviousFiles(staticPartition != null);
+    public TableWriteImpl<?> newWrite() {
+        return newWrite(commitUser, null).withIgnorePreviousFiles(staticPartition != null);
+    }
+
+    public TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId) {
+        return table.newPostponeFixedBucketWrite(commitUser, writeId);
     }
 
     @Override
-    public BatchTableCommit newCommit() {
-        InnerTableCommit commit =
-                table.newCommit(commitUser)
-                        .withOverwrite(staticPartition)
-                        .rowIdCheckConflict(rowIdCheckFromSnapshot);
-        commit.ignoreEmptyCommit(
+    public TableCommitImpl newCommit() {
+        boolean ignoreEmpty =
                 Options.fromMap(table.options())
                         .getOptional(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT)
-                        .orElse(true));
-        return commit;
+                        .orElse(true);
+        return newCommit(commitUser, ignoreEmpty);
     }
 
-    public BatchWriteBuilderImpl rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot) {
-        this.rowIdCheckFromSnapshot = rowIdCheckFromSnapshot;
-        return this;
+    public TableCommitImpl newCommit(String commitUser, boolean ignoreEmptyCommit) {
+        return table.newCommit(commitUser)
+                .withOverwrite(staticPartition)
+                .appendCommitCheckConflict(true)
+                .ignoreEmptyCommit(ignoreEmptyCommit);
     }
 }

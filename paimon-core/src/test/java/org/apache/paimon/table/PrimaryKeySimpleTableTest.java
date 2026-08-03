@@ -60,6 +60,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
+import org.apache.paimon.table.sink.PostponeFixedBucketWriteBuilder;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
@@ -210,6 +211,60 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         assertThat(file.fileName()).endsWith(".avro");
         assertThat(file.level()).isEqualTo(0);
         assertThat(file.valueStatsCols()).isEmpty();
+    }
+
+    @Test
+    public void testPostponeFixedBucketWriteBuilder() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
+        PostponeFixedBucketWriteBuilder builder = table.newPostponeFixedBucketWriteBuilder();
+
+        List<CommitMessage> conflictingMessages = new ArrayList<>();
+        try (TableWriteImpl<?> write = builder.newWrite()) {
+            write.writeAndReturn(rowData(1, 1, 1L), 0, 2);
+            conflictingMessages.addAll(write.prepareCommit());
+        }
+        try (TableWriteImpl<?> write = builder.newWrite()) {
+            write.writeAndReturn(rowData(1, 2, 2L), 1, 3);
+            conflictingMessages.addAll(write.prepareCommit());
+        }
+        try (BatchTableCommit commit = builder.newCommit()) {
+            assertThatThrownBy(() -> commit.commit(conflictingMessages))
+                    .hasMessageContaining("new bucket num 3")
+                    .hasMessageContaining("previous bucket num is 2");
+        }
+        assertThat(table.latestSnapshot()).isEmpty();
+
+        List<CommitMessage> messages;
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            assertThatThrownBy(() -> write.writeAndReturn(rowData(1, 1, 1L), 0, 0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("must be positive");
+            assertThatThrownBy(() -> write.writeAndReturn(rowData(1, 1, 1L), 2, 2))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("out of range");
+            write.writeAndReturn(rowData(1, 1, 1L), 0, 2);
+            assertThatThrownBy(() -> write.writeAndReturn(rowData(1, 3, 3L), 1, 3))
+                    .hasMessageContaining("new bucket num 3")
+                    .hasMessageContaining("previous bucket num is 2");
+            write.writeAndReturn(rowData(2, 2, 2L), 2, 3);
+            messages = write.prepareCommit();
+            assertThat(messages)
+                    .extracting(message -> ((CommitMessageImpl) message).totalBuckets())
+                    .containsExactlyInAnyOrder(2, 3);
+            commit.commit(messages);
+        }
+
+        assertThat(PostponeUtils.getKnownNumBuckets(table))
+                .containsEntry(binaryRow(1), 2)
+                .containsEntry(binaryRow(2), 3);
+
+        try (TableWriteImpl<?> write = builder.newWrite()) {
+            assertThatThrownBy(() -> write.writeAndReturn(rowData(1, 3, 3L), 0, 3))
+                    .hasMessageContaining("new bucket num 3")
+                    .hasMessageContaining("previous bucket num is 2");
+        }
     }
 
     @ParameterizedTest(name = "format-{0}")
