@@ -30,6 +30,8 @@ import org.apache.spark.sql.catalyst.expressions.JoinedRow
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.types.StructType
 
+import java.util.function.Consumer
+
 import scala.collection.JavaConverters._
 
 case class PaimonV2DataWriter(
@@ -132,19 +134,14 @@ case class PaimonV2DataWriter(
 
   override def commitImpl(): Seq[CommitMessage] = {
     val result = scala.collection.mutable.ListBuffer[CommitMessage]()
-    write.prepareCommit(
-      (msg: CommitMessage) => {
+    val onPrepared = new Consumer[CommitMessage] {
+      override def accept(msg: CommitMessage): Unit = {
         registerPrepared(Seq(msg))
         result += msg
-      })
-    plainWrite.foreach {
-      plain =>
-        plain.prepareCommit(
-          (msg: CommitMessage) => {
-            registerPrepared(Seq(msg))
-            result += msg
-          })
+      }
     }
+    write.prepareCommit(onPrepared)
+    plainWrite.foreach(_.prepareCommit(onPrepared))
     result.toSeq
   }
 

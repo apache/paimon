@@ -28,6 +28,8 @@ import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.sql.Row
 
+import java.util.function.Consumer
+
 case class PaimonDataWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
@@ -86,12 +88,13 @@ case class PaimonDataWrite(
 
   override def commitImpl(): Seq[CommitMessage] = {
     val messages = scala.collection.mutable.ListBuffer[CommitMessage]()
-    write.prepareCommit(
-      (msg: CommitMessage) => {
+    write.prepareCommit(new Consumer[CommitMessage] {
+      override def accept(msg: CommitMessage): Unit = {
         val transformed = transformCommitMessage(msg)
         registerPrepared(Seq(transformed))
         messages += transformed
-      })
+      }
+    })
     messages.toSeq
   }
 
