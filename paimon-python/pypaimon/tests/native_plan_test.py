@@ -382,6 +382,7 @@ class NativePlanTest(unittest.TestCase):
         table = Mock(partition_keys=['p'])
         table.path_factory.return_value.bucket_path.return_value = (
             '/warehouse/t/p=a/b/bucket-0')
+        table.file_io.list_status.return_value = [Mock(base_name='data.parquet')]
         data_file = Mock(
             external_path=None,
             file_name='data.parquet',
@@ -389,7 +390,6 @@ class NativePlanTest(unittest.TestCase):
         )
         split = Mock(
             partition=Mock(values=['a/b']), bucket=0, files=[data_file])
-        table.file_io.exists.return_value = True
 
         _restore_python_partition_paths(table, [split])
 
@@ -402,6 +402,7 @@ class NativePlanTest(unittest.TestCase):
         table = Mock(partition_keys=['p'])
         table.path_factory.return_value.bucket_path.return_value = (
             '/warehouse/t/p=a/b/bucket-0')
+        table.file_io.list_status.return_value = []
         rust_path = '/warehouse/t/p=a%2Fb/bucket-0/data.parquet'
         data_file = Mock(
             external_path=None,
@@ -410,11 +411,51 @@ class NativePlanTest(unittest.TestCase):
         )
         split = Mock(
             partition=Mock(values=['a/b']), bucket=0, files=[data_file])
-        table.file_io.exists.return_value = False
 
         _restore_python_partition_paths(table, [split])
 
         self.assertEqual(data_file.file_path, rust_path)
+
+    def test_partition_path_lists_each_bucket_once(self):
+        table = Mock(partition_keys=['p'])
+        table.path_factory.return_value.bucket_path.return_value = (
+            '/warehouse/t/p=a/b/bucket-0')
+        table.file_io.list_status.return_value = [
+            Mock(base_name='a.parquet'), Mock(base_name='b.parquet')]
+        splits = [
+            Mock(partition=Mock(values=['a/b']), bucket=0, files=[Mock(
+                external_path=None,
+                file_name=name,
+                file_path='/warehouse/t/p=a%%2Fb/bucket-0/%s' % name,
+            )])
+            for name in ('a.parquet', 'b.parquet')
+        ]
+
+        _restore_python_partition_paths(table, splits)
+
+        table.file_io.list_status.assert_called_once_with(
+            '/warehouse/t/p=a/b/bucket-0')
+        self.assertEqual(
+            [split.files[0].file_path for split in splits],
+            [
+                '/warehouse/t/p=a/b/bucket-0/a.parquet',
+                '/warehouse/t/p=a/b/bucket-0/b.parquet',
+            ],
+        )
+
+    def test_partition_path_listing_failure_is_not_hidden(self):
+        table = Mock(partition_keys=['p'])
+        table.path_factory.return_value.bucket_path.return_value = (
+            '/warehouse/t/p=a/b/bucket-0')
+        table.file_io.list_status.side_effect = PermissionError('denied')
+        split = Mock(partition=Mock(values=['a/b']), bucket=0, files=[Mock(
+            external_path=None,
+            file_name='data.parquet',
+            file_path='/warehouse/t/p=a%2Fb/bucket-0/data.parquet',
+        )])
+
+        with self.assertRaises(PermissionError):
+            _restore_python_partition_paths(table, [split])
 
     def test_native_plan_threads_trimmed_keys_to_deserializer(self):
         # PK tables route through: the trimmed primary keys must reach the

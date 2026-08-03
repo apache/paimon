@@ -140,26 +140,31 @@ def _predicate_to_native(predicate: Predicate) -> dict:
 
 
 def _restore_python_partition_paths(table, splits: List[Split]) -> None:
-    """Use PyPaimon's legacy path only when the data file exists there."""
+    """Restore legacy PyPaimon paths with one listing per bucket."""
     if not table.partition_keys:
         return
     path_factory = table.path_factory()
+    bucket_files = {}
     for split in splits:
         bucket_path = path_factory.bucket_path(
             tuple(split.partition.values), split.bucket)
+        candidates = []
         for data_file in split.files:
-            if data_file.external_path:
-                continue
             python_path = "%s/%s" % (
                 bucket_path.rstrip('/'), data_file.file_name)
-            if python_path == data_file.file_path:
-                continue
-            try:
-                if table.file_io.exists(python_path):
-                    data_file.file_path = python_path
-            except Exception:
-                # Keep Rust's manifest-derived path; read failures remain visible.
-                pass
+            if (not data_file.external_path
+                    and python_path != data_file.file_path):
+                candidates.append((data_file, python_path))
+        if not candidates:
+            continue
+        if bucket_path not in bucket_files:
+            bucket_files[bucket_path] = {
+                status.base_name
+                for status in table.file_io.list_status(bucket_path)
+            }
+        for data_file, python_path in candidates:
+            if data_file.file_name in bucket_files[bucket_path]:
+                data_file.file_path = python_path
 
 
 def native_plan(
