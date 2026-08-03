@@ -641,6 +641,29 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual((1000, 32000), stats[()])
         self.assertEqual(2, planner.plan(stats).num_buckets(()))
 
+    def test_postpone_stats_skip_known_partitions(self):
+        from pypaimon.write.postpone_bucket import PostponeBucketPlanner
+
+        table = self._create_postpone_table(
+            'default.test_postpone_skip_known_stats',
+            pa_schema=self.postpone_pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['id', 'dt'],
+        )
+        data = pa.RecordBatch.from_pydict({
+            'id': [1, 2],
+            'dt': ['known', 'new'],
+            'value': ['x', 'y'],
+        }, schema=self.postpone_pa_schema)
+        planner = PostponeBucketPlanner(
+            table,
+            known_num_buckets={('known',): 2},
+            postpone_row_counts={},
+        )
+
+        self.assertEqual(
+            {('new',)}, set(planner.input_partition_stats(data)))
+
     def test_postpone_size_inference_supports_java_type_surface(self):
         from pypaimon.write.postpone_bucket import PostponeBucketPlanner
 
@@ -774,6 +797,11 @@ class TableWriteTest(unittest.TestCase):
             messages = write.prepare_commit()
             self.assertEqual({8}, {message.total_buckets for message in messages})
             commit.commit(messages)
+
+        self.assertEqual(
+            list(range(8)),
+            self._read_sorted(table, 'id').column('id').to_pylist(),
+        )
 
     def test_postpone_batch_plans_write_rows_with_arrow_input(self):
         from pypaimon.table.row.generic_row import GenericRow

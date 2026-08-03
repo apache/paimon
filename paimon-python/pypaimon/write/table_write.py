@@ -271,6 +271,7 @@ class TableWrite:
         )
 
     def _distributed_write_options(self) -> Dict[str, Any]:
+        """Return options forwarded by ``write_ray`` to the Ray writer."""
         return {}
 
     def close(self):

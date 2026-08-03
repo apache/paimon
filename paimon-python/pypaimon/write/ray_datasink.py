@@ -359,16 +359,17 @@ def _collect_partition_stats(dataset, planner):
 
     def _stats(batch: pa.Table) -> pa.Table:
         stats = planner.input_partition_stats(batch)
+        items = list(stats.items())
         return pa.table({
             partition_col: pa.array(
-                [pickle.dumps(partition) for partition in stats],
+                [pickle.dumps(partition) for partition, _ in items],
                 type=pa.binary(),
             ),
             rows_col: pa.array(
-                [value[0] for value in stats.values()], type=pa.int64()
+                [value[0] for _, value in items], type=pa.int64()
             ),
             size_col: pa.array(
-                [value[1] for value in stats.values()], type=pa.int64()
+                [value[1] for _, value in items], type=pa.int64()
             ),
         })
 

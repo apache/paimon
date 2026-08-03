@@ -29,8 +29,12 @@ from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import _parse_type_precision_scale
 
 
+def _ceil_div(dividend, divisor):
+    return (dividend + divisor - 1) // divisor
+
+
 def _round_to_word(size):
-    return (size + 7) // 8 * 8
+    return _ceil_div(size, 8) * 8
 
 
 class _BinaryRowSizeEstimator:
@@ -294,6 +298,8 @@ class PostponeBucketPlanner:
         columns = [data.column(i) for i in range(len(fields))]
         collect_size = self.target_row_num_per_bucket is None
         for row, partition in enumerate(partitions):
+            if partition in self._known_num_buckets:
+                continue
             data_size = 0
             if collect_size:
                 values = [column[row].as_py() for column in columns]
@@ -320,19 +326,18 @@ class PostponeBucketPlanner:
                 total_rows = row_count + postpone_rows
                 num_buckets = max(
                     1,
-                    (total_rows + self.target_row_num_per_bucket - 1)
-                    // self.target_row_num_per_bucket,
+                    _ceil_div(
+                        total_rows, self.target_row_num_per_bucket),
                 )
             else:
                 estimated_size = data_size
                 if postpone_rows and row_count:
-                    estimated_size = (
-                        data_size * (row_count + postpone_rows) + row_count - 1
-                    ) // row_count
+                    estimated_size = _ceil_div(
+                        data_size * (row_count + postpone_rows), row_count)
                 num_buckets = max(
                     1,
-                    (estimated_size + self.target_size_per_bucket - 1)
-                    // self.target_size_per_bucket,
+                    _ceil_div(
+                        estimated_size, self.target_size_per_bucket),
                 )
             self._known_num_buckets[partition] = min(
                 num_buckets, self.max_num_buckets
