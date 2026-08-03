@@ -17,9 +17,153 @@
 
 from typing import Dict, Tuple
 
+from pypaimon.schema.data_types import (
+    ArrayType,
+    AtomicType,
+    MapType,
+    MultisetType,
+    RowType,
+    VectorType,
+)
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
-from pypaimon.table.row.internal_row import RowKind
+from pypaimon.table.row.generic_row import _parse_type_precision_scale
+
+
+def _round_to_word(size):
+    return (size + 7) // 8 * 8
+
+
+class _BinaryRowSizeEstimator:
+    """Calculates the Java internal binary size without serializing rows."""
+
+    @classmethod
+    def row_size(cls, values, fields):
+        size = ((len(fields) + 71) // 64) * 8 + len(fields) * 8
+        for value, field in zip(values, fields):
+            size += cls._variable_size(value, field.type)
+        return size
+
+    @classmethod
+    def _variable_size(cls, value, data_type):
+        if isinstance(data_type, AtomicType):
+            return cls._atomic_variable_size(value, data_type)
+        if value is None:
+            return 0
+        if isinstance(data_type, ArrayType):
+            return _round_to_word(cls._array_size(value, data_type.element))
+        if isinstance(data_type, VectorType):
+            return _round_to_word(
+                4 + data_type.length * cls._primitive_width(data_type.element)
+            )
+        if isinstance(data_type, MapType):
+            keys, values = cls._map_values(value)
+            return _round_to_word(
+                4
+                + cls._array_size(keys, data_type.key)
+                + cls._array_size(values, data_type.value)
+            )
+        if isinstance(data_type, MultisetType):
+            keys, values = cls._map_values(value)
+            return _round_to_word(
+                4
+                + cls._array_size(keys, data_type.element)
+                + cls._array_size(values, AtomicType("INT", False))
+            )
+        if isinstance(data_type, RowType):
+            return _round_to_word(
+                cls.row_size(cls._row_values(value, data_type), data_type.fields)
+            )
+        raise ValueError("Unsupported data type: {}".format(data_type))
+
+    @classmethod
+    def _atomic_variable_size(cls, value, data_type):
+        type_name = data_type.type.upper()
+        if type_name.startswith(("DECIMAL", "NUMERIC")):
+            precision, _ = _parse_type_precision_scale(data_type)
+            return 16 if precision > 18 else 0
+        if type_name.startswith("TIMESTAMP"):
+            precision, _ = _parse_type_precision_scale(data_type)
+            return 8 if precision > 3 else 0
+        if value is None:
+            return 0
+        if type_name == "VARIANT":
+            value_bytes, metadata = cls._variant_bytes(value)
+            return _round_to_word(4 + len(value_bytes) + len(metadata))
+        if type_name == "BLOB":
+            value = value if isinstance(value, (bytes, bytearray)) else value.to_data()
+            return cls._binary_size(value)
+        if type_name.startswith(("CHAR", "VARCHAR", "STRING")):
+            return cls._binary_size(str(value).encode("utf-8"))
+        if type_name.startswith(("BINARY", "VARBINARY", "BYTES")):
+            return cls._binary_size(value)
+        return 0
+
+    @classmethod
+    def _array_size(cls, values, element_type):
+        values = list(values)
+        header_size = 4 + ((len(values) + 31) // 32) * 4
+        size = _round_to_word(
+            header_size + len(values) * cls._fixed_width(element_type)
+        )
+        return size + sum(
+            cls._variable_size(value, element_type)
+            for value in values
+            if value is not None
+        )
+
+    @staticmethod
+    def _binary_size(value):
+        length = len(bytes(value))
+        return 0 if length <= 7 else _round_to_word(length)
+
+    @staticmethod
+    def _variant_bytes(value):
+        if isinstance(value, dict):
+            return bytes(value["value"]), bytes(value["metadata"])
+        return bytes(value.value()), bytes(value.metadata())
+
+    @staticmethod
+    def _map_values(value):
+        items = value.items() if isinstance(value, dict) else value
+        items = list(items)
+        return [item[0] for item in items], [item[1] for item in items]
+
+    @staticmethod
+    def _row_values(value, row_type):
+        if isinstance(value, dict):
+            return [value[field.name] for field in row_type.fields]
+        if hasattr(value, "values"):
+            return value.values
+        return list(value)
+
+    @classmethod
+    def _fixed_width(cls, data_type):
+        if isinstance(data_type, AtomicType):
+            type_name = data_type.type.upper()
+            if type_name in ("BOOLEAN", "BOOL", "TINYINT", "BYTE"):
+                return 1
+            if type_name in ("SMALLINT", "SHORT"):
+                return 2
+            if type_name in ("INT", "INTEGER", "FLOAT", "REAL", "DATE", "TIME") \
+                    or type_name.startswith("TIME("):
+                return 4
+            return 8
+        if isinstance(data_type, (ArrayType, MapType, MultisetType, RowType)):
+            return 8
+        raise ValueError("Unsupported array element type: {}".format(data_type))
+
+    @staticmethod
+    def _primitive_width(data_type):
+        type_name = data_type.type.upper()
+        if type_name in ("BOOLEAN", "TINYINT"):
+            return 1
+        if type_name == "SMALLINT":
+            return 2
+        if type_name in ("INT", "INTEGER", "FLOAT"):
+            return 4
+        if type_name in ("BIGINT", "DOUBLE"):
+            return 8
+        raise ValueError("Unsupported vector element type: {}".format(data_type))
 
 
 class PostponeBucketPlan:
@@ -153,9 +297,7 @@ class PostponeBucketPlanner:
             data_size = 0
             if collect_size:
                 values = [column[row].as_py() for column in columns]
-                data_size = len(GenericRowSerializer.to_bytes(
-                    GenericRow(values, fields, RowKind.INSERT)
-                )) - 4
+                data_size = _BinaryRowSizeEstimator.row_size(values, fields)
             row_count, total_size = stats.get(partition, (0, 0))
             stats[partition] = (row_count + 1, total_size + data_size)
         return stats

@@ -641,6 +641,43 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual((1000, 32000), stats[()])
         self.assertEqual(2, planner.plan(stats).num_buckets(()))
 
+    def test_postpone_size_inference_supports_java_type_surface(self):
+        from pypaimon.write.postpone_bucket import PostponeBucketPlanner
+
+        variant_type = pa.struct([
+            pa.field('value', pa.binary(), nullable=False),
+            pa.field('metadata', pa.binary(), nullable=False),
+        ])
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('items', pa.list_(pa.int32())),
+            ('attributes', pa.map_(pa.string(), pa.int32())),
+            ('nested', pa.struct([('label', pa.string())])),
+            ('embedding', pa.list_(pa.float32(), 2)),
+            ('payload', variant_type),
+            ('event_time', pa.timestamp('us', tz='UTC')),
+        ])
+        table = self._create_postpone_table(
+            'default.test_postpone_java_type_surface',
+            pa_schema,
+            primary_keys=['id'],
+        )
+        data = pa.RecordBatch.from_pydict({
+            'id': [1],
+            'items': [[1, 2, 3]],
+            'attributes': [[('a', 1)]],
+            'nested': [{'label': 'x'}],
+            'embedding': [[1.0, 2.0]],
+            'payload': [{'value': b'\x00', 'metadata': b'\x01'}],
+            'event_time': [datetime.datetime(
+                2026, 1, 1, tzinfo=datetime.timezone.utc
+            )],
+        }, schema=pa_schema)
+
+        planner = PostponeBucketPlanner(
+            table, known_num_buckets={}, postpone_row_counts={})
+        self.assertEqual((1, 176), planner.input_partition_stats(data)[()])
+
     def test_postpone_default_bucket_function_matches_java(self):
         from pypaimon.write.postpone_bucket import PostponeBucketPlan
         from pypaimon.write.row_key_extractor import (
@@ -1096,6 +1133,80 @@ class TableWriteTest(unittest.TestCase):
             write_three.close()
             commit_two.close()
             commit_three.close()
+
+    def test_uncertain_commit_then_cas_failure_keeps_files(self):
+        table = self._create_postpone_table(
+            'default.test_uncertain_commit_then_cas_failure',
+            pa_schema=self.postpone_pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['id', 'dt'],
+        )
+        builder = table.new_postpone_fixed_bucket_write_builder()
+        write = builder.new_write()
+        commit = builder.new_commit()
+        try:
+            write.write_arrow(pa.Table.from_pydict({
+                'id': [1], 'dt': ['p'], 'value': ['v'],
+            }, schema=self.postpone_pa_schema))
+            messages = write.prepare_commit()
+            data_paths = [
+                file.external_path or file.file_path
+                for message in messages
+                for file in message.new_files
+            ]
+            uncertain_error = TimeoutError('lost commit response')
+            file_store_commit = commit.file_store_commit
+            file_store_commit.commit_max_retries = 1
+            snapshot_commit = file_store_commit.snapshot_commit
+            real_commit = snapshot_commit.commit
+            attempts = 0
+
+            def uncertain_then_cas_failure(base_uuid, snapshot, statistics):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    self.assertTrue(real_commit(base_uuid, snapshot, statistics))
+                    self._commit_arrow(
+                        table,
+                        pa.Table.from_pydict({
+                            'id': [2], 'dt': ['p'], 'value': ['v2'],
+                        }, schema=self.postpone_pa_schema),
+                        fixed_bucket=True,
+                    )
+                    raise uncertain_error
+                return False
+
+            real_get_snapshot = file_store_commit.snapshot_manager.get_snapshot_by_id
+
+            def hide_first_snapshot(snapshot_id):
+                return None if snapshot_id == 1 else real_get_snapshot(snapshot_id)
+
+            # Keep the retry on the CAS path after snapshot 1 becomes unavailable.
+            with patch.object(
+                snapshot_commit,
+                'commit',
+                side_effect=uncertain_then_cas_failure,
+            ), patch.object(
+                file_store_commit.snapshot_manager,
+                'get_snapshot_by_id',
+                side_effect=hide_first_snapshot,
+            ), patch.object(
+                file_store_commit.conflict_detection,
+                'check_conflicts',
+                return_value=None,
+            ), patch.object(file_store_commit, '_commit_retry_wait'):
+                with self.assertRaises(RuntimeError) as context:
+                    commit.commit(messages)
+
+            self.assertIs(uncertain_error, context.exception.__cause__)
+            self.assertEqual(2, attempts)
+            self.assertTrue(all(table.file_io.exists(path) for path in data_paths))
+            self.assertEqual(
+                [1, 2], self._read_sorted(table, 'id').column('id').to_pylist()
+            )
+        finally:
+            write.close()
+            commit.close()
 
     def test_data_file_prefix_postpone(self):
         """Test that generated data file names follow the expected prefix format."""
