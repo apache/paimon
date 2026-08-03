@@ -80,7 +80,10 @@ class TableWrite:
             else:
                 indices_array = pa.array(row_indices, type=pa.int64())
                 sub_table = pa.compute.take(data, indices_array)
-            self.file_store_write.write(partition, bucket, sub_table)
+            self._write_partition_bucket_batch(partition, bucket, sub_table)
+
+    def _write_partition_bucket_batch(self, partition, bucket, data):
+        self.file_store_write.write(partition, bucket, data)
 
     def with_dynamic_bucket_index(
         self,
@@ -166,7 +169,7 @@ class TableWrite:
                     )
         if partition is None:
             return
-        self.file_store_write.write(partition, bucket, data)
+        self._write_partition_bucket_batch(partition, bucket, data)
 
     def write_row(self, row):
         values_by_name = row_to_named_values(row, self.table.table_schema.fields)
@@ -180,7 +183,16 @@ class TableWrite:
         partition, bucket = (
             self.row_key_extractor.extract_partition_bucket_row(values_by_name)
         )
-        self.file_store_write.write_row(partition, bucket, row, values_by_name)
+        self._write_partition_bucket_row(
+            partition, bucket, row, values_by_name
+        )
+
+    def _write_partition_bucket_row(
+        self, partition, bucket, row, values_by_name
+    ):
+        self.file_store_write.write_row(
+            partition, bucket, row, values_by_name
+        )
 
     def write_pandas(self, dataframe):
         write_cols = self.file_store_write.write_cols

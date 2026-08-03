@@ -450,7 +450,10 @@ class TableWriteTest(unittest.TestCase):
         table_write = write_builder.new_write()
         from pypaimon.write.postpone_batch_table_write import (
             PostponeFixedBucketBatchTableWrite,
+            PostponeFixedBucketWriteBuilder,
         )
+        self.assertIsInstance(
+            write_builder, PostponeFixedBucketWriteBuilder)
         self.assertIsInstance(
             table_write, PostponeFixedBucketBatchTableWrite)
         table_commit = write_builder.new_commit()
@@ -477,6 +480,33 @@ class TableWriteTest(unittest.TestCase):
         splits = read_builder.new_scan().plan().splits()
         actual = table_read.to_arrow(splits)
         self.assertEqual(expect, actual)
+
+    def test_postpone_file_store_write_validates_runtime_bucket_count(self):
+        from pypaimon.write.file_store_write import (
+            PostponeFixedBucketFileStoreWrite,
+        )
+
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['user_id'],
+            primary_keys=['user_id', 'dt'],
+            options={'bucket': -2},
+        )
+        identifier = 'default.test_postpone_runtime_bucket_validation'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        write = PostponeFixedBucketFileStoreWrite(table, 'test-user')
+        try:
+            with self.assertRaisesRegex(ValueError, 'must be positive'):
+                write.write((1,), 0, self.pk_expected.to_batches()[0], 0)
+            with self.assertRaisesRegex(ValueError, 'out of range'):
+                write.write((1,), 2, self.pk_expected.to_batches()[0], 2)
+
+            write._check_runtime_bucket((1,), 0, 2)
+            with self.assertRaisesRegex(RuntimeError, 'new bucket num 3'):
+                write._check_runtime_bucket((1,), 0, 3)
+        finally:
+            write.abort()
 
     def test_postpone_batch_fixed_bucket_disabled(self):
         schema = Schema.from_pyarrow_schema(

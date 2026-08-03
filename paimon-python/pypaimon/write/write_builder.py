@@ -58,30 +58,7 @@ class WriteBuilder(ABC):
 
 class BatchWriteBuilder(WriteBuilder):
 
-    def __init__(self, table):
-        super().__init__(table)
-        self.bucket_plan = None
-
-    def with_bucket_plan(self, bucket_plan):
-        """Use a precomputed partition bucket plan."""
-        self.bucket_plan = bucket_plan
-        return self
-
     def new_write(self) -> BatchTableWrite:
-        from pypaimon.table.bucket_mode import BucketMode
-        if (self.table.bucket_mode() == BucketMode.POSTPONE_MODE
-                and self.table.options.postpone_batch_write_fixed_bucket()):
-            from pypaimon.write.postpone_batch_table_write import (
-                PostponeFixedBucketBatchTableWrite,
-            )
-            return PostponeFixedBucketBatchTableWrite(
-                self.table,
-                self.commit_user,
-                self.static_partition,
-                self.bucket_plan,
-            )
-        if self.bucket_plan is not None:
-            raise ValueError("Bucket plans require a postpone-bucket table")
         return BatchTableWrite(self.table, self.commit_user, self.static_partition)
 
     def new_update(self) -> BatchTableUpdate:

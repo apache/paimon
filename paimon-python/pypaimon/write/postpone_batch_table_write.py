@@ -19,8 +19,9 @@ from typing import Any, Dict, List, Optional
 import pyarrow as pa
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_write import FileStoreWrite
+from pypaimon.write.file_store_write import PostponeFixedBucketFileStoreWrite
 from pypaimon.write.postpone_bucket import PostponeBucketPlanner
 from pypaimon.write.row_key_extractor import PostponeFixedBucketRowKeyExtractor
 from pypaimon.write.row_utils import (
@@ -29,6 +30,32 @@ from pypaimon.write.row_utils import (
     row_values_to_arrow_table,
 )
 from pypaimon.write.table_write import BatchTableWrite
+from pypaimon.write.write_builder import BatchWriteBuilder
+
+
+class PostponeFixedBucketWriteBuilder(BatchWriteBuilder):
+    """Write builder for fixed-bucket batches on a postpone table."""
+
+    def __init__(self, table):
+        if table.bucket_mode() != BucketMode.POSTPONE_MODE:
+            raise ValueError(
+                "Postpone fixed-bucket write requires a postpone-bucket table"
+            )
+        super().__init__(table)
+        self._bucket_plan = None
+
+    def with_bucket_plan(self, bucket_plan):
+        """Use a precomputed partition bucket plan."""
+        self._bucket_plan = bucket_plan
+        return self
+
+    def new_write(self):
+        return PostponeFixedBucketBatchTableWrite(
+            self.table,
+            self.commit_user,
+            self.static_partition,
+            self._bucket_plan,
+        )
 
 
 class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
@@ -57,12 +84,30 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
         super().__init__(table, commit_user, static_partition)
 
     def _create_file_store_write(self, commit_user):
-        return FileStoreWrite(
-            self.table, commit_user, postpone_fixed_bucket=True)
+        return PostponeFixedBucketFileStoreWrite(self.table, commit_user)
 
     def _create_row_key_extractor(self, static_partition):
         return PostponeFixedBucketRowKeyExtractor(
             self.table, self._bucket_plan)
+
+    def _write_partition_bucket_batch(self, partition, bucket, data):
+        self.file_store_write.write(
+            partition,
+            bucket,
+            data,
+            self.row_key_extractor.num_buckets(partition),
+        )
+
+    def _write_partition_bucket_row(
+        self, partition, bucket, row, values_by_name
+    ):
+        self.file_store_write.write_row(
+            partition,
+            bucket,
+            row,
+            values_by_name,
+            self.row_key_extractor.num_buckets(partition),
+        )
 
     def _buffer_input(self, data) -> bool:
         if self._plan_provided:
@@ -145,13 +190,6 @@ class PostponeFixedBucketBatchTableWrite(BatchTableWrite):
         self.batch_committed = True
         self._flush_pending_inputs()
         return self._prepare_commit(BATCH_COMMIT_IDENTIFIER)
-
-    def _prepare_commit(self, commit_identifier) -> List[CommitMessage]:
-        messages = super()._prepare_commit(commit_identifier)
-        for message in messages:
-            message.total_buckets = self.row_key_extractor.num_buckets(
-                message.partition)
-        return messages
 
     def _distributed_write_options(self) -> Dict[str, Any]:
         return {"postpone_bucket_planner": self._planner}
