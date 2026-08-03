@@ -67,6 +67,10 @@ public class ColumnarBatch {
         this.vectorizedColumnBatch.setNumRows(numRows);
     }
 
+    int numRows() {
+        return vectorizedColumnBatch.getNumRows();
+    }
+
     /** Returns the column at `ordinal`. */
     public ColumnVector column(int ordinal) {
         return columns[ordinal];
