@@ -344,6 +344,59 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testBTreeGlobalIndexTopNFallsBackForUnsupportedStartupModes() throws Exception {
+        write(100L);
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        long startSnapshot = table.snapshotManager().latestSnapshotId();
+        appendRows(100, 110);
+        table = (FileStoreTable) catalog.getTable(identifier());
+        long endSnapshot = table.snapshotManager().latestSnapshotId();
+
+        FileStoreTable incrementalTable =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.INCREMENTAL_BETWEEN.key(),
+                                startSnapshot + "," + endSnapshot));
+        TopN topN =
+                new TopN(
+                        new FieldRef(1, "f1", incrementalTable.rowType().getTypeAt(1)),
+                        DESCENDING,
+                        NULLS_LAST,
+                        5);
+
+        List<FileStoreTable> unsupportedTables =
+                Arrays.asList(
+                        table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_MODE.key(),
+                                        CoreOptions.StartupMode.COMPACTED_FULL.toString())),
+                        table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(), "0")),
+                        table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_CREATION_TIME_MILLIS.key(), "0")),
+                        incrementalTable);
+        for (FileStoreTable unsupportedTable : unsupportedTables) {
+            ReadBuilder unsupportedReadBuilder = unsupportedTable.newReadBuilder().withTopN(topN);
+            assertThat(unsupportedReadBuilder.newScan().plan().splits())
+                    .isNotEmpty()
+                    .allMatch(DataSplit.class::isInstance);
+        }
+
+        ReadBuilder readBuilder = incrementalTable.newReadBuilder().withTopN(topN);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).isNotEmpty().allMatch(DataSplit.class::isInstance);
+        assertThat(readF1(readBuilder, plan))
+                .containsExactlyInAnyOrder(
+                        "a100", "a101", "a102", "a103", "a104", "a105", "a106", "a107", "a108",
+                        "a109");
+    }
+
+    @Test
     public void testMixedRowIdOrSkipsGlobalIndexScan() throws Exception {
         write(10L);
         createIndex("f1");

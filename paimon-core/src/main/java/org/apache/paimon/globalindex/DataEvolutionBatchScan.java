@@ -389,10 +389,24 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return false;
         }
         CoreOptions options = table.coreOptions();
-        return options.globalIndexEnabled()
+        return supportsGlobalIndexTopN(options)
+                && options.globalIndexEnabled()
                 && !options.deletionVectorsEnabled()
                 && !options.queryAuthEnabled()
                 && !batchScan.snapshotReader().hasNonPartitionFilter();
+    }
+
+    private boolean supportsGlobalIndexTopN(CoreOptions options) {
+        switch (options.startupMode()) {
+            case LATEST_FULL:
+            case LATEST:
+            case FROM_TIMESTAMP:
+            case FROM_SNAPSHOT:
+            case FROM_SNAPSHOT_FULL:
+                return true;
+            default:
+                return false;
+        }
     }
 
     @VisibleForTesting
