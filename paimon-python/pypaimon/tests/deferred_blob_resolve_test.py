@@ -395,20 +395,6 @@ class DeferredBlobResolveTest(unittest.TestCase):
         self.assertEqual(3, counting_file_io.blobs_fetched)
         self.assertEqual(payloads[:4], result.column("payload").to_pylist())
 
-    def test_can_disable_deferred_resolution(self):
-        table = self._create_table(
-            "defer_disabled",
-            {"read.defer-blob-resolve": "false"},
-        )
-        predicate = table.new_read_builder().new_predicate_builder().less_than(
-            "score", 5)
-
-        result, counting_file_io = self._read(
-            table, predicate, blob_parallelism=4)
-
-        self.assertEqual(5, result.num_rows)
-        self.assertEqual(_ROW_COUNT, counting_file_io.blobs_fetched)
-
     def test_blob_predicate_keeps_eager_resolution(self):
         table = self._create_table("defer_blob_predicate")
         expected_payload = bytes([3]) * 1024

@@ -139,9 +139,8 @@ in-memory bytes, not from storage.
 For data-evolution reads, PyPaimon applies user filters, row-level authorization
 filters, and limits before materializing projected scalar BLOB payloads. A user
 or authorization filter that references a BLOB value keeps that field eager.
-Column masking is applied after payload materialization. Set
-`read.defer-blob-resolve=false` to restore eager materialization. ARRAY and MAP
-elements containing BLOB values are not deferred.
+Column masking is applied after payload materialization. ARRAY and MAP elements
+containing BLOB values are not deferred.
 
 ## Lower-level: `Blob.from_bytes`
 

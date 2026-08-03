@@ -92,8 +92,7 @@ def deferred_blob_field_names(table, read_fields: List[DataField],
                               has_post_filter: bool = False) -> set:
     # An auth filter also selects rows; defer past it too, like a predicate/limit.
     if ((predicate is None and limit is None and not has_post_filter)
-            or CoreOptions.blob_as_descriptor(table.options)
-            or not table.options.read_defer_blob_resolve()):
+            or CoreOptions.blob_as_descriptor(table.options)):
         return set()
 
     inline_fields = (
