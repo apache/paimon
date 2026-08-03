@@ -571,8 +571,9 @@ public class ParquetFilters {
 
     /**
      * The physical types a predicate on this Paimon type can be expressed in, most preferred first.
-     * The head is what Paimon itself writes; the tail is the type widening the vectorized reader
-     * accepts, so pushdown stays available for exactly the files that can be read.
+     * The head is what Paimon itself writes; the tail is a different type the vectorized reader
+     * accepts without changing predicate semantics. Lossy narrowing is excluded even when the file
+     * can be read, because filtering happens before the reader converts the value.
      */
     private static PrimitiveType.PrimitiveTypeName[] acceptableTypes(
             org.apache.paimon.types.DataType type) {
@@ -583,6 +584,11 @@ public class ParquetFilters {
                 };
             case TINYINT:
             case SMALLINT:
+                // Their INT64 readers cast values outside the target range, so a predicate on the
+                // converted value cannot safely prune the original long value.
+                return new PrimitiveType.PrimitiveTypeName[] {
+                    PrimitiveType.PrimitiveTypeName.INT32
+                };
             case INTEGER:
                 return new PrimitiveType.PrimitiveTypeName[] {
                     PrimitiveType.PrimitiveTypeName.INT32, PrimitiveType.PrimitiveTypeName.INT64
@@ -592,8 +598,9 @@ public class ParquetFilters {
                     PrimitiveType.PrimitiveTypeName.INT64, PrimitiveType.PrimitiveTypeName.INT32
                 };
             case FLOAT:
+                // A DOUBLE file value may round to the predicate's FLOAT value only after reading.
                 return new PrimitiveType.PrimitiveTypeName[] {
-                    PrimitiveType.PrimitiveTypeName.FLOAT, PrimitiveType.PrimitiveTypeName.DOUBLE
+                    PrimitiveType.PrimitiveTypeName.FLOAT
                 };
             case DOUBLE:
                 // A double bound cannot be narrowed to float without rounding it, so a FLOAT file
