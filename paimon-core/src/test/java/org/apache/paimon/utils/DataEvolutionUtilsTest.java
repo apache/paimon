@@ -197,6 +197,29 @@ public class DataEvolutionUtilsTest {
     }
 
     @Test
+    public void testCollectWrittenColumnsCachesSchemaAcrossProjections() {
+        TableSchema schema =
+                tableSchema(
+                        1L,
+                        new DataField(1, "a", DataTypes.INT()),
+                        new DataField(2, "b", DataTypes.STRING()));
+        DataFileMeta first = dataFile(1L, Collections.singletonList("a"));
+        DataFileMeta second = dataFile(1L, Collections.singletonList("b"));
+        AtomicInteger schemaLoads = new AtomicInteger();
+
+        WrittenColumns result =
+                DataEvolutionUtils.collectWrittenColumns(
+                        Collections.singletonList(dataSplit(first, second)),
+                        ignored -> {
+                            schemaLoads.incrementAndGet();
+                            return schema;
+                        });
+
+        assertThat(((KnownWrittenColumns) result).fieldIds()).containsExactly(1, 2);
+        assertThat(schemaLoads).hasValue(1);
+    }
+
+    @Test
     public void testCollectWrittenColumnsExpandsLegacyFileSchema() {
         TableSchema schema =
                 tableSchema(

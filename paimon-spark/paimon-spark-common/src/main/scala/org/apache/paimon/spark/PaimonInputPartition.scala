@@ -46,7 +46,7 @@ private[spark] case class PaimonMicroBatchMetadata(
 
 private[spark] case class PaimonMicroBatchInputPartition(
     splits: Seq[Split],
-    metadata: PaimonMicroBatchMetadata)
+    @transient metadata: PaimonMicroBatchMetadata)
   extends PaimonInputPartition
 
 object PaimonInputPartition {
