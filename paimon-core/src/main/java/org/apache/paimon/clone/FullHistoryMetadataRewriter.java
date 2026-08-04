@@ -275,6 +275,7 @@ public class FullHistoryMetadataRewriter {
         private final ManifestList targetManifestList;
         private final IndexFileHandler sourceIndexHandler;
         private final IndexManifestFile targetIndexManifestFile;
+        private final boolean usesDeltaChangelog;
         private final Map<String, List<ManifestFileMeta>> rewrittenManifests = new HashMap<>();
         private final Map<String, Pair<String, Long>> rewrittenManifestLists = new HashMap<>();
         private final Map<String, String> rewrittenIndexManifests = new HashMap<>();
@@ -290,6 +291,8 @@ public class FullHistoryMetadataRewriter {
             this.targetManifestList = target.store().manifestListFactory().create();
             this.sourceIndexHandler = source.store().newIndexFileHandler();
             this.targetIndexManifestFile = target.store().indexManifestFileFactory().create();
+            this.usesDeltaChangelog =
+                    source.coreOptions().changelogProducer() == CoreOptions.ChangelogProducer.NONE;
         }
 
         private void rewrite() throws Exception {
@@ -386,9 +389,16 @@ public class FullHistoryMetadataRewriter {
                 deltaManifestList =
                         Pair.of(changelog.deltaManifestList(), changelog.deltaManifestListSize());
                 changelogManifestList = rewriteManifestList(changelog.changelogManifestList());
-            } else {
-                baseManifestList = rewriteManifestList(changelog.baseManifestList());
+            } else if (usesDeltaChangelog && changelog.commitKind() == Snapshot.CommitKind.APPEND) {
+                baseManifestList =
+                        Pair.of(changelog.baseManifestList(), changelog.baseManifestListSize());
                 deltaManifestList = rewriteManifestList(changelog.deltaManifestList());
+                changelogManifestList = null;
+            } else {
+                baseManifestList =
+                        Pair.of(changelog.baseManifestList(), changelog.baseManifestListSize());
+                deltaManifestList =
+                        Pair.of(changelog.deltaManifestList(), changelog.deltaManifestListSize());
                 changelogManifestList = null;
             }
 
