@@ -149,6 +149,7 @@ class FullHistoryRootValidator {
             checkState(snapshot != null, "Target history root does not exist.");
             CanonicalDigest digest = new CanonicalDigest();
             digest.addInt(snapshot.version());
+            digest.addString(snapshot.uuid());
             digest.addLong(snapshot.id());
             digest.addLong(snapshot.schemaId());
 

@@ -22,6 +22,7 @@ import org.apache.paimon.Changelog;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.utils.DateTimeUtils;
@@ -133,10 +134,7 @@ public class FullHistoryCloneValidator {
         for (String branch : branches) {
             FileStoreTable source = sourceTable.switchToBranch(branch);
             FileStoreTable target = targetTable.switchToBranch(branch);
-            checkState(
-                    schemaIds(source).equals(schemaIds(target)),
-                    "Target schema IDs in branch %s do not match the source.",
-                    branch);
+            validateSchemas(source, target, branch);
             checkState(
                     snapshotIds(source).equals(snapshotIds(target)),
                     "Target snapshot IDs in branch %s do not match the source.",
@@ -202,10 +200,31 @@ public class FullHistoryCloneValidator {
         checkState(table.fileIO().exists(path), "Target statistics file does not exist: %s", path);
     }
 
-    private List<Long> schemaIds(FileStoreTable table) {
-        return table.schemaManager().listAll().stream()
-                .map(schema -> schema.id())
-                .collect(Collectors.toList());
+    private void validateSchemas(FileStoreTable source, FileStoreTable target, String branch) {
+        List<TableSchema> sourceSchemas = source.schemaManager().listAll();
+        List<TableSchema> targetSchemas = target.schemaManager().listAll();
+        checkState(
+                sourceSchemas.stream()
+                        .map(TableSchema::id)
+                        .collect(Collectors.toList())
+                        .equals(
+                                targetSchemas.stream()
+                                        .map(TableSchema::id)
+                                        .collect(Collectors.toList())),
+                "Target schema IDs in branch %s do not match the source.",
+                branch);
+        for (int i = 0; i < sourceSchemas.size(); i++) {
+            TableSchema sourceSchema = sourceSchemas.get(i);
+            TableSchema expected =
+                    sourceSchema.copy(
+                            FullHistoryMetadataRewriter.rewriteOptions(
+                                    sourceSchema.options(), pathMapping, source.location()));
+            checkState(
+                    FullHistoryMetadataRewriter.schemaEquals(expected, targetSchemas.get(i)),
+                    "Target schema %s in branch %s does not match source semantics.",
+                    sourceSchema.id(),
+                    branch);
+        }
     }
 
     private Set<Long> snapshotIds(FileStoreTable table) throws IOException {

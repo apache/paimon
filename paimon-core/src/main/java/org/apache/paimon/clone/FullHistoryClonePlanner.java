@@ -24,6 +24,7 @@ import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -38,6 +39,7 @@ import java.util.Set;
 import static org.apache.paimon.CoreOptions.BLOB_DESCRIPTOR_FIELD;
 import static org.apache.paimon.CoreOptions.BLOB_VIEW_FIELD;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Creates a fail-fast copy plan for a full-history clone. */
@@ -88,6 +90,13 @@ public class FullHistoryClonePlanner {
                 options.blobViewField().isEmpty(),
                 "Full-history clone does not support %s because it references another table.",
                 BLOB_VIEW_FIELD.key());
+        Set<String> managedBlobFields =
+                fieldNamesInBlobFile(new RowType(schema.fields()), options.blobInlineField());
+        checkArgument(
+                schema.primaryKeys().isEmpty() || managedBlobFields.isEmpty(),
+                "Full-history clone does not support managed BLOB fields %s in primary-key tables "
+                        + "because their absolute URIs are stored inside data files.",
+                managedBlobFields);
         IcebergOptions.StorageType icebergStorage =
                 Options.fromMap(schema.options()).get(IcebergOptions.METADATA_ICEBERG_STORAGE);
         checkArgument(

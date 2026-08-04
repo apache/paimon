@@ -118,7 +118,7 @@ public class FullHistoryMetadataRewriter {
                                     sourceBranchTable.location()));
             if (targetSchemaManager.schemaExists(targetSchema.id())) {
                 checkState(
-                        Objects.equals(targetSchemaManager.schema(targetSchema.id()), targetSchema),
+                        schemaEquals(targetSchemaManager.schema(targetSchema.id()), targetSchema),
                         "Target schema %s in branch %s is different from the planned schema.",
                         targetSchema.id(),
                         branch);
@@ -134,6 +134,18 @@ public class FullHistoryMetadataRewriter {
                         branch);
             }
         }
+    }
+
+    static boolean schemaEquals(TableSchema left, TableSchema right) {
+        return left.version() == right.version()
+                && left.id() == right.id()
+                && left.highestFieldId() == right.highestFieldId()
+                && left.timeMillis() == right.timeMillis()
+                && Objects.equals(left.fields(), right.fields())
+                && Objects.equals(left.partitionKeys(), right.partitionKeys())
+                && Objects.equals(left.primaryKeys(), right.primaryKeys())
+                && Objects.equals(left.options(), right.options())
+                && Objects.equals(left.comment(), right.comment());
     }
 
     static Map<String, String> rewriteOptions(
@@ -399,6 +411,7 @@ public class FullHistoryMetadataRewriter {
                 String statistics) {
             return new Snapshot(
                     snapshot.version(),
+                    snapshot.uuid(),
                     snapshot.id(),
                     snapshot.schemaId(),
                     baseManifestList.getLeft(),

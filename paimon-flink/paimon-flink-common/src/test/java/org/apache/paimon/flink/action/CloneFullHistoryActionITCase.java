@@ -25,10 +25,13 @@ import org.apache.paimon.clone.FullHistoryClonePlan;
 import org.apache.paimon.clone.FullHistoryClonePlanner;
 import org.apache.paimon.clone.FullHistoryFileCollector;
 import org.apache.paimon.clone.PathMapping;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -153,9 +156,10 @@ public class CloneFullHistoryActionITCase extends ActionITCaseBase {
                 .extracting(snapshot -> snapshot.id())
                 .containsExactlyInAnyOrder(1L, 2L);
 
+        Map<String, List<Integer>> expectedRows = readAllTimeTravel(source);
         targetFileIO.delete(source.location(), true);
         targetFileIO.delete(new Path(sourceExternal), true);
-        validateAllTimeTravel(resumed);
+        assertThat(readAllTimeTravel(resumed)).isEqualTo(expectedRows);
     }
 
     @Test
@@ -256,6 +260,64 @@ public class CloneFullHistoryActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testCloneAppendOnlyBlobAfterSourceRemoval() throws Exception {
+        byte[] blobBytes = "blob-content".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+        tableOptions.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        tableOptions.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        tableOptions.put(CoreOptions.BLOB_FIELD.key(), "f1");
+        FileStoreTable source =
+                createFileStoreTable(
+                        RowType.of(DataTypes.INT(), DataTypes.BLOB()),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
+        writeRows(source, 0, GenericRow.of(7, new BlobData(blobBytes)));
+
+        String targetRoot = new Path(getTempDirPath("blob-target-table")).toString();
+        Map<String, String> sourceCatalogConfig = Collections.singletonMap("warehouse", warehouse);
+        Map<String, String> targetCatalogConfig =
+                Collections.singletonMap("warehouse", getTempDirPath("blob-target-warehouse"));
+        CloneAction action =
+                new CloneAction(
+                        database,
+                        tableName,
+                        sourceCatalogConfig,
+                        "target_db",
+                        "target_table",
+                        targetCatalogConfig,
+                        4,
+                        null,
+                        null,
+                        null,
+                        null,
+                        "paimon",
+                        "full-history",
+                        Collections.singletonList(source.location() + "=" + targetRoot),
+                        false,
+                        false);
+
+        action.run();
+
+        LocalFileIO targetFileIO = LocalFileIO.create();
+        targetFileIO.delete(source.location(), true);
+        FileStoreTable target = FileStoreTableFactory.create(targetFileIO, new Path(targetRoot));
+        List<Integer> ids = new ArrayList<>();
+        List<byte[]> blobs = new ArrayList<>();
+        RecordReader<InternalRow> reader = target.newRead().createReader(target.newScan().plan());
+        reader.forEachRemaining(
+                row -> {
+                    ids.add(row.getInt(0));
+                    blobs.add(row.getBlob(1).toData());
+                });
+        assertThat(ids).containsExactly(7);
+        assertThat(blobs).hasSize(1);
+        assertThat(blobs.get(0)).isEqualTo(blobBytes);
+    }
+
+    @Test
     public void testCloneUsesTableRootForInternalFileWithNestedMapping() throws Exception {
         Map<String, String> tableOptions =
                 Collections.singletonMap(CoreOptions.DATA_FILE_PATH_DIRECTORY.key(), "data");
@@ -350,12 +412,21 @@ public class CloneFullHistoryActionITCase extends ActionITCaseBase {
 
     private void writeRows(FileStoreTable table, long commitIdentifier, int... ids)
             throws Exception {
+        List<InternalRow> rows = new ArrayList<>();
+        for (int id : ids) {
+            rows.add(GenericRow.of(id));
+        }
+        writeRows(table, commitIdentifier, rows.toArray(new InternalRow[0]));
+    }
+
+    private void writeRows(FileStoreTable table, long commitIdentifier, InternalRow... rows)
+            throws Exception {
         String user = UUID.randomUUID().toString();
         TableWriteImpl<?> tableWrite = table.newWrite(user);
         TableCommitImpl tableCommit = table.newCommit(user);
         try {
-            for (int id : ids) {
-                tableWrite.write(GenericRow.of(id));
+            for (InternalRow row : rows) {
+                tableWrite.write(row);
             }
             tableCommit.commit(commitIdentifier, tableWrite.prepareCommit(true, commitIdentifier));
         } finally {
@@ -364,36 +435,40 @@ public class CloneFullHistoryActionITCase extends ActionITCaseBase {
         }
     }
 
-    private void validateAllTimeTravel(FileStoreTable table) throws Exception {
+    private Map<String, List<Integer>> readAllTimeTravel(FileStoreTable table) throws Exception {
+        Map<String, List<Integer>> result = new HashMap<>();
         List<String> branches = new ArrayList<>(table.branchManager().branches());
         branches.add(DEFAULT_MAIN_BRANCH);
         for (String branch : branches) {
             FileStoreTable branchTable = table.switchToBranch(branch);
             for (Snapshot snapshot : branchTable.snapshotManager().safelyGetAllSnapshots()) {
-                assertThat(
-                                branchTable
-                                        .copy(
-                                                Collections.singletonMap(
-                                                        CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                                                        String.valueOf(snapshot.id())))
-                                        .newScan()
-                                        .plan()
-                                        .splits())
-                        .isNotEmpty();
+                result.put(
+                        branch + ":snapshot:" + snapshot.id(),
+                        readIds(
+                                branchTable.copy(
+                                        Collections.singletonMap(
+                                                CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                                                String.valueOf(snapshot.id())))));
             }
             for (Pair<Tag, String> tagAndName : branchTable.tagManager().tagObjects()) {
-                assertThat(
-                                branchTable
-                                        .copy(
-                                                Collections.singletonMap(
-                                                        CoreOptions.SCAN_TAG_NAME.key(),
-                                                        tagAndName.getRight()))
-                                        .newScan()
-                                        .plan()
-                                        .splits())
-                        .isNotEmpty();
+                result.put(
+                        branch + ":tag:" + tagAndName.getRight(),
+                        readIds(
+                                branchTable.copy(
+                                        Collections.singletonMap(
+                                                CoreOptions.SCAN_TAG_NAME.key(),
+                                                tagAndName.getRight()))));
             }
         }
+        return result;
+    }
+
+    private List<Integer> readIds(FileStoreTable table) throws Exception {
+        List<Integer> result = new ArrayList<>();
+        RecordReader<InternalRow> reader = table.newRead().createReader(table.newScan().plan());
+        reader.forEachRemaining(row -> result.add(row.getInt(0)));
+        Collections.sort(result);
+        return result;
     }
 
     private String fileUri(String name) {
