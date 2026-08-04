@@ -514,6 +514,28 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldMaxAggBoolean() {
+        FieldMaxAgg fieldMaxAgg = new FieldMaxAggFactory().create(new BooleanType(), null, null);
+        assertThat(fieldMaxAgg.agg(null, true)).isEqualTo(true);
+        assertThat(fieldMaxAgg.agg(false, null)).isEqualTo(false);
+        assertThat(fieldMaxAgg.agg(false, false)).isEqualTo(false);
+        assertThat(fieldMaxAgg.agg(false, true)).isEqualTo(true);
+        assertThat(fieldMaxAgg.agg(true, false)).isEqualTo(true);
+        assertThat(fieldMaxAgg.agg(true, true)).isEqualTo(true);
+    }
+
+    @Test
+    public void testFieldMinAggBoolean() {
+        FieldMinAgg fieldMinAgg = new FieldMinAggFactory().create(new BooleanType(), null, null);
+        assertThat(fieldMinAgg.agg(null, false)).isEqualTo(false);
+        assertThat(fieldMinAgg.agg(true, null)).isEqualTo(true);
+        assertThat(fieldMinAgg.agg(true, true)).isEqualTo(true);
+        assertThat(fieldMinAgg.agg(true, false)).isEqualTo(false);
+        assertThat(fieldMinAgg.agg(false, true)).isEqualTo(false);
+        assertThat(fieldMinAgg.agg(false, false)).isEqualTo(false);
+    }
+
+    @Test
     public void testFieldSumIntAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new IntType(), null, null);
         assertThat(fieldSumAgg.agg(null, 10)).isEqualTo(10);

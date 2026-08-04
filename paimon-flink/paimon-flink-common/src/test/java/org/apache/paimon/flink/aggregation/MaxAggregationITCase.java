@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class MaxAggregationITCase extends CatalogITCaseBase {
     @Override
     protected List<String> ddl() {
-        return Collections.singletonList(
+        return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS T2 ("
                         + "j INT, k INT, "
                         + "a INT, "
@@ -63,7 +63,32 @@ public class MaxAggregationITCase extends CatalogITCaseBase {
                         + "'fields.l.aggregate-function'='max',"
                         + "'fields.m.aggregate-function'='max',"
                         + "'fields.n.aggregate-function'='max'"
+                        + ");",
+                "CREATE TABLE IF NOT EXISTS T_BOOL_MAX ("
+                        + "j INT, k INT, "
+                        + "o BOOLEAN, "
+                        + "PRIMARY KEY (j,k) NOT ENFORCED)"
+                        + " WITH ('merge-engine'='aggregation', "
+                        + "'fields.o.aggregate-function'='max'"
                         + ");");
+    }
+
+    @Test
+    public void testBooleanMergeInMemory() {
+        batchSql(
+                "INSERT INTO T_BOOL_MAX VALUES (1, 2, CAST(NULL AS BOOLEAN)), (1, 2, false), "
+                        + "(1, 2, true), (1, 3, false), (1, 3, false)");
+        assertThat(batchSql("SELECT * FROM T_BOOL_MAX"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, true), Row.of(1, 3, false));
+    }
+
+    @Test
+    public void testBooleanMergeRead() {
+        batchSql("INSERT INTO T_BOOL_MAX VALUES (1, 2, false)");
+        batchSql("INSERT INTO T_BOOL_MAX VALUES (1, 2, true)");
+        batchSql("INSERT INTO T_BOOL_MAX VALUES (1, 2, false)");
+        assertThat(batchSql("SELECT * FROM T_BOOL_MAX"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, true));
     }
 
     @Test

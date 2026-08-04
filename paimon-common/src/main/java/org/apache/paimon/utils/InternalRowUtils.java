@@ -446,6 +446,9 @@ public class InternalRowUtils {
     public static int compare(Object x, Object y, DataTypeRoot type) {
         int ret;
         switch (type) {
+            case BOOLEAN:
+                ret = Boolean.compare((boolean) x, (boolean) y);
+                break;
             case DECIMAL:
                 Decimal xDD = (Decimal) x;
                 Decimal yDD = (Decimal) y;

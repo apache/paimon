@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class MinAggregationITCase extends CatalogITCaseBase {
     @Override
     protected List<String> ddl() {
-        return Collections.singletonList(
+        return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS T3 ("
                         + "j INT, k INT, "
                         + "a INT, "
@@ -63,7 +63,32 @@ public class MinAggregationITCase extends CatalogITCaseBase {
                         + "'fields.l.aggregate-function'='min',"
                         + "'fields.m.aggregate-function'='min',"
                         + "'fields.n.aggregate-function'='min'"
+                        + ");",
+                "CREATE TABLE IF NOT EXISTS T_BOOL_MIN ("
+                        + "j INT, k INT, "
+                        + "o BOOLEAN, "
+                        + "PRIMARY KEY (j,k) NOT ENFORCED)"
+                        + " WITH ('merge-engine'='aggregation', "
+                        + "'fields.o.aggregate-function'='min'"
                         + ");");
+    }
+
+    @Test
+    public void testBooleanMergeInMemory() {
+        batchSql(
+                "INSERT INTO T_BOOL_MIN VALUES (1, 2, CAST(NULL AS BOOLEAN)), (1, 2, true), "
+                        + "(1, 2, false), (1, 3, true), (1, 3, true)");
+        assertThat(batchSql("SELECT * FROM T_BOOL_MIN"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, false), Row.of(1, 3, true));
+    }
+
+    @Test
+    public void testBooleanMergeRead() {
+        batchSql("INSERT INTO T_BOOL_MIN VALUES (1, 2, true)");
+        batchSql("INSERT INTO T_BOOL_MIN VALUES (1, 2, false)");
+        batchSql("INSERT INTO T_BOOL_MIN VALUES (1, 2, true)");
+        assertThat(batchSql("SELECT * FROM T_BOOL_MIN"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, false));
     }
 
     @Test
