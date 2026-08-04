@@ -49,6 +49,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
         implements GlobalIndexReader {
 
     private final SortedFileMetaSelector fileSelector;
+    private final List<GlobalIndexIOMeta> files;
     private final long fallbackScanMaxSize;
     private final Map<Path, R> readerCache;
     private final ExecutorService executor;
@@ -59,6 +60,7 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
             long fallbackScanMaxSize,
             ExecutorService executor) {
         this.fileSelector = new SortedFileMetaSelector(files, keySerializer);
+        this.files = new ArrayList<>(files);
         this.fallbackScanMaxSize = fallbackScanMaxSize;
         this.readerCache = new ConcurrentHashMap<>();
         this.executor = executor;
@@ -389,6 +391,11 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
         }
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                 .thenApply(v -> unionResults(futures));
+    }
+
+    protected CompletableFuture<Optional<GlobalIndexResult>> visitAllFiles(
+            Function<R, Optional<GlobalIndexResult>> visitor) {
+        return visitSelectedFiles(Optional.of(files), visitor);
     }
 
     private R getOrCreateReader(GlobalIndexIOMeta meta) {

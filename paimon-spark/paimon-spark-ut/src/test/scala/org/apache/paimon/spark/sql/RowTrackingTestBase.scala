@@ -20,6 +20,7 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.errors.ErrorMessages
+import org.apache.paimon.globalindex.IndexedSplit
 import org.apache.paimon.spark.PaimonMetrics.RESULTED_TABLE_FILES
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.read.PaimonSplitScan
@@ -1083,6 +1084,35 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
         sql("SELECT id, name, b FROM t ORDER BY id"),
         Seq(Row(1, "old", 10), Row(2, "new", 21))
       )
+    }
+  }
+
+  test("Data Evolution: BTree global index TopN with Spark SQL") {
+    assume(gteqSpark3_3)
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, name STRING) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'c'), (3, 'b'), (4, 'e'), (5, 'd')")
+      sql(
+        "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
+          "index_type => 'btree', options => 'btree-index.records-per-range=2')")
+
+      val descending = "SELECT id, name FROM t ORDER BY name DESC NULLS LAST LIMIT 2"
+      val descendingScan = getPaimonScan(descending)
+      assert(descendingScan.pushedTopN.nonEmpty)
+      assert(descendingScan.inputSplits.nonEmpty)
+      assert(descendingScan.inputSplits.forall(_.isInstanceOf[IndexedSplit]))
+      checkAnswer(sql(descending), Seq(Row(4, "e"), Row(5, "d")))
+
+      val ascending = "SELECT id, name FROM t ORDER BY name ASC NULLS LAST LIMIT 2"
+      val ascendingScan = getPaimonScan(ascending)
+      assert(ascendingScan.pushedTopN.nonEmpty)
+      assert(ascendingScan.inputSplits.nonEmpty)
+      assert(ascendingScan.inputSplits.forall(_.isInstanceOf[IndexedSplit]))
+      checkAnswer(sql(ascending), Seq(Row(1, "a"), Row(3, "b")))
     }
   }
 

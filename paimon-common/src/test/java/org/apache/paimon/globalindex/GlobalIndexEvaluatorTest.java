@@ -23,6 +23,7 @@ import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -45,6 +46,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -95,6 +98,46 @@ class GlobalIndexEvaluatorTest {
 
         assertThat(result).isPresent();
         assertBitmapContainsExactly(result.get().results(), 1L, 2L, 3L);
+        evaluator.close();
+    }
+
+    @Test
+    void testTopNUsesAggregatedReaderAndReusesPredicateCache() {
+        RowType rowType = rowType();
+        AtomicInteger readersCreated = new AtomicInteger();
+        GlobalIndexReader first =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitTopN(TopN topN) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1, 2)));
+                    }
+                };
+        GlobalIndexReader second =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitTopN(TopN topN) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(2, 3)));
+                    }
+                };
+        GlobalIndexReader union = new UnionGlobalIndexReader(Arrays.asList(first, second));
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId -> {
+                            readersCreated.incrementAndGet();
+                            return Collections.singletonList(union);
+                        });
+        TopN topN = new TopN(new FieldRef(0, "a", DataTypes.INT()), DESCENDING, NULLS_LAST, 2);
+
+        evaluator.evaluate(new PredicateBuilder(rowType).equal(0, 42));
+        Optional<GlobalIndexResult> firstResult = evaluator.evaluateTopN(topN);
+        Optional<GlobalIndexResult> secondResult = evaluator.evaluateTopN(topN);
+
+        assertThat(firstResult).isPresent();
+        assertBitmapContainsExactly(firstResult.get().results(), 1L, 2L, 3L);
+        assertThat(secondResult).isPresent();
+        assertBitmapContainsExactly(secondResult.get().results(), 1L, 2L, 3L);
+        assertThat(readersCreated).hasValue(1);
         evaluator.close();
     }
 

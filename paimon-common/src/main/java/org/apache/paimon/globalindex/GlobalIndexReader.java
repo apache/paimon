@@ -23,6 +23,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.Closeable;
@@ -78,6 +79,16 @@ public interface GlobalIndexReader
     default CompletableFuture<Optional<ScoredGlobalIndexResult>> visitFullTextSearch(
             FullTextSearch fullTextSearch) {
         throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Returns row candidates for the given TopN predicate.
+     *
+     * <p>The result may contain more than {@link TopN#limit()} rows when this reader owns multiple
+     * independent index files. Callers must still apply the final TopN operation.
+     */
+    default CompletableFuture<Optional<GlobalIndexResult>> visitTopN(TopN topN) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     /** Batch search; result {@code i} matches vector {@code i}. */

@@ -54,6 +54,10 @@ public abstract class BlockReader {
         return new BlockIterator(this);
     }
 
+    public ReverseBlockIterator reverseIterator() {
+        return new ReverseBlockIterator(this);
+    }
+
     /** Seek to slice position from record position. */
     public abstract int seekTo(int recordPosition);
 
