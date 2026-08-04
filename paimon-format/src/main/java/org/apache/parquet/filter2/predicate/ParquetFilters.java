@@ -32,6 +32,7 @@ import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypeVisitor;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
@@ -537,6 +538,8 @@ public class ParquetFilters {
             return new PushdownTarget(fieldRef.name(), acceptable[0]);
         }
 
+        validateBigIntCompatibility(fieldRef, fileType);
+
         if (ParquetSchemaConverter.isUnsignedInt(fileType)) {
             // An unsigned column orders its statistics unsigned, so a signed bound would prune the
             // wrong row groups. The read still widens the column; only the pruning is given up.
@@ -551,6 +554,14 @@ public class ParquetFilters {
             }
         }
         throw new UnsupportedOperationException();
+    }
+
+    /** Reject physical integer annotations that cannot be represented as BIGINT. */
+    private static void validateBigIntCompatibility(FieldRef fieldRef, PrimitiveType fileType) {
+        if (fieldRef.type().getTypeRoot() == DataTypeRoot.BIGINT
+                && !ParquetSchemaConverter.isBigIntLogicalTypeCompatible(fileType)) {
+            throw new UnsupportedOperationException();
+        }
     }
 
     /** Reject physical integer ranges that the declared narrow type cannot preserve on read. */
