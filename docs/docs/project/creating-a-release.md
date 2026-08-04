@@ -113,8 +113,12 @@ workflow passes only these two secrets to the reusable publishing workflow.
 
 Before managing the first release:
 
-1. Create a GPG key associated with your `@apache.org` identity and publish it
-   to a public key server.
+1. Create an RSA GPG key of at least 2048 bits associated with your
+   `@apache.org` identity and publish it to a public key server. The
+   [ASF Release Distribution Policy](https://infra.apache.org/release-distribution.html)
+   requires RSA keys for new artifacts; use RSA 4096 for a newly generated
+   release key. Do not use DSA, ECDSA, EdDSA, or Ed25519 to sign release
+   artifacts.
 2. Append the public key to the Paimon
    [KEYS](https://downloads.apache.org/paimon/KEYS) file. Never remove keys
    required to verify an older release.
@@ -132,10 +136,15 @@ Before managing the first release:
    log.
 
 ```shell
-gpg --list-secret-keys --keyid-format LONG
+gpg --list-options show-subkey-fingerprint \
+  --list-secret-keys --keyid-format LONG
 git config user.signingkey
 svn --version
 ```
+
+Confirm that the exact key or signing subkey configured for the release is
+reported as `rsa2048` or larger. Do not infer compliance from another key in
+the same keyring.
 
 ## Prepare the release
 
