@@ -26,6 +26,7 @@ import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
 import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.types.{DataType, RowType}
 
+import org.apache.spark.Partition
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.InternalRow
@@ -38,7 +39,7 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.connector.read.Scan
+import org.apache.spark.sql.connector.read.{InputPartition, Scan}
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
@@ -54,6 +55,9 @@ import java.util.{Map => JMap}
 trait SparkShim {
 
   def classicApi: ClassicApi
+
+  /** Returns the data source input partitions represented by a Spark RDD partition. */
+  def dataSourceInputPartitions(partition: Partition): Seq[InputPartition]
 
   def createSparkParser(delegate: ParserInterface): ParserInterface
 

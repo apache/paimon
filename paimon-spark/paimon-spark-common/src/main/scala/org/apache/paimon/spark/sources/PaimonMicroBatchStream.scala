@@ -20,15 +20,26 @@ package org.apache.paimon.spark.sources
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{PaimonImplicits, PaimonInputPartition, PaimonPartitionReaderFactory, SparkConnectorOptions}
+import org.apache.paimon.schema.TableSchema
+import org.apache.paimon.spark.{PaimonImplicits, PaimonInputPartition, PaimonMicroBatchInputPartition, PaimonMicroBatchMetadata, PaimonPartitionReaderFactory, SparkConnectorOptions}
 import org.apache.paimon.table.DataTable
-import org.apache.paimon.table.source.ReadBuilder
+import org.apache.paimon.table.source.{AllColumns, ReadBuilder}
+import org.apache.paimon.utils.DataEvolutionUtils
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReaderFactory}
 import org.apache.spark.sql.connector.read.streaming.{MicroBatchStream, Offset, ReadLimit, SupportsTriggerAvailableNow}
 
+import java.lang.{Long => JLong}
+import java.util.function.Function
+
+import scala.collection.JavaConverters._
 import scala.collection.mutable
+import scala.util.control.NonFatal
+
+private[spark] case class PlannedMicroBatch(
+    admittedSplits: Array[IndexedDataSplit],
+    metadata: PaimonMicroBatchMetadata)
 
 class PaimonMicroBatchStream(
     originTable: DataTable,
@@ -93,6 +104,9 @@ class PaimonMicroBatchStream(
 
   private lazy val blobAsDescriptor: Boolean = options.get(CoreOptions.BLOB_AS_DESCRIPTOR)
 
+  private lazy val batchWrittenColumnsEnabled: Boolean =
+    options.get(SparkConnectorOptions.BATCH_WRITTEN_COLUMNS_ENABLED)
+
   override def getDefaultReadLimit: ReadLimit = defaultReadLimit
 
   override def prepareForTriggerAvailableNow(): Unit = {
@@ -134,9 +148,46 @@ class PaimonMicroBatchStream(
     }
     val endOffset = PaimonSourceOffset(end)
 
-    getBatch(startOffset, Some(endOffset), None)
-      .map(ids => PaimonInputPartition(ids.entry))
-      .toArray[InputPartition]
+    val admittedSplits = getBatch(startOffset, Some(endOffset), None)
+    if (!batchWrittenColumnsEnabled) {
+      admittedSplits
+        .map(ids => PaimonInputPartition(ids.entry))
+        .toArray[InputPartition]
+    } else {
+      val plannedBatch = createPlannedMicroBatch(startOffset, endOffset, admittedSplits)
+      plannedBatch.admittedSplits
+        .map(ids => PaimonMicroBatchInputPartition(Seq(ids.entry), plannedBatch.metadata))
+        .toArray[InputPartition]
+    }
+  }
+
+  private def createPlannedMicroBatch(
+      startOffset: PaimonSourceOffset,
+      endOffset: PaimonSourceOffset,
+      admittedSplits: Array[IndexedDataSplit]): PlannedMicroBatch = {
+    val writtenColumns =
+      try {
+        val schemaManager = table.schemaManager()
+        DataEvolutionUtils.collectWrittenColumns(
+          admittedSplits.map(_.entry).toSeq.asJava,
+          new Function[JLong, TableSchema] {
+            override def apply(schemaId: JLong): TableSchema =
+              schemaManager.schema(schemaId.longValue())
+          }
+        )
+      } catch {
+        case NonFatal(e) =>
+          logWarning("Failed to collect written columns for a micro-batch; using all columns.", e)
+          AllColumns.INSTANCE
+      }
+
+    val metadata = PaimonMicroBatchMetadata(
+      checkpointLocation,
+      startOffset.json(),
+      endOffset.json(),
+      admittedSplits.length,
+      writtenColumns)
+    PlannedMicroBatch(admittedSplits, metadata)
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {
