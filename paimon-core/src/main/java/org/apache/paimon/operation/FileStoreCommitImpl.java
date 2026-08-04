@@ -1222,11 +1222,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             indexManifest =
-                    indexManifestFile.writeIndexFiles(
-                            oldIndexManifest,
-                            indexFiles,
-                            bucketMode,
-                            options.globalIndexIgnoreMissingDelete());
+                    indexManifestFile.writeIndexFiles(oldIndexManifest, indexFiles, bucketMode);
 
             long latestSchemaId =
                     schemaManager

@@ -52,19 +52,9 @@ public class IndexManifestFileHandler {
 
     private final BucketMode bucketMode;
 
-    private final boolean ignoreMissingGlobalIndexDelete;
-
     IndexManifestFileHandler(IndexManifestFile indexManifestFile, BucketMode bucketMode) {
-        this(indexManifestFile, bucketMode, false);
-    }
-
-    IndexManifestFileHandler(
-            IndexManifestFile indexManifestFile,
-            BucketMode bucketMode,
-            boolean ignoreMissingGlobalIndexDelete) {
         this.indexManifestFile = indexManifestFile;
         this.bucketMode = bucketMode;
-        this.ignoreMissingGlobalIndexDelete = ignoreMissingGlobalIndexDelete;
     }
 
     String write(@Nullable String previousIndexManifest, List<IndexManifestEntry> newIndexFiles) {
@@ -107,7 +97,7 @@ public class IndexManifestFileHandler {
 
     private IndexManifestFileCombiner getIndexManifestFileCombine(String indexType) {
         if (!DELETION_VECTORS_INDEX.equals(indexType) && !HASH_INDEX.equals(indexType)) {
-            return new GlobalIndexCombiner(ignoreMissingGlobalIndexDelete);
+            return new GlobalIndexCombiner();
         }
 
         if (DELETION_VECTORS_INDEX.equals(indexType) && BucketMode.BUCKET_UNAWARE == bucketMode) {
@@ -213,12 +203,6 @@ public class IndexManifestFileHandler {
     /** We combine the previous and new index files by file name. */
     static class GlobalIndexCombiner implements IndexManifestFileCombiner {
 
-        private final boolean ignoreMissingDelete;
-
-        GlobalIndexCombiner(boolean ignoreMissingDelete) {
-            this.ignoreMissingDelete = ignoreMissingDelete;
-        }
-
         @Override
         public List<IndexManifestEntry> combine(
                 List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles) {
@@ -239,7 +223,7 @@ public class IndexManifestFileHandler {
             for (IndexManifestEntry entry : removed) {
                 String fileName = entry.indexFile().fileName();
                 checkState(
-                        ignoreMissingDelete || indexEntries.containsKey(fileName),
+                        indexEntries.containsKey(fileName),
                         "Trying to delete global index file %s which does not exist.",
                         fileName);
                 indexEntries.remove(fileName);

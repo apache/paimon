@@ -214,7 +214,7 @@ public class IndexManifestFileHandlerTest {
     }
 
     @Test
-    public void testMissingGlobalIndexDeleteRejectedByDefault() throws Exception {
+    public void testMissingGlobalIndexDeleteRejected() throws Exception {
         TestAppendFileStore fileStore =
                 TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
         IndexManifestFile indexManifestFile = createIndexManifestFile(fileStore);
@@ -222,7 +222,7 @@ public class IndexManifestFileHandlerTest {
         IndexManifestEntry previous = globalIndexEntry("prev-index", 0, 99, 1);
         String manifest =
                 indexManifestFile.writeIndexFiles(
-                        null, Arrays.asList(previous), BucketMode.BUCKET_UNAWARE, false);
+                        null, Arrays.asList(previous), BucketMode.BUCKET_UNAWARE);
         IndexManifestEntry missing = globalIndexEntry("missing-index", 100, 199, 1);
 
         assertThatThrownBy(
@@ -230,33 +230,10 @@ public class IndexManifestFileHandlerTest {
                                 indexManifestFile.writeIndexFiles(
                                         manifest,
                                         Arrays.asList(missing.toDeleteEntry()),
-                                        BucketMode.BUCKET_UNAWARE,
-                                        false))
+                                        BucketMode.BUCKET_UNAWARE))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(
                         "Trying to delete global index file missing-index which does not exist.");
-    }
-
-    @Test
-    public void testMissingGlobalIndexDeleteCanBeIgnoredExplicitly() throws Exception {
-        TestAppendFileStore fileStore =
-                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
-        IndexManifestFile indexManifestFile = createIndexManifestFile(fileStore);
-
-        IndexManifestEntry previous = globalIndexEntry("prev-index", 0, 99, 1);
-        String manifest =
-                indexManifestFile.writeIndexFiles(
-                        null, Arrays.asList(previous), BucketMode.BUCKET_UNAWARE, false);
-        IndexManifestEntry missing = globalIndexEntry("missing-index", 100, 199, 1);
-
-        String ignored =
-                indexManifestFile.writeIndexFiles(
-                        manifest,
-                        Arrays.asList(missing.toDeleteEntry()),
-                        BucketMode.BUCKET_UNAWARE,
-                        true);
-
-        assertThat(indexManifestFile.read(ignored)).containsExactly(previous);
     }
 
     @Test

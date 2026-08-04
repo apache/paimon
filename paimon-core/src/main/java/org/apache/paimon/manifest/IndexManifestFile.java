@@ -61,23 +61,16 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
         return pathFactory.toPath(fileName);
     }
 
-    /**
-     * Write new index files to index manifest.
-     *
-     * @param ignoreMissingGlobalIndexDelete whether to ignore deleting a global index file which
-     *     does not exist in the previous index manifest
-     */
+    /** Write new index files to index manifest. */
     @Nullable
     public String writeIndexFiles(
             @Nullable String previousIndexManifest,
             List<IndexManifestEntry> newIndexFiles,
-            BucketMode bucketMode,
-            boolean ignoreMissingGlobalIndexDelete) {
+            BucketMode bucketMode) {
         if (newIndexFiles.isEmpty()) {
             return previousIndexManifest;
         }
-        IndexManifestFileHandler handler =
-                new IndexManifestFileHandler(this, bucketMode, ignoreMissingGlobalIndexDelete);
+        IndexManifestFileHandler handler = new IndexManifestFileHandler(this, bucketMode);
         return handler.write(previousIndexManifest, newIndexFiles);
     }
 

@@ -1457,37 +1457,25 @@ public class FileStoreCommitTest {
         }
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testGlobalIndexIgnoreMissingDelete(boolean ignoreMissingDelete) throws Exception {
-        Map<String, String> options = new HashMap<>();
-        if (ignoreMissingDelete) {
-            options.put(CoreOptions.GLOBAL_INDEX_IGNORE_MISSING_DELETE.key(), "true");
-        }
-        TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE, options);
+    @Test
+    public void testMissingGlobalIndexDeleteRejected() throws Exception {
+        TestFileStore store = createStore(false);
         KeyValue record = gen.next();
         BinaryRow partition = gen.getPartition(record);
         store.commitData(Collections.singletonList(record), s -> partition, kv -> 0);
 
-        if (ignoreMissingDelete) {
-            try (FileStoreCommitImpl commit = store.newCommit()) {
-                commit.commit(deleteIndexCommittable(partition, "missing-index", 0, 0), false);
-            }
-        } else {
-            assertThatThrownBy(
-                            () -> {
-                                try (FileStoreCommitImpl commit = store.newCommit()) {
-                                    commit.commit(
-                                            deleteIndexCommittable(
-                                                    partition, "missing-index", 0, 0),
-                                            false);
-                                }
-                            })
-                    .satisfies(
-                            anyCauseMatches(
-                                    IllegalStateException.class,
-                                    "Trying to delete global index file missing-index which does not exist."));
-        }
+        assertThatThrownBy(
+                        () -> {
+                            try (FileStoreCommitImpl commit = store.newCommit()) {
+                                commit.commit(
+                                        deleteIndexCommittable(partition, "missing-index", 0, 0),
+                                        false);
+                            }
+                        })
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalStateException.class,
+                                "Trying to delete global index file missing-index which does not exist."));
     }
 
     @Test
