@@ -340,7 +340,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int generatedSnapshot = 0;
         int attempts = 0;
 
-        ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
+        List<CommitMessage> commitMessages = committable.fileCommittables();
+        ManifestEntryChanges changes = collectChanges(commitMessages);
+        Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
         try {
             List<SimpleFileEntry> appendSimpleEntries =
                     SimpleFileEntry.from(changes.appendTableFiles);
@@ -393,10 +395,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.compactIndexFiles.isEmpty()) {
                 attempts +=
                         tryCommit(
-                                CommitChangesProvider.provider(
-                                        changes.compactTableFiles,
-                                        changes.compactChangelog,
-                                        changes.compactIndexFiles),
+                                compactChangesProvider(changes, materializedBuckets),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -765,6 +764,69 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         commitMessages.forEach(changes::collect);
         LOG.info("Finished collecting changes, including: {}", changes);
         return changes;
+    }
+
+    private Set<Pair<BinaryRow, Integer>> materializedBuckets(List<CommitMessage> commitMessages) {
+        if (!options.dataEvolutionEnabled() || !options.deletionVectorsEnabled()) {
+            return Collections.emptySet();
+        }
+
+        Set<Pair<BinaryRow, Integer>> result = new HashSet<>();
+        for (CommitMessage message : commitMessages) {
+            CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+            if (commitMessage.compactIncrement().compactBefore().stream()
+                            .noneMatch(
+                                    file ->
+                                            !isBlobFile(file.fileName())
+                                                    && !isVectorStoreFile(file.fileName()))
+                    || commitMessage.compactIncrement().compactAfter().stream()
+                            .anyMatch(file -> file.firstRowId() != null)) {
+                continue;
+            }
+            result.add(Pair.of(commitMessage.partition(), commitMessage.bucket()));
+        }
+        return result;
+    }
+
+    @VisibleForTesting
+    CommitChangesProvider compactChangesProvider(
+            ManifestEntryChanges changes, Set<Pair<BinaryRow, Integer>> materializedBuckets) {
+        if (materializedBuckets.isEmpty()) {
+            return CommitChangesProvider.provider(
+                    changes.compactTableFiles, changes.compactChangelog, changes.compactIndexFiles);
+        }
+
+        return latestSnapshot -> {
+            List<IndexManifestEntry> indexFiles =
+                    changes.compactIndexFiles.stream()
+                            // Replace global-index deletions prepared against an older snapshot.
+                            .filter(
+                                    entry ->
+                                            entry.kind() != FileKind.DELETE
+                                                    || entry.indexFile().globalIndexMeta() == null
+                                                    || !materializedBuckets.contains(
+                                                            Pair.of(
+                                                                    entry.partition(),
+                                                                    entry.bucket())))
+                            .collect(Collectors.toList());
+
+            // This provider is invoked again after every optimistic-commit conflict. Scanning the
+            // latest snapshot here guarantees that an index committed concurrently is either
+            // deleted by this attempt or makes this attempt retry and is deleted by the next one.
+            if (latestSnapshot != null && latestSnapshot.indexManifest() != null) {
+                for (IndexManifestEntry entry :
+                        indexManifestFile.read(latestSnapshot.indexManifest())) {
+                    if (entry.indexFile().globalIndexMeta() != null
+                            && materializedBuckets.contains(
+                                    Pair.of(entry.partition(), entry.bucket()))) {
+                        indexFiles.add(entry.toDeleteEntry());
+                    }
+                }
+            }
+
+            return new CommitChanges(
+                    changes.compactTableFiles, changes.compactChangelog, indexFiles);
+        };
     }
 
     private int tryCommit(

@@ -46,6 +46,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
@@ -910,6 +911,36 @@ public class FileStoreCommitTest {
         snapshot = store.snapshotManager().latestSnapshot();
         file = indexFileHandler.scanHashIndex(snapshot, part2, 2);
         assertThat(file).isEmpty();
+    }
+
+    @Test
+    public void testMaterializedCompactionOnlyRefreshesGlobalIndexInSameBucket() throws Exception {
+        TestFileStore store = createStore(false, 2);
+        BinaryRow partition = gen.getPartition(gen.next());
+        IndexManifestEntry materializedBucketDelete =
+                globalIndexDeleteEntry(partition, 0, "materialized-bucket-index");
+        IndexManifestEntry otherBucketDelete =
+                globalIndexDeleteEntry(partition, 1, "other-bucket-index");
+        ManifestEntryChanges changes = new ManifestEntryChanges(2);
+        changes.compactIndexFiles.add(materializedBucketDelete);
+        changes.compactIndexFiles.add(otherBucketDelete);
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            CommitChanges refreshed =
+                    commit.compactChangesProvider(
+                                    changes, Collections.singleton(Pair.of(partition, 0)))
+                            .provide(null);
+
+            assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete);
+        }
+    }
+
+    private static IndexManifestEntry globalIndexDeleteEntry(
+            BinaryRow partition, int bucket, String fileName) {
+        IndexFileMeta file =
+                new IndexFileMeta(
+                        "btree", fileName, 1, 1, new GlobalIndexMeta(0, 0, 0, null, null), null);
+        return new IndexManifestEntry(FileKind.DELETE, partition, bucket, file);
     }
 
     @Test

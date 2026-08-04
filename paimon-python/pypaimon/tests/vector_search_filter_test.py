@@ -116,6 +116,12 @@ class _StubTable:
                 return _G()
         return _P()
 
+    def copy(self, options):
+        return self
+
+    def copy_without_time_travel(self, options):
+        return self
+
     def new_vector_search_builder(self):
         from pypaimon.table.source.vector_search_builder import (
             VectorSearchBuilderImpl,
@@ -289,6 +295,11 @@ def _install_raw_full_text_read_builder(table, text_column_name, row_id_to_text,
 def _patch_snapshot(testcase, entries, snapshot=None):
     """Stub IndexFileHandler.scan + snapshot resolution."""
 
+    if snapshot is None:
+        snapshot = types.SimpleNamespace(id=1)
+    elif not hasattr(snapshot, "id"):
+        snapshot.id = 1
+
     mock.patch.stopall()
     for attr in ("_scan_patch", "_travel_patch"):
         patcher = getattr(testcase, attr, None)
@@ -309,7 +320,7 @@ def _patch_snapshot(testcase, entries, snapshot=None):
     testcase._scan_patch.start()
     testcase._travel_patch = mock.patch(
         "pypaimon.snapshot.time_travel_util.TimeTravelUtil.try_travel_to_snapshot",
-        return_value=snapshot if snapshot is not None else object())
+        return_value=snapshot)
     testcase._travel_patch.start()
 
 
@@ -395,7 +406,12 @@ class GlobalIndexLiveRowFilterTest(unittest.TestCase):
 
         class _Table:
             options = _Options()
+            table_schema = _StubSchema()
             file_io = object()
+
+            def copy_without_time_travel(self_inner, options):
+                calls["copy_options"] = options
+                return self_inner
 
             def new_read_builder(self_inner):
                 calls["new_read_builder"] = True
@@ -409,14 +425,18 @@ class GlobalIndexLiveRowFilterTest(unittest.TestCase):
                 return [1, 3]
 
         partition_filter = object()
+        snapshot = types.SimpleNamespace(id=3)
+        table = _Table()
         with mock.patch(
                 "pypaimon.table.source.global_index_live_row_filter."
                 "DeletionVector.read",
                 return_value=_DeletionVector()) as read:
             rows = global_index_live_row_filter.live_rows(
-                _Table(), partition_filter)
+                table, partition_filter, snapshot)
 
         read.assert_called_once_with(_Table.file_io, deletion_file)
+        self.assertEqual("from-snapshot", calls["copy_options"]["scan.mode"])
+        self.assertEqual("3", calls["copy_options"]["scan.snapshot-id"])
         self.assertIs(partition_filter, calls["partition_filter"])
         self.assertTrue(calls["new_read_builder"])
         self.assertTrue(calls["new_scan"])
@@ -938,7 +958,8 @@ class VectorSearchFilterTest(unittest.TestCase):
         ]
         self.table = _StubTable(fields=[self.id_field, self.embedding_field],
                                 entries=self.entries)
-        _patch_snapshot(self, self.entries)
+        self.snapshot = types.SimpleNamespace(id=1, next_row_id=10)
+        _patch_snapshot(self, self.entries, self.snapshot)
 
     def tearDown(self):
         mock.patch.stopall()
@@ -1009,13 +1030,20 @@ class VectorSearchFilterTest(unittest.TestCase):
             return _FakeReader()
 
         with mock.patch(
+                "pypaimon.table.source.vector_search_read."
+                "global_index_live_row_filter.live_rows",
+                return_value=None) as live_rows_fn, \
+             mock.patch(
                 "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
-                return_value=scanner), \
+                return_value=scanner) as scanner_factory, \
              mock.patch(
                 "pypaimon.table.source.vector_search_read._create_vector_reader",
                 side_effect=_capture_create):
             self._builder(filter_pred).new_vector_search_read().read_plan(scan_plan)
 
+        self.assertIs(self.snapshot, scan_plan.snapshot())
+        live_rows_fn.assert_called_once_with(self.table, None, self.snapshot)
+        self.assertIs(self.snapshot, scanner_factory.call_args.kwargs["snapshot"])
         # Pre-filter happened once with our filter.
         self.assertEqual(1, scanner.scan.call_count)
         self.assertIs(filter_pred, scanner.scan.call_args[0][0])
@@ -2752,6 +2780,124 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         self.assertEqual(["embedding", "id", "_ROW_ID"], calls["projection"])
         self.assertEqual(["split"], calls["splits"])
         self.assertEqual([5], sorted(list(result.results())))
+
+    def test_read_plan_pins_raw_search_to_planned_snapshot(self):
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+        from pypaimon.table.source.vector_search_scan import VectorSearchScanPlan
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+
+        snapshot = types.SimpleNamespace(id=7)
+        embedding_field = _field(1, "embedding", "FLOAT")
+        table = _StubTable(fields=[embedding_field], entries=[])
+        read_table = _StubTable(fields=[embedding_field], entries=[])
+        _install_raw_vector_read_builder(
+            read_table, "embedding", {0: [1.0]})
+        table.copy_without_time_travel = mock.Mock(return_value=read_table)
+        plan = VectorSearchScanPlan(
+            [RawVectorSearchSplit([Range(0, 0)], [], "ivf-flat")],
+            snapshot,
+        )
+
+        result = DataEvolutionVectorRead(
+            table,
+            limit=1,
+            vector_column=embedding_field,
+            query_vector=[1.0],
+        ).read_plan(plan)
+
+        table.copy_without_time_travel.assert_called_once_with({
+            CoreOptions.SCAN_MODE.key(): "from-snapshot",
+            CoreOptions.SCAN_SNAPSHOT_ID.key(): "7",
+        })
+        self.assertEqual([0], sorted(list(result.results())))
+
+    def test_read_does_not_reuse_snapshot_from_previous_plan(self):
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+        from pypaimon.table.source.vector_search_scan import VectorSearchScanPlan
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+
+        snapshot = types.SimpleNamespace(id=7)
+        embedding_field = _field(1, "embedding", "FLOAT")
+        table = _StubTable(fields=[embedding_field], entries=[])
+        planned_table = _StubTable(fields=[embedding_field], entries=[])
+        _install_raw_vector_read_builder(table, "embedding", {1: [1.0]})
+        _install_raw_vector_read_builder(planned_table, "embedding", {0: [1.0]})
+        table.copy_without_time_travel = mock.Mock(return_value=planned_table)
+        split = RawVectorSearchSplit([Range(0, 1)], [], "ivf-flat")
+        reader = DataEvolutionVectorRead(
+            table,
+            limit=1,
+            vector_column=embedding_field,
+            query_vector=[1.0],
+        )
+
+        reader.read_plan(VectorSearchScanPlan([split], snapshot))
+        table.copy_without_time_travel.reset_mock()
+        result = reader.read([split])
+
+        table.copy_without_time_travel.assert_not_called()
+        self.assertEqual([1], sorted(list(result.results())))
+
+    def test_read_batch_does_not_reuse_snapshot_from_previous_plan(self):
+        from pypaimon.table.source.vector_search_read import BatchVectorSearchReadImpl
+        from pypaimon.table.source.vector_search_scan import VectorSearchScanPlan
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+
+        snapshot = types.SimpleNamespace(id=7)
+        embedding_field = _field(1, "embedding", "FLOAT")
+        table = _StubTable(fields=[embedding_field], entries=[])
+        planned_table = _StubTable(fields=[embedding_field], entries=[])
+        _install_raw_vector_read_builder(table, "embedding", {1: [1.0]})
+        _install_raw_vector_read_builder(planned_table, "embedding", {0: [1.0]})
+        table.copy_without_time_travel = mock.Mock(return_value=planned_table)
+        split = RawVectorSearchSplit([Range(0, 1)], [], "ivf-flat")
+        reader = BatchVectorSearchReadImpl(
+            table,
+            limit=1,
+            vector_column=embedding_field,
+            query_vectors=[[1.0]],
+        )
+
+        reader.read_batch_plan(VectorSearchScanPlan([split], snapshot))
+        table.copy_without_time_travel.reset_mock()
+        results = reader.read_batch([split])
+
+        table.copy_without_time_travel.assert_not_called()
+        self.assertEqual([1], sorted(list(results[0].results())))
+
+    def test_read_plan_clears_conflicting_time_travel_options(self):
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+        from pypaimon.table.source.vector_search_scan import VectorSearchScanPlan
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+
+        snapshot = types.SimpleNamespace(id=7)
+        embedding_field = _field(1, "embedding", "FLOAT")
+        table = _StubTable(fields=[embedding_field], entries=[])
+        table.table_schema.options = {
+            CoreOptions.SCAN_TAG_NAME.key(): "tag-1",
+            CoreOptions.SCAN_TIMESTAMP.key(): "2026-08-03 12:00:00",
+        }
+        read_table = _StubTable(fields=[embedding_field], entries=[])
+        _install_raw_vector_read_builder(
+            read_table, "embedding", {0: [1.0]})
+        table.copy_without_time_travel = mock.Mock(return_value=read_table)
+
+        DataEvolutionVectorRead(
+            table,
+            limit=1,
+            vector_column=embedding_field,
+            query_vector=[1.0],
+        ).read_plan(VectorSearchScanPlan(
+            [RawVectorSearchSplit([Range(0, 0)], [], "ivf-flat")],
+            snapshot,
+        ))
+
+        table.copy_without_time_travel.assert_called_once_with({
+            CoreOptions.SCAN_MODE.key(): "from-snapshot",
+            CoreOptions.SCAN_SNAPSHOT_ID.key(): "7",
+            CoreOptions.SCAN_TAG_NAME.key(): None,
+            CoreOptions.SCAN_TIMESTAMP.key(): None,
+        })
 
     def tearDown(self):
         mock.patch.stopall()

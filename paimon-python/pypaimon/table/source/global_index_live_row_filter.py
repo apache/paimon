@@ -19,6 +19,7 @@
 
 from typing import Optional
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
@@ -26,8 +27,8 @@ from pypaimon.utils.range import Range
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
-def live_rows(table, partition_filter=None) -> Optional[RoaringBitmap64]:
-    """Return current live global row ids for deletion-vector tables.
+def live_rows(table, partition_filter=None, snapshot=None) -> Optional[RoaringBitmap64]:
+    """Return live global row ids at ``snapshot`` for deletion-vector tables.
 
     ``None`` means no live-row filter is needed. This keeps tables without
     deletion vectors on the old zero-overhead path.
@@ -39,7 +40,8 @@ def live_rows(table, partition_filter=None) -> Optional[RoaringBitmap64]:
             or not deletion_vectors_enabled(False)):
         return None
 
-    read_builder = table.new_read_builder()
+    read_table = table_at_snapshot(table, snapshot)
+    read_builder = read_table.new_read_builder()
     if partition_filter is not None:
         read_builder = read_builder.with_partition_filter(partition_filter)
 
@@ -56,8 +58,26 @@ def live_rows(table, partition_filter=None) -> Optional[RoaringBitmap64]:
     # Phase 2: subtract each DV. Ranges are all unioned first (no re-add), and
     # peak memory stays at one DV at a time.
     for split in data_splits:
-        _subtract_deleted_rows(table, rows, split)
+        _subtract_deleted_rows(read_table, rows, split)
     return rows
+
+
+def table_at_snapshot(table, snapshot):
+    """Return a table pinned to ``snapshot``, clearing conflicting time travel."""
+    if snapshot is None:
+        return table
+
+    pin_options = {
+        CoreOptions.SCAN_MODE.key(): "from-snapshot",
+        CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id),
+    }
+    for option in (CoreOptions.SCAN_TAG_NAME,
+                   CoreOptions.SCAN_WATERMARK,
+                   CoreOptions.SCAN_TIMESTAMP,
+                   CoreOptions.SCAN_TIMESTAMP_MILLIS):
+        if option.key() in table.table_schema.options:
+            pin_options[option.key()] = None
+    return table.copy_without_time_travel(pin_options)
 
 
 def for_range(live_row_ids: Optional[RoaringBitmap64],
