@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import os
 import shutil
 import tempfile
@@ -146,6 +147,8 @@ class RayIncrementalWriteTest(unittest.TestCase):
             return real_prepare(*args, **kwargs)
 
         with mock.patch(
+                "pypaimon.ray.incremental_write._SPLITS_PER_WINDOW", 1), \
+                mock.patch(
                 "pypaimon.ray.incremental_write.time.monotonic",
                 side_effect=[0, 11, 11]), mock.patch.object(
                 ray_datasink, "_write_primary_key_groups",
@@ -163,16 +166,30 @@ class RayIncrementalWriteTest(unittest.TestCase):
     def test_time_trigger_batches_completed_windows(self):
         target, source = self._create_tables(source_rows=4)
         operation_id = "time-{}".format(uuid.uuid4().hex)
+        from pypaimon.write import ray_datasink
+
         before = self.catalog.get_table(
             target).snapshot_manager().get_latest_snapshot().id
+        real_prepare = ray_datasink._write_primary_key_groups
+        calls = 0
+
+        def count_windows(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return real_prepare(*args, **kwargs)
 
         with mock.patch(
+                "pypaimon.ray.incremental_write._SPLITS_PER_WINDOW", 2), \
+                mock.patch(
                 "pypaimon.ray.incremental_write.time.monotonic",
-                side_effect=[0, 1, 11, 11, 11]):
+                side_effect=[0, 11, 11]), mock.patch.object(
+                ray_datasink, "_write_primary_key_groups",
+                side_effect=count_windows):
             self._incremental_write(target, source, operation_id)
 
         after = self.catalog.get_table(
             target).snapshot_manager().get_latest_snapshot().id
+        self.assertEqual(2, calls)
         self.assertEqual(3, after - before)
         self.assertEqual({
             "id": [1, 2, 3, 4],
@@ -204,6 +221,65 @@ class RayIncrementalWriteTest(unittest.TestCase):
             self.catalog.get_table(
                 target).snapshot_manager().get_latest_snapshot().id,
         )
+        self.catalog.alter_table(target, [
+            SchemaChange.add_column(
+                "later", AtomicType("STRING"))], False)
+        self.assertTrue(delete_write_paimon_checkpoint(
+            target, self.catalog_options, operation_id))
+
+    def test_rejects_late_schema_change_and_mismatched_checkpoint(self):
+        from pypaimon.ray import incremental_write
+
+        target, source = self._create_tables(source_rows=1)
+        table = self.catalog.get_table(target)
+        base = table.snapshot_manager().get_latest_snapshot()
+        operation_id = "fence-{}".format(uuid.uuid4().hex)
+        plan = {
+            "table": source,
+            "snapshot_id": 1,
+            "fingerprint": "expected",
+            "num_units": 1,
+            "splits_per_window": 1,
+        }
+        state = incremental_write._checkpoint_state(
+            operation_id, table.table_schema.id, ["feature"], plan, 0)
+
+        def alter_schema(*_args, **_kwargs):
+            self.catalog.alter_table(target, [
+                SchemaChange.drop_column("feature")], False)
+
+        with mock.patch.object(
+                incremental_write, "_store_checkpoint_tag",
+                side_effect=alter_schema):
+            with self.assertRaisesRegex(RuntimeError, "schema change"):
+                incremental_write._commit_checkpoint(
+                    self.catalog, target, table, base,
+                    table.table_schema.id,
+                    incremental_write._commit_user(operation_id),
+                    incremental_write._checkpoint_tags(operation_id),
+                    1, [], state)
+
+        other_state = dict(state)
+        other_state["source"] = dict(plan, fingerprint="other")
+        committed = mock.Mock(
+            properties={incremental_write._CHECKPOINT_PROPERTY: json.dumps(
+                other_state)},
+            id=base.id + 2,
+        )
+        commit = mock.Mock()
+        with mock.patch(
+                "pypaimon.write.table_commit.StreamTableCommit",
+                return_value=commit), mock.patch.object(
+                incremental_write, "_find_checkpoint_snapshot",
+                return_value=committed), mock.patch.object(
+                incremental_write, "_store_checkpoint_tag"):
+            with self.assertRaisesRegex(RuntimeError, "different state"):
+                incremental_write._commit_checkpoint(
+                    self.catalog, target, table, base,
+                    table.table_schema.id,
+                    incremental_write._commit_user(operation_id),
+                    incremental_write._checkpoint_tags(operation_id),
+                    2, [], state)
 
     def test_rejects_concurrent_target_changes(self):
         from pypaimon.write import ray_datasink

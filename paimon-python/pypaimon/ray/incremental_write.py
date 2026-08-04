@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 _CHECKPOINT_PROPERTY = "ray.write-paimon.checkpoint"
 _CHECKPOINT_VERSION = 1
+_SPLITS_PER_WINDOW = 64
 _TAG_PREFIX = "_pypaimon_write_"
 
 
@@ -125,12 +126,16 @@ def incremental_write_paimon(
         checkpoint_snapshot if checkpoint_snapshot is not None
         else latest_snapshot)
 
+    splits_per_window = (
+        state["source"].get("splits_per_window", 1)
+        if state is not None else _SPLITS_PER_WINDOW)
     bound = source._bind(
         catalog,
         checkpoint_plan=state["source"] if state is not None else None,
         source_tag=source_tag if retained is not None else None,
         retained_snapshot_id=(
             retained.snapshot.id if retained is not None else None),
+        splits_per_window=splits_per_window,
     )
     _ensure_tag(
         catalog, source.table_identifier, source_tag,
@@ -177,8 +182,10 @@ def incremental_write_paimon(
     last_commit_time = time.monotonic()
 
     try:
-        for start in range(next_offset, bound.num_units):
-            end = start + 1
+        while pending_offset < bound.num_units:
+            end = min(
+                pending_offset + bound.plan["splits_per_window"],
+                bound.num_units)
             dataset = bound.read_window(pending_offset, end).map_batches(
                 to_write_batch, batch_format="pyarrow")
             messages = _write_primary_key_groups(
@@ -233,7 +240,8 @@ def delete_write_paimon_checkpoint(
     loaded = _load_checkpoint(
         catalog, target, table, operation_id, None,
         _commit_user(operation_id), _checkpoint_tags(operation_id),
-        restore_tag=False, recover_without_tag=True)
+        restore_tag=False, recover_without_tag=True,
+        validate_schema=False)
     if loaded is None:
         return False
     _, state = loaded
@@ -289,6 +297,10 @@ def _commit_checkpoint(
             logger.warning("Failed to close checkpoint commit.", exc_info=True)
     _store_checkpoint_tag(
         catalog, target, checkpoint_tags, base_snapshot, checkpoint_id)
+    if _read_checkpoint(base_snapshot) != state:
+        raise RuntimeError(
+            "Checkpoint was committed by another writer with different state.")
+    _validate_schema(table, schema_id)
     return base_snapshot
 
 
@@ -307,7 +319,7 @@ def _checkpoint_state(
 def _load_checkpoint(
         catalog, target, table, operation_id, update_cols,
         commit_user, checkpoint_tags, restore_tag=True,
-        recover_without_tag=False):
+        recover_without_tag=False, validate_schema=True):
     snapshots = [
         tagged.snapshot for tagged in (
             _get_tag(catalog, target, tag) for tag in checkpoint_tags)
@@ -331,9 +343,8 @@ def _load_checkpoint(
         raise RuntimeError("Checkpoint tag belongs to another writer.")
     if state["operation_id"] != operation_id:
         raise RuntimeError("operation_id hash collision.")
-    latest_schema = table.schema_manager.latest()
-    if latest_schema is None or state["schema_id"] != latest_schema.id:
-        raise RuntimeError("Target schema changed during incremental write.")
+    if validate_schema:
+        _validate_schema(table, state["schema_id"])
     if update_cols is not None and state["update_cols"] != list(update_cols):
         raise ValueError(
             "operation_id {!r} was already used with update_cols {}.".format(
@@ -353,12 +364,16 @@ def _read_checkpoint(snapshot, strict=True):
         state = json.loads(encoded)
         next_offset = state["next_offset"]
         num_units = state["source"]["num_units"]
+        splits_per_window = state["source"].get("splits_per_window", 1)
         if (state["version"] != _CHECKPOINT_VERSION
                 or isinstance(next_offset, bool)
                 or not isinstance(next_offset, int)
                 or next_offset < 0
                 or not isinstance(num_units, int)
-                or next_offset > num_units):
+                or next_offset > num_units
+                or isinstance(splits_per_window, bool)
+                or not isinstance(splits_per_window, int)
+                or splits_per_window < 1):
             raise ValueError
         return state
     except Exception as error:
@@ -431,6 +446,12 @@ def _abort_messages(table, messages):
         commit.abort(messages)
     finally:
         commit.close()
+
+
+def _validate_schema(table, schema_id):
+    latest = table.schema_manager.latest()
+    if latest is None or latest.id != schema_id:
+        raise RuntimeError("Target schema changed during incremental write.")
 
 
 def _validate_operation_id(operation_id):

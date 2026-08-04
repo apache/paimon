@@ -50,7 +50,8 @@ class PaimonOffsetSource:
             catalog,
             checkpoint_plan=None,
             source_tag=None,
-            retained_snapshot_id=None):
+            retained_snapshot_id=None,
+            splits_per_window=1):
         from pypaimon.common.options.core_options import CoreOptions
         from pypaimon.read.read_builder import ReadBuilder
 
@@ -108,8 +109,12 @@ class PaimonOffsetSource:
             "snapshot_id": snapshot_id,
             "fingerprint": fingerprint,
             "num_units": len(units),
+            "splits_per_window": splits_per_window,
         }
-        if checkpoint_plan is not None and plan != checkpoint_plan:
+        expected_plan = dict(checkpoint_plan or {})
+        if checkpoint_plan is not None:
+            expected_plan.setdefault("splits_per_window", splits_per_window)
+        if checkpoint_plan is not None and plan != expected_plan:
             raise ValueError(
                 "PaimonOffsetSource does not match the saved checkpoint.")
         self._table = table

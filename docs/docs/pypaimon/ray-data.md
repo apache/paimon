@@ -293,8 +293,8 @@ write_paimon(
 ```
 
 Use a fixed-bucket, partial-update target. Source rows need unique primary keys
-and all `update_cols`; missing keys are inserted. Commits occur after source
-splits, so the actual
+and all `update_cols`; missing keys are inserted. Source splits run in bounded
+windows, so the actual
 interval may be longer. Concurrent target writes or schema changes fail. After
 success, `delete_write_paimon_checkpoint` releases retained snapshots.
 
