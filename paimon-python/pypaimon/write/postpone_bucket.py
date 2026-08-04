@@ -152,7 +152,9 @@ class _BinaryRowSizeEstimator:
                     or type_name.startswith("TIME("):
                 return 4
             return 8
-        if isinstance(data_type, (ArrayType, MapType, MultisetType, RowType)):
+        if isinstance(
+                data_type,
+                (ArrayType, MapType, MultisetType, RowType, VectorType)):
             return 8
         raise ValueError("Unsupported array element type: {}".format(data_type))
 

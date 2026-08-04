@@ -232,7 +232,7 @@ class ConflictDetection:
                     "Trying to delete file {} which is not previously added.".format(
                         entry.file.file_name))
 
-        conflict = self.check_bucket_num_conflicts(merged_entries, commit_kind)
+        conflict = self.check_bucket_num_conflicts(merged_entries)
         if conflict is not None:
             return conflict
 
@@ -270,10 +270,7 @@ class ConflictDetection:
         return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
 
     @staticmethod
-    def check_bucket_num_conflicts(entries, commit_kind):
-        if commit_kind == "OVERWRITE":
-            return None
-
+    def check_bucket_num_conflicts(entries):
         total_buckets = {}
         for entry in entries:
             if entry.kind != 0 or entry.total_buckets <= 0:
@@ -282,9 +279,9 @@ class ConflictDetection:
             previous = total_buckets.get(partition)
             if previous is not None and previous != entry.total_buckets:
                 return RuntimeError(
-                    "Total buckets of partition {} changed from {} to {} "
-                    "without overwrite. Give up committing.".format(
-                        partition, previous, entry.total_buckets
+                    "Total buckets of partition {} differ between committed "
+                    "files: {} and {}. Give up committing.".format(
+                        partition, previous, entry.total_buckets,
                     )
                 )
             total_buckets[partition] = entry.total_buckets

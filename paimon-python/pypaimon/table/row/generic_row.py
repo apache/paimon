@@ -19,7 +19,7 @@ import calendar
 import decimal
 import struct
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any, List, Union
 
@@ -85,6 +85,12 @@ def _datetime_to_millis_and_nanos(value: datetime):
     millis = epoch_seconds * 1000 + value.microsecond // 1000
     nano_of_millisecond = (value.microsecond % 1000) * 1000
     return millis, nano_of_millisecond
+
+
+def _normalize_ltz(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _millis_nanos_to_datetime(millis: int, nano_of_millisecond: int = 0) -> datetime:
@@ -420,12 +426,20 @@ class GenericRowSerializer:
                 'CHAR', 'VARCHAR', 'STRING', 'BINARY', 'VARBINARY', 'BYTES', 'BLOB'])
             is_decimal_type = type_name.startswith('DECIMAL') or type_name.startswith('NUMERIC')
             is_timestamp_type = type_name.startswith('TIMESTAMP')
+            is_ltz_type = type_name.startswith('TIMESTAMP_LTZ') or 'WITH LOCAL TIME ZONE' in type_name
+            is_variant_type = type_name == 'VARIANT'
             if is_decimal_type or is_timestamp_type:
                 precision, scale = _parse_type_precision_scale(field.type)
             else:
                 precision, scale = 0, 0
             is_high_precision_decimal = is_decimal_type and precision > 18
             is_non_compact_timestamp = is_timestamp_type and precision > 3
+
+            if is_timestamp_type:
+                if is_ltz_type:
+                    value = _normalize_ltz(value)
+                elif value.tzinfo is not None:
+                    raise RuntimeError("datetime tzinfo not supported yet")
 
             if is_decimal_type and value is not None:
                 d = value if isinstance(value, Decimal) else Decimal(str(value))
@@ -437,8 +451,6 @@ class GenericRowSerializer:
 
             if is_non_compact_timestamp:
                 # Non-compact: millis in var area, (offset << 32 | nanoOfMilli) in fixed part
-                if value.tzinfo is not None:
-                    raise RuntimeError("datetime tzinfo not supported yet")
                 ts_millis, nano_of_millisecond = _datetime_to_millis_and_nanos(value)
                 var_value_bytes = struct.pack('<q', ts_millis)
                 offset_in_variable_part = current_variable_offset
@@ -447,6 +459,26 @@ class GenericRowSerializer:
                 absolute_offset = fixed_part_size + offset_in_variable_part
                 offset_and_nano = (absolute_offset << 32) | nano_of_millisecond
                 struct.pack_into('<q', fixed_part, field_fixed_offset, offset_and_nano)
+            elif is_variant_type:
+                if isinstance(value, dict):
+                    variant_value = bytes(value['value'])
+                    variant_metadata = bytes(value['metadata'])
+                else:
+                    variant_value = bytes(value.value())
+                    variant_metadata = bytes(value.metadata())
+                value_bytes = (
+                    struct.pack('<i', len(variant_value))
+                    + variant_value
+                    + variant_metadata
+                )
+                length = len(value_bytes)
+                var_length = cls._round_number_of_bytes_to_nearest_word(length)
+                variable_part_data.append(value_bytes + b'\x00' * (var_length - length))
+                absolute_offset = fixed_part_size + current_variable_offset
+                current_variable_offset += var_length
+                struct.pack_into(
+                    '<q', fixed_part, field_fixed_offset,
+                    (absolute_offset << 32) | length)
             elif is_var_len_type or is_high_precision_decimal:
                 if is_high_precision_decimal:
                     # Big-endian signed bytes
@@ -458,7 +490,9 @@ class GenericRowSerializer:
                 elif any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING']):
                     value_bytes = str(value).encode('utf-8')
                 elif type_name == 'BLOB':
-                    value_bytes = value.to_data()
+                    value_bytes = (
+                        value.to_data() if hasattr(value, 'to_data') else bytes(value)
+                    )
                 else:
                     value_bytes = bytes(value)
 

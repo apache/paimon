@@ -701,6 +701,27 @@ class TableWriteTest(unittest.TestCase):
             table, known_num_buckets={}, postpone_row_counts={})
         self.assertEqual((1, 176), planner.input_partition_stats(data)[()])
 
+    def test_postpone_size_inference_supports_nested_vector(self):
+        from pypaimon.write.postpone_bucket import PostponeBucketPlanner
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('embeddings', pa.list_(pa.list_(pa.float32(), 2))),
+        ])
+        table = self._create_postpone_table(
+            'default.test_postpone_nested_vector_size',
+            pa_schema,
+            primary_keys=['id'],
+        )
+        data = pa.RecordBatch.from_pydict({
+            'id': [1],
+            'embeddings': [[[1.0, 2.0], [3.0, 4.0]]],
+        }, schema=pa_schema)
+
+        planner = PostponeBucketPlanner(
+            table, known_num_buckets={}, postpone_row_counts={})
+        self.assertEqual((1, 80), planner.input_partition_stats(data)[()])
+
     def test_postpone_default_bucket_function_matches_java(self):
         from pypaimon.write.postpone_bucket import PostponeBucketPlan
         from pypaimon.write.row_key_extractor import (
@@ -725,6 +746,38 @@ class TableWriteTest(unittest.TestCase):
 
         # Java BinaryRow hash -201703277 maps to bucket 1 of 4.
         self.assertEqual([1], extractor.extract_partition_bucket_batch(data)[1])
+
+    def test_postpone_bucket_key_hashes_match_java(self):
+        from pypaimon.schema.data_types import (
+            AtomicType,
+            DataField,
+        )
+        from pypaimon.write.row_key_extractor import RowKeyExtractor
+
+        cases = [
+            (
+                'timestamp_ltz',
+                datetime.datetime(
+                    2026, 1, 2, 11, 4, 5, 123456,
+                    tzinfo=datetime.timezone(datetime.timedelta(hours=8))),
+                AtomicType('TIMESTAMP_LTZ(6)'),
+                1245041971,
+            ),
+            (
+                'variant',
+                {'value': b'\x00', 'metadata': b'\x01'},
+                AtomicType('VARIANT'),
+                -1501111295,
+            ),
+        ]
+
+        for name, value, data_type, expected in cases:
+            with self.subTest(name=name):
+                actual = RowKeyExtractor._binary_row_hash_code(
+                    (value,), [DataField(0, 'key', data_type)])
+                if actual >= 0x80000000:
+                    actual -= 0x100000000
+                self.assertEqual(expected, actual)
 
     @parameterized.expand([('mod',), ('hive',)])
     def test_postpone_rejects_unsupported_bucket_function(
@@ -908,6 +961,87 @@ class TableWriteTest(unittest.TestCase):
             small_write.close()
             large_write.close()
             commit.close()
+
+    def test_postpone_overwrite_bucket_plan_mismatch_fails_commit(self):
+        from pypaimon.write.commit.conflict_detection import CommitConflictError
+
+        table = self._create_postpone_table(
+            'default.test_postpone_overwrite_plan_mismatch',
+            pa_schema=self.postpone_pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['id', 'dt'],
+            options={
+                'postpone.target-size-per-bucket': '100 b',
+                'postpone.batch-write-fixed-bucket.max-parallelism': 3,
+            },
+        )
+        small_builder = table.new_postpone_fixed_bucket_write_builder()
+        large_builder = table.new_postpone_fixed_bucket_write_builder()
+        small_builder.overwrite({'dt': 'p'})
+        large_builder.overwrite({'dt': 'p'})
+        small_write = small_builder.new_write()
+        large_write = large_builder.new_write()
+        commit = small_builder.new_commit()
+        try:
+            small_write.write_arrow(pa.Table.from_pydict({
+                'id': [1], 'dt': ['p'], 'value': ['x'],
+            }, schema=self.postpone_pa_schema))
+            large_write.write_arrow(pa.Table.from_pydict({
+                'id': [2], 'dt': ['p'], 'value': ['x' * 500],
+            }, schema=self.postpone_pa_schema))
+            messages = (
+                small_write.prepare_commit() + large_write.prepare_commit())
+            self.assertEqual({1, 3}, {m.total_buckets for m in messages})
+            paths = [
+                file.external_path or file.file_path
+                for message in messages
+                for file in message.new_files
+            ]
+
+            with self.assertRaisesRegex(CommitConflictError, 'Total buckets'):
+                commit.commit(messages)
+            self.assertTrue(all(
+                not table.file_io.exists(path) for path in paths))
+        finally:
+            small_write.close()
+            large_write.close()
+            commit.close()
+
+    def test_postpone_overwrite_allows_bucket_rescale(self):
+        from pypaimon.write.postpone_bucket import PostponeBucketPlan
+
+        table = self._create_postpone_table(
+            'default.test_postpone_overwrite_rescale',
+            pa_schema=self.postpone_pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['id', 'dt'],
+            options={
+                'postpone.target-size-per-bucket': '1 b',
+                'postpone.batch-write-fixed-bucket.max-parallelism': 2,
+            },
+        )
+        self._commit_arrow(table, pa.Table.from_pydict({
+            'id': [1], 'dt': ['p'], 'value': ['old'],
+        }, schema=self.postpone_pa_schema), fixed_bucket=True)
+
+        builder = table.new_postpone_fixed_bucket_write_builder()
+        builder.with_bucket_plan(PostponeBucketPlan({('p',): 3}))
+        builder.overwrite({'dt': 'p'})
+        write = builder.new_write()
+        commit = builder.new_commit()
+        try:
+            write.write_arrow(pa.Table.from_pydict({
+                'id': [2], 'dt': ['p'], 'value': ['new'],
+            }, schema=self.postpone_pa_schema))
+            messages = write.prepare_commit()
+            self.assertEqual({3}, {m.total_buckets for m in messages})
+            commit.commit(messages)
+        finally:
+            write.close()
+            commit.close()
+
+        self.assertEqual(
+            [2], self._read_sorted(table, 'id').column('id').to_pylist())
 
     def test_postpone_batch_fixed_bucket_reuses_existing_bucket_num(self):
         table = self._create_postpone_table(
