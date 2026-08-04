@@ -71,7 +71,19 @@ gpg --verify "${PYPAIMON_ARCHIVE}.asc" "${PYPAIMON_ARCHIVE}"
 ```
 
 Confirm that both signatures are good and that the full signing-key fingerprint
-belongs to the RM and appears in the downloaded `KEYS` file.
+belongs to the RM and appears in the downloaded `KEYS` file. Also inspect the
+exact key or subkey that produced each signature:
+
+```shell
+gpg --list-options show-subkey-fingerprint \
+  --list-keys "<FULL_SIGNING_KEY_FINGERPRINT>"
+```
+
+The signing key must be RSA and at least 2048 bits, as required by the
+[ASF Release Distribution Policy](https://infra.apache.org/release-distribution.html).
+A newly generated release key should be RSA 4096. DSA, ECDSA, EdDSA, and
+Ed25519 signing keys do not satisfy this policy, even when the signature is
+cryptographically valid.
 
 On Linux:
 
@@ -380,7 +392,7 @@ binding, and list the checks you completed.
 
 Verified:
 - signed RC tag and announced commit SHA
-- Paimon and PyPaimon GPG signatures and SHA-512 checksums
+- Paimon and PyPaimon GPG signatures, RSA signing-key policy, and SHA-512 checksums
 - LICENSE, NOTICE, source-only archive contents, and release versions
 - Paimon source build/test scope on <OS/ARCH>, JDK <version>, Maven <version>
 - Java staging repository and representative class-file targets
