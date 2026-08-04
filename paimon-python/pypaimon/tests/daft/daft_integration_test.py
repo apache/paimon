@@ -613,9 +613,12 @@ def test_read_paimon_filter_pruning_matches_explain(catalog_options, monkeypatch
     assert result == {"id": [999], "name": ["file-b"]}
     assert len(planned_paths) == 1
     assert explain.total_file_count == len(planned_paths)
-    assert explain.paimon_scan.file_skipping is not None
-    assert explain.paimon_scan.file_skipping.before == 2
-    assert explain.paimon_scan.file_skipping.after == 1
+    if explain.paimon_scan.native_planned:
+        assert explain.paimon_scan.file_skipping is None
+    else:
+        assert explain.paimon_scan.file_skipping is not None
+        assert explain.paimon_scan.file_skipping.before == 2
+        assert explain.paimon_scan.file_skipping.after == 1
 
 
 def test_read_paimon_limit(catalog_options):

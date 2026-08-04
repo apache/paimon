@@ -740,7 +740,7 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         self.assertEqual(actual.num_rows, 3)
         expect = pa.Table.from_pydict(
             {'x': [1, 2, 3], 'y': ['a', 'b', 'c']}, schema=pa_schema)
-        self.assertEqual(actual, expect)
+        self.assertEqual(actual.sort_by('x'), expect)
 
     @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")
     @unittest.skipUnless(

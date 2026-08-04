@@ -247,6 +247,9 @@ function pytest_torch_check() {
 }
 # Mixed tests check - runs Java-Python interoperability tests
 function mixed_check() {
+    # Native-plan coverage is asserted only by the main pytest session.
+    unset PYPAIMON_TEST_NATIVE_PLAN
+
     # Get Python version
     PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     echo "Detected Python version: $PYTHON_VERSION"
