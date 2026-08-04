@@ -37,6 +37,16 @@ _NATIVE_FORWARDED_OPTIONS = frozenset({
     CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key(),
     CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(),
     CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(),
+    CoreOptions.SCAN_SNAPSHOT_ID.key(),
+    CoreOptions.SCAN_TAG_NAME.key(),
+    CoreOptions.SCAN_TIMESTAMP.key(),
+    CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+})
+_NATIVE_TIME_TRAVEL_OPTIONS = frozenset({
+    CoreOptions.SCAN_SNAPSHOT_ID.key(),
+    CoreOptions.SCAN_TAG_NAME.key(),
+    CoreOptions.SCAN_TIMESTAMP.key(),
+    CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
 })
 
 
@@ -86,23 +96,17 @@ class TableScan:
     def _native_plan_supported_impl(self) -> bool:
         """Fall back to the Python scanner for scans native can't carry:
         shard/slice, chunk-shuffle, global-index, first-row merge-engine (Rust
-        drops L0), deletion vectors (Python drops L0), data evolution
-        (dedicated split generator), postpone bucket (drops synthetic buckets),
+        drops L0), deletion vectors, postpone bucket (drops synthetic buckets),
         a primary-key table whose trimmed PK is empty (PK equals the partition
         key; native may mark splits raw-convertible and skip merge), dynamic
-        bucket / cross-partition PK tables (unconfirmed Rust parity), any
-        partitioned table (Rust bucket_path vs the writer's str(value) can
-        diverge), a stale schema (Rust reloads the latest), copy() overrides
-        Rust does not see (e.g. a removed scan.snapshot-id), a row limit
-        (native has no plan-time limit pushdown), query auth, non-main branch,
-        time-travel, scan.version, incremental, a missing/old pypaimon-rust, or
-        a catalog / identifier Rust cannot reconstruct. Keep this capability
-        gate in sync when adding scan features."""
+        bucket / cross-partition PK tables (unconfirmed Rust parity), a stale
+        schema without time travel, copy() overrides Rust does not see (notably
+        removing a persisted scan option), unsupported time travel selectors,
+        query auth, non-main branch, incremental scans, a missing/old
+        pypaimon-rust, or a catalog / identifier Rust cannot reconstruct. Keep
+        this capability gate in sync when adding scan features."""
         from pypaimon.read.native_plan import native_runtime_available
         if not native_runtime_available():
-            return False
-        # Native has no plan-time limit pushdown; Python trims splits before read.
-        if self.limit is not None:
             return False
         fs = self.file_scanner
         if (getattr(fs, 'idx_of_this_subtask', None) is not None
@@ -110,7 +114,6 @@ class TableScan:
                 or getattr(fs, 'chunk_shuffle', None) is not None
                 or getattr(fs, '_global_index_result', None) is not None
                 or getattr(fs, 'deletion_vectors_enabled', False)
-                or getattr(fs, 'data_evolution', False)
                 or getattr(fs, 'only_read_real_buckets', False)):
             return False
         loader = getattr(
@@ -146,20 +149,24 @@ class TableScan:
         from pypaimon.table.bucket_mode import BucketMode
         if self.table.bucket_mode() in (BucketMode.HASH_DYNAMIC, BucketMode.CROSS_PARTITION):
             return False
-        # Rust bucket_path vs the writer's unescaped str(value) can diverge -> fall back.
-        if self.table.partition_keys:
-            return False
-        # Rust reloads the latest schema; fall back if this table's schema is stale.
+        options = self.table.options.options
+        supported_time_travel = any(
+            options.contains_key(key) for key in _NATIVE_TIME_TRAVEL_OPTIONS)
+        # Time travel intentionally carries a historical schema; other stale
+        # table objects must still fall back because Rust reloads the latest.
         latest_schema = self.table.schema_manager.latest()
-        if latest_schema is not None and latest_schema.id != self.table.table_schema.id:
+        if (not supported_time_travel and latest_schema is not None
+                and latest_schema.id != self.table.table_schema.id):
             return False
-        # copy() overrides Rust can't see (e.g. removed scan.snapshot-id) -> fall back.
-        overrides = set(getattr(self.table, '_applied_dynamic_options', {}) or {})
-        if overrides - _NATIVE_FORWARDED_OPTIONS:
+        # Rust cannot remove an option persisted in the catalog-loaded schema.
+        applied_options = getattr(self.table, '_applied_dynamic_options', {}) or {}
+        if (set(applied_options) - _NATIVE_FORWARDED_OPTIONS
+                or any(key in _NATIVE_TIME_TRAVEL_OPTIONS and value is None
+                       for key, value in applied_options.items())):
             return False
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
-        options = self.table.options.options
-        if any(options.contains_key(k) for k in SCAN_KEYS) \
+        unsupported_scan_keys = set(SCAN_KEYS) - _NATIVE_TIME_TRAVEL_OPTIONS
+        if any(options.contains_key(k) for k in unsupported_scan_keys) \
                 or options.contains_key('scan.version'):
             return False
         return not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
@@ -167,15 +174,29 @@ class TableScan:
     def _try_native_plan(self) -> Optional[Plan]:
         """Plan via pypaimon_rust, then drop partitions the predicate rejects.
 
-        The predicate is not pushed to the native planner, so this may read more
-        files; the reader's row filter/limit still apply, so results match. Return
-        None when Rust finds no splits so the caller can use the matching Python
-        fallback (with scan stats when requested).
+        Predicate and limit are pushed into Rust planning and are still enforced
+        by the reader. Return None when Rust finds no splits so the caller can use
+        the matching Python fallback (with scan stats when requested).
         """
         from pypaimon.read.native_plan import native_plan
 
         try:
-            splits = native_plan(self.table)
+            native_predicate = self.predicate
+            if self.partition_predicate is not None:
+                native_predicate = PredicateBuilder.and_predicates([
+                    predicate for predicate in (
+                        native_predicate,
+                        self.file_scanner.partition_key_predicate,
+                    ) if predicate is not None
+                ])
+            splits = native_plan(
+                self.table,
+                predicate=native_predicate,
+                limit=self.limit,
+                projection=(
+                    [field.name for field in self._read_type]
+                    if self._read_type is not None else None),
+            )
             if not splits:
                 return None
             snapshot_id = splits[0].snapshot_id

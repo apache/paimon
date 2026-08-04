@@ -26,7 +26,15 @@ from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
 from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.read.native_plan import _catalog_options, native_plan
+from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.read.native_plan import (
+    _catalog_options,
+    _predicate_to_native,
+    _read_options,
+    _restore_python_partition_paths,
+    native_plan,
+)
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.table_scan import TableScan
 from pypaimon.table.bucket_mode import BucketMode
@@ -60,6 +68,8 @@ def _scan(native_enabled, file_scanner):
     file_scanner.data_evolution = False            # no data evolution
     file_scanner.only_read_real_buckets = False    # not postpone bucket
     scan.file_scanner = file_scanner
+    scan.predicate = None
+    scan.partition_predicate = None
     scan._query_auth_fn = None      # no query-auth restrictions
     scan._read_type = None
     scan.limit = None               # no row limit
@@ -109,7 +119,8 @@ class NativePlanTest(unittest.TestCase):
         with patch('pypaimon.read.native_plan.native_plan', return_value=[keep, drop]) as np:
             plan = scan.plan()
 
-        np.assert_called_once_with(scan.table)
+        np.assert_called_once_with(
+            scan.table, predicate=None, limit=None, projection=None)
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [keep])
 
@@ -132,9 +143,39 @@ class NativePlanTest(unittest.TestCase):
         with patch('pypaimon.read.native_plan.native_plan', return_value=splits):
             self.assertEqual(scan.plan().splits(), splits)
 
+    def test_plan_forwards_filter_limit_partition_and_time_travel(self):
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        scan.table.partition_keys = ['dt']
+        scan.limit = 5
+        scan._read_type = [Mock(name='k'), Mock(name='dt')]
+        scan._read_type[0].name = 'k'
+        scan._read_type[1].name = 'dt'
+        scan.predicate = PredicateBuilder.and_predicates([
+            Predicate('equal', 0, 'k', [7]),
+            Predicate('equal', 1, 'dt', ['2026-08-02']),
+        ])
+        scan.table._applied_dynamic_options = {'scan.snapshot-id': '3'}
+        scan.table.options.options.contains_key.side_effect = (
+            lambda key: key == 'scan.snapshot-id')
+        scan.table.table_schema.id = 2
+        scan.table.schema_manager.latest.return_value.id = 3
+        split = Mock(partition=Mock(values=['2026-08-02']), snapshot_id=3)
+
+        with patch('pypaimon.read.native_plan.native_plan', return_value=[split]) as np:
+            plan = scan.plan()
+
+        self.assertEqual(plan.snapshot_id, 3)
+        np.assert_called_once_with(
+            scan.table,
+            predicate=scan.predicate,
+            limit=5,
+            projection=['k', 'dt'],
+        )
+
     def test_plan_falls_back_when_scan_is_not_plain(self):
         # Native planning does not carry shard/slice, global-index, or
-        # time-travel/incremental scans -> must fall back to the file scanner.
+        # incremental scans -> must fall back to the file scanner.
         def check(setup):
             fs = Mock(partition_key_predicate=None)
             sentinel = object()
@@ -151,7 +192,6 @@ class NativePlanTest(unittest.TestCase):
         check(lambda s, fs: setattr(fs, 'chunk_shuffle', (1, 100)))
         check(lambda s, fs: setattr(fs, '_global_index_result', object()))
         check(lambda s, fs: setattr(fs, 'deletion_vectors_enabled', True))
-        check(lambda s, fs: setattr(fs, 'data_evolution', True))
         check(lambda s, fs: setattr(fs, 'only_read_real_buckets', True))
         check(lambda s, fs: (setattr(s.table, 'is_primary_key_table', True),
                              setattr(s.table, 'trimmed_primary_keys', [])))
@@ -161,11 +201,9 @@ class NativePlanTest(unittest.TestCase):
             'return_value', BucketMode.CROSS_PARTITION))
         check(lambda s, fs: setattr(
             s.table, '_applied_dynamic_options', {'scan.snapshot-id': None}))
-        check(lambda s, fs: setattr(s.table, 'partition_keys', ['dt']))
         check(lambda s, fs: setattr(s.table.schema_manager.latest.return_value, 'id', 2))
         check(lambda s, fs: s.table.schema_manager.latest.__setattr__(
             'side_effect', RuntimeError('metadata read failed')))
-        check(lambda s, fs: setattr(s, 'limit', 5))
         check(lambda s, fs: s.table.options.options.contains_key.__setattr__(
             'side_effect', lambda k: k == 'scan.version'))
         check(lambda s, fs: s.table.options.merge_engine.__setattr__(
@@ -181,8 +219,6 @@ class NativePlanTest(unittest.TestCase):
         for attr in ('hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'):
             check(lambda s, fs, attr=attr: setattr(
                 s.table.catalog_environment.catalog_loader.context(), attr, object()))
-        check(lambda s, fs: s.table.options.options.contains_key.__setattr__(
-            'return_value', True))          # time-travel
         check(lambda s, fs: s.table.options.options.contains.__setattr__(
             'return_value', True))          # incremental
 
@@ -271,7 +307,8 @@ class NativePlanTest(unittest.TestCase):
 
         self.assertIs(plan, fallback_plan)
         self.assertIs(stats, fallback_stats)
-        np.assert_called_once_with(scan.table)
+        np.assert_called_once_with(
+            scan.table, predicate=None, limit=None, projection=None)
         fs.scan_with_stats.assert_called_once_with()
         fs.scan.assert_not_called()
 
@@ -316,14 +353,120 @@ class NativePlanTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exact built-in catalog loader'):
             _catalog_options(table)
 
+    def test_predicate_and_time_travel_are_converted_for_rust(self):
+        predicate = PredicateBuilder.and_predicates([
+            Predicate('greaterOrEqual', 0, 'k', [10]),
+            Predicate('in', 1, 'v', ['a', 'b']),
+        ])
+        self.assertEqual(_predicate_to_native(predicate), {
+            'method': 'and',
+            'children': [
+                {'method': 'greaterOrEqual', 'field': 'k', 'literals': [10]},
+                {'method': 'in', 'field': 'v', 'literals': ['a', 'b']},
+            ],
+        })
+
+        table = Mock()
+        table.options.source_split_target_size.return_value = 1024
+        table.options.source_split_open_file_cost.return_value = 128
+        table.options.options = Options({
+            'scan.snapshot-id': '9',
+        })
+        self.assertEqual(_read_options(table), {
+            'source.split.target-size': '1024',
+            'source.split.open-file-cost': '128',
+            'scan.snapshot-id': '9',
+        })
+
+    def test_partition_path_prefers_existing_python_legacy_path(self):
+        table = Mock(partition_keys=['p'])
+        table.path_factory.return_value.bucket_path.return_value = (
+            '/warehouse/t/p=a/b/bucket-0')
+        table.file_io.list_status.return_value = [Mock(base_name='data.parquet')]
+        data_file = Mock(
+            external_path=None,
+            file_name='data.parquet',
+            file_path='/warehouse/t/p=a%2Fb/bucket-0/data.parquet',
+        )
+        split = Mock(
+            partition=Mock(values=['a/b']), bucket=0, files=[data_file])
+
+        _restore_python_partition_paths(table, [split])
+
+        self.assertEqual(
+            data_file.file_path,
+            '/warehouse/t/p=a/b/bucket-0/data.parquet',
+        )
+
+    def test_partition_path_keeps_existing_rust_path(self):
+        table = Mock(partition_keys=['p'])
+        table.path_factory.return_value.bucket_path.return_value = (
+            '/warehouse/t/p=a/b/bucket-0')
+        table.file_io.list_status.return_value = []
+        rust_path = '/warehouse/t/p=a%2Fb/bucket-0/data.parquet'
+        data_file = Mock(
+            external_path=None,
+            file_name='data.parquet',
+            file_path=rust_path,
+        )
+        split = Mock(
+            partition=Mock(values=['a/b']), bucket=0, files=[data_file])
+
+        _restore_python_partition_paths(table, [split])
+
+        self.assertEqual(data_file.file_path, rust_path)
+
+    def test_partition_path_lists_each_bucket_once(self):
+        table = Mock(partition_keys=['p'])
+        table.path_factory.return_value.bucket_path.return_value = (
+            '/warehouse/t/p=a/b/bucket-0')
+        table.file_io.list_status.return_value = [
+            Mock(base_name='a.parquet'), Mock(base_name='b.parquet')]
+        splits = [
+            Mock(partition=Mock(values=['a/b']), bucket=0, files=[Mock(
+                external_path=None,
+                file_name=name,
+                file_path='/warehouse/t/p=a%%2Fb/bucket-0/%s' % name,
+            )])
+            for name in ('a.parquet', 'b.parquet')
+        ]
+
+        _restore_python_partition_paths(table, splits)
+
+        table.file_io.list_status.assert_called_once_with(
+            '/warehouse/t/p=a/b/bucket-0')
+        self.assertEqual(
+            [split.files[0].file_path for split in splits],
+            [
+                '/warehouse/t/p=a/b/bucket-0/a.parquet',
+                '/warehouse/t/p=a/b/bucket-0/b.parquet',
+            ],
+        )
+
+    def test_partition_path_listing_failure_is_not_hidden(self):
+        table = Mock(partition_keys=['p'])
+        table.path_factory.return_value.bucket_path.return_value = (
+            '/warehouse/t/p=a/b/bucket-0')
+        table.file_io.list_status.side_effect = PermissionError('denied')
+        split = Mock(partition=Mock(values=['a/b']), bucket=0, files=[Mock(
+            external_path=None,
+            file_name='data.parquet',
+            file_path='/warehouse/t/p=a%2Fb/bucket-0/data.parquet',
+        )])
+
+        with self.assertRaises(PermissionError):
+            _restore_python_partition_paths(table, [split])
+
     def test_native_plan_threads_trimmed_keys_to_deserializer(self):
         # PK tables route through: the trimmed primary keys must reach the
         # deserializer so per-file min/max keys are decoded for merge-on-read.
         kfields = [object()]
         table = Mock(trimmed_primary_keys_fields=kfields)
         table.table_schema = Mock(fields=[], partition_keys=[])
+        table.partition_keys = []
         table.options.source_split_target_size.return_value = 1024
         table.options.source_split_open_file_cost.return_value = 128
+        table.options.options.contains_key.return_value = False
         split = Mock()
         split.serialize.return_value = b'bytes'
         rt = Mock()
