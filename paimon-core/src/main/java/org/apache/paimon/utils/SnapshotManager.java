@@ -361,9 +361,13 @@ public class SnapshotManager implements Serializable {
 
     public @Nullable Snapshot earlierOrEqualWatermark(long watermark) {
         Long latest = latestSnapshotId();
+        if (latest == null) {
+            return null;
+        }
         // If latest == Long.MIN_VALUE don't need next binary search for watermark
         // which can reduce IO cost with snapshot
-        if (latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
+        Long latestWatermark = snapshot(latest).watermark();
+        if (latestWatermark != null && latestWatermark == Long.MIN_VALUE) {
             return null;
         }
 
@@ -388,30 +392,29 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        if (earliestWatermark >= watermark) {
-            return snapshot(earliest);
+        if (earliestWatermark > watermark) {
+            return null;
         }
         Snapshot finalSnapshot = null;
 
         while (earliest <= latest) {
             long mid = earliest + (latest - earliest) / 2; // Avoid overflow
-            Snapshot snapshot = snapshot(mid);
+            // A snapshot without a watermark takes the ordering position of the
+            // nearest earlier snapshot (within the search window) that carries one
+            long pos = mid;
+            Snapshot snapshot = snapshot(pos);
             Long commitWatermark = snapshot.watermark();
-            if (commitWatermark == null) {
-                // find the first snapshot with watermark
-                while (mid >= earliest) {
-                    mid--;
-                    commitWatermark = snapshot(mid).watermark();
-                    if (commitWatermark != null) {
-                        break;
-                    }
-                }
+            while (commitWatermark == null && pos > earliest) {
+                pos--;
+                snapshot = snapshot(pos);
+                commitWatermark = snapshot.watermark();
             }
             if (commitWatermark == null) {
+                // No snapshot with watermark in [earliest, mid]: skip the range
                 earliest = mid + 1;
             } else {
                 if (commitWatermark > watermark) {
-                    latest = mid - 1; // Search in the left half
+                    latest = pos - 1; // Search in the left half
                 } else if (commitWatermark < watermark) {
                     earliest = mid + 1; // Search in the right half
                     finalSnapshot = snapshot;
@@ -426,9 +429,13 @@ public class SnapshotManager implements Serializable {
 
     public @Nullable Snapshot laterOrEqualWatermark(long watermark) {
         Long latest = latestSnapshotId();
+        if (latest == null) {
+            return null;
+        }
         // If latest == Long.MIN_VALUE don't need next binary search for watermark
         // which can reduce IO cost with snapshot
-        if (latest == null || snapshot(latest).watermark() == Long.MIN_VALUE) {
+        Long latestWatermark = snapshot(latest).watermark();
+        if (latestWatermark != null && latestWatermark == Long.MIN_VALUE) {
             return null;
         }
 
@@ -460,23 +467,22 @@ public class SnapshotManager implements Serializable {
 
         while (earliest <= latest) {
             long mid = earliest + (latest - earliest) / 2; // Avoid overflow
-            Snapshot snapshot = snapshot(mid);
+            // A snapshot without a watermark takes the ordering position of the
+            // nearest earlier snapshot (within the search window) that carries one
+            long pos = mid;
+            Snapshot snapshot = snapshot(pos);
             Long commitWatermark = snapshot.watermark();
-            if (commitWatermark == null) {
-                // find the first snapshot with watermark
-                while (mid >= earliest) {
-                    mid--;
-                    commitWatermark = snapshot(mid).watermark();
-                    if (commitWatermark != null) {
-                        break;
-                    }
-                }
+            while (commitWatermark == null && pos > earliest) {
+                pos--;
+                snapshot = snapshot(pos);
+                commitWatermark = snapshot.watermark();
             }
             if (commitWatermark == null) {
+                // No snapshot with watermark in [earliest, mid]: skip the range
                 earliest = mid + 1;
             } else {
                 if (commitWatermark > watermark) {
-                    latest = mid - 1; // Search in the left half
+                    latest = pos - 1; // Search in the left half
                     finalSnapshot = snapshot;
                 } else if (commitWatermark < watermark) {
                     earliest = mid + 1; // Search in the right half

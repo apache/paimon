@@ -27,6 +27,7 @@ import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -38,6 +39,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
@@ -119,8 +121,13 @@ public class SnapshotManagerTest {
             localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
 
-        assertThat(snapshotManager.earlierOrEqualWatermark(millis + 999).id())
-                .isEqualTo(isRaceCondition ? 1 : 0);
+        if (isRaceCondition) {
+            // The earliest snapshot has expired, so no remaining snapshot carries a
+            // watermark earlier than or equal to the requested one
+            assertThat(snapshotManager.earlierOrEqualWatermark(millis + 999)).isNull();
+        } else {
+            assertThat(snapshotManager.earlierOrEqualWatermark(millis + 999).id()).isEqualTo(0);
+        }
     }
 
     @ParameterizedTest
@@ -297,7 +304,7 @@ public class SnapshotManagerTest {
                 null);
     }
 
-    private Snapshot createSnapshotWithMillis(long id, long millis, long watermark) {
+    private Snapshot createSnapshotWithMillis(long id, long millis, @Nullable Long watermark) {
         return new Snapshot(
                 id,
                 0L,
@@ -538,6 +545,140 @@ public class SnapshotManagerTest {
         Changelog changelog = createChangelogWithMillis(id, 1L);
         snapshotManager.commitChangelog(changelog, id);
         assertDoesNotThrow(() -> snapshotManager.commitChangelog(changelog, id));
+    }
+
+    @Test
+    @Timeout(60) // the search must terminate; defective code loops forever here
+    public void testLaterOrEqualWatermarkWithInterleavedNullWatermarks() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 10 snapshots, only snapshots 0, 4 and 9 carry a watermark
+        Map<Long, Long> watermarks = Map.of(0L, 100L, 4L, 200L, 9L, 300L);
+        for (long i = 0; i < 10; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // the null-watermark fallback must terminate and return snapshot 4
+        assertThat(snapshotManager.laterOrEqualWatermark(150).id()).isEqualTo(4);
+        assertThat(snapshotManager.laterOrEqualWatermark(250).id()).isEqualTo(9);
+        // larger than the largest watermark returns null
+        assertThat(snapshotManager.laterOrEqualWatermark(301)).isNull();
+        // smaller than the smallest watermark returns the first snapshot with a watermark
+        assertThat(snapshotManager.laterOrEqualWatermark(50).id()).isEqualTo(0);
+    }
+
+    @Test
+    public void testLaterOrEqualWatermarkExactMatchWithNullWatermarks() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 5 snapshots, snapshots 2 and 3 do not carry a watermark
+        Map<Long, Long> watermarks = Map.of(0L, 100L, 1L, 150L, 4L, 300L);
+        for (long i = 0; i < 5; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // the exact match is snapshot 1, not one of the null-watermark snapshots
+        assertThat(snapshotManager.laterOrEqualWatermark(150).id()).isEqualTo(1);
+    }
+
+    @Test
+    public void testLaterOrEqualWatermarkWithAllNullWatermarks() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 5 snapshots without watermark
+        for (long i = 0; i < 5; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.laterOrEqualWatermark(100)).isNull();
+    }
+
+    @Test
+    public void testLaterOrEqualWatermarkWithNullWatermarkTail() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 4 snapshots, snapshots 2 and 3 do not carry a watermark
+        Map<Long, Long> watermarks = Map.of(0L, 100L, 1L, 200L);
+        for (long i = 0; i < 4; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.laterOrEqualWatermark(150).id()).isEqualTo(1);
+        // the null-watermark tail does not extend the watermark range
+        assertThat(snapshotManager.laterOrEqualWatermark(250)).isNull();
+    }
+
+    @Test
+    public void testEarlierOrEqualWatermarkBelowMinimum() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 3 snapshots with dense watermarks
+        for (long i = 0; i < 3; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, 100 + i * 100);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // smaller than the smallest watermark returns null
+        assertThat(snapshotManager.earlierOrEqualWatermark(50)).isNull();
+    }
+
+    @Test
+    @Timeout(60) // the search must terminate; defective code loops forever here
+    public void testEarlierOrEqualWatermarkWithInterleavedNullWatermarks() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 10 snapshots, only snapshots 0, 4 and 9 carry a watermark
+        Map<Long, Long> watermarks = Map.of(0L, 100L, 4L, 200L, 9L, 300L);
+        for (long i = 0; i < 10; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.earlierOrEqualWatermark(150).id()).isEqualTo(0);
+        assertThat(snapshotManager.earlierOrEqualWatermark(250).id()).isEqualTo(4);
+        assertThat(snapshotManager.earlierOrEqualWatermark(350).id()).isEqualTo(9);
+    }
+
+    @Test
+    public void testEarlierOrEqualWatermarkExactMatchWithNullWatermarks() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 5 snapshots, snapshots 2 and 3 do not carry a watermark
+        Map<Long, Long> watermarks = Map.of(0L, 100L, 1L, 150L, 4L, 300L);
+        for (long i = 0; i < 5; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // the exact match is snapshot 1, not one of the null-watermark snapshots
+        assertThat(snapshotManager.earlierOrEqualWatermark(150).id()).isEqualTo(1);
+        // null-watermark snapshots fall back to the nearest earlier watermark
+        assertThat(snapshotManager.earlierOrEqualWatermark(200).id()).isEqualTo(1);
+    }
+
+    @Test
+    public void testEarlierOrEqualWatermarkWithAllNullWatermarks() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 5 snapshots without watermark
+        for (long i = 0; i < 5; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.earlierOrEqualWatermark(100)).isNull();
     }
 
     /**
