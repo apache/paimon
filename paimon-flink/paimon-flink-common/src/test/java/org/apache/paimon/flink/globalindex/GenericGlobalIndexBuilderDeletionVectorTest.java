@@ -24,14 +24,11 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
-
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/** Tests the deletion-vector guard in {@link GenericGlobalIndexBuilder}. */
+/** Tests deletion-vector table support in {@link GenericGlobalIndexBuilder}. */
 class GenericGlobalIndexBuilderDeletionVectorTest {
 
     private static FileStoreTable table(boolean deletionVectorsEnabled) {
@@ -48,56 +45,14 @@ class GenericGlobalIndexBuilderDeletionVectorTest {
     }
 
     @Test
-    void testLuminaAllowedOnDeletionVectorTable() {
-        assertThatCode(
-                        () ->
-                                new GenericGlobalIndexBuilder(table(true))
-                                        .withIndexType("lumina")
-                                        .scan())
+    void testGlobalIndexAllowedOnDeletionVectorTable() {
+        assertThatCode(() -> new GenericGlobalIndexBuilder(table(true)).scan())
                 .doesNotThrowAnyException();
     }
 
     @Test
-    void testLegacyLuminaIdentifierAllowedOnDeletionVectorTable() {
-        assertThatCode(
-                        () ->
-                                new GenericGlobalIndexBuilder(table(true))
-                                        .withIndexType("lumina-vector-ann")
-                                        .scan())
-                .doesNotThrowAnyException();
-    }
-
-    @Test
-    void testNativeVectorIndexesAllowedOnDeletionVectorTable() {
-        for (String indexType :
-                Arrays.asList("ivf-flat", "ivf-pq", "ivf-sq", "ivf-rq", "diskann")) {
-            assertThatCode(
-                            () ->
-                                    new GenericGlobalIndexBuilder(table(true))
-                                            .withIndexType(indexType)
-                                            .scan())
-                    .as(indexType)
-                    .doesNotThrowAnyException();
-        }
-    }
-
-    @Test
-    void testNonLuminaRejectedOnDeletionVectorTable() {
-        assertThatThrownBy(
-                        () ->
-                                new GenericGlobalIndexBuilder(table(true))
-                                        .withIndexType("bitmap")
-                                        .scan())
-                .hasMessageContaining("deletion vectors");
-    }
-
-    @Test
-    void testNonLuminaAllowedWithoutDeletionVectors() {
-        assertThatCode(
-                        () ->
-                                new GenericGlobalIndexBuilder(table(false))
-                                        .withIndexType("bitmap")
-                                        .scan())
+    void testGlobalIndexAllowedWithoutDeletionVectors() {
+        assertThatCode(() -> new GenericGlobalIndexBuilder(table(false)).scan())
                 .doesNotThrowAnyException();
     }
 }

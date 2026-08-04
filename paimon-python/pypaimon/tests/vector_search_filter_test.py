@@ -2808,6 +2808,60 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         })
         self.assertEqual([0], sorted(list(result.results())))
 
+    def test_read_does_not_reuse_snapshot_from_previous_plan(self):
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+        from pypaimon.table.source.vector_search_scan import VectorSearchScanPlan
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+
+        snapshot = types.SimpleNamespace(id=7)
+        embedding_field = _field(1, "embedding", "FLOAT")
+        table = _StubTable(fields=[embedding_field], entries=[])
+        planned_table = _StubTable(fields=[embedding_field], entries=[])
+        _install_raw_vector_read_builder(table, "embedding", {1: [1.0]})
+        _install_raw_vector_read_builder(planned_table, "embedding", {0: [1.0]})
+        table.copy = mock.Mock(return_value=planned_table)
+        split = RawVectorSearchSplit([Range(0, 1)], [], "ivf-flat")
+        reader = DataEvolutionVectorRead(
+            table,
+            limit=1,
+            vector_column=embedding_field,
+            query_vector=[1.0],
+        )
+
+        reader.read_plan(VectorSearchScanPlan([split], snapshot))
+        table.copy.reset_mock()
+        result = reader.read([split])
+
+        table.copy.assert_not_called()
+        self.assertEqual([1], sorted(list(result.results())))
+
+    def test_read_batch_does_not_reuse_snapshot_from_previous_plan(self):
+        from pypaimon.table.source.vector_search_read import BatchVectorSearchReadImpl
+        from pypaimon.table.source.vector_search_scan import VectorSearchScanPlan
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+
+        snapshot = types.SimpleNamespace(id=7)
+        embedding_field = _field(1, "embedding", "FLOAT")
+        table = _StubTable(fields=[embedding_field], entries=[])
+        planned_table = _StubTable(fields=[embedding_field], entries=[])
+        _install_raw_vector_read_builder(table, "embedding", {1: [1.0]})
+        _install_raw_vector_read_builder(planned_table, "embedding", {0: [1.0]})
+        table.copy = mock.Mock(return_value=planned_table)
+        split = RawVectorSearchSplit([Range(0, 1)], [], "ivf-flat")
+        reader = BatchVectorSearchReadImpl(
+            table,
+            limit=1,
+            vector_column=embedding_field,
+            query_vectors=[[1.0]],
+        )
+
+        reader.read_batch_plan(VectorSearchScanPlan([split], snapshot))
+        table.copy.reset_mock()
+        results = reader.read_batch([split])
+
+        table.copy.assert_not_called()
+        self.assertEqual([1], sorted(list(results[0].results())))
+
     def test_read_plan_clears_conflicting_time_travel_options(self):
         from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
         from pypaimon.table.source.vector_search_scan import VectorSearchScanPlan

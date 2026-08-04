@@ -36,11 +36,6 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
     static final double DEFAULT_TRAIN_SAMPLE_RATIO = 1.0;
 
     @Override
-    public boolean supportsDeletionVectors() {
-        return true;
-    }
-
-    @Override
     public GlobalIndexer create(DataField field, Options options) {
         String identifier = identifier();
         return new NativeVectorGlobalIndexer(
