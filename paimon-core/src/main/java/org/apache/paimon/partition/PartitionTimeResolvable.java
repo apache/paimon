@@ -18,6 +18,7 @@
 
 package org.apache.paimon.partition;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.time.temporal.TemporalAmount;
 import java.util.LinkedHashMap;
@@ -30,7 +31,10 @@ import java.util.List;
  * {@code formatter} are provided, a full pattern-based resolver is returned; otherwise a fallback
  * resolver that handles the unconfigured case is returned.
  */
-public interface PartitionTimeResolvable {
+public interface PartitionTimeResolvable extends Serializable {
+
+    /** Returns the partition keys used by this resolver. */
+    List<String> partitionKeys();
 
     /** Parses partition column values into a {@link LocalDateTime}. */
     LocalDateTime parsePartitionValues(List<?> partitionValues);
@@ -54,10 +58,10 @@ public interface PartitionTimeResolvable {
      * unconfigured case.
      */
     static PartitionTimeResolvable create(
-            List<String> partitionColumns, String pattern, String formatter) {
+            List<String> partitionKeys, String pattern, String formatter) {
         if (pattern == null || formatter == null) {
-            return PartitionTimeResolver.createFallback(partitionColumns, pattern, formatter);
+            return PartitionTimeResolver.createFallback(partitionKeys, pattern, formatter);
         }
-        return new PartitionTimeResolver(partitionColumns, pattern, formatter);
+        return new PartitionTimeResolver(partitionKeys, pattern, formatter);
     }
 }

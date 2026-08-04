@@ -42,7 +42,6 @@ class PartitionMarkDoneTriggerTest {
     private List<String> pendingPartitions;
     private PartitionMarkDoneTrigger.State state;
     private PartitionTimeResolver resolver;
-    private final List<String> partitionKeys = Collections.singletonList("dt");
 
     @BeforeEach
     public void before() throws Exception {
@@ -60,7 +59,8 @@ class PartitionMarkDoneTriggerTest {
                         pendingPartitions.addAll(partitions);
                     }
                 };
-        this.resolver = new PartitionTimeResolver(partitionKeys, "$dt", "yyyy-MM-dd");
+        this.resolver =
+                new PartitionTimeResolver(Collections.singletonList("dt"), "$dt", "yyyy-MM-dd");
     }
 
     @Test
@@ -69,7 +69,6 @@ class PartitionMarkDoneTriggerTest {
                 new PartitionMarkDoneTrigger(
                         state,
                         resolver,
-                        partitionKeys,
                         timeInterval,
                         idleTime,
                         toEpochMillis("2024-02-01"),
@@ -116,7 +115,6 @@ class PartitionMarkDoneTriggerTest {
                 new PartitionMarkDoneTrigger(
                         state,
                         resolver,
-                        partitionKeys,
                         timeInterval,
                         idleTime,
                         toEpochMillis("2024-02-06"),
@@ -133,13 +131,7 @@ class PartitionMarkDoneTriggerTest {
     public void testWithEndInput() throws Exception {
         PartitionMarkDoneTrigger trigger =
                 new PartitionMarkDoneTrigger(
-                        state,
-                        resolver,
-                        partitionKeys,
-                        timeInterval,
-                        idleTime,
-                        toEpochMillis("2024-02-01"),
-                        true);
+                        state, resolver, timeInterval, idleTime, toEpochMillis("2024-02-01"), true);
 
         // test not reach partition end + idle time
         trigger.notifyPartition("dt=2024-02-02", toEpochMillis("2024-02-01"));
@@ -151,13 +143,7 @@ class PartitionMarkDoneTriggerTest {
     public void testParseNonDateFormattedPartition() throws Exception {
         PartitionMarkDoneTrigger trigger =
                 new PartitionMarkDoneTrigger(
-                        state,
-                        resolver,
-                        partitionKeys,
-                        timeInterval,
-                        idleTime,
-                        toEpochMillis("2024-02-01"),
-                        true);
+                        state, resolver, timeInterval, idleTime, toEpochMillis("2024-02-01"), true);
 
         assertThat(trigger.extractDateTime("unknown")).isEmpty();
         trigger.notifyPartition("dt=__DEFAULT_PARTITION__", toEpochMillis("2024-02-01"));

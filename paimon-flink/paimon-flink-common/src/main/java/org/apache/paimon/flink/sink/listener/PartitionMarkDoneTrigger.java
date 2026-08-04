@@ -64,7 +64,6 @@ public class PartitionMarkDoneTrigger {
 
     private final State state;
     private final PartitionTimeResolvable timeResolver;
-    private final List<String> partitionKeys;
     // can be null when markDoneWhenEndInput is true
     @Nullable private final Long timeInterval;
     // can be null when markDoneWhenEndInput is true
@@ -75,7 +74,6 @@ public class PartitionMarkDoneTrigger {
     public PartitionMarkDoneTrigger(
             State state,
             PartitionTimeResolvable timeResolver,
-            List<String> partitionKeys,
             @Nullable Duration timeInterval,
             @Nullable Duration idleTime,
             boolean markDoneWhenEndInput)
@@ -83,7 +81,6 @@ public class PartitionMarkDoneTrigger {
         this(
                 state,
                 timeResolver,
-                partitionKeys,
                 timeInterval,
                 idleTime,
                 System.currentTimeMillis(),
@@ -93,7 +90,6 @@ public class PartitionMarkDoneTrigger {
     public PartitionMarkDoneTrigger(
             State state,
             PartitionTimeResolvable timeResolver,
-            List<String> partitionKeys,
             @Nullable Duration timeInterval,
             @Nullable Duration idleTime,
             long currentTimeMillis,
@@ -102,7 +98,6 @@ public class PartitionMarkDoneTrigger {
         this.pendingPartitions = new HashMap<>();
         this.state = state;
         this.timeResolver = timeResolver;
-        this.partitionKeys = partitionKeys;
         this.timeInterval = timeInterval == null ? null : timeInterval.toMillis();
         this.idleTime = idleTime == null ? null : idleTime.toMillis();
         this.markDoneWhenEndInput = markDoneWhenEndInput;
@@ -211,6 +206,7 @@ public class PartitionMarkDoneTrigger {
     Optional<LocalDateTime> extractDateTime(String partition) {
         try {
             LinkedHashMap<String, String> spec = extractPartitionSpecFromPath(new Path(partition));
+            List<String> partitionKeys = timeResolver.partitionKeys();
             List<String> values = new ArrayList<>(partitionKeys.size());
             for (String key : partitionKeys) {
                 values.add(spec.get(key));
@@ -278,7 +274,6 @@ public class PartitionMarkDoneTrigger {
                         partitionKeys,
                         coreOptions.partitionTimestampPattern(),
                         coreOptions.partitionTimestampFormatter()),
-                partitionKeys,
                 options.get(PARTITION_TIME_INTERVAL),
                 options.get(PARTITION_IDLE_TIME_TO_DONE),
                 options.get(PARTITION_MARK_DONE_WHEN_END_INPUT));

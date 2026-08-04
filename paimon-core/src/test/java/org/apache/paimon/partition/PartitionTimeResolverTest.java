@@ -51,8 +51,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class PartitionTimeResolverTest {
 
     private TemporalAmount extractMinStep(
-            String pattern, String formatter, String... partitionColumns) {
-        return new PartitionTimeResolver(Arrays.asList(partitionColumns), pattern, formatter)
+            String pattern, String formatter, String... partitionKeys) {
+        return new PartitionTimeResolver(Arrays.asList(partitionKeys), pattern, formatter)
                 .extractMinStep();
     }
 

@@ -59,18 +59,18 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class PartitionTimeResolver implements PartitionTimeResolvable {
     private static final Map<Character, ChronoField> FIELD_MAP = new HashMap<>();
-    private final List<String> partitionColumns;
+    private final List<String> partitionKeys;
     private final String pattern;
     private final String formatter;
     private Map<PatternToken, List<FormatToken>> patternFormatMappings;
     private List<PatternToken> patternTokens;
     private List<FormatToken> formatTokens;
 
-    public PartitionTimeResolver(List<String> partitionColumns, String pattern, String formatter) {
+    public PartitionTimeResolver(List<String> partitionKeys, String pattern, String formatter) {
         checkArgument(pattern != null, "pattern cannot be null");
         checkArgument(formatter != null, "formatter cannot be null");
-        checkArgument(partitionColumns != null, "partitionColumns cannot be null");
-        this.partitionColumns = partitionColumns;
+        checkArgument(partitionKeys != null, "partitionKeys cannot be null");
+        this.partitionKeys = partitionKeys;
         this.pattern = pattern;
         this.formatter = formatter;
         init();
@@ -82,8 +82,8 @@ public class PartitionTimeResolver implements PartitionTimeResolvable {
      * the common unconfigured case.
      */
     static PartitionTimeResolvable createFallback(
-            List<String> partitionColumns, String pattern, String formatter) {
-        return new FallbackPartitionTimeResolver(partitionColumns, pattern, formatter);
+            List<String> partitionKeys, String pattern, String formatter) {
+        return new FallbackPartitionTimeResolver(partitionKeys, pattern, formatter);
     }
 
     static {
@@ -98,11 +98,16 @@ public class PartitionTimeResolver implements PartitionTimeResolvable {
 
     private void init() {
         this.patternFormatMappings = new HashMap<>();
-        this.patternTokens = parsePattern(partitionColumns, pattern);
+        this.patternTokens = parsePattern(partitionKeys, pattern);
         this.formatTokens = parseFormatter();
         boolean matched = matchRecursive(0, 0);
         checkArgument(
                 matched, "Failed to match pattern '%s' to formatter '%s'", pattern, formatter);
+    }
+
+    @Override
+    public List<String> partitionKeys() {
+        return partitionKeys;
     }
 
     /**
@@ -111,6 +116,7 @@ public class PartitionTimeResolver implements PartitionTimeResolvable {
      * @return the smallest {@link Duration} or {@link Period} step among variable-controlled time
      *     units
      */
+    @Override
     public TemporalAmount extractMinStep() {
         List<TimeFieldToken> fieldTokens =
                 patternFormatMappings.values().stream()
@@ -130,6 +136,7 @@ public class PartitionTimeResolver implements PartitionTimeResolvable {
      * Computes partition column values by formatting the given datetime and extracting each
      * variable's segment according to the pattern-to-format mapping.
      */
+    @Override
     public LinkedHashMap<String, String> resolvePartitionValues(LocalDateTime dateTime) {
         LinkedHashMap<String, String> result = new LinkedHashMap<>();
         for (PatternToken patternToken : patternTokens) {
@@ -147,9 +154,10 @@ public class PartitionTimeResolver implements PartitionTimeResolvable {
         return result;
     }
 
+    @Override
     public LocalDateTime parsePartitionValues(List<?> partitionValues) {
         String timestampString =
-                buildTimestampString(partitionColumns, partitionValues, patternTokens);
+                buildTimestampString(partitionKeys, partitionValues, patternTokens);
         DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(formatter, Locale.ROOT);
 
         Set<ChronoField> fields =
@@ -183,14 +191,12 @@ public class PartitionTimeResolver implements PartitionTimeResolvable {
      * Builds the timestamp string by substituting partition column values into the pattern tokens.
      */
     private static String buildTimestampString(
-            List<String> partitionColumns,
-            List<?> partitionValues,
-            List<PatternToken> patternTokens) {
+            List<String> partitionKeys, List<?> partitionValues, List<PatternToken> patternTokens) {
         checkArgument(partitionValues != null, "Values cannot be null");
 
         Map<String, Object> valueMap = new HashMap<>();
-        for (int i = 0; i < partitionColumns.size(); i++) {
-            valueMap.put(partitionColumns.get(i), partitionValues.get(i));
+        for (int i = 0; i < partitionKeys.size(); i++) {
+            valueMap.put(partitionKeys.get(i), partitionValues.get(i));
         }
         checkArgument(partitionValues.size() == valueMap.size(), "Values size mismatch");
 
@@ -257,9 +263,9 @@ public class PartitionTimeResolver implements PartitionTimeResolvable {
     }
 
     /** Parses pattern string into pattern tokens (variables and literals). */
-    private static List<PatternToken> parsePattern(List<String> partitionColumns, String pattern) {
+    private static List<PatternToken> parsePattern(List<String> partitionKeys, String pattern) {
         List<String> sortedPartCols =
-                partitionColumns.stream()
+                partitionKeys.stream()
                         .sorted(Comparator.reverseOrder())
                         .collect(Collectors.toList());
 
@@ -531,18 +537,21 @@ public class PartitionTimeResolver implements PartitionTimeResolvable {
                         .toFormatter()
                         .withResolverStyle(ResolverStyle.LENIENT);
 
-        private final List<String> partitionColumns;
+        private final List<String> partitionKeys;
         @Nullable private final String pattern;
         @Nullable private final String formatter;
 
         FallbackPartitionTimeResolver(
-                List<String> partitionColumns,
-                @Nullable String pattern,
-                @Nullable String formatter) {
-            checkArgument(partitionColumns != null, "partitionColumns cannot be null");
-            this.partitionColumns = partitionColumns;
+                List<String> partitionKeys, @Nullable String pattern, @Nullable String formatter) {
+            checkArgument(partitionKeys != null, "partitionKeys cannot be null");
+            this.partitionKeys = partitionKeys;
             this.pattern = pattern;
             this.formatter = formatter;
+        }
+
+        @Override
+        public List<String> partitionKeys() {
+            return partitionKeys;
         }
 
         @Override
@@ -554,9 +563,9 @@ public class PartitionTimeResolver implements PartitionTimeResolvable {
             } else {
                 timestampString =
                         buildTimestampString(
-                                partitionColumns,
+                                partitionKeys,
                                 partitionValues,
-                                parsePattern(partitionColumns, pattern));
+                                parsePattern(partitionKeys, pattern));
             }
             return toLocalDateTime(timestampString, formatter);
         }
