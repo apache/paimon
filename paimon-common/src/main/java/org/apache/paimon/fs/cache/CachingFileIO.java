@@ -181,6 +181,12 @@ public class CachingFileIO implements FileIO {
     }
 
     @Override
+    public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+        // the interface default (temp file + rename) would bypass the delegate's atomic override
+        return delegate.tryToWriteAtomic(path, content);
+    }
+
+    @Override
     public String createBlobPresignedUrl(
             Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
         return delegate.createBlobPresignedUrl(tableRoot, descriptor, validity);

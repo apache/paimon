@@ -36,8 +36,10 @@ import java.util.concurrent.Future;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -164,5 +166,22 @@ public class ResolvingFileIOTest {
                 "https://example",
                 resolvingFileIO.createBlobPresignedUrl(tableRoot, descriptor, validity));
         verify(delegate).createBlobPresignedUrl(tableRoot, descriptor, validity);
+    }
+
+    @Test
+    public void testTryToWriteAtomicReachesResolvedOverride() throws IOException {
+        FileIO delegate = mock(FileIO.class);
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        resolvingFileIO.configure(CatalogContext.create(new Options(), loader, null));
+
+        Path target = new Path("oss://bucket/table/snapshot/LATEST");
+        when(delegate.tryToWriteAtomic(target, "content")).thenReturn(true);
+
+        assertTrue(resolvingFileIO.tryToWriteAtomic(target, "content"));
+        verify(delegate).tryToWriteAtomic(target, "content");
+        // the interface default would have written a temp file and renamed it instead
+        verify(delegate, never()).rename(any(), any());
     }
 }

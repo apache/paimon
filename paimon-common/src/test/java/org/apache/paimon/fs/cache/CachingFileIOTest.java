@@ -49,7 +49,9 @@ import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_MAX_SIZE;
 import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_WHITELIST;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -85,6 +87,24 @@ class CachingFileIOTest {
         assertThat(cachingIO.createBlobPresignedUrl(tableRoot, descriptor, validity))
                 .isEqualTo("https://example");
         verify(delegate).createBlobPresignedUrl(tableRoot, descriptor, validity);
+    }
+
+    @Test
+    void testTryToWriteAtomicReachesDelegateOverride() throws IOException {
+        FileIO delegate = mock(FileIO.class);
+        CachingFileIO cachingIO =
+                newCachingFileIO(
+                        delegate,
+                        new LocalMemoryCacheManager(1024, 64),
+                        EnumSet.of(FileType.DATA),
+                        64);
+        Path target = new Path("oss://bucket/table/snapshot/LATEST");
+        when(delegate.tryToWriteAtomic(target, "content")).thenReturn(true);
+
+        assertThat(cachingIO.tryToWriteAtomic(target, "content")).isTrue();
+        verify(delegate).tryToWriteAtomic(target, "content");
+        // the interface default would have written a temp file and renamed it instead
+        verify(delegate, never()).rename(any(), any());
     }
 
     private CachingFileIO newCachingFileIO(
