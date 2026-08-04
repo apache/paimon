@@ -221,6 +221,30 @@ class ParquetTypeWideningTest {
         assertThat(rows).hasSize(3);
     }
 
+    /** DOUBLE values are rounded while reading, so predicates cannot be pushed before the cast. */
+    @Test
+    void testDoubleReadAsFloatDoesNotPushLossyPredicate() throws Exception {
+        RowType readType =
+                RowType.builder()
+                        .field("pageviewId", DataTypes.STRING())
+                        .field("rate", DataTypes.FLOAT())
+                        .build();
+        Path path =
+                writeSchema(
+                        "message root {\n"
+                                + "  optional binary pageviewId (UTF8);\n"
+                                + "  optional double rate;\n"
+                                + "}",
+                        (group, i) ->
+                                group.append("pageviewId", PAGEVIEW_IDS[i]).append("rate", 0.1d));
+        PredicateBuilder builder = new PredicateBuilder(readType);
+
+        List<Object[]> rows =
+                read(readType, path, Collections.singletonList(builder.equal(1, 0.1f)));
+
+        assertThat(rows).extracting(row -> row[1]).containsExactly(0.1f, 0.1f, 0.1f);
+    }
+
     // ------------------------------------------------------------------
     // Narrowing INT64 -> INT. The reader already handles it via
     // IntegerFromLongUpdater; only the pushdown was left behind.
@@ -241,6 +265,124 @@ class ParquetTypeWideningTest {
 
         assertThat(rows).hasSize(3);
         assertThat((Integer) rows.get(2)[1]).isEqualTo(3000);
+    }
+
+    /** The INT64 reader wraps values outside the TINYINT range, so pushdown would lose rows. */
+    @Test
+    void testInt64ReadAsTinyIntDoesNotPushLossyPredicate() throws Exception {
+        RowType readType =
+                RowType.builder()
+                        .field("pageviewId", DataTypes.STRING())
+                        .field("ecpm", DataTypes.TINYINT())
+                        .build();
+        Path path = write(ecpmSchema("int64 ecpm"), (group, i) -> group.append("ecpm", 128L));
+        PredicateBuilder builder = new PredicateBuilder(readType);
+
+        List<Object[]> rows =
+                read(readType, path, Collections.singletonList(builder.equal(1, (byte) -128)));
+
+        assertThat(rows)
+                .extracting(row -> row[1])
+                .containsExactly((byte) -128, (byte) -128, (byte) -128);
+    }
+
+    /** The INT64 reader wraps values outside the SMALLINT range, so pushdown would lose rows. */
+    @Test
+    void testInt64ReadAsSmallIntDoesNotPushLossyPredicate() throws Exception {
+        RowType readType =
+                RowType.builder()
+                        .field("pageviewId", DataTypes.STRING())
+                        .field("ecpm", DataTypes.SMALLINT())
+                        .build();
+        Path path = write(ecpmSchema("int64 ecpm"), (group, i) -> group.append("ecpm", 65_535L));
+        PredicateBuilder builder = new PredicateBuilder(readType);
+
+        List<Object[]> rows =
+                read(readType, path, Collections.singletonList(builder.equal(1, (short) -1)));
+
+        assertThat(rows)
+                .extracting(row -> row[1])
+                .containsExactly((short) -1, (short) -1, (short) -1);
+    }
+
+    /** A bare INT32 may also wrap when read as TINYINT, so its predicate cannot be pushed. */
+    @Test
+    void testInt32ReadAsTinyIntDoesNotPushLossyPredicate() throws Exception {
+        RowType readType =
+                RowType.builder()
+                        .field("pageviewId", DataTypes.STRING())
+                        .field("ecpm", DataTypes.TINYINT())
+                        .build();
+        Path path = write(ecpmSchema("int32 ecpm"), (group, i) -> group.append("ecpm", 128));
+        PredicateBuilder builder = new PredicateBuilder(readType);
+
+        List<Object[]> rows =
+                read(readType, path, Collections.singletonList(builder.equal(1, (byte) -128)));
+
+        assertThat(rows)
+                .extracting(row -> row[1])
+                .containsExactly((byte) -128, (byte) -128, (byte) -128);
+    }
+
+    /** A bare INT32 may also wrap when read as SMALLINT, so its predicate cannot be pushed. */
+    @Test
+    void testInt32ReadAsSmallIntDoesNotPushLossyPredicate() throws Exception {
+        RowType readType =
+                RowType.builder()
+                        .field("pageviewId", DataTypes.STRING())
+                        .field("ecpm", DataTypes.SMALLINT())
+                        .build();
+        Path path = write(ecpmSchema("int32 ecpm"), (group, i) -> group.append("ecpm", 65_535));
+        PredicateBuilder builder = new PredicateBuilder(readType);
+
+        List<Object[]> rows =
+                read(readType, path, Collections.singletonList(builder.equal(1, (short) -1)));
+
+        assertThat(rows)
+                .extracting(row -> row[1])
+                .containsExactly((short) -1, (short) -1, (short) -1);
+    }
+
+    /** A wider signed annotation still permits values outside the declared TINYINT range. */
+    @Test
+    void testInt16ReadAsTinyIntDoesNotPushLossyPredicate() throws Exception {
+        RowType readType =
+                RowType.builder()
+                        .field("pageviewId", DataTypes.STRING())
+                        .field("ecpm", DataTypes.TINYINT())
+                        .build();
+        Path path =
+                write(
+                        ecpmSchema("int32 ecpm (INTEGER(16,true))"),
+                        (group, i) -> group.append("ecpm", 128));
+        PredicateBuilder builder = new PredicateBuilder(readType);
+
+        List<Object[]> rows =
+                read(readType, path, Collections.singletonList(builder.equal(1, (byte) -128)));
+
+        assertThat(rows)
+                .extracting(row -> row[1])
+                .containsExactly((byte) -128, (byte) -128, (byte) -128);
+    }
+
+    /** Matching signed integer annotations retain predicate pushdown for valid physical values. */
+    @Test
+    void testAnnotatedInt8PushdownStillPrunes() throws Exception {
+        RowType readType =
+                RowType.builder()
+                        .field("pageviewId", DataTypes.STRING())
+                        .field("ecpm", DataTypes.TINYINT())
+                        .build();
+        Path path =
+                write(
+                        ecpmSchema("int32 ecpm (INTEGER(8,true))"),
+                        (group, i) -> group.append("ecpm", i + 1));
+        PredicateBuilder builder = new PredicateBuilder(readType);
+
+        List<Object[]> rows =
+                read(readType, path, Collections.singletonList(builder.greaterThan(1, (byte) 99)));
+
+        assertThat(rows).isEmpty();
     }
 
     // ------------------------------------------------------------------
@@ -406,11 +548,20 @@ class ParquetTypeWideningTest {
                 case VARCHAR:
                     values[i] = row.getString(i).toString();
                     break;
+                case TINYINT:
+                    values[i] = row.getByte(i);
+                    break;
+                case SMALLINT:
+                    values[i] = row.getShort(i);
+                    break;
                 case INTEGER:
                     values[i] = row.getInt(i);
                     break;
                 case BIGINT:
                     values[i] = row.getLong(i);
+                    break;
+                case FLOAT:
+                    values[i] = row.getFloat(i);
                     break;
                 case DOUBLE:
                     values[i] = row.getDouble(i);

@@ -543,12 +543,40 @@ public class ParquetFilters {
             throw new UnsupportedOperationException();
         }
 
+        validateNarrowIntegerPushdown(fieldRef, fileType);
+
         for (PrimitiveType.PrimitiveTypeName candidate : acceptable) {
             if (fileType.getPrimitiveTypeName() == candidate) {
                 return new PushdownTarget(fileType.getName(), candidate);
             }
         }
         throw new UnsupportedOperationException();
+    }
+
+    /** Reject physical integer ranges that the declared narrow type cannot preserve on read. */
+    private static void validateNarrowIntegerPushdown(FieldRef fieldRef, PrimitiveType fileType) {
+        int maxBitWidth;
+        switch (fieldRef.type().getTypeRoot()) {
+            case TINYINT:
+                maxBitWidth = 8;
+                break;
+            case SMALLINT:
+                maxBitWidth = 16;
+                break;
+            default:
+                return;
+        }
+
+        LogicalTypeAnnotation logicalType = fileType.getLogicalTypeAnnotation();
+        if (!(logicalType instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation)) {
+            throw new UnsupportedOperationException();
+        }
+
+        LogicalTypeAnnotation.IntLogicalTypeAnnotation intType =
+                (LogicalTypeAnnotation.IntLogicalTypeAnnotation) logicalType;
+        if (!intType.isSigned() || intType.getBitWidth() > maxBitWidth) {
+            throw new UnsupportedOperationException();
+        }
     }
 
     /**
@@ -571,8 +599,9 @@ public class ParquetFilters {
 
     /**
      * The physical types a predicate on this Paimon type can be expressed in, most preferred first.
-     * The head is what Paimon itself writes; the tail is the type widening the vectorized reader
-     * accepts, so pushdown stays available for exactly the files that can be read.
+     * The head is what Paimon itself writes; the tail is a different type the vectorized reader
+     * accepts without changing predicate semantics. Lossy narrowing is excluded even when the file
+     * can be read, because filtering happens before the reader converts the value.
      */
     private static PrimitiveType.PrimitiveTypeName[] acceptableTypes(
             org.apache.paimon.types.DataType type) {
@@ -583,6 +612,10 @@ public class ParquetFilters {
                 };
             case TINYINT:
             case SMALLINT:
+                // INT64 is lossy; INT32 annotations are validated by pushdownTarget.
+                return new PrimitiveType.PrimitiveTypeName[] {
+                    PrimitiveType.PrimitiveTypeName.INT32
+                };
             case INTEGER:
                 return new PrimitiveType.PrimitiveTypeName[] {
                     PrimitiveType.PrimitiveTypeName.INT32, PrimitiveType.PrimitiveTypeName.INT64
@@ -592,8 +625,9 @@ public class ParquetFilters {
                     PrimitiveType.PrimitiveTypeName.INT64, PrimitiveType.PrimitiveTypeName.INT32
                 };
             case FLOAT:
+                // A DOUBLE file value may round to the predicate's FLOAT value only after reading.
                 return new PrimitiveType.PrimitiveTypeName[] {
-                    PrimitiveType.PrimitiveTypeName.FLOAT, PrimitiveType.PrimitiveTypeName.DOUBLE
+                    PrimitiveType.PrimitiveTypeName.FLOAT
                 };
             case DOUBLE:
                 // A double bound cannot be narrowed to float without rounding it, so a FLOAT file
