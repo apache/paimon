@@ -252,7 +252,6 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             try {
                 abort();
             } catch (Throwable t) {
-                // never let the cleanup replace the failure that caused it
                 e.addSuppressed(t);
             }
             throw e;

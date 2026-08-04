@@ -100,7 +100,6 @@ public class FormatTableSingleFileWriterTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("cannot close");
 
-        // the staged two phase data must be discarded as well
         assertThat(fileIO.listFiles(new Path(tempDir.toString()), true)).isEmpty();
     }
 

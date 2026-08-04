@@ -173,7 +173,6 @@ public class FormatTableSingleFileWriter {
             try {
                 abort();
             } catch (Throwable t) {
-                // never let the cleanup replace the failure that caused it
                 e.addSuppressed(t);
             }
             throw e;
