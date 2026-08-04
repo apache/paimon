@@ -299,46 +299,10 @@ def _write_primary_key_groups(
     static_partition: Optional[Dict[str, Any]],
     concurrency: Optional[int],
     ray_remote_args: Optional[Dict[str, Any]],
-) -> None:
-    all_messages, _ = _prepare_primary_key_groups(
-        dataset,
-        table,
-        overwrite=overwrite,
-        static_partition=static_partition,
-        concurrency=concurrency,
-        ray_remote_args=ray_remote_args,
-    )
-
-    coordinator = PaimonDatasink(
-        table,
-        overwrite=overwrite,
-        static_partition=static_partition,
-    )
-    try:
-        coordinator.on_write_start()
-    except Exception:
-        _abort_primary_key_messages(table, all_messages)
-        raise
-    try:
-        coordinator.on_write_complete([all_messages])
-    except Exception as error:
-        coordinator.on_write_failed(error)
-        raise
-
-
-def _prepare_primary_key_groups(
-    dataset,
-    table,
-    *,
-    overwrite: bool = False,
-    static_partition: Optional[Dict[str, Any]] = None,
-    concurrency: Optional[int] = None,
-    ray_remote_args: Optional[Dict[str, Any]] = None,
+    prepare_only: bool = False,
 ):
-    """Write complete PK bucket groups and return uncommitted messages."""
     import inspect
     import pickle
-    import traceback
 
     from pypaimon.ray.shuffle import (
         _coerce_large_string_types,
@@ -347,43 +311,27 @@ def _prepare_primary_key_groups(
 
     grouped, bucket_col = _group_by_partition_bucket(dataset, table)
     message_col = "__paimon_commit_messages__"
-    count_col = "__paimon_row_count__"
-    error_col = "__paimon_write_error__"
     captured_table = table
 
     # Keep the writer inside the group UDF. Ray may split the UDF output
     # into multiple blocks, so only serialized commit messages leave it.
     def _write_group(group: pa.Table) -> pa.Table:
         if group.num_rows == 0:
-            return pa.table({
-                message_col: pa.array([], type=pa.binary()),
-                count_col: pa.array([], type=pa.int64()),
-                error_col: pa.array([], type=pa.string()),
-            })
+            return pa.table({message_col: pa.array([], type=pa.binary())})
 
         rows = _coerce_large_string_types(
             group.drop_columns([bucket_col])
         )
-        commit_messages = []
-        try:
-            worker_sink = PaimonDatasink(
-                captured_table,
-                overwrite=overwrite,
-                static_partition=static_partition,
-            )
-            commit_messages = worker_sink.write([rows], None)
-            encoded = pickle.dumps(commit_messages)
-            error = None
-        except Exception:
-            _abort_primary_key_messages(captured_table, commit_messages)
-            encoded = pickle.dumps([])
-            error = traceback.format_exc()
+        worker_sink = PaimonDatasink(
+            captured_table,
+            overwrite=overwrite,
+            static_partition=static_partition,
+        )
+        commit_messages = worker_sink.write([rows], None)
         return pa.table({
             message_col: pa.array(
-                [encoded], type=pa.binary()
-            ),
-            count_col: pa.array([rows.num_rows], type=pa.int64()),
-            error_col: pa.array([error], type=pa.string()),
+                [pickle.dumps(commit_messages)], type=pa.binary()
+            )
         })
 
     map_kwargs = {"batch_format": "pyarrow"}
@@ -402,57 +350,30 @@ def _prepare_primary_key_groups(
     if ray_remote_args:
         map_kwargs.update(ray_remote_args)
 
-    results = grouped.map_groups(_write_group, **map_kwargs)
-    all_messages = []
-    num_rows = 0
-    first_error = None
+    messages = grouped.map_groups(_write_group, **map_kwargs)
+    coordinator = None
+    if not prepare_only:
+        coordinator = PaimonDatasink(
+            table,
+            overwrite=overwrite,
+            static_partition=static_partition,
+        )
+        coordinator.on_write_start()
     try:
-        for batch in results.iter_batches(batch_format="pyarrow"):
-            blobs = batch.column(message_col).to_pylist()
-            counts = batch.column(count_col).to_pylist()
-            errors = batch.column(error_col).to_pylist()
-            for blob, count, error in zip(blobs, counts, errors):
-                if error is not None:
-                    if first_error is None:
-                        first_error = error
-                    continue
-                all_messages.extend(pickle.loads(blob))
-                num_rows += count
-        if first_error is not None:
-            raise RuntimeError(first_error)
-        return all_messages, num_rows
-    except Exception:
-        # Some Ray versions lose the schema while shuffling an empty Dataset.
-        # Check only on the failure path to avoid an extra source scan.
-        empty = False
-        if not all_messages:
+        write_returns = []
+        for batch in messages.iter_batches(batch_format="pyarrow"):
+            for blob in batch.column(message_col).to_pylist():
+                write_returns.append(pickle.loads(blob))
+        if prepare_only:
+            return [message for result in write_returns for message in result]
+        coordinator.on_write_complete(write_returns)
+    except Exception as error:
+        if prepare_only:
             try:
-                empty = dataset.limit(1).count() == 0
+                if dataset.limit(1).count() == 0:
+                    return []
             except Exception:
                 pass
-        if empty:
-            return [], 0
-        _abort_primary_key_messages(table, all_messages)
+        else:
+            coordinator.on_write_failed(error)
         raise
-
-
-def _abort_primary_key_messages(table, messages):
-    if not messages:
-        return
-    commit = table.new_batch_write_builder().new_commit()
-    try:
-        try:
-            commit.abort(messages)
-        except Exception:
-            logger.warning(
-                "Failed to abort primary-key commit messages.",
-                exc_info=True,
-            )
-    finally:
-        try:
-            commit.close()
-        except Exception:
-            logger.warning(
-                "Failed to close primary-key abort commit.",
-                exc_info=True,
-            )

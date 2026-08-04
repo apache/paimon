@@ -273,23 +273,17 @@ overlapping buckets or sequence numbers for those modes.
   HASH_FIXED primary-key group. Each `(partition_keys..., bucket)` group
   must fit in memory on one Ray node. This option does not enable Ray
   writes for HASH_DYNAMIC or CROSS_PARTITION primary-key tables.
-- `commit_mode`: `"atomic"` (default) or `"incremental"`.
-- `operation_id`, `commit_interval_seconds`, `update_cols`: required by
-  incremental writes as described below.
+- `commit_mode`: `"atomic"` (default) or `"incremental"`; see below.
 
 ### Incremental write
 
-Long-running primary-key updates can commit completed work periodically and
-resume with the same `operation_id`:
+Long-running updates can commit periodically and resume by `operation_id`:
 
 ```python
 from pypaimon.ray import PaimonOffsetSource, write_paimon
 
-source = PaimonOffsetSource(
-    "database_name.updates",
-    projection=["id", "feature"],
-)
-metrics = write_paimon(
+source = PaimonOffsetSource("database_name.updates", projection=["id", "feature"])
+write_paimon(
     source,
     "database_name.target",
     {"warehouse": "/path/to/warehouse"},
@@ -300,13 +294,11 @@ metrics = write_paimon(
 )
 ```
 
-The target must use fixed buckets and `merge-engine=partial-update`. Source
-rows must contain unique target primary keys and every `update_cols` column;
-other columns must be nullable. Missing keys are inserted. Sequence fields are
-not supported yet. Commits occur after completed internal windows, so the
-actual interval may be longer than `commit_interval_seconds`. Concurrent target
-writes or schema changes fail. After success, `delete_write_paimon_checkpoint`
-releases the retained source and checkpoint snapshots.
+The target must use fixed buckets and `merge-engine=partial-update`. Source rows
+must contain unique primary keys and every `update_cols` column. Missing keys
+are inserted. Commits occur after completed source splits, so the actual
+interval may be longer. Concurrent target writes or schema changes fail. After
+success, `delete_write_paimon_checkpoint` releases retained snapshots.
 
 ### `TableWrite.write_ray()` (lower-level)
 

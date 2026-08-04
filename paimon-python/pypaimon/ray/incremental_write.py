@@ -28,7 +28,6 @@ from pypaimon.write.commit.conflict_detection import CommitConflictError
 logger = logging.getLogger(__name__)
 
 _CHECKPOINT_PROPERTY = "ray.write-paimon.checkpoint"
-_CHECKPOINT_MODE = "primary-key-source-offset"
 _CHECKPOINT_VERSION = 1
 _TAG_PREFIX = "_pypaimon_write_"
 
@@ -49,7 +48,7 @@ def incremental_write_paimon(
     from pypaimon.ray.offset_source import PaimonOffsetSource
     from pypaimon.schema.data_types import PyarrowFieldParser
     from pypaimon.table.bucket_mode import BucketMode
-    from pypaimon.write.ray_datasink import _prepare_primary_key_groups
+    from pypaimon.write.ray_datasink import _write_primary_key_groups
 
     if not isinstance(source, PaimonOffsetSource):
         raise ValueError(
@@ -71,10 +70,6 @@ def incremental_write_paimon(
     if table.bucket_mode() != BucketMode.HASH_FIXED:
         raise ValueError(
             "incremental write_paimon requires a fixed-bucket target.")
-    if table.cross_partition_update:
-        raise ValueError(
-            "incremental write_paimon does not support cross-partition "
-            "updates.")
     if table.options.merge_engine() != MergeEngine.PARTIAL_UPDATE:
         raise ValueError(
             "incremental write_paimon requires "
@@ -116,7 +111,7 @@ def incremental_write_paimon(
     checkpoint_snapshot, state = loaded if loaded is not None else (None, None)
     latest_snapshot = table.snapshot_manager().get_latest_snapshot()
     if (state is not None
-            and not state["complete"]
+            and state["next_offset"] < state["source"]["num_units"]
             and latest_snapshot is not None
             and latest_snapshot.id != checkpoint_snapshot.id):
         raise RuntimeError("Concurrent target commit detected.")
@@ -138,23 +133,24 @@ def incremental_write_paimon(
         bound.plan["snapshot_id"])
 
     next_offset = state["next_offset"] if state is not None else 0
-    num_written = state["num_written"] if state is not None else 0
-    checkpoint_id = state["checkpoint_id"] if state is not None else 0
+    checkpoint_id = (
+        checkpoint_snapshot.commit_identifier
+        if checkpoint_snapshot is not None else 0)
     if next_offset > bound.num_units:
         raise RuntimeError("Checkpoint is beyond the source unit count.")
-    if state is not None and state["complete"]:
-        return {"num_written": num_written}
+    if state is not None and next_offset == bound.num_units:
+        return
     if state is None:
         checkpoint_id = 1
         state = _checkpoint_state(
             operation_id, planned_schema_id, update_cols,
-            bound.plan, 0, 0, checkpoint_id, bound.num_units == 0)
+            bound.plan, 0)
         base_snapshot = _commit_checkpoint(
             catalog, target, table, base_snapshot,
             planned_schema_id, commit_user, checkpoint_tags,
             checkpoint_id, [], state)
-        if state["complete"]:
-            return {"num_written": 0}
+        if bound.num_units == 0:
+            return
 
     target_schema = PyarrowFieldParser.from_paimon_schema(
         table.table_schema.fields)
@@ -173,22 +169,24 @@ def incremental_write_paimon(
         return pa.Table.from_arrays(arrays, schema=target_schema)
 
     pending_messages = []
-    pending_rows = 0
     pending_offset = next_offset
     last_commit_time = time.monotonic()
 
     try:
-        for _, end in bound.windows(next_offset):
+        for start in range(next_offset, bound.num_units):
+            end = start + 1
             dataset = bound.read_window(pending_offset, end).map_batches(
                 to_write_batch, batch_format="pyarrow")
-            messages, rows = _prepare_primary_key_groups(
+            messages = _write_primary_key_groups(
                 dataset,
                 table,
+                overwrite=False,
+                static_partition=None,
                 concurrency=concurrency,
                 ray_remote_args=ray_remote_args,
+                prepare_only=True,
             )
             pending_messages.extend(messages)
-            pending_rows += rows
             pending_offset = end
             complete = end == bound.num_units
             if (complete
@@ -197,8 +195,7 @@ def incremental_write_paimon(
                 checkpoint_id += 1
                 state = _checkpoint_state(
                     operation_id, planned_schema_id, update_cols,
-                    bound.plan, pending_offset,
-                    num_written + pending_rows, checkpoint_id, complete)
+                    bound.plan, pending_offset)
                 try:
                     base_snapshot = _commit_checkpoint(
                         catalog, target, table, base_snapshot,
@@ -209,16 +206,12 @@ def incremental_write_paimon(
                     # commit layer owns cleanup in the known case.
                     pending_messages = []
                     raise
-                num_written += pending_rows
                 pending_messages = []
-                pending_rows = 0
                 logger.info(
                     "Committed incremental write %s at offset %d/%d.",
                     operation_id, pending_offset, bound.num_units)
                 if not complete:
                     last_commit_time = time.monotonic()
-
-        return {"num_written": num_written}
     except Exception:
         if pending_messages:
             _abort_messages(table, pending_messages)
@@ -240,7 +233,7 @@ def delete_write_paimon_checkpoint(
     if loaded is None:
         return False
     _, state = loaded
-    if not state["complete"]:
+    if state["next_offset"] != state["source"]["num_units"]:
         raise RuntimeError("Cannot delete an incomplete checkpoint.")
 
     deleted = False
@@ -296,19 +289,14 @@ def _commit_checkpoint(
 
 
 def _checkpoint_state(
-        operation_id, schema_id, update_cols, source_plan, next_offset,
-        num_written, checkpoint_id, complete):
+        operation_id, schema_id, update_cols, source_plan, next_offset):
     return {
         "version": _CHECKPOINT_VERSION,
-        "mode": _CHECKPOINT_MODE,
         "operation_id": operation_id,
         "schema_id": schema_id,
         "update_cols": list(update_cols),
         "source": dict(source_plan),
         "next_offset": next_offset,
-        "num_written": num_written,
-        "checkpoint_id": checkpoint_id,
-        "complete": complete,
     }
 
 
@@ -349,7 +337,7 @@ def _load_checkpoint(
     if restore_tag:
         _store_checkpoint_tag(
             catalog, target, checkpoint_tags, checkpoint,
-            state["checkpoint_id"])
+            checkpoint.commit_identifier)
     return checkpoint, state
 
 
@@ -359,26 +347,14 @@ def _read_checkpoint(snapshot, strict=True):
         return None
     try:
         state = json.loads(encoded)
-        required = {
-            "operation_id", "schema_id", "update_cols", "source",
-            "next_offset", "num_written", "checkpoint_id", "complete",
-        }
-        if (state.get("version") != _CHECKPOINT_VERSION
-                or state.get("mode") != _CHECKPOINT_MODE
-                or not required.issubset(state)
-                or not isinstance(state["source"], dict)
-                or not isinstance(state["complete"], bool)):
-            raise ValueError
-        for name in ("next_offset", "num_written", "checkpoint_id"):
-            if (isinstance(state[name], bool)
-                    or not isinstance(state[name], int)
-                    or state[name] < 0):
-                raise ValueError
-        num_units = state["source"].get("num_units")
-        if (not isinstance(num_units, int)
-                or state["next_offset"] > num_units
-                or (state["complete"]
-                    and state["next_offset"] != num_units)):
+        next_offset = state["next_offset"]
+        num_units = state["source"]["num_units"]
+        if (state["version"] != _CHECKPOINT_VERSION
+                or isinstance(next_offset, bool)
+                or not isinstance(next_offset, int)
+                or next_offset < 0
+                or not isinstance(num_units, int)
+                or next_offset > num_units):
             raise ValueError
         return state
     except Exception as error:
@@ -446,8 +422,6 @@ def _delete_tag(catalog, table, tag, ignore_missing=False):
 
 
 def _abort_messages(table, messages):
-    if not messages:
-        return
     commit = table.new_batch_write_builder().new_commit()
     try:
         commit.abort(messages)
@@ -458,8 +432,6 @@ def _abort_messages(table, messages):
 def _validate_operation_id(operation_id):
     if not isinstance(operation_id, str) or not operation_id.strip():
         raise ValueError("operation_id must be a non-empty string.")
-    if len(operation_id) > 256:
-        raise ValueError("operation_id must contain at most 256 characters.")
 
 
 def _digest(value):
