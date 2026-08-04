@@ -3042,6 +3042,7 @@ class BlobEndToEndTest(unittest.TestCase):
             self.assertEqual(result["tail"].to_data(), b"third")
 
     def test_map_blob_key_types_and_rejections(self):
+        from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
         from pypaimon.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
@@ -3058,6 +3059,7 @@ class BlobEndToEndTest(unittest.TestCase):
                 Decimal("123456789012345678.90"),
             ),
             (AtomicType("DATE"), datetime.date(1969, 12, 31)),
+            (AtomicType("TIME(3)"), datetime.time(12, 34, 56, 789000)),
             (AtomicType("STRING"), "string"),
             (AtomicType("CHAR(3)"), "abc"),
             (AtomicType("VARCHAR(10)"), "varchar"),
@@ -3072,6 +3074,7 @@ class BlobEndToEndTest(unittest.TestCase):
             b"\xd2\x04\x00\x00\x00\x00\x00\x00",
             b"\x00\xab\x54\xa9\x8c\xeb\x1f\x0a\xd2",
             b"\xff\xff\xff\xff",
+            b"\x95\x2c\xb3\x02",
             b"string",
             b"abc",
             b"varchar",
@@ -3124,6 +3127,14 @@ class BlobEndToEndTest(unittest.TestCase):
                 finally:
                     reader.close()
 
+        time_serializer = create_map_blob_key_serializer(AtomicType("TIME(9)"))
+        serialized_time = time_serializer.serialize(datetime.time(12, 34, 56, 789999))
+        self.assertEqual(serialized_time, b"\x95\x2c\xb3\x02")
+        self.assertEqual(
+            time_serializer.deserialize(serialized_time),
+            datetime.time(12, 34, 56, 789000),
+        )
+
         output = io.BytesIO()
         unsupported_key_writer = BlobFormatWriter(output)
         unsupported_key_field = DataField(
@@ -3161,6 +3172,19 @@ class BlobEndToEndTest(unittest.TestCase):
             invalid_key_writer.add_element(GenericRow(
                 [{"not-an-int": BlobData(b"value")}],
                 [int_key_field],
+                RowKind.INSERT,
+            ))
+
+        invalid_time_key_writer = BlobFormatWriter(io.BytesIO())
+        time_key_field = DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("TIME(3)"), AtomicType("BLOB")),
+        )
+        with self.assertRaisesRegex(ValueError, "key must be a datetime.time"):
+            invalid_time_key_writer.add_element(GenericRow(
+                [{"not-a-time": BlobData(b"value")}],
+                [time_key_field],
                 RowKind.INSERT,
             ))
 

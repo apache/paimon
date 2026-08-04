@@ -1564,6 +1564,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'date_payloads': {
                 datetime.date(1969, 12, 31): b'java-date',
             },
+            'time_payloads': {
+                datetime.time(12, 34, 56, 789000): b'java-time',
+            },
         }
         for name, expected in expected_additional_payloads.items():
             self.assertEqual(
@@ -1580,6 +1583,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         high_decimal_map_blob_type = pa.map_(
             pa.decimal128(20, 2), pa.large_binary())
         date_map_blob_type = pa.map_(pa.date32(), pa.large_binary())
+        time_map_blob_type = pa.map_(pa.time32('ms'), pa.large_binary())
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('payloads', map_blob_type),
@@ -1587,6 +1591,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ('compact_decimal_payloads', compact_decimal_map_blob_type),
             ('high_decimal_payloads', high_decimal_map_blob_type),
             ('date_payloads', date_map_blob_type),
+            ('time_payloads', time_map_blob_type),
         ])
         schema = Schema.from_pyarrow_schema(
             pa_schema,
@@ -1635,6 +1640,13 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 )], None, None, None],
                 type=date_map_blob_type,
             ),
+            'time_payloads': pa.array(
+                [[(
+                    datetime.time(12, 34, 56, 789000),
+                    b'python-time',
+                )], None, None, None],
+                type=time_map_blob_type,
+            ),
         }, schema=pa_schema)
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -1669,6 +1681,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             },
             'date_payloads': {
                 datetime.date(1969, 12, 31): b'python-date',
+            },
+            'time_payloads': {
+                datetime.time(12, 34, 56, 789000): b'python-time',
             },
         }
         for name, expected in expected_additional_payloads.items():

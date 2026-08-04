@@ -895,10 +895,12 @@ their encodings are:
 | `DECIMAL(p, s)`, `p <= 18` | Eight-byte little-endian signed unscaled integer |
 | `DECIMAL(p, s)`, `p > 18` | Minimal-length signed big-endian two's-complement unscaled integer |
 | `DATE` | Four-byte little-endian signed count of days since 1970-01-01 |
+| `TIME(p)` | Four-byte little-endian signed count of milliseconds since midnight |
 | `CHAR`, `VARCHAR` | UTF-8 bytes |
 
 The DECIMAL scale is defined by the field type and is not stored in each key. An empty
-map has an entry count of zero and is distinct from a null map.
+map has an entry count of zero and is distinct from a null map. The `TIME(p)` encoding
+uses Paimon's millisecond internal representation and does not add nanosecond precision.
 
 At the outer file index level, `-1` represents a null field and `-2` represents a
 field placeholder used by data evolution.
