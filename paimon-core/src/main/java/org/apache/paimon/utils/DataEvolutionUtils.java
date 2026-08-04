@@ -20,13 +20,20 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.source.AllColumns;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.KnownWrittenColumns;
+import org.apache.paimon.table.source.WrittenColumns;
 import org.apache.paimon.types.DataField;
 
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -37,6 +44,44 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Util class for data evolution. */
 public class DataEvolutionUtils {
+
+    /** Collect written field ids from data files in the selected splits. */
+    public static WrittenColumns collectWrittenColumns(
+            Collection<DataSplit> splits, Function<Long, TableSchema> schemaLoader) {
+        Set<Integer> fieldIds = new TreeSet<>();
+        Map<Pair<Long, List<String>>, Set<Integer>> fieldIdsCache = new HashMap<>();
+        for (DataSplit split : splits) {
+            for (DataFileMeta file : split.dataFiles()) {
+                try {
+                    Pair<Long, List<String>> cacheKey = Pair.of(file.schemaId(), file.writeCols());
+                    Set<Integer> fileFieldIds = fieldIdsCache.get(cacheKey);
+                    if (fileFieldIds == null) {
+                        fileFieldIds = computeFileFieldIds(schemaLoader, file);
+                        fieldIdsCache.put(cacheKey, fileFieldIds);
+                    }
+                    fieldIds.addAll(fileFieldIds);
+                } catch (RuntimeException e) {
+                    return AllColumns.INSTANCE;
+                }
+            }
+        }
+        return new KnownWrittenColumns(fieldIds);
+    }
+
+    /** Resolve a data file's physical columns through the schema the file was written with. */
+    public static Set<Integer> computeFileFieldIds(
+            Function<Long, TableSchema> schemaLoader, DataFileMeta file) {
+        TableSchema fileSchema = schemaLoader.apply(file.schemaId());
+        if (fileSchema == null) {
+            throw new IllegalArgumentException("Cannot find schema " + file.schemaId());
+        }
+
+        Set<Integer> fieldIds = new TreeSet<>();
+        for (DataField field : fileSchema.project(file.writeCols()).fields()) {
+            fieldIds.add(field.id());
+        }
+        return fieldIds;
+    }
 
     /**
      * Table field ids physically present in a file, resolved through the schema used to write it.

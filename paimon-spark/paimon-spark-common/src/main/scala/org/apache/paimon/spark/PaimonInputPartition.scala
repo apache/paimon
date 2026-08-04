@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.table.source.Split
+import org.apache.paimon.table.source.{Split, WrittenColumns}
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
@@ -36,6 +36,19 @@ trait PaimonInputPartition extends InputPartition {
 }
 
 case class SimplePaimonInputPartition(splits: Seq[Split]) extends PaimonInputPartition
+
+private[spark] case class PaimonMicroBatchMetadata(
+    sourceId: String,
+    startOffset: String,
+    endOffset: String,
+    splitCount: Int,
+    writtenColumns: WrittenColumns)
+
+private[spark] case class PaimonMicroBatchInputPartition(
+    splits: Seq[Split],
+    metadata: PaimonMicroBatchMetadata)
+  extends PaimonInputPartition
+
 object PaimonInputPartition {
   def apply(split: Split): PaimonInputPartition = {
     SimplePaimonInputPartition(Seq(split))
