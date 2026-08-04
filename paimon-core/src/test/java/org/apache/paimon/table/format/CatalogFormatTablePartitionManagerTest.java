@@ -288,6 +288,72 @@ class CatalogFormatTablePartitionManagerTest {
     }
 
     @Test
+    void testRangeOnLeadingKeyIsPushedDownAsValuePattern() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenReturn(new PagedList<>(Collections.emptyList(), null));
+
+        partitionManager(catalog)
+                .listPartitions(Collections.emptyMap(), yearBetween("2019", "2021"));
+
+        verify(catalog)
+                .listPartitionsByFilterPaged(
+                        eq(IDENTIFIER), any(), eq(REQUEST_SIZE), isNull(), eq("year=20%"));
+    }
+
+    @Test
+    void testValuePatternExtendsAnEqualityPrefixByOneKey() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenReturn(new PagedList<>(Collections.emptyList(), null));
+
+        PredicateBuilder builder = partitionPredicates();
+        Predicate monthRange =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(1, BinaryString.fromString("01")),
+                        builder.lessOrEqual(1, BinaryString.fromString("09")));
+
+        partitionManager(catalog)
+                .listPartitions(Collections.singletonMap("year", "2025"), monthRange);
+
+        verify(catalog)
+                .listPartitionsByFilterPaged(
+                        eq(IDENTIFIER),
+                        any(),
+                        eq(REQUEST_SIZE),
+                        isNull(),
+                        eq("year=2025/month=0%"));
+    }
+
+    /**
+     * The pattern only narrows what the catalog returns; the scan still tests every candidate. So a
+     * pattern that matches extra partitions is harmless, while one that misses a matching partition
+     * silently drops data. This pins the direction that matters against a catalog that really
+     * applies the LIKE pattern.
+     */
+    @Test
+    void testValuePatternNeverDropsAMatchingPartition() throws Exception {
+        List<Partition> universe = new ArrayList<>();
+        for (int year = 2018; year <= 2021; year++) {
+            for (int month = 1; month <= 12; month++) {
+                universe.add(partition(String.valueOf(year), String.format("%02d", month)));
+            }
+        }
+        Catalog catalog = catalogHonouringPattern(universe);
+
+        Predicate filter = yearBetween("2019", "2021");
+        List<Partition> returned =
+                partitionManager(catalog).listPartitions(Collections.emptyMap(), filter);
+
+        List<Partition> shouldSurvive =
+                universe.stream()
+                        .filter(p -> p.spec().get("year").compareTo("2019") >= 0)
+                        .filter(p -> p.spec().get("year").compareTo("2021") <= 0)
+                        .collect(Collectors.toList());
+        assertThat(returned).containsAll(shouldSurvive);
+    }
+
+    @Test
     void testNonLeadingPrefixIsRejected() {
         Catalog catalog = mock(Catalog.class);
         FormatTablePartitionManager partitionManager = partitionManager(catalog);
@@ -504,6 +570,50 @@ class CatalogFormatTablePartitionManagerTest {
 
     private static List<Map<String, String>> flatten(List<List<Map<String, String>>> batches) {
         return batches.stream().flatMap(List::stream).collect(Collectors.toList());
+    }
+
+    private static PredicateBuilder partitionPredicates() {
+        return new PredicateBuilder(
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"year", "month"}));
+    }
+
+    private static Predicate yearBetween(String lower, String upper) {
+        PredicateBuilder builder = partitionPredicates();
+        return PredicateBuilder.and(
+                builder.greaterOrEqual(0, BinaryString.fromString(lower)),
+                builder.lessOrEqual(0, BinaryString.fromString(upper)));
+    }
+
+    /** A catalog that really applies the LIKE pattern, so an over-narrow pattern shows up. */
+    private static Catalog catalogHonouringPattern(List<Partition> universe) throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenAnswer(
+                        invocation -> {
+                            String pattern = invocation.getArgument(4);
+                            java.util.regex.Pattern like =
+                                    pattern == null
+                                            ? null
+                                            : java.util.regex.Pattern.compile(
+                                                    java.util.regex.Pattern.quote(pattern)
+                                                            .replace("%", "\\E.*\\Q")
+                                                            .replace("_", "\\E.\\Q"));
+                            List<Partition> matched = new ArrayList<>();
+                            for (Partition partition : universe) {
+                                String name =
+                                        "year="
+                                                + partition.spec().get("year")
+                                                + "/month="
+                                                + partition.spec().get("month");
+                                if (like == null || like.matcher(name).matches()) {
+                                    matched.add(partition);
+                                }
+                            }
+                            return new PagedList<>(matched, null);
+                        });
+        return catalog;
     }
 
     private static Partition partition(String year, String month) {

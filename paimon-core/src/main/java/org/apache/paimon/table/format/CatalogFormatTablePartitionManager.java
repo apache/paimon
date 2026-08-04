@@ -25,7 +25,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.utils.FunctionWithException;
-import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
@@ -73,7 +72,7 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
                 prefix,
                 partitionKeys,
                 identifier.getFullName());
-        String pattern = PartitionPathUtils.buildPartitionNamePrefixPattern(partitionKeys, ordered);
+        String pattern = PartitionNamePatterns.build(partitionKeys, ordered, filter);
         return execute(
                 catalog -> {
                     if (filter != null) {
