@@ -66,7 +66,7 @@ case class PaimonSparkWriter(
   private val fullCompactionDeltaCommits: Option[Int] =
     Option.apply(coreOptions.fullCompactionDeltaCommits())
 
-  private val needFullCompaction = fullCompactionDeltaCommits.exists {
+  private val forceFullCompaction = fullCompactionDeltaCommits.exists {
     deltaCommits => deltaCommits > 0 && batchId.forall(id => (id + 1) % deltaCommits == 0)
   }
 
@@ -438,7 +438,7 @@ case class PaimonSparkWriter(
         stagedSparkSession,
         postponeBaseSnapshotId,
         overwritePartitionSpec,
-        needFullCompaction).commit(commitMessages, finalOperation)
+        forceFullCompaction).commit(commitMessages, finalOperation)
       postCommit(finalMessages)
       return
     }

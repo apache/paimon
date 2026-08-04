@@ -52,7 +52,7 @@ private[spark] class SparkPostponeStagedCommitter(
     @transient spark: SparkSession,
     baseSnapshotId: Option[Long],
     overwritePartitionSpec: Option[Map[String, String]],
-    needFullCompaction: Boolean)
+    forceFullCompaction: Boolean)
   extends Serializable {
 
   import SparkPostponeStagedCommitter._
@@ -70,10 +70,7 @@ private[spark] class SparkPostponeStagedCommitter(
     options.put(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false")
     table.copy(options)
   }
-  private val fixedWriteBuilder = {
-    val builder = fixedWriteTable.newPostponeFixedBucketWriteBuilder()
-    if (needFullCompaction) builder.withCompaction() else builder
-  }
+  private val fixedWriteBuilder = fixedWriteTable.newPostponeFixedBucketWriteBuilder()
   private val rescaleWriteBuilder = {
     val options = new java.util.HashMap[String, String]()
     options.put(CoreOptions.CHANGELOG_PRODUCER.key(), CoreOptions.ChangelogProducer.NONE.toString)
@@ -279,7 +276,7 @@ private[spark] class SparkPostponeStagedCommitter(
       replacePreviousFiles,
       restoreSnapshotId = restoreSnapshotId,
       writeBuilder = fixedWriteBuilder,
-      fullCompaction = needFullCompaction)
+      fullCompaction = forceFullCompaction)
   }
 
   private def rewriteRealBuckets(
