@@ -163,6 +163,75 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testFullTextSearchPinsLiveRowsToPlanSnapshot() throws Exception {
+        Identifier identifier = identifier("full_text_pinned_live_rows");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.STRING())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+
+        String[] documents = {
+            "paimon keyword", "paimon keyword", "paimon keyword", "paimon keyword"
+        };
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+
+        FullTextSearchBuilder builder =
+                table.newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("keyword"))
+                        .withLimit(4);
+        FullTextScan.Plan plan = builder.newFullTextScan().scan();
+
+        // Row 0 was live when the plan was created. A later DV commit must not change
+        // the plan's live-row view.
+        commitDeletionVectors(table, 0L);
+
+        GlobalIndexResult result = builder.newFullTextRead().read(plan);
+        assertThat(result.results()).contains(0L);
+    }
+
+    @Test
+    public void testFullTextRawFallbackPinsDataReadToPlanSnapshot() throws Exception {
+        Identifier identifier = identifier("full_text_pinned_raw_fallback");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.STRING())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .option(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE.key(), "full")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+
+        String[] indexedDocuments = {"indexed document", "another indexed document"};
+        writeDocuments(table, indexedDocuments);
+        buildAndCommitIndex(table, indexedDocuments);
+        writeDocuments(table, new String[] {"fresh planned document", "other raw document"});
+
+        FullTextSearchBuilder builder =
+                table.newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("fresh"))
+                        .withLimit(4);
+        FullTextScan.Plan plan = builder.newFullTextScan().scan();
+
+        // Row id 2 belongs to the raw fallback and was live at planning time.
+        commitDeletionVectors(table, 2L);
+
+        GlobalIndexResult result = builder.newFullTextRead().read(plan);
+        assertThat(result.results()).contains(2L);
+    }
+
+    @Test
     public void testFullTextSearchNonFastModesScanUnindexedData() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();

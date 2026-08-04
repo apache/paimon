@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -78,7 +80,16 @@ public class DataEvolutionFullTextRead implements FullTextRead {
     }
 
     @Override
+    public GlobalIndexResult read(FullTextScan.Plan plan) {
+        return read(plan.splits(), plan.snapshot());
+    }
+
+    @Override
     public GlobalIndexResult read(List<FullTextSearchSplit> splits) {
+        return read(splits, null);
+    }
+
+    private GlobalIndexResult read(List<FullTextSearchSplit> splits, @Nullable Snapshot snapshot) {
         if (splits.isEmpty()) {
             return GlobalIndexResult.createEmpty();
         }
@@ -102,16 +113,38 @@ public class DataEvolutionFullTextRead implements FullTextRead {
         }
 
         GlobalIndexFileReader indexFileReader = m -> table.fileIO().newInputStream(m.filePath());
-        RoaringNavigableMap64 liveRows = GlobalIndexLiveRowFilter.liveRows(table, partitionFilter);
+        RoaringNavigableMap64 liveRows =
+                GlobalIndexLiveRowFilter.liveRows(table, snapshot, partitionFilter, null);
         ScoredGlobalIndexResult result =
                 evalQuery(splitsByColumn, indexPathFactory, indexFileReader, executor, liveRows);
         if (!rawRowRanges.isEmpty()) {
             result =
                     new RawFullTextReadImpl(
-                                    table, partitionFilter, limit, textColumn, this::evalQuery)
+                                    rawReadTable(snapshot),
+                                    partitionFilter,
+                                    limit,
+                                    textColumn,
+                                    this::evalQuery)
                             .withRawSearch(result, rawRowRanges, splitsByColumn, executor);
         }
         return result.topK(limit);
+    }
+
+    private FileStoreTable rawReadTable(@Nullable Snapshot planSnapshot) {
+        if (planSnapshot == null) {
+            return table;
+        }
+
+        Map<String, String> pinOptions = new HashMap<>();
+        pinOptions.put(
+                CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_SNAPSHOT.toString());
+        pinOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(planSnapshot.id()));
+        pinOptions.put(CoreOptions.SCAN_VERSION.key(), null);
+        pinOptions.put(CoreOptions.SCAN_TAG_NAME.key(), null);
+        pinOptions.put(CoreOptions.SCAN_WATERMARK.key(), null);
+        pinOptions.put(CoreOptions.SCAN_TIMESTAMP.key(), null);
+        pinOptions.put(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), null);
+        return table.copyWithoutTimeTravel(pinOptions);
     }
 
     ScoredGlobalIndexResult evalQuery(

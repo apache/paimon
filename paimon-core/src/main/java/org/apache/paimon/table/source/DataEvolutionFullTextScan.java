@@ -34,6 +34,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -128,7 +130,18 @@ public class DataEvolutionFullTextScan implements FullTextScan {
             }
         }
 
-        return () -> splits;
+        @Nullable Snapshot planSnapshot = snapshot;
+        return new Plan() {
+            @Override
+            public List<FullTextSearchSplit> splits() {
+                return splits;
+            }
+
+            @Override
+            public Snapshot snapshot() {
+                return planSnapshot;
+            }
+        };
     }
 
     /**

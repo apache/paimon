@@ -881,10 +881,13 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
             None, field_id=1, index_type="btree",
             file_name="btree.index", row_range_start=0, row_range_end=9)
         table = _StubTable(fields=[text_field], entries=[ft_entry, btree_entry])
-        _patch_snapshot(self, [ft_entry, btree_entry])
+        snapshot = types.SimpleNamespace(id=7)
+        _patch_snapshot(self, [ft_entry, btree_entry], snapshot)
 
-        splits = DataEvolutionFullTextScan(table, [text_field]).scan().splits()
+        plan = DataEvolutionFullTextScan(table, [text_field]).scan()
+        splits = plan.splits()
 
+        self.assertIs(snapshot, plan.snapshot())
         self.assertEqual(1, len(splits))
         self.assertEqual(
             ["ft.index"],
@@ -2905,6 +2908,98 @@ class VectorSearchManySplitsTest(unittest.TestCase):
 
 class FullTextSearchManySplitsTest(unittest.TestCase):
 
+    def test_full_text_read_plan_pins_live_rows_to_snapshot(self):
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
+        from pypaimon.table.source.full_text_scan import FullTextScanPlan
+        from pypaimon.table.source.full_text_search_split import (
+            IndexFullTextSearchSplit,
+        )
+
+        snapshot = types.SimpleNamespace(id=7)
+        text_field = _field(1, "content", "STRING")
+        entry = _entry(None, field_id=1, index_type="full-text",
+                       file_name="ft.index", row_range_start=10,
+                       row_range_end=14)
+        table = _StubTable(fields=[text_field], entries=[entry])
+        split = IndexFullTextSearchSplit(
+            column_name="content",
+            row_range_start=10,
+            row_range_end=14,
+            full_text_index_files=[entry.index_file],
+        )
+        live_rows = _bitmap(10, 12, 13, 14)
+
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+            class _FakeReader:
+                def visit_full_text_search(self_inner, fts):
+                    return _completed_future(
+                        DictBasedScoredIndexResult({
+                            row_id: float(row_id)
+                            for row_id in fts.include_row_ids
+                        }))
+
+                def close(self_inner):
+                    pass
+
+            return _FakeReader()
+
+        with mock.patch(
+                "pypaimon.table.source.full_text_read."
+                "global_index_live_row_filter.live_rows",
+                return_value=live_rows) as live_rows_fn, \
+             mock.patch(
+                "pypaimon.table.source.full_text_read._create_full_text_reader",
+                side_effect=_fake_create):
+            result = DataEvolutionFullTextRead(
+                table,
+                limit=10,
+                text_column=text_field,
+                query=match_query("test"),
+            ).read_plan(FullTextScanPlan([split], snapshot))
+
+        live_rows_fn.assert_called_once_with(table, None, snapshot)
+        self.assertEqual([10, 12, 13, 14], sorted(list(result.results())))
+
+    def test_full_text_raw_fallback_pins_data_read_to_snapshot(self):
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
+        from pypaimon.table.source.full_text_scan import FullTextScanPlan
+        from pypaimon.table.source.full_text_search_split import RawFullTextSearchSplit
+
+        snapshot = types.SimpleNamespace(id=7)
+        text_field = _field(1, "content", "STRING")
+        table = _StubTable(fields=[text_field], entries=[])
+        planned_table = _StubTable(fields=[text_field], entries=[])
+        _install_raw_full_text_read_builder(
+            planned_table, "content", {5: "raw paimon"})
+        table.copy_without_time_travel = mock.Mock(return_value=planned_table)
+
+        with mock.patch(
+                "pypaimon.table.source.full_text_read."
+                "DataEvolutionFullTextRead._build_raw_index",
+                return_value=b"raw-index"), \
+             mock.patch(
+                "pypaimon.table.source.full_text_read._search_raw_full_text",
+                return_value=DictBasedScoredIndexResult({5: 9.0})):
+            result = DataEvolutionFullTextRead(
+                table,
+                limit=10,
+                text_column=text_field,
+                query=match_query("paimon"),
+            ).read_plan(FullTextScanPlan(
+                [RawFullTextSearchSplit([Range(5, 5)])], snapshot))
+
+        table.copy_without_time_travel.assert_called_once_with({
+            CoreOptions.SCAN_MODE.key(): "from-snapshot",
+            CoreOptions.SCAN_SNAPSHOT_ID.key(): "7",
+        })
+        self.assertEqual([5], sorted(list(result.results())))
+
     def test_full_text_read_threads_external_path_to_reader(self):
         from pypaimon.table.source.full_text_read import DataEvolutionFullTextRead
         from pypaimon.table.source.full_text_search_split import (
@@ -3002,7 +3097,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
                 partition_filter=partition_filter,
             ).read([split])
 
-        live_rows_fn.assert_called_once_with(table, partition_filter)
+        live_rows_fn.assert_called_once_with(table, partition_filter, None)
         self.assertEqual([[0, 2, 3, 4]], [b.to_list() for b in captured])
         self.assertEqual([10, 12, 13, 14], sorted(list(result.results())))
 

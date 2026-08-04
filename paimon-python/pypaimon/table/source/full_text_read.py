@@ -72,7 +72,13 @@ class DataEvolutionFullTextRead(FullTextRead):
         self._query = query
         self._partition_filter = partition_filter
 
+    def read_plan(self, plan: FullTextScanPlan) -> GlobalIndexResult:
+        return self._read(plan.splits(), plan.snapshot())
+
     def read(self, splits: List[FullTextSearchSplit]) -> GlobalIndexResult:
+        return self._read(splits, None)
+
+    def _read(self, splits: List[FullTextSearchSplit], snapshot) -> GlobalIndexResult:
         index_splits, raw_splits = _split_search_splits(splits)
         if not index_splits and not raw_splits:
             return GlobalIndexResult.create_empty()
@@ -81,10 +87,10 @@ class DataEvolutionFullTextRead(FullTextRead):
         for split in index_splits:
             splits_by_column.setdefault(split.column_name, []).append(split)
         live_rows = global_index_live_row_filter.live_rows(
-            self._table, self._partition_filter)
+            self._table, self._partition_filter, snapshot)
         indexed_result = self._eval_column_query(splits_by_column, live_rows)
         raw_result = self._read_raw_search(
-            _raw_row_ranges(raw_splits), _index_type(index_splits))
+            _raw_row_ranges(raw_splits), _index_type(index_splits), snapshot)
         return indexed_result.or_(raw_result).top_k(self._limit)
 
     def _eval_column_query(
@@ -160,7 +166,7 @@ class DataEvolutionFullTextRead(FullTextRead):
         future.add_done_callback(lambda _: reader.close())
         return future
 
-    def _read_raw_search(self, raw_row_ranges, index_type):
+    def _read_raw_search(self, raw_row_ranges, index_type, snapshot=None):
         raw_row_ranges = Range.sort_and_merge_overlap(raw_row_ranges, True)
         if not raw_row_ranges:
             return DictBasedScoredIndexResult({})
@@ -169,7 +175,7 @@ class DataEvolutionFullTextRead(FullTextRead):
 
         row_range_start = raw_row_ranges[0].from_
         row_range_end = raw_row_ranges[-1].to
-        table = self._read_raw_rows(raw_row_ranges)
+        table = self._read_raw_rows(raw_row_ranges, snapshot)
         if table is None or table.num_rows == 0:
             return DictBasedScoredIndexResult({})
 
@@ -188,8 +194,10 @@ class DataEvolutionFullTextRead(FullTextRead):
             _candidate_limit(row_range_start, row_range_end),
         ).top_k(self._limit)
 
-    def _read_raw_rows(self, raw_row_ranges):
-        read_builder = self._table.new_read_builder()
+    def _read_raw_rows(self, raw_row_ranges, snapshot=None):
+        read_table = global_index_live_row_filter.table_at_snapshot(
+            self._table, snapshot)
+        read_builder = read_table.new_read_builder()
         if self._partition_filter is not None:
             read_builder = read_builder.with_partition_filter(self._partition_filter)
 

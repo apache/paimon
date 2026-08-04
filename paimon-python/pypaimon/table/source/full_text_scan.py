@@ -36,11 +36,15 @@ from pypaimon.utils.range import Range
 class FullTextScanPlan:
     """Plan of full-text scan."""
 
-    def __init__(self, splits: List[FullTextSearchSplit]):
+    def __init__(self, splits: List[FullTextSearchSplit], snapshot=None):
         self._splits = splits
+        self._snapshot = snapshot
 
     def splits(self) -> List[FullTextSearchSplit]:
         return self._splits
+
+    def snapshot(self):
+        return self._snapshot
 
 
 class FullTextScan(ABC):
@@ -129,7 +133,7 @@ class DataEvolutionFullTextScan(FullTextScan):
             if raw_row_ranges:
                 splits.append(RawFullTextSearchSplit(raw_row_ranges))
 
-        return FullTextScanPlan(splits)
+        return FullTextScanPlan(splits, snapshot)
 
 
 def _supports_full_text_search(index_type):
