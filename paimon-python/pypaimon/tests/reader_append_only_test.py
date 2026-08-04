@@ -25,6 +25,7 @@ import unittest
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
@@ -1022,6 +1023,7 @@ class AoReaderTest(unittest.TestCase):
 
             print(f"✓ Iteration {test_iteration + 1}/{iter_num} completed successfully")
 
+    @pytest.mark.python_plan
     def test_is_in_with_partitions(self):
         from pypaimon.manifest.manifest_file_manager import ManifestFileManager
         from io import BytesIO
@@ -1119,6 +1121,7 @@ class AoReaderTest(unittest.TestCase):
         self.assertFalse(pb.equal('pt', 'x').test(row_null))
         self.assertTrue(pb.equal('pt', 'x').test(row_x))
 
+    @pytest.mark.python_plan
     def test_early_partition_filter_isnull_scan(self):
         # Black-box: drive the early manifest partition filter through an actual
         # scan (not just Predicate.test), over a null + non-null partition mix.

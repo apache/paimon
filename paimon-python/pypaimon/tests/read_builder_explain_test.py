@@ -25,6 +25,7 @@ import unittest
 from typing import Any, Dict, List
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate import Predicate
@@ -131,6 +132,7 @@ class ReadBuilderExplainTest(unittest.TestCase):
 
     # ---- 2. PK + partition + bucket pruning ----------------------------
 
+    @pytest.mark.python_plan
     def test_explain_pk_table_with_partition_and_bucket_predicate(self):
         table, pa_schema = self._pk_partitioned_bucketed_table(
             'explain_pk_pruning', num_buckets=4)

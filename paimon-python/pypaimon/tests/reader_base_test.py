@@ -27,6 +27,7 @@ from unittest.mock import Mock
 
 import pandas as pd
 import pyarrow as pa
+import pytest
 from parameterized import parameterized
 
 from pypaimon import CatalogFactory, Schema
@@ -226,6 +227,7 @@ class ReaderBasicTest(unittest.TestCase):
         pd.testing.assert_frame_equal(
             actual_df.reset_index(drop=True), expected_df.reset_index(drop=True))
 
+    @pytest.mark.python_plan
     def test_full_data_types(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int8()),
