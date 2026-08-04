@@ -24,6 +24,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.types.logical.BinaryType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -107,21 +108,21 @@ public class LogicalTypeConversion {
         String dimKey = String.format("field.%s.vector-dim", fieldName);
         checkArgument(
                 options.containsKey(dimKey),
-                "When setting '"
-                        + CoreOptions.VECTOR_FIELD.key()
-                        + "', you must also set 'field.%s.vector-dim',"
-                        + " where %s is the name of the vector field.");
+                "When setting '%s', you must also set '%s'.",
+                CoreOptions.VECTOR_FIELD.key(),
+                dimKey);
         String vectorDim = options.get(dimKey);
         checkArgument(
-                !vectorDim.trim().isEmpty(),
-                "Expected an integer for vector-dim, but got empty value.");
+                !StringUtils.isNullOrWhitespaceOnly(vectorDim),
+                "Expected an integer for '%s', but got empty value.",
+                dimKey);
 
         try {
-            int dim = Integer.parseInt(vectorDim);
+            int dim = Integer.parseInt(vectorDim.trim());
             return DataTypes.VECTOR(dim, toDataType(elementType));
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(
-                    "Expected an integer for vector-dim, but got: " + vectorDim);
+                    String.format("Expected an integer for '%s', but got: %s.", dimKey, vectorDim));
         }
     }
 
