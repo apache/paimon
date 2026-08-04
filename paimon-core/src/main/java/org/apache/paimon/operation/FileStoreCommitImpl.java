@@ -341,7 +341,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         List<CommitMessage> commitMessages = committable.fileCommittables();
         ManifestEntryChanges changes = collectChanges(commitMessages);
-        Set<BinaryRow> materializedPartitions = materializedPartitions(commitMessages);
+        Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
         try {
             List<SimpleFileEntry> appendSimpleEntries =
                     SimpleFileEntry.from(changes.appendTableFiles);
@@ -394,7 +394,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.compactIndexFiles.isEmpty()) {
                 attempts +=
                         tryCommit(
-                                compactChangesProvider(changes, materializedPartitions),
+                                compactChangesProvider(changes, materializedBuckets),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -765,12 +765,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return changes;
     }
 
-    private Set<BinaryRow> materializedPartitions(List<CommitMessage> commitMessages) {
+    private Set<Pair<BinaryRow, Integer>> materializedBuckets(List<CommitMessage> commitMessages) {
         if (!options.dataEvolutionEnabled() || !options.deletionVectorsEnabled()) {
             return Collections.emptySet();
         }
 
-        Set<BinaryRow> result = new HashSet<>();
+        Set<Pair<BinaryRow, Integer>> result = new HashSet<>();
         for (CommitMessage message : commitMessages) {
             CommitMessageImpl commitMessage = (CommitMessageImpl) message;
             if (commitMessage.compactIncrement().compactBefore().stream()
@@ -782,14 +782,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             .anyMatch(file -> file.firstRowId() != null)) {
                 continue;
             }
-            result.add(commitMessage.partition());
+            result.add(Pair.of(commitMessage.partition(), commitMessage.bucket()));
         }
         return result;
     }
 
-    private CommitChangesProvider compactChangesProvider(
-            ManifestEntryChanges changes, Set<BinaryRow> materializedPartitions) {
-        if (materializedPartitions.isEmpty()) {
+    @VisibleForTesting
+    CommitChangesProvider compactChangesProvider(
+            ManifestEntryChanges changes, Set<Pair<BinaryRow, Integer>> materializedBuckets) {
+        if (materializedBuckets.isEmpty()) {
             return CommitChangesProvider.provider(
                     changes.compactTableFiles, changes.compactChangelog, changes.compactIndexFiles);
         }
@@ -802,8 +803,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     entry ->
                                             entry.kind() != FileKind.DELETE
                                                     || entry.indexFile().globalIndexMeta() == null
-                                                    || !materializedPartitions.contains(
-                                                            entry.partition()))
+                                                    || !materializedBuckets.contains(
+                                                            Pair.of(
+                                                                    entry.partition(),
+                                                                    entry.bucket())))
                             .collect(Collectors.toList());
 
             // This provider is invoked again after every optimistic-commit conflict. Scanning the
@@ -813,7 +816,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 for (IndexManifestEntry entry :
                         indexManifestFile.read(latestSnapshot.indexManifest())) {
                     if (entry.indexFile().globalIndexMeta() != null
-                            && materializedPartitions.contains(entry.partition())) {
+                            && materializedBuckets.contains(
+                                    Pair.of(entry.partition(), entry.bucket()))) {
                         indexFiles.add(entry.toDeleteEntry());
                     }
                 }

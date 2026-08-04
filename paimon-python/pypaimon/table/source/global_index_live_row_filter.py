@@ -77,7 +77,7 @@ def table_at_snapshot(table, snapshot):
                    CoreOptions.SCAN_TIMESTAMP_MILLIS):
         if option.key() in table.table_schema.options:
             pin_options[option.key()] = None
-    return table.copy(pin_options)
+    return table.copy_without_time_travel(pin_options)
 
 
 def for_range(live_row_ids: Optional[RoaringBitmap64],

@@ -119,6 +119,9 @@ class _StubTable:
     def copy(self, options):
         return self
 
+    def copy_without_time_travel(self, options):
+        return self
+
     def new_vector_search_builder(self):
         from pypaimon.table.source.vector_search_builder import (
             VectorSearchBuilderImpl,
@@ -406,7 +409,7 @@ class GlobalIndexLiveRowFilterTest(unittest.TestCase):
             table_schema = _StubSchema()
             file_io = object()
 
-            def copy(self_inner, options):
+            def copy_without_time_travel(self_inner, options):
                 calls["copy_options"] = options
                 return self_inner
 
@@ -2789,7 +2792,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         read_table = _StubTable(fields=[embedding_field], entries=[])
         _install_raw_vector_read_builder(
             read_table, "embedding", {0: [1.0]})
-        table.copy = mock.Mock(return_value=read_table)
+        table.copy_without_time_travel = mock.Mock(return_value=read_table)
         plan = VectorSearchScanPlan(
             [RawVectorSearchSplit([Range(0, 0)], [], "ivf-flat")],
             snapshot,
@@ -2802,7 +2805,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
             query_vector=[1.0],
         ).read_plan(plan)
 
-        table.copy.assert_called_once_with({
+        table.copy_without_time_travel.assert_called_once_with({
             CoreOptions.SCAN_MODE.key(): "from-snapshot",
             CoreOptions.SCAN_SNAPSHOT_ID.key(): "7",
         })
@@ -2819,7 +2822,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         planned_table = _StubTable(fields=[embedding_field], entries=[])
         _install_raw_vector_read_builder(table, "embedding", {1: [1.0]})
         _install_raw_vector_read_builder(planned_table, "embedding", {0: [1.0]})
-        table.copy = mock.Mock(return_value=planned_table)
+        table.copy_without_time_travel = mock.Mock(return_value=planned_table)
         split = RawVectorSearchSplit([Range(0, 1)], [], "ivf-flat")
         reader = DataEvolutionVectorRead(
             table,
@@ -2829,10 +2832,10 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         )
 
         reader.read_plan(VectorSearchScanPlan([split], snapshot))
-        table.copy.reset_mock()
+        table.copy_without_time_travel.reset_mock()
         result = reader.read([split])
 
-        table.copy.assert_not_called()
+        table.copy_without_time_travel.assert_not_called()
         self.assertEqual([1], sorted(list(result.results())))
 
     def test_read_batch_does_not_reuse_snapshot_from_previous_plan(self):
@@ -2846,7 +2849,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         planned_table = _StubTable(fields=[embedding_field], entries=[])
         _install_raw_vector_read_builder(table, "embedding", {1: [1.0]})
         _install_raw_vector_read_builder(planned_table, "embedding", {0: [1.0]})
-        table.copy = mock.Mock(return_value=planned_table)
+        table.copy_without_time_travel = mock.Mock(return_value=planned_table)
         split = RawVectorSearchSplit([Range(0, 1)], [], "ivf-flat")
         reader = BatchVectorSearchReadImpl(
             table,
@@ -2856,10 +2859,10 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         )
 
         reader.read_batch_plan(VectorSearchScanPlan([split], snapshot))
-        table.copy.reset_mock()
+        table.copy_without_time_travel.reset_mock()
         results = reader.read_batch([split])
 
-        table.copy.assert_not_called()
+        table.copy_without_time_travel.assert_not_called()
         self.assertEqual([1], sorted(list(results[0].results())))
 
     def test_read_plan_clears_conflicting_time_travel_options(self):
@@ -2877,7 +2880,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         read_table = _StubTable(fields=[embedding_field], entries=[])
         _install_raw_vector_read_builder(
             read_table, "embedding", {0: [1.0]})
-        table.copy = mock.Mock(return_value=read_table)
+        table.copy_without_time_travel = mock.Mock(return_value=read_table)
 
         DataEvolutionVectorRead(
             table,
@@ -2889,7 +2892,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
             snapshot,
         ))
 
-        table.copy.assert_called_once_with({
+        table.copy_without_time_travel.assert_called_once_with({
             CoreOptions.SCAN_MODE.key(): "from-snapshot",
             CoreOptions.SCAN_SNAPSHOT_ID.key(): "7",
             CoreOptions.SCAN_TAG_NAME.key(): None,
