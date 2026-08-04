@@ -24,7 +24,10 @@ import pyarrow as pa
 from ray.data._internal.execution.interfaces import TaskContext
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.ray_datasink import PaimonDatasink
+from pypaimon.write.ray_datasink import (
+    PaimonDatasink,
+    _consume_write_results,
+)
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_write import TableWrite
 
@@ -603,6 +606,67 @@ class RaySinkTest(unittest.TestCase):
         self.assertEqual(abort_args[1], commit_msg2)
         mock_commit.close.assert_called_once()
         self.assertEqual(datasink._pending_commit_messages, [])
+
+    def test_consume_write_results_stages_messages_before_late_failure(self):
+        import pickle
+
+        message_col = '__messages__'
+
+        class FailingResults:
+            def iter_batches(self, batch_format):
+                if batch_format != 'pyarrow':
+                    raise AssertionError(batch_format)
+                yield pa.table({
+                    message_col: pa.array(
+                        [pickle.dumps(['first'])], type=pa.binary()
+                    ),
+                })
+                raise RuntimeError('late failure')
+
+        coordinator = Mock()
+        with self.assertRaisesRegex(RuntimeError, 'late failure'):
+            _consume_write_results(
+                FailingResults(), coordinator, message_col
+            )
+
+        coordinator.add_pending_commit_messages.assert_called_once_with(
+            ['first']
+        )
+        coordinator.on_write_complete.assert_not_called()
+        coordinator.on_write_failed.assert_called_once()
+
+    def test_consume_write_results_drains_errors_as_data(self):
+        import pickle
+
+        message_col = '__messages__'
+        error_col = '__errors__'
+        results = Mock()
+        results.iter_batches.return_value = iter([
+            pa.table({
+                message_col: pa.array([
+                    pickle.dumps(['first']),
+                    pickle.dumps([]),
+                    pickle.dumps(['last']),
+                ], type=pa.binary()),
+                error_col: pa.array(
+                    [None, 'worker failure', None], type=pa.string()
+                ),
+            }),
+        ])
+        coordinator = Mock()
+
+        with self.assertRaisesRegex(RuntimeError, 'worker failure'):
+            _consume_write_results(
+                results, coordinator, message_col, error_col
+            )
+
+        self.assertEqual(
+            [call.args[0] for call in
+             coordinator.add_pending_commit_messages.call_args_list],
+            [['first'], [], ['last']],
+        )
+        coordinator.on_write_complete.assert_not_called()
+        coordinator.on_write_failed.assert_called_once()
 
         # Test abort failure handling (should not raise exception)
         datasink = PaimonDatasink(self.table, overwrite=False)

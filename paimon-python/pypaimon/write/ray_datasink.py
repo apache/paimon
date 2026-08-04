@@ -20,6 +20,7 @@ Module to write a Paimon table from a Ray Dataset, by using the Ray Datasink API
 """
 
 import logging
+import traceback
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
 
 from ray.data.datasource.datasink import Datasink
@@ -231,6 +232,11 @@ class PaimonDatasink(_DatasinkBase):
                         exc_info=e
                     )
 
+    def add_pending_commit_messages(self, commit_messages) -> None:
+        self._pending_commit_messages.extend(
+            message for message in commit_messages if not message.is_empty()
+        )
+
     def on_write_failed(self, error: Exception) -> None:
         logger.error(
             f"Write job failed for table {self._table_name}. Error: {error}",
@@ -272,6 +278,7 @@ def write_paimon_dataset(
     from pypaimon.ray.shuffle import (
         HASH_FIXED_PRECLUSTER_MAP_GROUPS,
         HASH_FIXED_PRECLUSTER_MODES,
+        HASH_FIXED_PRECLUSTER_OFF,
         maybe_apply_repartition,
     )
     from pypaimon.table.bucket_mode import BucketMode
@@ -290,7 +297,7 @@ def write_paimon_dataset(
             postpone_bucket_planner is not None
             or (
                 table.options.postpone_batch_write_fixed_bucket()
-                and hash_fixed_precluster == HASH_FIXED_PRECLUSTER_MAP_GROUPS
+                and hash_fixed_precluster != HASH_FIXED_PRECLUSTER_OFF
             )
         )
     ):
@@ -317,7 +324,7 @@ def write_paimon_dataset(
                     overwrite or static_partition is not None
                 ),
             )
-        _write_primary_key_groups(
+        _write_postpone_primary_key_blocks(
             dataset,
             table,
             overwrite=overwrite,
@@ -354,6 +361,138 @@ def write_paimon_dataset(
         concurrency=concurrency,
         ray_remote_args=ray_remote_args,
     )
+
+
+def _write_postpone_primary_key_blocks(
+    dataset,
+    table,
+    *,
+    overwrite: bool,
+    static_partition: Optional[Dict[str, Any]],
+    concurrency: Optional[int],
+    ray_remote_args: Optional[Dict[str, Any]],
+    bucket_extractor,
+    postpone_bucket_plan,
+) -> None:
+    import pickle
+
+    from pypaimon.ray.shuffle import (
+        _coerce_large_string_types,
+        _sort_by_partition_bucket_primary_key,
+    )
+
+    sorted_dataset, routing_columns = (
+        _sort_by_partition_bucket_primary_key(
+            dataset, table, bucket_extractor
+        )
+    )
+    message_col = "__paimon_commit_messages__"
+    error_col = "__paimon_write_error__"
+    captured_table = table
+
+    def _write_block(batch: pa.Table) -> pa.Table:
+        if batch.num_rows == 0:
+            return pa.table({
+                message_col: pa.array([], type=pa.binary()),
+                error_col: pa.array([], type=pa.string()),
+            })
+
+        rows = _coerce_large_string_types(
+            batch.drop_columns(routing_columns)
+        )
+        worker_sink = PaimonDatasink(
+            captured_table,
+            overwrite=overwrite,
+            static_partition=static_partition,
+            postpone_bucket_plan=postpone_bucket_plan,
+        )
+        try:
+            commit_messages = worker_sink.write([rows], None)
+            error = None
+        except Exception:
+            commit_messages = []
+            error = traceback.format_exc()
+        return pa.table({
+            message_col: pa.array(
+                [pickle.dumps(commit_messages)], type=pa.binary()
+            ),
+            error_col: pa.array([error], type=pa.string()),
+        })
+
+    map_kwargs = _ray_map_kwargs(
+        sorted_dataset.map_batches,
+        concurrency,
+        ray_remote_args,
+        batch_size=None,
+        batch_format="pyarrow",
+        zero_copy_batch=True,
+    )
+
+    results = sorted_dataset.map_batches(_write_block, **map_kwargs)
+    coordinator = PaimonDatasink(
+        table,
+        overwrite=overwrite,
+        static_partition=static_partition,
+    )
+    coordinator.on_write_start()
+    _consume_write_results(
+        results, coordinator, message_col, error_col
+    )
+
+
+def _ray_map_kwargs(method, concurrency, ray_remote_args, **kwargs):
+    import inspect
+
+    if concurrency is not None:
+        concurrency_param = inspect.signature(
+            method
+        ).parameters.get("concurrency")
+        if (
+            concurrency_param is not None
+            and concurrency_param.kind != inspect.Parameter.VAR_KEYWORD
+        ):
+            kwargs["concurrency"] = concurrency
+        else:
+            from ray.data._internal.compute import TaskPoolStrategy
+            kwargs["compute"] = TaskPoolStrategy(size=concurrency)
+    if ray_remote_args:
+        kwargs.update(ray_remote_args)
+    return kwargs
+
+
+def _consume_write_results(
+    results,
+    coordinator,
+    message_col,
+    error_col=None,
+) -> None:
+    import pickle
+
+    write_returns = []
+    errors = []
+    try:
+        for batch in results.iter_batches(batch_format="pyarrow"):
+            messages = batch.column(message_col).to_pylist()
+            batch_errors = (
+                batch.column(error_col).to_pylist()
+                if error_col is not None else [None] * len(messages)
+            )
+            for blob, error in zip(messages, batch_errors):
+                commit_messages = pickle.loads(blob)
+                write_returns.append(commit_messages)
+                coordinator.add_pending_commit_messages(commit_messages)
+                if error is not None:
+                    errors.append(error)
+        if errors:
+            raise RuntimeError(
+                "One or more Ray write tasks failed:\n{}".format(
+                    "\n".join(errors)
+                )
+            )
+        coordinator.on_write_complete(write_returns)
+    except Exception as error:
+        coordinator.on_write_failed(error)
+        raise
 
 
 def _collect_partition_stats(dataset, planner):
@@ -410,7 +549,6 @@ def _write_primary_key_groups(
     bucket_extractor=None,
     postpone_bucket_plan=None,
 ) -> None:
-    import inspect
     import pickle
 
     from pypaimon.ray.shuffle import (
@@ -422,13 +560,17 @@ def _write_primary_key_groups(
         dataset, table, extractor=bucket_extractor
     )
     message_col = "__paimon_commit_messages__"
+    error_col = "__paimon_write_error__"
     captured_table = table
 
     # Keep the writer inside the group UDF. Ray may split the UDF output
     # into multiple blocks, so only serialized commit messages leave it.
     def _write_group(group: pa.Table) -> pa.Table:
         if group.num_rows == 0:
-            return pa.table({message_col: pa.array([], type=pa.binary())})
+            return pa.table({
+                message_col: pa.array([], type=pa.binary()),
+                error_col: pa.array([], type=pa.string()),
+            })
 
         rows = _coerce_large_string_types(
             group.drop_columns([bucket_col])
@@ -439,28 +581,25 @@ def _write_primary_key_groups(
             static_partition=static_partition,
             postpone_bucket_plan=postpone_bucket_plan,
         )
-        commit_messages = worker_sink.write([rows], None)
+        try:
+            commit_messages = worker_sink.write([rows], None)
+            error = None
+        except Exception:
+            commit_messages = []
+            error = traceback.format_exc()
         return pa.table({
             message_col: pa.array(
                 [pickle.dumps(commit_messages)], type=pa.binary()
-            )
+            ),
+            error_col: pa.array([error], type=pa.string()),
         })
 
-    map_kwargs = {"batch_format": "pyarrow"}
-    if concurrency is not None:
-        concurrency_param = inspect.signature(
-            grouped.map_groups
-        ).parameters.get("concurrency")
-        if (
-            concurrency_param is not None
-            and concurrency_param.kind != inspect.Parameter.VAR_KEYWORD
-        ):
-            map_kwargs["concurrency"] = concurrency
-        else:
-            from ray.data._internal.compute import TaskPoolStrategy
-            map_kwargs["compute"] = TaskPoolStrategy(size=concurrency)
-    if ray_remote_args:
-        map_kwargs.update(ray_remote_args)
+    map_kwargs = _ray_map_kwargs(
+        grouped.map_groups,
+        concurrency,
+        ray_remote_args,
+        batch_format="pyarrow",
+    )
 
     messages = grouped.map_groups(_write_group, **map_kwargs)
     coordinator = PaimonDatasink(
@@ -469,12 +608,6 @@ def _write_primary_key_groups(
         static_partition=static_partition,
     )
     coordinator.on_write_start()
-    try:
-        write_returns = []
-        for batch in messages.iter_batches(batch_format="pyarrow"):
-            for blob in batch.column(message_col).to_pylist():
-                write_returns.append(pickle.loads(blob))
-        coordinator.on_write_complete(write_returns)
-    except Exception as error:
-        coordinator.on_write_failed(error)
-        raise
+    _consume_write_results(
+        messages, coordinator, message_col, error_col
+    )

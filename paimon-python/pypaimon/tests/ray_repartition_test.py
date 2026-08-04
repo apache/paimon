@@ -36,8 +36,8 @@ explicitly selected. These tests cover:
   * regression: a table whose schema already contains a column named
     ``__paimon_bucket__`` still works (collision-safe column name).
   * non-HASH_FIXED append-only tables pass through unchanged.
-  * postpone-bucket tables keep the streaming path by default and use
-    real buckets only through explicit ``map_groups`` mode.
+  * postpone-bucket tables write immediately visible real buckets by
+    default and retain the legacy path through explicit ``off`` mode.
 """
 
 import glob
@@ -241,12 +241,14 @@ class RayShuffleTest(unittest.TestCase):
         finally:
             writer.close()
 
-    def test_primary_key_postpone_bucket_default_keeps_postpone_path(self):
+    def test_primary_key_postpone_bucket_default_writes_real_buckets(self):
         from pypaimon.ray import write_paimon
 
         pa_schema = pa.schema([
             pa.field('id', pa.int32(), nullable=False),
             ('value', pa.int64()),
+            ('__paimon_bucket__', pa.string()),
+            ('__paimon_writer_key__', pa.string()),
         ])
         table_name = 'test_pk_postpone_bucket_ray_default'
         identifier = self._make_table(
@@ -256,12 +258,84 @@ class RayShuffleTest(unittest.TestCase):
         dataset = ray.data.from_arrow(pa.Table.from_pydict({
             'id': list(range(20)),
             'value': list(range(20)),
+            '__paimon_bucket__': ['bucket'] * 20,
+            '__paimon_writer_key__': ['writer'] * 20,
         }, schema=pa_schema)).repartition(4)
 
         write_paimon(dataset, identifier, self.catalog_options)
 
         files = self._count_data_files(table_name)
         self.assertTrue(files)
+        self.assertNotIn(
+            'bucket-postpone',
+            {os.path.basename(os.path.dirname(path)) for path in files},
+        )
+        result = self._read_table(identifier)
+        self.assertEqual(20, len(result))
+        self.assertEqual(
+            {'id', 'value', '__paimon_bucket__', '__paimon_writer_key__'},
+            set(result.columns),
+        )
+
+    def test_primary_key_postpone_bucket_off_keeps_postpone_path(self):
+        from pypaimon.ray import write_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('value', pa.int64()),
+        ])
+        table_name = 'test_pk_postpone_bucket_ray_off'
+        identifier = self._make_table(
+            table_name, pa_schema, primary_keys=['id'],
+            options={'bucket': '-2'},
+        )
+        dataset = ray.data.from_arrow(pa.Table.from_pydict({
+            'id': list(range(20)),
+            'value': list(range(20)),
+        }, schema=pa_schema)).repartition(4)
+
+        write_paimon(
+            dataset,
+            identifier,
+            self.catalog_options,
+            hash_fixed_precluster='off',
+        )
+
+        files = self._count_data_files(table_name)
+        self.assertTrue(files)
+        self.assertEqual(
+            {'bucket-postpone'},
+            {os.path.basename(os.path.dirname(path)) for path in files},
+        )
+        self.assertEqual(0, len(self._read_table(identifier)))
+
+    def test_postpone_fixed_bucket_table_option_can_be_disabled(self):
+        from pypaimon.ray import write_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('value', pa.int64()),
+        ])
+        table_name = 'test_postpone_fixed_bucket_option_disabled'
+        identifier = self._make_table(
+            table_name, pa_schema, primary_keys=['id'],
+            options={
+                'bucket': '-2',
+                'postpone.batch-write-fixed-bucket': 'false',
+            },
+        )
+        rows = pa.Table.from_pydict({
+            'id': list(range(20)),
+            'value': list(range(20)),
+        }, schema=pa_schema)
+
+        write_paimon(
+            ray.data.from_arrow(rows).repartition(4),
+            identifier,
+            self.catalog_options,
+        )
+
+        files = self._count_data_files(table_name)
         self.assertEqual(
             {'bucket-postpone'},
             {os.path.basename(os.path.dirname(path)) for path in files},
@@ -303,12 +377,56 @@ class RayShuffleTest(unittest.TestCase):
         )
 
         files = self._count_data_files(table_name)
-        self.assertEqual(4, len(files))
+        self.assertTrue(files)
         self.assertEqual(
             {'bucket-0', 'bucket-1'},
             {os.path.basename(os.path.dirname(path)) for path in files},
         )
         self.assertEqual(len(self._read_table(identifier)), 100)
+
+    def test_postpone_large_bucket_spans_writer_blocks(self):
+        from ray.data import DataContext
+
+        from pypaimon.ray import write_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('value', pa.string()),
+        ])
+        table_name = 'test_postpone_large_bucket_writer_blocks'
+        identifier = self._make_table(
+            table_name, pa_schema, primary_keys=['id'],
+            options={
+                'bucket': '-2',
+                'postpone.batch-write-fixed-bucket.max-parallelism': '1',
+            },
+        )
+        ids = [key for key in range(400) for _ in range(2)]
+        rows = pa.Table.from_pydict({
+            'id': ids,
+            'value': ['x' * 4096] * len(ids),
+        }, schema=pa_schema)
+
+        context = DataContext.get_current()
+        previous_target = context.target_max_block_size
+        context.target_max_block_size = 64 * 1024
+        try:
+            write_paimon(
+                ray.data.from_arrow(rows).repartition(8),
+                identifier,
+                self.catalog_options,
+                concurrency=4,
+            )
+        finally:
+            context.target_max_block_size = previous_target
+
+        files = self._count_data_files(table_name)
+        self.assertGreater(len(files), 1)
+        self.assertEqual(
+            {'bucket-0'},
+            {os.path.basename(os.path.dirname(path)) for path in files},
+        )
+        self.assertEqual(400, len(self._read_table(identifier)))
 
     def test_explicit_postpone_writer_uses_real_buckets(self):
         pa_schema = pa.schema([
