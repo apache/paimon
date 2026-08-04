@@ -188,6 +188,87 @@ public class IcebergFullHistoryCompatibilityTest {
         assertThat(readIceberg(icebergTable, 2L)).containsExactlyInAnyOrder("1|1|a", "1|2|b");
     }
 
+    @Test
+    public void testEnableOnUncompactedDvBucketExportsCompactedFiles() throws Exception {
+        FileStoreTable table = createPaimonTableWithoutIceberg();
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(row(RowKind.INSERT, 1, 1, "a"));
+        write.write(row(RowKind.INSERT, 1, 2, "b"));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        write.compact(partition(1), 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        write.write(row(RowKind.INSERT, 1, 3, "c"));
+        write.write(row(RowKind.DELETE, 1, 2, "b"));
+        commit.commit(3, write.prepareCommit(false, 3));
+
+        // this compaction produces a deletion vector against the max level file
+        write.compact(partition(1), 0, false);
+        commit.commit(4, write.prepareCommit(true, 4));
+
+        // a level-0 file on top of the compacted levels: the bucket's batch split is now NOT
+        // raw-convertible (level-0 file + overlapping key ranges + an active deletion vector)
+        write.write(row(RowKind.INSERT, 1, 4, "d"));
+        commit.commit(5, write.prepareCommit(false, 5));
+        write.close();
+        commit.close();
+
+        // enable Iceberg v3 WITHOUT full history sync; the next commit creates metadata from
+        // scratch while the bucket still has uncompacted level-0 files
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.TABLE_LOCATION.toString());
+        options.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        options.put(IcebergOptions.METADATA_DELETE_AFTER_COMMIT.key(), "false");
+        table = table.copy(options);
+        write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        commit = table.newCommit(commitUser);
+
+        write.write(row(RowKind.INSERT, 1, 5, "e"));
+        commit.commit(6, write.prepareCommit(false, 6));
+
+        // The non-raw-convertible split must not be dropped wholesale: the files above level 0
+        // (with their deletion vector) are exactly what live incremental commits would have
+        // published, so Iceberg sees the data as of the last compaction. Only the level-0 rows
+        // (d, e) stay invisible until a compaction rewrites them.
+        HadoopCatalog icebergCatalog = new HadoopCatalog(new Configuration(), tempDir.toString());
+        Table icebergTable = icebergCatalog.loadTable(TableIdentifier.of("mydb.db", "t"));
+        assertThat(readIceberg(icebergTable, null)).containsExactlyInAnyOrder("1|1|a", "1|3|c");
+
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(), new Path(table.location(), "metadata/v6.metadata.json"));
+        assertThat(metadata.nextRowId()).isNotNull();
+        IcebergPathFactory paths = new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, paths);
+        assertThat(
+                        manifestList
+                                .read(new Path(metadata.currentSnapshot().manifestList()).getName())
+                                .stream()
+                                .filter(m -> m.content() == IcebergManifestFileMeta.Content.DATA))
+                .allMatch(m -> m.firstRowId() != null);
+
+        // a full compaction exports the level-0 rows through the incremental path
+        write.compact(partition(1), 0, true);
+        commit.commit(7, write.prepareCommit(true, 7));
+        write.close();
+        commit.close();
+
+        icebergTable.refresh();
+        assertThat(readIceberg(icebergTable, null))
+                .containsExactlyInAnyOrder("1|1|a", "1|3|c", "1|4|d", "1|5|e");
+    }
+
     private static List<String> readIceberg(Table icebergTable, Long snapshotId) throws Exception {
         IcebergGenerics.ScanBuilder builder = IcebergGenerics.read(icebergTable);
         if (snapshotId != null) {

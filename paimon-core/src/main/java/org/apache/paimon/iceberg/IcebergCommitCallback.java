@@ -640,20 +640,32 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         SummaryMetrics metrics = new SummaryMetrics();
         Set<BinaryRow> changedPartitions = new HashSet<>();
 
-        List<DataSplit> filteredDataSplits =
-                snapshotReader.read().dataSplits().stream()
-                        .filter(DataSplit::rawConvertible)
-                        .collect(Collectors.toList());
-        for (DataSplit dataSplit : filteredDataSplits) {
-            changedPartitions.add(dataSplit.partition());
+        DataFilePathFactories dataFilePathFactories =
+                new DataFilePathFactories(fileStorePathFactory);
+        SkippedFiles skippedFiles = new SkippedFiles();
+        for (DataSplit dataSplit : snapshotReader.read().dataSplits()) {
             dataSplitToManifestEntries(
-                    dataSplit, snapshotId, schemaCache, dataFileEntries, dvFileEntries);
-
-            for (DataFileMeta paimonFileMeta : dataSplit.dataFiles()) {
-                metrics.addedDataFiles++;
-                metrics.addedRecords += paimonFileMeta.rowCount();
-                metrics.addedFilesSize += paimonFileMeta.fileSize();
-            }
+                    dataSplit,
+                    snapshotId,
+                    schemaCache,
+                    dataFilePathFactories,
+                    dataFileEntries,
+                    dvFileEntries,
+                    metrics,
+                    changedPartitions,
+                    skippedFiles);
+        }
+        if (skippedFiles.fileCount > 0) {
+            LOG.warn(
+                    "Iceberg metadata for Paimon snapshot {} was created from scratch, but "
+                            + "{} data file(s) containing {} row(s) cannot be read without merging "
+                            + "(level-0 files, or files shadowed by newer levels in buckets with "
+                            + "overlapping key ranges) and were not exported to Iceberg. "
+                            + "These rows will appear in Iceberg once compaction rewrites them; "
+                            + "trigger a full compaction to export them immediately.",
+                    snapshotId,
+                    skippedFiles.fileCount,
+                    skippedFiles.recordCount);
         }
 
         List<IcebergManifestFileMeta> dataManifestFileMetas = new ArrayList<>();
@@ -807,28 +819,62 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
     }
 
+    /** Files skipped by a from-scratch export because they cannot be read without merging. */
+    private static class SkippedFiles {
+        private long fileCount;
+        private long recordCount;
+    }
+
     private void dataSplitToManifestEntries(
             DataSplit dataSplit,
             long snapshotId,
             SchemaCache schemaCache,
+            DataFilePathFactories dataFilePathFactories,
             List<IcebergManifestEntry> dataFileEntries,
-            List<IcebergManifestEntry> dvFileEntries) {
-        List<RawFile> rawFiles = dataSplit.convertToRawFiles().get();
+            List<IcebergManifestEntry> dvFileEntries,
+            SummaryMetrics metrics,
+            Set<BinaryRow> changedPartitions,
+            SkippedFiles skippedFiles) {
+        boolean rawConvertible = dataSplit.rawConvertible();
+        List<RawFile> rawFiles = rawConvertible ? dataSplit.convertToRawFiles().get() : null;
+        DataFilePathFactory dataFilePathFactory =
+                dataFilePathFactories.get(dataSplit.partition(), dataSplit.bucket());
 
         for (int i = 0; i < dataSplit.dataFiles().size(); i++) {
             DataFileMeta paimonFileMeta = dataSplit.dataFiles().get(i);
-            RawFile rawFile = rawFiles.get(i);
+            String filePath;
+            String fileFormat;
+            if (rawConvertible) {
+                RawFile rawFile = rawFiles.get(i);
+                filePath = rawFile.path();
+                fileFormat = rawFile.format();
+            } else if (shouldAddFileToIceberg(paimonFileMeta)) {
+                // A split that cannot be read raw as a whole (it contains level-0 files or
+                // overlapping key ranges) can still contain files that the incremental commit
+                // path would have published; dropping the whole split would silently lose their
+                // rows until some future compaction happens to rewrite the files.
+                filePath = dataFilePathFactory.toPath(paimonFileMeta).toString();
+                fileFormat = paimonFileMeta.fileFormat();
+            } else {
+                skippedFiles.fileCount++;
+                skippedFiles.recordCount += paimonFileMeta.rowCount();
+                continue;
+            }
             IcebergDataFileMeta fileMeta =
                     IcebergDataFileMeta.create(
                             IcebergDataFileMeta.Content.DATA,
-                            rawFile.path(),
-                            rawFile.format(),
+                            filePath,
+                            fileFormat,
                             dataSplit.partition(),
-                            rawFile.rowCount(),
-                            rawFile.fileSize(),
+                            paimonFileMeta.rowCount(),
+                            paimonFileMeta.fileSize(),
                             schemaCache.get(paimonFileMeta.schemaId()),
                             paimonFileMeta.valueStats(),
                             paimonFileMeta.valueStatsCols());
+            metrics.addedDataFiles++;
+            metrics.addedRecords += paimonFileMeta.rowCount();
+            metrics.addedFilesSize += paimonFileMeta.fileSize();
+            changedPartitions.add(dataSplit.partition());
             dataFileEntries.add(
                     new IcebergManifestEntry(
                             IcebergManifestEntry.Status.ADDED,
@@ -849,7 +895,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         deletionFile.cardinality() != null,
                         "cardinality in DeletionFile is null, stop generating dv for iceberg. "
                                 + "dataFile path is {}, deletionFile is {}",
-                        rawFile.path(),
+                        filePath,
                         deletionFile);
 
                 // We can not get the file size of the complete DV index file from the DeletionFile,
@@ -862,7 +908,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                 dataSplit.partition(),
                                 deletionFile.cardinality(),
                                 -1,
-                                rawFile.path(),
+                                filePath,
                                 deletionFile.offset(),
                                 deletionFile.length());
 
