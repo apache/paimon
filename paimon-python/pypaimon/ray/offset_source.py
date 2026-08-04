@@ -20,8 +20,6 @@ import hashlib
 import pickle
 from typing import Any, Callable, List, Optional
 
-__all__ = ["PaimonOffsetSource"]
-
 
 class PaimonOffsetSource:
     """A snapshot-pinned Paimon source processed in stable offset units.

@@ -273,8 +273,6 @@ overlapping buckets or sequence numbers for those modes.
   HASH_FIXED primary-key group. Each `(partition_keys..., bucket)` group
   must fit in memory on one Ray node. This option does not enable Ray
   writes for HASH_DYNAMIC or CROSS_PARTITION primary-key tables.
-- `commit_mode`: `"atomic"` (default) or `"incremental"`; see below.
-
 ### Incremental write
 
 Long-running updates can commit periodically and resume by `operation_id`:
@@ -294,9 +292,9 @@ write_paimon(
 )
 ```
 
-The target must use fixed buckets and `merge-engine=partial-update`. Source rows
-must contain unique primary keys and every `update_cols` column. Missing keys
-are inserted. Commits occur after completed source splits, so the actual
+Use a fixed-bucket, partial-update target. Source rows need unique primary keys
+and all `update_cols`; missing keys are inserted. Commits occur after source
+splits, so the actual
 interval may be longer. Concurrent target writes or schema changes fail. After
 success, `delete_write_paimon_checkpoint` releases retained snapshots.
 

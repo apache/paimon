@@ -70,6 +70,10 @@ def incremental_write_paimon(
     if table.bucket_mode() != BucketMode.HASH_FIXED:
         raise ValueError(
             "incremental write_paimon requires a fixed-bucket target.")
+    if table.cross_partition_update:
+        raise ValueError(
+            "incremental write_paimon does not support cross-partition "
+            "updates.")
     if table.options.merge_engine() != MergeEngine.PARTIAL_UPDATE:
         raise ValueError(
             "incremental write_paimon requires "
