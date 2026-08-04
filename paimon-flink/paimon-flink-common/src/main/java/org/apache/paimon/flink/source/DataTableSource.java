@@ -153,6 +153,12 @@ public class DataTableSource extends BaseDataTableSource
     public RowLevelModificationScanContext applyRowLevelModificationScan(
             RowLevelModificationType rowLevelModificationType,
             @Nullable RowLevelModificationScanContext previousContext) {
+        if (isDataEvolutionTable()) {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            DataEvolutionRowLevelModificationScanContext.clearFallbackSnapshot(
+                    fileStoreTable.location().toString(),
+                    fileStoreTable.snapshotManager().branch());
+        }
         if (rowLevelModificationType != RowLevelModificationType.DELETE
                 || !isDataEvolutionTable()
                 || TimeTravelUtil.hasTimeTravelOptions(Options.fromMap(table.options()))) {
@@ -165,6 +171,10 @@ public class DataTableSource extends BaseDataTableSource
                 snapshotId == null
                         ? DataEvolutionRowLevelModificationScanContext.EMPTY_TABLE_SNAPSHOT
                         : snapshotId;
+        DataEvolutionRowLevelModificationScanContext.registerFallbackSnapshot(
+                fileStoreTable.location().toString(),
+                fileStoreTable.snapshotManager().branch(),
+                rowLevelModificationSnapshotId);
         return DataEvolutionRowLevelModificationScanContext.addSnapshot(
                 previousContext,
                 fileStoreTable.location().toString(),

@@ -142,12 +142,21 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
             @Nullable RowLevelModificationScanContext rowLevelModificationScanContext) {
         if (isDataEvolutionTable()) {
             FileStoreTable fileStoreTable = (FileStoreTable) table;
+            String tableLocation = fileStoreTable.location().toString();
+            String branch = fileStoreTable.snapshotManager().branch();
+            Long snapshotId;
+            if (rowLevelModificationScanContext == null) {
+                snapshotId =
+                        DataEvolutionRowLevelModificationScanContext.takeFallbackSnapshot(
+                                tableLocation, branch);
+            } else {
+                DataEvolutionRowLevelModificationScanContext.clearFallbackSnapshot(
+                        tableLocation, branch);
+                snapshotId =
+                        DataEvolutionRowLevelModificationScanContext.snapshotId(
+                                rowLevelModificationScanContext, tableLocation, branch);
+            }
             DataEvolutionDeleteSink.validateTable(fileStoreTable);
-            Long snapshotId =
-                    DataEvolutionRowLevelModificationScanContext.snapshotId(
-                            rowLevelModificationScanContext,
-                            fileStoreTable.location().toString(),
-                            fileStoreTable.snapshotManager().branch());
             if (snapshotId == null) {
                 throw new IllegalStateException(
                         "Data Evolution DELETE requires a snapshot from the Paimon table source.");

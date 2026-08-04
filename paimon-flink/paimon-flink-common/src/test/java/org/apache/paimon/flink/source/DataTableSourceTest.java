@@ -21,6 +21,9 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
+import org.apache.paimon.flink.dataevolution.DataEvolutionRowLevelModificationScanContext;
+import org.apache.paimon.flink.sink.FlinkTableSink;
+import org.apache.paimon.flink.sink.SupportsRowLevelOperationFlinkTableSink;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -44,15 +47,18 @@ import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.connector.RowLevelModificationScanContext;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
+import org.apache.flink.table.connector.source.abilities.SupportsRowLevelModificationScan.RowLevelModificationType;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -225,6 +231,57 @@ class DataTableSourceTest {
                 ContinuousFileStoreSource.class.getDeclaredField("unordered");
         unorderedField.setAccessible(true);
         assertThat((boolean) unorderedField.get(source)).isFalse();
+    }
+
+    @Test
+    void testDataEvolutionDeleteWithoutForwardedContextUsesPlannedSnapshot() throws Exception {
+        FileStoreTable table =
+                createTable(
+                        ImmutableMap.of(
+                                "bucket",
+                                "-1",
+                                "row-tracking.enabled",
+                                "true",
+                                "data-evolution.enabled",
+                                "true",
+                                "deletion-vectors.enabled",
+                                "true"));
+        writeData(table);
+
+        ObjectIdentifier identifier = ObjectIdentifier.of("cat", "db", "table");
+        DataEvolutionDataTableSource source =
+                new DataEvolutionDataTableSource(identifier, table, false, null);
+        RowLevelModificationScanContext scanContext =
+                source.applyRowLevelModificationScan(RowLevelModificationType.DELETE, null);
+        Long plannedSnapshot =
+                DataEvolutionRowLevelModificationScanContext.snapshotId(
+                        scanContext, table.location().toString(), table.snapshotManager().branch());
+
+        DataEvolutionDataTableSource copiedSource = (DataEvolutionDataTableSource) source.copy();
+        assertThat(copiedSource.listReadableMetadata().containsKey("_ROW_ID")).isTrue();
+
+        // The sink must use the source snapshot even if another commit arrives after planning.
+        writeData(table);
+        assertThat(table.snapshotManager().latestSnapshotId()).isGreaterThan(plannedSnapshot);
+
+        FlinkTableSink sink = new FlinkTableSink(identifier, table, null);
+        sink.applyRowLevelDelete(null);
+        FlinkTableSink copiedSink = (FlinkTableSink) sink.copy();
+        assertThat(dataEvolutionDeleteSnapshotId(copiedSink)).isEqualTo(plannedSnapshot);
+
+        // The fallback is one-shot, so another sink cannot reuse a stale planned snapshot.
+        assertThatThrownBy(
+                        () -> new FlinkTableSink(identifier, table, null).applyRowLevelDelete(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("requires a snapshot");
+    }
+
+    private static Long dataEvolutionDeleteSnapshotId(FlinkTableSink sink) throws Exception {
+        Field field =
+                SupportsRowLevelOperationFlinkTableSink.class.getDeclaredField(
+                        "dataEvolutionDeleteSnapshotId");
+        field.setAccessible(true);
+        return (Long) field.get(sink);
     }
 
     private PaimonDataStreamScanProvider runtimeProvider(FlinkTableSource tableSource) {

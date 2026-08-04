@@ -34,6 +34,9 @@ public class DataEvolutionRowLevelModificationScanContext
 
     public static final long EMPTY_TABLE_SNAPSHOT = -1L;
 
+    private static final ThreadLocal<Map<Pair<String, String>, Long>> FALLBACK_SNAPSHOT_IDS =
+            ThreadLocal.withInitial(HashMap::new);
+
     private final Map<Pair<String, String>, Long> snapshotIds;
 
     private DataEvolutionRowLevelModificationScanContext(
@@ -65,5 +68,37 @@ public class DataEvolutionRowLevelModificationScanContext
         }
         return ((DataEvolutionRowLevelModificationScanContext) context)
                 .snapshotIds.get(Pair.of(tableLocation, branch));
+    }
+
+    /**
+     * Registers a planned snapshot for planners which do not forward the row-level modification
+     * context from source to sink.
+     *
+     * <p>The fallback is thread-confined and consumed once. It never derives a snapshot from the
+     * sink-side table, so a concurrent commit cannot move the DELETE to a newer snapshot.
+     */
+    public static void registerFallbackSnapshot(
+            String tableLocation, String branch, long snapshotId) {
+        FALLBACK_SNAPSHOT_IDS.get().put(Pair.of(tableLocation, branch), snapshotId);
+    }
+
+    @Nullable
+    public static Long takeFallbackSnapshot(String tableLocation, String branch) {
+        Map<Pair<String, String>, Long> snapshotIds = FALLBACK_SNAPSHOT_IDS.get();
+        Long snapshotId = snapshotIds.remove(Pair.of(tableLocation, branch));
+        removeFallbackIfEmpty(snapshotIds);
+        return snapshotId;
+    }
+
+    public static void clearFallbackSnapshot(String tableLocation, String branch) {
+        Map<Pair<String, String>, Long> snapshotIds = FALLBACK_SNAPSHOT_IDS.get();
+        snapshotIds.remove(Pair.of(tableLocation, branch));
+        removeFallbackIfEmpty(snapshotIds);
+    }
+
+    private static void removeFallbackIfEmpty(Map<Pair<String, String>, Long> snapshotIds) {
+        if (snapshotIds.isEmpty()) {
+            FALLBACK_SNAPSHOT_IDS.remove();
+        }
     }
 }
