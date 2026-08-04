@@ -2752,7 +2752,16 @@ public class CoreOptions implements Serializable {
             key("postpone.batch-write-fixed-bucket.max-parallelism")
                     .intType()
                     .defaultValue(2048)
-                    .withDescription("The number of partitions for global index.");
+                    .withDescription(
+                            "Maximum bucket number inferred for a partition by a fixed-bucket batch write. The inferred number is rounded up to a power of two before applying this limit.");
+
+    public static final ConfigOption<Integer>
+            POSTPONE_BATCH_WRITE_FIXED_BUCKET_RESCALE_LOAD_FACTOR =
+                    key("postpone.batch-write-fixed-bucket.rescale-load-factor")
+                            .intType()
+                            .defaultValue(32)
+                            .withDescription(
+                                    "Maximum tolerated ratio between the required bucket number and the existing bucket number before a fixed-bucket batch write enlarges the existing layout. Rescaling also requires the configured maximum parallelism to permit a larger bucket number.");
 
     public static final ConfigOption<Integer> POSTPONE_DEFAULT_BUCKET_NUM =
             key("postpone.default-bucket-num")
@@ -2766,14 +2775,14 @@ public class CoreOptions implements Serializable {
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "Target row number per bucket when batch writing fixed buckets or compacting postpone bucket files for a partition without real bucket data.");
+                            "Target row number per bucket when estimating the required bucket number from the current staged batch or compacting postpone bucket files.");
 
     public static final ConfigOption<MemorySize> POSTPONE_TARGET_SIZE_PER_BUCKET =
             key("postpone.target-size-per-bucket")
                     .memoryType()
                     .defaultValue(MemorySize.parse("1 gb"))
                     .withDescription(
-                            "Target uncompressed serialized data size per bucket when Spark batch writes fixed buckets for a partition without real bucket data. "
+                            "Target staged file size per bucket when Spark estimates the required bucket number from the current staged batch. "
                                     + "This option is ignored when 'postpone.target-row-num-per-bucket' is configured.");
 
     public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
@@ -4450,6 +4459,10 @@ public class CoreOptions implements Serializable {
 
     public int postponeBatchWriteFixedBucketMaxParallelism() {
         return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET_MAX_PARALLELISM);
+    }
+
+    public int postponeBatchWriteFixedBucketRescaleLoadFactor() {
+        return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET_RESCALE_LOAD_FACTOR);
     }
 
     public int postponeDefaultBucketNum() {

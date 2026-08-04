@@ -186,7 +186,7 @@ public class RescaleProcedure extends BaseProcedure {
         FileStoreTable rescaledTable = table.copy(table.schema().copy(bucketOptions));
 
         PaimonSparkWriter writer = PaimonSparkWriter.apply(rescaledTable);
-        writer.writeBuilder().withOverwrite();
+        writer.withOverwrite();
         writer.commit(writer.write(datasetForRead));
     }
 

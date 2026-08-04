@@ -1306,7 +1306,13 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td><h5>postpone.batch-write-fixed-bucket.max-parallelism</h5></td>
             <td style="word-wrap: break-word;">2048</td>
             <td>Integer</td>
-            <td>The number of partitions for global index.</td>
+            <td>Maximum bucket number inferred for a partition by a fixed-bucket batch write. The inferred number is rounded up to a power of two before applying this limit.</td>
+        </tr>
+        <tr>
+            <td><h5>postpone.batch-write-fixed-bucket.rescale-load-factor</h5></td>
+            <td style="word-wrap: break-word;">32</td>
+            <td>Integer</td>
+            <td>Maximum tolerated ratio between the required bucket number and the existing bucket number before a fixed-bucket batch write enlarges the existing layout. Rescaling also requires the configured maximum parallelism to permit a larger bucket number.</td>
         </tr>
         <tr>
             <td><h5>postpone.default-bucket-num</h5></td>
@@ -1324,13 +1330,13 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td><h5>postpone.target-row-num-per-bucket</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
-            <td>Target row number per bucket when batch writing fixed buckets or compacting postpone bucket files for a partition without real bucket data.</td>
+            <td>Target row number per bucket when estimating the required bucket number from the current staged batch or compacting postpone bucket files.</td>
         </tr>
         <tr>
             <td><h5>postpone.target-size-per-bucket</h5></td>
             <td style="word-wrap: break-word;">1 gb</td>
             <td>MemorySize</td>
-            <td>Target uncompressed serialized data size per bucket when Spark batch writes fixed buckets for a partition without real bucket data. This option is ignored when 'postpone.target-row-num-per-bucket' is configured.</td>
+            <td>Target staged file size per bucket when Spark estimates the required bucket number from the current staged batch. This option is ignored when 'postpone.target-row-num-per-bucket' is configured.</td>
         </tr>
         <tr>
             <td><h5>primary-key</h5></td>

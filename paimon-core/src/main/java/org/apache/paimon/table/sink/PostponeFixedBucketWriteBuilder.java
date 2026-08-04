@@ -26,6 +26,7 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
 
@@ -41,6 +42,7 @@ public class PostponeFixedBucketWriteBuilder implements BatchWriteBuilder {
     private final String commitUser;
 
     @Nullable private Map<String, String> staticPartition;
+    private boolean compactionEnabled;
 
     public PostponeFixedBucketWriteBuilder(FileStoreTable table) {
         checkArgument(
@@ -72,13 +74,24 @@ public class PostponeFixedBucketWriteBuilder implements BatchWriteBuilder {
         return this;
     }
 
+    /** Enables compaction for writers created by this builder. */
+    public PostponeFixedBucketWriteBuilder withCompaction() {
+        this.compactionEnabled = true;
+        return this;
+    }
+
     @Override
     public TableWriteImpl<?> newWrite() {
         return newWrite(commitUser, null).withIgnorePreviousFiles(staticPartition != null);
     }
 
     public TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId) {
-        return table.newPostponeFixedBucketWrite(commitUser, writeId);
+        FileStoreTable writeTable =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.WRITE_ONLY.key(),
+                                Boolean.toString(!compactionEnabled)));
+        return writeTable.newPostponeFixedBucketWrite(commitUser, writeId);
     }
 
     @Override

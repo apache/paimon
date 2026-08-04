@@ -33,7 +33,6 @@ import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -168,9 +167,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     /** Creates a merge-tree writer for fixed-bucket batch writes to a postpone-bucket table. */
     public AbstractFileStoreWrite<KeyValue> newPostponeFixedBucketWrite(String commitUser) {
-        Options writeOptions = new Options(options.toMap());
-        writeOptions.set(CoreOptions.WRITE_ONLY, true);
-        return newFixedBucketWrite(commitUser, new CoreOptions(writeOptions));
+        return newFixedBucketWrite(commitUser, options);
     }
 
     private AbstractFileStoreWrite<KeyValue> newFixedBucketWrite(

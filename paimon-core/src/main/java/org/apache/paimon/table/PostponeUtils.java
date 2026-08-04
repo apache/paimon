@@ -39,6 +39,7 @@ import org.apache.paimon.utils.Pair;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -128,10 +129,10 @@ public class PostponeUtils {
 
     public static PostponeBucketAssigner createPostponeBucketAssigner(
             FileStoreTable table, long snapshotId, int defaultParallelism) {
-        return createPostponeBucketAssigner(table, snapshotId, defaultParallelism, null);
+        return loadPostponeBucketAssigner(table, snapshotId, defaultParallelism, null);
     }
 
-    private static PostponeBucketAssigner createPostponeBucketAssigner(
+    private static PostponeBucketAssigner loadPostponeBucketAssigner(
             FileStoreTable table,
             long snapshotId,
             int defaultParallelism,
@@ -142,15 +143,6 @@ public class PostponeUtils {
                 !table.coreOptions().postponeTargetRowNumPerBucket().isPresent()
                         ? Collections.emptyMap()
                         : getPostponeRowCounts(table, snapshotId, partitionFilter);
-        return createPostponeBucketAssigner(
-                table, knownNumBuckets, postponeRowCounts, defaultParallelism);
-    }
-
-    private static PostponeBucketAssigner createPostponeBucketAssigner(
-            FileStoreTable table,
-            Map<BinaryRow, Integer> knownNumBuckets,
-            Map<BinaryRow, Long> postponeRowCounts,
-            int defaultParallelism) {
         Long targetRowNumPerBucket =
                 table.coreOptions().postponeTargetRowNumPerBucket().orElse(null);
         int defaultBucketNum =
@@ -163,18 +155,36 @@ public class PostponeUtils {
                 knownNumBuckets, targetRowNumPerBucket, postponeRowCounts, defaultBucketNum);
     }
 
+    /** Creates snapshot-bound routing metadata. */
     public static PostponeBucketRouter createPostponeBucketRouter(
             FileStoreTable table,
             long snapshotId,
             int defaultParallelism,
             @Nullable PartitionPredicate partitionFilter) {
-        return createPostponeBucketRouter(
+        return newPostponeBucketRouter(
                 table,
-                createPostponeBucketAssigner(
-                        table, snapshotId, defaultParallelism, partitionFilter));
+                loadPostponeBucketAssigner(table, snapshotId, defaultParallelism, partitionFilter));
     }
 
-    private static PostponeBucketRouter createPostponeBucketRouter(
+    /** Creates routing metadata from bucket numbers decided by an execution engine. */
+    public static PostponeBucketRouter createPostponeBucketRouter(
+            FileStoreTable table,
+            Map<BinaryRow, Integer> numBucketsByPartition,
+            int defaultBucketNum) {
+        checkArgument(defaultBucketNum > 0, "Default postpone bucket number must be positive.");
+        Map<BinaryRow, Integer> copied = new HashMap<>();
+        for (Map.Entry<BinaryRow, Integer> entry : numBucketsByPartition.entrySet()) {
+            checkArgument(
+                    entry.getValue() != null && entry.getValue() > 0,
+                    "Postpone bucket number must be positive.");
+            copied.put(entry.getKey().copy(), entry.getValue());
+        }
+        return newPostponeBucketRouter(
+                table,
+                new PostponeBucketAssigner(copied, null, Collections.emptyMap(), defaultBucketNum));
+    }
+
+    private static PostponeBucketRouter newPostponeBucketRouter(
             FileStoreTable table, PostponeBucketAssigner bucketAssigner) {
         List<String> trimmedPrimaryKeys = table.schema().trimmedPrimaryKeys();
         int[] bucketKeyMapping =
@@ -249,6 +259,93 @@ public class PostponeUtils {
         }
     }
 
+    /**
+     * Decides the target bucket number from an exactly measured staged batch.
+     *
+     * <p>Previously committed postpone files are intentionally excluded. An existing layout is
+     * retained while the staged batch's required bucket number stays within the configured rescale
+     * load factor. This avoids paying for a layout rewrite for ordinary size differences while
+     * protecting a large batch from being funneled into too few writers.
+     */
+    public static FixedBucketDecision decideFixedBucketNum(
+            long stagedRowCount,
+            long stagedFileSize,
+            @Nullable Integer existingBucketNum,
+            CoreOptions options) {
+        checkArgument(stagedRowCount >= 0, "Staged row count cannot be negative.");
+        checkArgument(stagedFileSize >= 0, "Staged file size cannot be negative.");
+        checkArgument(
+                existingBucketNum == null || existingBucketNum > 0,
+                "Existing bucket number must be positive.");
+
+        int maxBucketNum = options.postponeBatchWriteFixedBucketMaxParallelism();
+        checkArgument(
+                maxBucketNum > 0,
+                "Option '%s' must be greater than 0.",
+                CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET_MAX_PARALLELISM.key());
+        int rescaleLoadFactor = options.postponeBatchWriteFixedBucketRescaleLoadFactor();
+        checkArgument(
+                rescaleLoadFactor > 0,
+                "Option '%s' must be greater than 0.",
+                CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET_RESCALE_LOAD_FACTOR.key());
+
+        BigInteger requiredBucketNum;
+        if (options.postponeTargetRowNumPerBucket().isPresent()) {
+            long targetRowCount = options.postponeTargetRowNumPerBucket().get();
+            checkArgument(
+                    targetRowCount > 0,
+                    "Option '%s' must be greater than 0.",
+                    CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET.key());
+            requiredBucketNum =
+                    ceilDiv(BigInteger.valueOf(stagedRowCount), BigInteger.valueOf(targetRowCount));
+        } else {
+            long targetSize = options.postponeTargetSizePerBucket();
+            checkArgument(
+                    targetSize > 0,
+                    "Option '%s' must be greater than 0.",
+                    CoreOptions.POSTPONE_TARGET_SIZE_PER_BUCKET.key());
+            requiredBucketNum =
+                    ceilDiv(BigInteger.valueOf(stagedFileSize), BigInteger.valueOf(targetSize));
+        }
+
+        requiredBucketNum = requiredBucketNum.max(BigInteger.ONE);
+        int suggestedBucketNum = roundUpToPowerOfTwo(requiredBucketNum, maxBucketNum);
+        boolean requiresRescale =
+                existingBucketNum != null
+                        && requiredBucketNum.compareTo(
+                                        BigInteger.valueOf(existingBucketNum)
+                                                .multiply(BigInteger.valueOf(rescaleLoadFactor)))
+                                > 0
+                        && suggestedBucketNum > existingBucketNum;
+        int targetBucketNum;
+        if (existingBucketNum == null) {
+            targetBucketNum = suggestedBucketNum;
+        } else if (requiresRescale) {
+            targetBucketNum = suggestedBucketNum;
+        } else {
+            targetBucketNum = existingBucketNum;
+        }
+        return new FixedBucketDecision(targetBucketNum, requiresRescale);
+    }
+
+    private static BigInteger ceilDiv(BigInteger value, BigInteger divisor) {
+        checkArgument(divisor.signum() > 0, "Bucket target must be positive.");
+        if (value.signum() <= 0) {
+            return BigInteger.ZERO;
+        }
+        return value.subtract(BigInteger.ONE).divide(divisor).add(BigInteger.ONE);
+    }
+
+    private static int roundUpToPowerOfTwo(BigInteger value, int upperBound) {
+        int cappedValue = value.min(BigInteger.valueOf(upperBound)).intValueExact();
+        if (cappedValue <= 1) {
+            return 1;
+        }
+
+        long roundedValue = (long) Integer.highestOneBit(cappedValue - 1) << 1;
+        return (int) Math.min(roundedValue, upperBound);
+    }
+
     public static Map<BinaryRow, Integer> getKnownNumBuckets(FileStoreTable table) {
         return getKnownNumBuckets(
                 table.store().newScan().onlyReadRealBuckets().readSimpleEntries());
@@ -256,7 +353,22 @@ public class PostponeUtils {
 
     public static Map<BinaryRow, Integer> getKnownNumBuckets(
             FileStoreTable table, long snapshotId) {
-        return getKnownNumBuckets(table, snapshotId, null);
+        return getKnownNumBuckets(table, snapshotId, (PartitionPredicate) null);
+    }
+
+    /** Returns known real-bucket counts only for the specified partitions. */
+    public static Map<BinaryRow, Integer> getKnownNumBuckets(
+            FileStoreTable table, long snapshotId, List<BinaryRow> partitions) {
+        if (partitions.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return getKnownNumBuckets(
+                table.store()
+                        .newScan()
+                        .withSnapshot(snapshotId)
+                        .withPartitionFilter(partitions)
+                        .onlyReadRealBuckets()
+                        .readSimpleEntries());
     }
 
     static Map<BinaryRow, Integer> getKnownNumBuckets(
@@ -383,6 +495,26 @@ public class PostponeUtils {
         private PostponeBucketAssigner withDefaultBucketNum(int newDefaultBucketNum) {
             return new PostponeBucketAssigner(
                     knownNumBuckets, targetRowNumPerBucket, postponeRowCounts, newDefaultBucketNum);
+        }
+    }
+
+    /** Bucket decision for an exactly measured staged batch. */
+    public static final class FixedBucketDecision {
+
+        private final int targetBucketNum;
+        private final boolean requiresRescale;
+
+        private FixedBucketDecision(int targetBucketNum, boolean requiresRescale) {
+            this.targetBucketNum = targetBucketNum;
+            this.requiresRescale = requiresRescale;
+        }
+
+        public int targetBucketNum() {
+            return targetBucketNum;
+        }
+
+        public boolean requiresRescale() {
+            return requiresRescale;
         }
     }
 
