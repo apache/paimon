@@ -75,6 +75,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
     private static final String OSS_REGION = "fs.oss.region";
     private static final String OSS_USER_AGENT_EXTENDED = "fs.oss.user.agent.extended";
+    private static final String OSS_SHOW_DIR_TIMESTAMP = "fs.oss.show-dir-timestamp";
     private static final String DLF_ACCESS_TRACKING_EXTENDED_INFO =
             "dlf.access-tracking.extended-info";
 
@@ -148,6 +149,11 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             context.hadoopConf()
                     .iterator()
                     .forEachRemaining(entry -> hadoopOptions.set(entry.getKey(), entry.getValue()));
+        }
+
+        // Resolving a timestamp for every listed directory is expensive in Jindo.
+        if (!hadoopOptions.containsKey(OSS_SHOW_DIR_TIMESTAMP)) {
+            hadoopOptions.set(OSS_SHOW_DIR_TIMESTAMP, "false");
         }
 
         String dlfAccessTrackingExtendedInfo =

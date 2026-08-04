@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jindo;
 
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
@@ -43,6 +44,32 @@ import static org.mockito.Mockito.when;
 
 /** Tests for {@link JindoFileIO}. */
 public class JindoFileIOTest {
+
+    private static final String SHOW_DIR_TIMESTAMP = "fs.oss.show-dir-timestamp";
+
+    @Test
+    public void testDisableDirectoryTimestampByDefault() {
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(CatalogContext.create(new Options()));
+
+        assertThat(
+                        fileIO.hadoopOptions(new Path("oss://bucket/table"), "meta")
+                                .get(SHOW_DIR_TIMESTAMP))
+                .isEqualTo("false");
+    }
+
+    @Test
+    public void testKeepExplicitDirectoryTimestampSetting() {
+        Options options = new Options();
+        options.set(SHOW_DIR_TIMESTAMP, "true");
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(CatalogContext.create(options));
+
+        assertThat(
+                        fileIO.hadoopOptions(new Path("oss://bucket/table"), "meta")
+                                .get(SHOW_DIR_TIMESTAMP))
+                .isEqualTo("true");
+    }
 
     @Test
     public void testCreateBlobClientUsesConfiguredSts() {
