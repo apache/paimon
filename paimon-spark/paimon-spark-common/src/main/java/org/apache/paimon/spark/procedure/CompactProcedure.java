@@ -38,6 +38,7 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 import org.apache.paimon.spark.SparkUtils;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.sort.TableSorter;
@@ -94,6 +95,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import scala.collection.JavaConverters;
@@ -325,6 +327,7 @@ public class CompactProcedure extends BaseProcedure {
         boolean filterByPartitionIdleTime = partitionIdleTime != null;
         Set<BinaryRow> partitionToBeCompacted =
                 getPartitionsToCompact(snapshotReader, partitionIdleTime);
+        Predicate<BinaryRow> shouldCompactPartition = nonExpiredPartitionPredicate(table);
         List<Pair<byte[], Integer>> partitionBuckets =
                 snapshotReader.bucketEntries().stream()
                         .map(entry -> Pair.of(entry.partition(), entry.bucket()))
@@ -333,6 +336,7 @@ public class CompactProcedure extends BaseProcedure {
                                 pair ->
                                         !filterByPartitionIdleTime
                                                 || partitionToBeCompacted.contains(pair.getKey()))
+                        .filter(pair -> shouldCompactPartition.test(pair.getKey()))
                         .map(
                                 p ->
                                         Pair.of(
@@ -393,6 +397,23 @@ public class CompactProcedure extends BaseProcedure {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static Predicate<BinaryRow> nonExpiredPartitionPredicate(FileStoreTable table) {
+        CoreOptions options = table.coreOptions();
+        if (!options.compactionSkipExpiredPartitions()
+                || options.partitionExpireTime() == null
+                || !CoreOptions.PartitionExpireStrategy.VALUES_TIME
+                        .toString()
+                        .equals(options.partitionExpireStrategy())) {
+            return partition -> true;
+        }
+
+        LocalDateTime expireDateTime = LocalDateTime.now().minus(options.partitionExpireTime());
+        PartitionValuesTimeExpireStrategy expireStrategy =
+                new PartitionValuesTimeExpireStrategy(
+                        options, table.schema().logicalPartitionType());
+        return partition -> !expireStrategy.isExpired(expireDateTime, partition);
     }
 
     private void compactUnAwareBucketTable(
