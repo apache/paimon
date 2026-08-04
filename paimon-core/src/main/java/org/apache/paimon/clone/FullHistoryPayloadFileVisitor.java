@@ -87,6 +87,7 @@ public class FullHistoryPayloadFileVisitor {
         private final Path tableMappingAnchor;
         private final Path dataMappingAnchor;
         private final boolean indexFileInDataFileDir;
+        private final boolean usesDeltaChangelog;
         private final Set<String> visitedSnapshotData = new HashSet<>();
         private final Set<String> visitedChangelogLists = new HashSet<>();
         private final Set<String> visitedAppendDeltaLists = new HashSet<>();
@@ -109,6 +110,8 @@ public class FullHistoryPayloadFileVisitor {
                             ? pathFactory.dataFilePath()
                             : tableMappingAnchor;
             this.indexFileInDataFileDir = options.indexFileInDataFileDir();
+            this.usesDeltaChangelog =
+                    options.changelogProducer() == CoreOptions.ChangelogProducer.NONE;
         }
 
         private void visitSnapshot(Snapshot snapshot) throws IOException {
@@ -126,7 +129,7 @@ public class FullHistoryPayloadFileVisitor {
         private void visitChangelog(Changelog changelog) throws IOException {
             if (changelog.changelogManifestList() != null) {
                 visitChangelogManifest(changelog.changelogManifestList());
-            } else if (changelog.commitKind() == Snapshot.CommitKind.APPEND) {
+            } else if (usesDeltaChangelog && changelog.commitKind() == Snapshot.CommitKind.APPEND) {
                 visitAppendDeltaFiles(changelog.deltaManifestList());
             }
         }

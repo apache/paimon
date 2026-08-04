@@ -19,6 +19,7 @@
 package org.apache.paimon.clone;
 
 import org.apache.paimon.Changelog;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.index.IndexFileHandler;
@@ -115,6 +116,7 @@ class FullHistoryRootValidator {
         private final ManifestList manifestList;
         private final ManifestFile manifestFile;
         private final IndexFileHandler indexFileHandler;
+        private final boolean usesDeltaChangelog;
         private final ManifestEntrySerializer manifestEntrySerializer =
                 new ManifestEntrySerializer();
         private final IndexManifestEntrySerializer indexEntrySerializer =
@@ -134,6 +136,8 @@ class FullHistoryRootValidator {
             this.manifestList = table.store().manifestListFactory().create();
             this.manifestFile = table.store().manifestFileFactory().create();
             this.indexFileHandler = table.store().newIndexFileHandler();
+            this.usesDeltaChangelog =
+                    table.coreOptions().changelogProducer() == CoreOptions.ChangelogProducer.NONE;
         }
 
         private byte[] snapshotDigest(Snapshot snapshot) throws IOException {
@@ -153,13 +157,24 @@ class FullHistoryRootValidator {
             digest.addLong(snapshot.id());
             digest.addLong(snapshot.schemaId());
 
-            boolean dedicatedChangelog =
-                    longLivedChangelog && snapshot.changelogManifestList() != null;
-            if (dedicatedChangelog) {
+            boolean deltaChangelog =
+                    longLivedChangelog
+                            && usesDeltaChangelog
+                            && snapshot.changelogManifestList() == null
+                            && snapshot.commitKind() == Snapshot.CommitKind.APPEND;
+            if (longLivedChangelog && !deltaChangelog) {
                 digest.addString(snapshot.baseManifestList());
                 digest.addNullableLong(snapshot.baseManifestListSize());
                 digest.addString(snapshot.deltaManifestList());
                 digest.addNullableLong(snapshot.deltaManifestListSize());
+            } else if (deltaChangelog) {
+                digest.addString(snapshot.baseManifestList());
+                digest.addNullableLong(snapshot.baseManifestListSize());
+                digest.addBytes(
+                        manifestListDigest(
+                                        snapshot.deltaManifestList(),
+                                        snapshot.deltaManifestListSize())
+                                .toBytes());
             } else {
                 digest.addBytes(
                         manifestListDigest(

@@ -19,6 +19,7 @@
 package org.apache.paimon.clone;
 
 import org.apache.paimon.Changelog;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
@@ -85,6 +86,7 @@ public class FullHistoryFileCollector {
         private final FullHistoryFileSet.Builder builder;
         private final FileStorePathFactory pathFactory;
         private final ManifestList manifestList;
+        private final boolean usesDeltaChangelog;
         private final Set<String> collectedManifestLists = new HashSet<>();
         private final Set<String> collectedIndexManifests = new HashSet<>();
         private final Set<String> collectedStatistics = new HashSet<>();
@@ -94,6 +96,8 @@ public class FullHistoryFileCollector {
             this.builder = builder;
             this.pathFactory = table.store().pathFactory();
             this.manifestList = table.store().manifestListFactory().create();
+            this.usesDeltaChangelog =
+                    table.coreOptions().changelogProducer() == CoreOptions.ChangelogProducer.NONE;
         }
 
         private void collectSchemaFiles() throws IOException {
@@ -126,8 +130,8 @@ public class FullHistoryFileCollector {
                 builder.addMetadataFile(manager.longLivedChangelogPath(changelog.id()));
                 if (changelog.changelogManifestList() != null) {
                     collectManifestList(changelog.changelogManifestList());
-                } else {
-                    collectManifestList(changelog.baseManifestList());
+                } else if (usesDeltaChangelog
+                        && changelog.commitKind() == Snapshot.CommitKind.APPEND) {
                     collectManifestList(changelog.deltaManifestList());
                 }
             }
