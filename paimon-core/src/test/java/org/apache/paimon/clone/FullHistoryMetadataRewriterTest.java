@@ -231,6 +231,12 @@ public class FullHistoryMetadataRewriterTest {
         assertThat(target.snapshotManager().safelyGetAllSnapshots())
                 .extracting(snapshot -> snapshot.id())
                 .containsExactlyInAnyOrder(1L, 2L);
+        assertThat(target.snapshotManager().safelyGetAllSnapshots())
+                .extracting(Snapshot::uuid)
+                .containsExactlyInAnyOrderElementsOf(
+                        source.snapshotManager().safelyGetAllSnapshots().stream()
+                                .map(Snapshot::uuid)
+                                .collect(Collectors.toList()));
         assertThat(target.tagManager().tagObjects())
                 .extracting(tag -> tag.getRight())
                 .containsExactly("tag1");
@@ -406,6 +412,43 @@ public class FullHistoryMetadataRewriterTest {
                                         .validatePublishedCloneStreaming())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("snapshot")
+                .hasMessageContaining("does not match source semantics");
+    }
+
+    @Test
+    public void testStreamingValidationRejectsCorruptedSchemaContent() throws Exception {
+        TaggedClone clone = createTaggedClone("corrupted-schema");
+        TableSchema targetSchema = clone.target.schema();
+        TableSchema corruptedSchema =
+                new TableSchema(
+                        targetSchema.version(),
+                        targetSchema.id(),
+                        targetSchema.fields(),
+                        targetSchema.highestFieldId() + 1,
+                        targetSchema.partitionKeys(),
+                        targetSchema.primaryKeys(),
+                        targetSchema.options(),
+                        targetSchema.comment(),
+                        targetSchema.timeMillis());
+        SchemaManager schemaManager = clone.target.schemaManager();
+        Path schemaPath =
+                new Path(
+                        schemaManager.schemaDirectory(),
+                        SchemaManager.SCHEMA_PREFIX + corruptedSchema.id());
+        fileIO.overwriteFileUtf8(schemaPath, corruptedSchema.toString());
+        FileStoreTable corruptedTarget =
+                FileStoreTableFactory.create(fileIO, clone.target.location());
+
+        assertThatThrownBy(
+                        () ->
+                                new FullHistoryCloneValidator(
+                                                clone.source,
+                                                corruptedTarget,
+                                                clone.mapping,
+                                                FullHistoryCopyPlan.empty())
+                                        .validatePublishedCloneStreaming())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("schema")
                 .hasMessageContaining("does not match source semantics");
     }
 
@@ -924,6 +967,62 @@ public class FullHistoryMetadataRewriterTest {
     }
 
     @Test
+    public void testPlannerRejectsManagedBlobInPrimaryKeyTable() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("managed-blob-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("managed-blob-target/table").toString());
+        Schema.Builder builder = Schema.newBuilder();
+        builder.column("id", DataTypes.INT());
+        builder.column("blob", DataTypes.BLOB());
+        builder.primaryKey("id");
+        builder.option(CoreOptions.PATH.key(), sourceRoot.toString());
+        builder.option(CoreOptions.BUCKET.key(), "1");
+        builder.option(CoreOptions.BUCKET_KEY.key(), "id");
+        builder.option(CoreOptions.BLOB_FIELD.key(), "blob");
+        TableSchema schema =
+                SchemaUtils.forceCommit(new SchemaManager(fileIO, sourceRoot), builder.build());
+        FileStoreTable source = FileStoreTableFactory.create(fileIO, sourceRoot, schema);
+
+        assertThatThrownBy(
+                        () ->
+                                new FullHistoryClonePlanner(
+                                                source,
+                                                PathMapping.parse(
+                                                        Collections.singletonList(
+                                                                sourceRoot + "=" + targetRoot)))
+                                        .planStructure())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("managed BLOB")
+                .hasMessageContaining("blob")
+                .hasMessageContaining("inside data files");
+    }
+
+    @Test
+    public void testPlannerAllowsBlobDataFilesInAppendOnlyTable() throws Exception {
+        Path sourceRoot = new Path(tempDir.resolve("append-blob-source/table").toString());
+        Path targetRoot = new Path(tempDir.resolve("append-blob-target/table").toString());
+        Schema.Builder builder = Schema.newBuilder();
+        builder.column("id", DataTypes.INT());
+        builder.column("blob", DataTypes.BLOB());
+        builder.option(CoreOptions.PATH.key(), sourceRoot.toString());
+        builder.option(CoreOptions.BUCKET.key(), "-1");
+        builder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        builder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        builder.option(CoreOptions.BLOB_FIELD.key(), "blob");
+        TableSchema schema =
+                SchemaUtils.forceCommit(new SchemaManager(fileIO, sourceRoot), builder.build());
+        FileStoreTable source = FileStoreTableFactory.create(fileIO, sourceRoot, schema);
+
+        FullHistoryClonePlan plan =
+                new FullHistoryClonePlanner(
+                                source,
+                                PathMapping.parse(
+                                        Collections.singletonList(sourceRoot + "=" + targetRoot)))
+                        .planStructure();
+
+        assertThat(plan.targetRoot()).isEqualTo(targetRoot);
+    }
+
+    @Test
     public void testPlannerRejectsIcebergCompatibilityInHistoricalSchema() throws Exception {
         Path sourceRoot = new Path(tempDir.resolve("iceberg-source/table").toString());
         Path targetRoot = new Path(tempDir.resolve("iceberg-target/table").toString());
@@ -1347,6 +1446,7 @@ public class FullHistoryMetadataRewriterTest {
     private static Snapshot copyWithIndexManifest(Snapshot snapshot, String indexManifest) {
         return new Snapshot(
                 snapshot.version(),
+                snapshot.uuid(),
                 snapshot.id(),
                 snapshot.schemaId(),
                 snapshot.baseManifestList(),
@@ -1373,6 +1473,7 @@ public class FullHistoryMetadataRewriterTest {
     private static Snapshot copyWithStatistics(Snapshot snapshot, String statistics) {
         return new Snapshot(
                 snapshot.version(),
+                snapshot.uuid(),
                 snapshot.id(),
                 snapshot.schemaId(),
                 snapshot.baseManifestList(),
@@ -1399,6 +1500,7 @@ public class FullHistoryMetadataRewriterTest {
     private static Snapshot copyWithManifestRoots(Snapshot snapshot, Snapshot roots) {
         return new Snapshot(
                 snapshot.version(),
+                snapshot.uuid(),
                 snapshot.id(),
                 snapshot.schemaId(),
                 roots.baseManifestList(),
@@ -1426,6 +1528,7 @@ public class FullHistoryMetadataRewriterTest {
             Snapshot snapshot, Pair<String, Long> deltaManifestList) {
         return new Snapshot(
                 snapshot.version(),
+                snapshot.uuid(),
                 snapshot.id(),
                 snapshot.schemaId(),
                 snapshot.baseManifestList(),

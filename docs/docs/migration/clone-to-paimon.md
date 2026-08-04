@@ -75,14 +75,17 @@ time; `clone_if_exists` is a failed-job resume protocol, not a concurrent execut
 
 Mapped external-data and external-index target locations must be dedicated to this clone and must
 not be changed while the initial run or a retry is active. Payload files are streamed directly into
-these owned roots to avoid an additional remote rename or object copy. Table metadata and
-`_SUCCESS` are published only after every copy task succeeds and the rewritten metadata is
-validated. On a reported copy failure, the action attempts to remove the target created by that
-attempt. If cleanup or an abrupt process termination leaves a file, resume accepts the expected
-size and rejects a conflicting size. Existing-file validation compares sizes, not checksums.
+these owned roots to avoid an additional remote rename or object copy. After every copy task
+succeeds, the action writes rewritten table metadata, validates it, and then publishes `_SUCCESS`.
+On a reported copy failure, the action attempts to remove the target created by that attempt. If
+cleanup or an abrupt process termination leaves a file, resume accepts the expected size and rejects
+a conflicting size. Existing-file validation compares sizes, not checksums. Rewritten metadata can
+be visible while final validation is still running. Do not register, read, or switch workloads to the
+target table until `_SUCCESS` exists.
 
-Full-history clone does not currently support blob descriptors or blob views, Iceberg compatibility
-metadata, filtered clone, format conversion, or metadata-only clone.
+Full-history clone does not currently support blob descriptors, blob views, managed BLOBs in
+primary-key tables, Iceberg compatibility metadata, filtered clone, format conversion, or
+metadata-only clone.
 
 ## Clone Hive Table
 
