@@ -136,8 +136,7 @@ Before managing the first release:
    log.
 
 ```shell
-gpg --list-options show-subkey-fingerprint \
-  --list-secret-keys --keyid-format LONG
+gpg --with-subkey-fingerprint --list-secret-keys --keyid-format LONG
 git config user.signingkey
 svn --version
 ```
