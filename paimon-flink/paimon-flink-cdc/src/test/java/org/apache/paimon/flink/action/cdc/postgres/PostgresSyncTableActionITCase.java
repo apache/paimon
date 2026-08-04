@@ -365,6 +365,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                             DataTypes.STRING(), // _text
                             DataTypes.BYTES(), // _bin
                             DataTypes.STRING(), // _json
+                            DataTypes.STRING(), // _jsonb
                             DataTypes.STRING(), // _uuid
                             DataTypes.ARRAY(DataTypes.STRING()) // _array
                         },
@@ -399,6 +400,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                             "_text",
                             "_bin",
                             "_json",
+                            "_jsonb",
                             "_uuid",
                             "_array",
                         });
@@ -425,6 +427,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                                 + "Paimon    , Apache Paimon, Apache Paimon PostgreSQL Test Data, "
                                 + "[98, 121, 116, 101, 115], "
                                 + "{\"a\": \"b\"}, "
+                                + "{\"c\": \"d\"}, "
                                 + "123e4567-e89b-12d3-a456-426655440000, "
                                 + "[item1, item2]"
                                 + "]",
@@ -445,6 +448,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                                 + "NULL, NULL, "
                                 + "NULL, NULL, "
                                 + "NULL, NULL, "
+                                + "NULL, "
                                 + "NULL, "
                                 + "NULL, "
                                 + "NULL, "
