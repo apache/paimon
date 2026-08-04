@@ -20,6 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.spark.sources.PaimonSourceOffset
 import org.apache.paimon.table.source.{KnownWrittenColumns, WrittenColumns}
+import org.apache.paimon.utils.InstantiationUtil
 
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.streaming.{StreamingQueryException, StreamTest, Trigger}
@@ -49,6 +50,22 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
           checkAnswer(nullDF, Seq(Row(1, null), Row(2, null), Row(4, null)))
         }
     }
+  }
+
+  test("Paimon Source: keep micro-batch metadata on the driver") {
+    val metadata =
+      PaimonMicroBatchMetadata(
+        "source",
+        "start",
+        "end",
+        0,
+        new KnownWrittenColumns(Seq(Integer.valueOf(1)).asJava))
+    val partition = PaimonMicroBatchInputPartition(Seq.empty, metadata)
+
+    val restored = InstantiationUtil.clone(partition)
+
+    assert(restored.splits.isEmpty)
+    assert(restored.metadata == null)
   }
 
   test("Paimon Source: expose written columns to raw foreachBatch") {
@@ -129,6 +146,53 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
         } finally {
           query.stop()
         }
+    }
+  }
+
+  test("Paimon Source: written columns metadata is ambiguous with an empty second source") {
+    withTable("written_columns_source_1", "written_columns_source_2") {
+      withTempDir {
+        checkpointDir =>
+          spark.sql("CREATE TABLE written_columns_source_1 (id INT)")
+          spark.sql("CREATE TABLE written_columns_source_2 (id INT)")
+          spark.sql("INSERT INTO written_columns_source_1 VALUES (1)")
+          spark.sql("INSERT INTO written_columns_source_2 VALUES (2)")
+
+          val source1 = spark.readStream
+            .option(SparkConnectorOptions.BATCH_WRITTEN_COLUMNS_ENABLED.key(), true)
+            .table("written_columns_source_1")
+          val source2 = spark.readStream
+            .option(SparkConnectorOptions.BATCH_WRITTEN_COLUMNS_ENABLED.key(), true)
+            .table("written_columns_source_2")
+          @volatile var nonEmptyBatchMetadataPresent = Seq.empty[Boolean]
+
+          val query = source1
+            .union(source2)
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                val metadataPresent =
+                  PaimonSparkMicroBatchMetadata.writtenColumns(batch).isPresent
+                if (batch.count() > 0) {
+                  nonEmptyBatchMetadataPresent = nonEmptyBatchMetadataPresent :+ metadataPresent
+                }
+                ()
+            }
+            .start()
+
+          try {
+            query.processAllAvailable()
+            nonEmptyBatchMetadataPresent = Seq.empty
+
+            spark.sql("INSERT INTO written_columns_source_1 VALUES (3)")
+            query.processAllAvailable()
+
+            assert(nonEmptyBatchMetadataPresent == Seq(false))
+          } finally {
+            query.stop()
+          }
+      }
     }
   }
 

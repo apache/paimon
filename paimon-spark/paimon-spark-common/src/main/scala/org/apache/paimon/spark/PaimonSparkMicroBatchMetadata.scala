@@ -19,6 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.annotation.Experimental
+import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.table.source.WrittenColumns
 
 import org.apache.spark.rdd.RDD
@@ -26,7 +27,7 @@ import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.execution.datasources.v2.DataSourceRDD
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
-import java.util.{IdentityHashMap, Optional}
+import java.util.{IdentityHashMap, Map => JMap, Optional, UUID}
 
 import scala.collection.mutable
 import scala.util.control.NonFatal
@@ -36,6 +37,8 @@ import scala.util.control.NonFatal
 final class PaimonSparkMicroBatchMetadata private ()
 
 object PaimonSparkMicroBatchMetadata {
+
+  private val StreamingQueryIdKey = "sql.streaming.queryId"
 
   /**
    * Returns written columns for a raw foreachBatch Dataset with exactly one Paimon streaming
@@ -54,6 +57,10 @@ object PaimonSparkMicroBatchMetadata {
   }
 
   private def extractWrittenColumns(batch: Dataset[_]): Optional[WrittenColumns] = {
+    if (!hasExactlyOnePaimonSource(batch)) {
+      return Optional.empty()
+    }
+
     val visited = new IdentityHashMap[RDD[_], java.lang.Boolean]()
     val metadata = mutable.ArrayBuffer.empty[PaimonMicroBatchMetadata]
     var incompletePaimonSource = false
@@ -89,6 +96,40 @@ object PaimonSparkMicroBatchMetadata {
       } else {
         Optional.of(only.writtenColumns)
       }
+    }
+  }
+
+  private def hasExactlyOnePaimonSource(batch: Dataset[_]): Boolean = {
+    val queryId = batch.sparkSession.sparkContext.getLocalProperty(StreamingQueryIdKey)
+    if (queryId == null) {
+      return false
+    }
+
+    val sharedState =
+      batch.sparkSession.getClass.getMethod("sharedState").invoke(batch.sparkSession)
+    val activeQueries =
+      sharedState.getClass
+        .getMethod("activeStreamingQueries")
+        .invoke(sharedState)
+        .asInstanceOf[JMap[UUID, AnyRef]]
+    val execution = activeQueries.get(UUID.fromString(queryId))
+    if (execution == null) {
+      return false
+    }
+
+    // Spark replaces sources without new offsets with LocalRelation before foreachBatch. Their
+    // RDD lineage therefore contains no InputPartition to inspect. The active StreamExecution is
+    // the only per-query structure which still retains every source. Keep this Spark-internal
+    // access isolated here and fail closed if a Spark version changes it.
+    val sources =
+      execution.getClass.getMethod("sources").invoke(execution).asInstanceOf[Seq[AnyRef]]
+    val distinctSources = new IdentityHashMap[AnyRef, java.lang.Boolean]()
+    sources.foreach(source => distinctSources.put(source, java.lang.Boolean.TRUE))
+
+    if (distinctSources.size() != 1) {
+      false
+    } else {
+      distinctSources.keySet().iterator().next().isInstanceOf[PaimonMicroBatchStream]
     }
   }
 }

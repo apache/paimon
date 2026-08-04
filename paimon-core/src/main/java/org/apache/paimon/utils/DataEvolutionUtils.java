@@ -49,6 +49,9 @@ public class DataEvolutionUtils {
     public static WrittenColumns collectWrittenColumns(
             Collection<DataSplit> splits, Function<Long, TableSchema> schemaLoader) {
         Set<Integer> fieldIds = new TreeSet<>();
+        Map<Long, TableSchema> schemaCache = new HashMap<>();
+        Function<Long, TableSchema> cachedSchemaLoader =
+                schemaId -> schemaCache.computeIfAbsent(schemaId, schemaLoader);
         Map<Pair<Long, List<String>>, Set<Integer>> fieldIdsCache = new HashMap<>();
         for (DataSplit split : splits) {
             for (DataFileMeta file : split.dataFiles()) {
@@ -56,7 +59,7 @@ public class DataEvolutionUtils {
                     Pair<Long, List<String>> cacheKey = Pair.of(file.schemaId(), file.writeCols());
                     Set<Integer> fileFieldIds = fieldIdsCache.get(cacheKey);
                     if (fileFieldIds == null) {
-                        fileFieldIds = computeFileFieldIds(schemaLoader, file);
+                        fileFieldIds = computeFileFieldIds(cachedSchemaLoader, file);
                         fieldIdsCache.put(cacheKey, fileFieldIds);
                     }
                     fieldIds.addAll(fileFieldIds);
