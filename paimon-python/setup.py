@@ -24,7 +24,7 @@ import tarfile
 import tempfile
 from setuptools import find_packages, setup
 
-VERSION = "2.0.dev"
+VERSION = "2.0.0"
 
 
 def get_dev_version():
