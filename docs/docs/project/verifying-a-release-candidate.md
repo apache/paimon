@@ -75,7 +75,7 @@ belongs to the RM and appears in the downloaded `KEYS` file. Also inspect the
 exact key or subkey that produced each signature:
 
 ```shell
-gpg --list-options show-subkey-fingerprint \
+gpg --with-subkey-fingerprint \
   --list-keys "<FULL_SIGNING_KEY_FINGERPRINT>"
 ```
 
