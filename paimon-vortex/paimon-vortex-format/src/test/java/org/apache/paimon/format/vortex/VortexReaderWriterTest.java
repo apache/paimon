@@ -44,6 +44,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RoaringBitmap32;
 
+import dev.vortex.jni.NativeRuntime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -596,5 +597,77 @@ public class VortexReaderWriterTest {
             }
             assertEquals(5, expectedPos, "Should have read exactly 5 rows");
         }
+    }
+
+    @Test
+    public void testReturnedPositionWithMultipleScanPartitions(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("payload", DataTypes.STRING())
+                        .build();
+        VortexFileFormat format =
+                new VortexFileFormatFactory()
+                        .create(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+
+        FileIO fileIO = new LocalFileIO();
+        Path testFile =
+                new Path(new Path(tempDir.toUri()), "test_ordered_scan_" + UUID.randomUUID());
+
+        // Create multiple scan tasks and make the first one slower, so an unordered scan returns
+        // a later task first.
+        int firstRangeRowCount = 1_024;
+        int lastSelectedRow = 4_999;
+        try (FormatWriter writer =
+                ((SupportsDirectWrite) format.createWriterFactory(rowType))
+                        .create(fileIO, testFile, "")) {
+            for (int i = 0; i <= lastSelectedRow; i++) {
+                String payload = i < firstRangeRowCount ? payload(i) : "x";
+                writer.addElement(GenericRow.of(i, BinaryString.fromString(payload)));
+            }
+        }
+
+        long[] selectedRows = new long[firstRangeRowCount + 1];
+        for (int i = 0; i < firstRangeRowCount; i++) {
+            selectedRows[i] = i;
+        }
+        selectedRows[firstRangeRowCount] = lastSelectedRow;
+
+        int previousWorkerCount = NativeRuntime.workerCount();
+        NativeRuntime.setWorkerThreads(2);
+        try {
+            try (VortexRecordsReader reader =
+                    new VortexRecordsReader(
+                            testFile,
+                            rowType,
+                            rowType,
+                            selectedRows,
+                            null,
+                            Collections.emptyMap())) {
+                int readCount = 0;
+                FileRecordIterator<InternalRow> batch;
+                while ((batch = reader.readBatch()) != null) {
+                    InternalRow row;
+                    while ((row = batch.next()) != null) {
+                        assertEquals(batch.returnedPosition(), row.getInt(0));
+                        readCount++;
+                    }
+                }
+                assertEquals(selectedRows.length, readCount);
+            }
+        } finally {
+            NativeRuntime.setWorkerThreads(previousWorkerCount);
+        }
+    }
+
+    private static String payload(int rowId) {
+        char[] chars = new char[4_096];
+        int state = rowId + 1;
+        for (int i = 0; i < chars.length; i++) {
+            state = state * 1_103_515_245 + 12_345;
+            chars[i] = (char) ('a' + ((state >>> 16) & 15));
+        }
+        return new String(chars);
     }
 }
