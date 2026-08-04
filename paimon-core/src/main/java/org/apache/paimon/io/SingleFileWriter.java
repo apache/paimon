@@ -247,9 +247,14 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
                 out.close();
                 out = null;
             }
-        } catch (IOException e) {
+        } catch (Throwable e) {
             LOG.warn("Exception occurs when closing file {}. Cleaning up.", path, e);
-            abort();
+            try {
+                abort();
+            } catch (Throwable t) {
+                // never let the cleanup replace the failure that caused it
+                e.addSuppressed(t);
+            }
             throw e;
         } finally {
             closed = true;
