@@ -779,6 +779,56 @@ class TableWriteTest(unittest.TestCase):
                     actual -= 0x100000000
                 self.assertEqual(expected, actual)
 
+    @parameterized.expand([
+        ('compact', 'ms', 123000),
+        ('non_compact', 'us', 123456),
+    ])
+    def test_postpone_ltz_key_reopens_and_filters(
+            self, name, unit, microsecond):
+        identifier = 'default.test_postpone_ltz_' + name
+        pa_schema = pa.schema([
+            pa.field('key', pa.timestamp(unit, tz='UTC'), nullable=False),
+            pa.field('value', pa.string()),
+        ])
+        table = self._create_postpone_table(
+            identifier, pa_schema, primary_keys=['key'])
+        key = datetime.datetime(
+            2026, 1, 2, 3, 4, 5, microsecond,
+            tzinfo=datetime.timezone.utc)
+        self._commit_arrow(table, pa.Table.from_pydict({
+            'key': [key], 'value': ['v'],
+        }, schema=pa_schema), fixed_bucket=True)
+
+        reopened = self.catalog.get_table(identifier)
+        read_builder = reopened.new_read_builder()
+        read_builder.with_filter(
+            read_builder.new_predicate_builder().equal('key', key))
+        splits = read_builder.new_scan().plan().splits()
+        result = read_builder.new_read().to_arrow(splits)
+        self.assertEqual(1, result.num_rows)
+
+    def test_postpone_variant_key_reopens_and_scans(self):
+        from pypaimon.data.generic_variant import GenericVariant
+
+        identifier = 'default.test_postpone_variant_key'
+        variant = GenericVariant.from_python(-1)
+        variant_array = GenericVariant.to_arrow_array([variant])
+        pa_schema = pa.schema([
+            pa.field('key', variant_array.type, nullable=False),
+            pa.field('value', pa.string()),
+        ])
+        table = self._create_postpone_table(
+            identifier, pa_schema, primary_keys=['key'])
+        data = pa.Table.from_arrays(
+            [variant_array, pa.array(['v'])], schema=pa_schema)
+        self._commit_arrow(table, data, fixed_bucket=True)
+
+        reopened = self.catalog.get_table(identifier)
+        read_builder = reopened.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        result = read_builder.new_read().to_arrow(splits)
+        self.assertEqual(1, result.num_rows)
+
     @parameterized.expand([('mod',), ('hive',)])
     def test_postpone_rejects_unsupported_bucket_function(
             self, bucket_function):

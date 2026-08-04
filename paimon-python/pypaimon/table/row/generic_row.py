@@ -23,6 +23,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any, List, Union
 
+from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.schema.data_types import AtomicType, DataField, DataType
 from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.blob import BlobData
@@ -91,6 +92,11 @@ def _normalize_ltz(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value
     return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _is_ltz_type(type_name: str) -> bool:
+    return (type_name.startswith('TIMESTAMP_LTZ') or
+            'WITH LOCAL TIME ZONE' in type_name)
 
 
 def _millis_nanos_to_datetime(millis: int, nano_of_millisecond: int = 0) -> datetime:
@@ -240,12 +246,14 @@ class GenericRowDeserializer:
             return cls._parse_decimal(bytes_data, base_offset, field_offset, data_type)
         elif type_name.startswith('TIMESTAMP'):
             return cls._parse_timestamp(bytes_data, base_offset, field_offset, data_type)
+        elif type_name == 'VARIANT':
+            return cls._parse_variant(bytes_data, base_offset, field_offset)
         elif type_name in ['DATE']:
             return cls._parse_date(bytes_data, field_offset)
         elif type_name.startswith('TIME'):
             return cls._parse_time(bytes_data, field_offset)
         else:
-            return cls._parse_string(bytes_data, base_offset, field_offset)
+            raise TypeError(f"Unsupported type for deserialization: {type_name}")
 
     @classmethod
     def _parse_boolean(cls, bytes_data: bytes, field_offset: int) -> bool:
@@ -326,6 +334,31 @@ class GenericRowDeserializer:
         return BlobData.from_bytes(binary_data)
 
     @classmethod
+    def _parse_variant(cls, bytes_data: bytes, base_offset: int,
+                       field_offset: int) -> GenericVariant:
+        if field_offset + 8 > len(bytes_data):
+            raise ValueError("Not enough bytes for VARIANT offset and size")
+        offset_and_len = struct.unpack(
+            '<q', bytes_data[field_offset:field_offset + 8])[0]
+        sub_offset = (offset_and_len >> 32) & 0xFFFFFFFF
+        total_size = offset_and_len & 0xFFFFFFFF
+        data_offset = base_offset + sub_offset
+        data_end = data_offset + total_size
+        if total_size < 4 or data_end > len(bytes_data):
+            raise ValueError("Invalid VARIANT offset or size")
+
+        value_size = struct.unpack(
+            '<i', bytes_data[data_offset:data_offset + 4])[0]
+        if value_size < 0 or value_size > total_size - 4:
+            raise ValueError("Invalid VARIANT value size")
+        value_offset = data_offset + 4
+        metadata_offset = value_offset + value_size
+        return GenericVariant(
+            bytes_data[value_offset:metadata_offset],
+            bytes_data[metadata_offset:data_end],
+        )
+
+    @classmethod
     def _unscaled_to_decimal(cls, unscaled_value: int, scale: int) -> Decimal:
         sign = 0 if unscaled_value >= 0 else 1
         digits = tuple(int(d) for d in str(abs(unscaled_value))) if unscaled_value != 0 else (0,)
@@ -366,14 +399,17 @@ class GenericRowDeserializer:
         if precision <= 3:
             # Compact: epoch millis in fixed part
             millis = struct.unpack('<q', bytes_data[field_offset:field_offset + 8])[0]
-            return _millis_nanos_to_datetime(millis)
+            result = _millis_nanos_to_datetime(millis)
         else:
             # Non-compact: (cursor << 32 | nanoOfMillisecond) in fixed part, millis in var area
             offset_and_nanos = struct.unpack('<q', bytes_data[field_offset:field_offset + 8])[0]
             nano_of_millisecond = offset_and_nanos & 0xFFFFFFFF
             sub_offset = (offset_and_nanos >> 32) & 0xFFFFFFFF
             millis = struct.unpack('<q', bytes_data[base_offset + sub_offset:base_offset + sub_offset + 8])[0]
-            return _millis_nanos_to_datetime(millis, nano_of_millisecond)
+            result = _millis_nanos_to_datetime(millis, nano_of_millisecond)
+        if _is_ltz_type(data_type.type.upper()):
+            return result.replace(tzinfo=timezone.utc)
+        return result
 
     @classmethod
     def _parse_date(cls, bytes_data: bytes, field_offset: int) -> date:
@@ -426,7 +462,7 @@ class GenericRowSerializer:
                 'CHAR', 'VARCHAR', 'STRING', 'BINARY', 'VARBINARY', 'BYTES', 'BLOB'])
             is_decimal_type = type_name.startswith('DECIMAL') or type_name.startswith('NUMERIC')
             is_timestamp_type = type_name.startswith('TIMESTAMP')
-            is_ltz_type = type_name.startswith('TIMESTAMP_LTZ') or 'WITH LOCAL TIME ZONE' in type_name
+            is_ltz_type = _is_ltz_type(type_name)
             is_variant_type = type_name == 'VARIANT'
             if is_decimal_type or is_timestamp_type:
                 precision, scale = _parse_type_precision_scale(field.type)
