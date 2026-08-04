@@ -286,7 +286,13 @@ def write_paimon_dataset(
 
     if (
         table.bucket_mode() == BucketMode.POSTPONE_MODE
-        and table.options.postpone_batch_write_fixed_bucket()
+        and (
+            postpone_bucket_planner is not None
+            or (
+                table.options.postpone_batch_write_fixed_bucket()
+                and hash_fixed_precluster == HASH_FIXED_PRECLUSTER_MAP_GROUPS
+            )
+        )
     ):
         from pypaimon.write.postpone_bucket import (
             PostponeBucketPlanner,

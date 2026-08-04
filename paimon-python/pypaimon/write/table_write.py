@@ -244,11 +244,10 @@ class TableWrite:
                 By default, dynamically decided based on available resources.
             ray_remote_args: Optional kwargs passed to :func:`ray.remote` in write tasks.
                 For example, ``{"num_cpus": 2, "max_retries": 3}``.
-            hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
-                and ``"off"`` write append-only HASH_FIXED tables directly
-                and reject HASH_FIXED primary-key tables. ``"map_groups"``
-                writes each HASH_FIXED primary-key group in one task and
-                preserves the legacy single-group memory bound.
+            hash_fixed_precluster: Pre-clustering mode. ``"auto"`` and
+                ``"off"`` keep the default write path. ``"map_groups"``
+                writes each HASH_FIXED or postpone-bucket primary-key group
+                in one task and preserves the single-group memory bound.
             static_partition: Optional partition spec to overwrite. When set,
                 the Ray write runs in overwrite mode for this partition and
                 overrides any builder-level partition spec.

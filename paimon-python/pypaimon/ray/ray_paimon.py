@@ -295,8 +295,9 @@ def write_paimon(
     writer. For primary-key tables, ``map_groups`` writes each complete
     ``(partition_keys..., bucket)`` group in one Ray task and returns
     commit messages to the driver. It should only be used when every
-    group fits in memory. Postpone-bucket batch writes resolve existing
-    bucket counts once on the driver and always use this grouped path.
+    group fits in memory. Postpone-bucket writes keep their streaming
+    path unless ``map_groups`` is explicitly selected; that mode resolves
+    bucket counts once on the driver and writes to real buckets.
     HASH_DYNAMIC and CROSS_PARTITION primary-key Ray writes are rejected
     because Ray write tasks create independent Paimon writers.
 
@@ -307,11 +308,10 @@ def write_paimon(
         overwrite: If ``True``, overwrite existing data in the table.
         concurrency: Optional max number of Ray write tasks to run concurrently.
         ray_remote_args: Optional kwargs passed to ``ray.remote`` in write tasks.
-        hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
-            and ``"off"`` write append-only HASH_FIXED tables directly
-            and reject HASH_FIXED primary-key tables. ``"map_groups"``
-            writes each HASH_FIXED primary-key group in one task and
-            preserves the legacy single-group memory bound.
+        hash_fixed_precluster: Pre-clustering mode. ``"auto"`` and
+            ``"off"`` keep the default write path. ``"map_groups"``
+            writes each HASH_FIXED or postpone-bucket primary-key group
+            in one task and preserves the single-group memory bound.
     """
     _require_ray_data()
 

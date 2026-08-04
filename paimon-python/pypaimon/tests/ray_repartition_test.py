@@ -36,8 +36,8 @@ explicitly selected. These tests cover:
   * regression: a table whose schema already contains a column named
     ``__paimon_bucket__`` still works (collision-safe column name).
   * non-HASH_FIXED append-only tables pass through unchanged.
-  * dynamic-bucket primary-key tables fail fast, while postpone-bucket
-    primary-key tables plan once and group multi-block input by real bucket.
+  * postpone-bucket tables keep the streaming path by default and use
+    real buckets only through explicit ``map_groups`` mode.
 """
 
 import glob
@@ -241,7 +241,34 @@ class RayShuffleTest(unittest.TestCase):
         finally:
             writer.close()
 
-    def test_primary_key_postpone_bucket_multi_block_single_writer_per_bucket(self):
+    def test_primary_key_postpone_bucket_default_keeps_postpone_path(self):
+        from pypaimon.ray import write_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('value', pa.int64()),
+        ])
+        table_name = 'test_pk_postpone_bucket_ray_default'
+        identifier = self._make_table(
+            table_name, pa_schema, primary_keys=['id'],
+            options={'bucket': '-2'},
+        )
+        dataset = ray.data.from_arrow(pa.Table.from_pydict({
+            'id': list(range(20)),
+            'value': list(range(20)),
+        }, schema=pa_schema)).repartition(4)
+
+        write_paimon(dataset, identifier, self.catalog_options)
+
+        files = self._count_data_files(table_name)
+        self.assertTrue(files)
+        self.assertEqual(
+            {'bucket-postpone'},
+            {os.path.basename(os.path.dirname(path)) for path in files},
+        )
+        self.assertEqual(0, len(self._read_table(identifier)))
+
+    def test_primary_key_postpone_bucket_map_groups_writes_real_buckets(self):
         from pypaimon.ray import write_paimon
 
         pa_schema = pa.schema([
@@ -272,6 +299,7 @@ class RayShuffleTest(unittest.TestCase):
             identifier,
             self.catalog_options,
             concurrency=4,
+            hash_fixed_precluster="map_groups",
         )
 
         files = self._count_data_files(table_name)
@@ -281,6 +309,39 @@ class RayShuffleTest(unittest.TestCase):
             {os.path.basename(os.path.dirname(path)) for path in files},
         )
         self.assertEqual(len(self._read_table(identifier)), 100)
+
+    def test_explicit_postpone_writer_uses_real_buckets(self):
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('value', pa.int64()),
+        ])
+        table_name = 'test_explicit_postpone_ray_writer'
+        identifier = self._make_table(
+            table_name, pa_schema, primary_keys=['id'],
+            options={'bucket': '-2'},
+        )
+        dataset = ray.data.from_arrow(pa.Table.from_pydict({
+            'id': list(range(20)),
+            'value': list(range(20)),
+        }, schema=pa_schema)).repartition(4)
+
+        table = CatalogFactory.create(
+            self.catalog_options).get_table(identifier)
+        writer = (
+            table.new_postpone_fixed_bucket_write_builder().new_write()
+        )
+        try:
+            writer.write_ray(dataset)
+        finally:
+            writer.close()
+
+        files = self._count_data_files(table_name)
+        self.assertTrue(files)
+        self.assertNotIn(
+            'bucket-postpone',
+            {os.path.basename(os.path.dirname(path)) for path in files},
+        )
+        self.assertEqual(20, len(self._read_table(identifier)))
 
     def test_partitioned_fixed_bucket_roundtrip(self):
         """Partitioned table — confirms the post-groupby schema does not
