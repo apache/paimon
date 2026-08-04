@@ -55,6 +55,12 @@ _COALESCE_SPAN = 8 << 20
 _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION = 2.0
 
 
+def create_temp_path(path: str) -> str:
+    """Create the hidden temporary path used for an atomic write."""
+    separator = max(path.rfind('/'), path.rfind('\\'))
+    return f"{path[:separator + 1]}.{path[separator + 1:]}.{uuid.uuid4()}.tmp"
+
+
 def _coalesce_ranges(items, max_gap, max_span):
     """Group ``(idx, path, offset, length)`` (length >= 0) into merged spans:
     ``[(path, span_offset, span_length, [(idx, offset, length), ...])]``."""
@@ -292,7 +298,7 @@ class FileIO(ABC):
             if self.is_dir(path):
                 return False
 
-        temp_path = path + str(uuid.uuid4()) + ".tmp"
+        temp_path = create_temp_path(path)
         success = False
         try:
             self.write_file(temp_path, content, False)

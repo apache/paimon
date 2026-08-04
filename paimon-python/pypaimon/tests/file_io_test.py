@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pyarrow.fs as pafs
 
+from pypaimon.common.file_io import create_temp_path
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
@@ -32,6 +33,18 @@ from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO, _pyarrow_lt_7
 
 class FileIOTest(unittest.TestCase):
     """Test cases for FileIO.to_filesystem_path method."""
+
+    @patch('pypaimon.common.file_io.uuid.uuid4', return_value='test-uuid')
+    def test_create_temp_path(self, _):
+        self.assertEqual(
+            create_temp_path("oss://bucket/table/snapshot/snapshot-1"),
+            "oss://bucket/table/snapshot/.snapshot-1.test-uuid.tmp")
+        self.assertEqual(
+            create_temp_path("snapshot-1"),
+            ".snapshot-1.test-uuid.tmp")
+        self.assertEqual(
+            create_temp_path(r"C:\table\snapshot\snapshot-1"),
+            r"C:\table\snapshot\.snapshot-1.test-uuid.tmp")
 
     def test_filesystem_path_conversion(self):
         """Test S3FileSystem path conversion with various formats."""
