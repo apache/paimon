@@ -73,6 +73,7 @@ import java.nio.ByteOrder;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.isBigIntLogicalTypeCompatible;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.isUnsignedInt;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -183,14 +184,15 @@ public class ParquetVectorUpdaterFactory {
         public UpdaterFactory visit(BigIntType bigIntType) {
             return c -> {
                 PrimitiveType parquetType = c.getPrimitiveType();
+                if (!isBigIntLogicalTypeCompatible(parquetType)) {
+                    throw new UnsupportedOperationException(
+                            "Cannot read "
+                                    + parquetType.getPrimitiveTypeName()
+                                    + " logical type "
+                                    + parquetType.getLogicalTypeAnnotation()
+                                    + " as BIGINT");
+                }
                 if (parquetType.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.INT32) {
-                    LogicalTypeAnnotation annotation = parquetType.getLogicalTypeAnnotation();
-                    if (annotation != null
-                            && !(annotation
-                                    instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation)) {
-                        throw new UnsupportedOperationException(
-                                "Cannot read INT32 logical type " + annotation + " as BIGINT");
-                    }
                     // The file kept the narrower int, either because the column was widened in
                     // the metastore after the data was written, or because it is unsigned and
                     // BIGINT is the only Paimon type that can hold every value.

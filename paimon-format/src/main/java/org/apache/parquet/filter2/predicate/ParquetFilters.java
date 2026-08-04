@@ -538,13 +538,14 @@ public class ParquetFilters {
             return new PushdownTarget(fieldRef.name(), acceptable[0]);
         }
 
+        validateBigIntCompatibility(fieldRef, fileType);
+
         if (ParquetSchemaConverter.isUnsignedInt(fileType)) {
             // An unsigned column orders its statistics unsigned, so a signed bound would prune the
             // wrong row groups. The read still widens the column; only the pruning is given up.
             throw new UnsupportedOperationException();
         }
 
-        validateBigIntWidening(fieldRef, fileType);
         validateNarrowIntegerPushdown(fieldRef, fileType);
 
         for (PrimitiveType.PrimitiveTypeName candidate : acceptable) {
@@ -555,16 +556,10 @@ public class ParquetFilters {
         throw new UnsupportedOperationException();
     }
 
-    /** Reject INT32 logical values whose meaning changes when the column is declared BIGINT. */
-    private static void validateBigIntWidening(FieldRef fieldRef, PrimitiveType fileType) {
-        if (fieldRef.type().getTypeRoot() != DataTypeRoot.BIGINT
-                || fileType.getPrimitiveTypeName() != PrimitiveType.PrimitiveTypeName.INT32) {
-            return;
-        }
-
-        LogicalTypeAnnotation logicalType = fileType.getLogicalTypeAnnotation();
-        if (logicalType != null
-                && !(logicalType instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation)) {
+    /** Reject physical integer annotations that cannot be represented as BIGINT. */
+    private static void validateBigIntCompatibility(FieldRef fieldRef, PrimitiveType fileType) {
+        if (fieldRef.type().getTypeRoot() == DataTypeRoot.BIGINT
+                && !ParquetSchemaConverter.isBigIntLogicalTypeCompatible(fileType)) {
             throw new UnsupportedOperationException();
         }
     }

@@ -230,6 +230,85 @@ class ParquetTypeWideningTest {
                 .hasMessageContaining("TIME");
     }
 
+    @Test
+    void testIncompatibleInt64CannotReadAsBigInt() throws Exception {
+        List<LogicalTypeAnnotation> incompatibleTypes =
+                Arrays.asList(
+                        LogicalTypeAnnotation.decimalType(2, 18),
+                        LogicalTypeAnnotation.timeType(true, LogicalTypeAnnotation.TimeUnit.MICROS),
+                        LogicalTypeAnnotation.timestampType(
+                                false, LogicalTypeAnnotation.TimeUnit.MICROS),
+                        LogicalTypeAnnotation.intType(64, false));
+
+        for (LogicalTypeAnnotation logicalType : incompatibleTypes) {
+            MessageType schema =
+                    new MessageType(
+                            "root",
+                            Arrays.asList(
+                                    Types.optional(PrimitiveTypeName.BINARY)
+                                            .as(LogicalTypeAnnotation.stringType())
+                                            .named("pageviewId"),
+                                    Types.optional(PrimitiveTypeName.INT64)
+                                            .as(logicalType)
+                                            .named("ecpm"),
+                                    Types.optional(PrimitiveTypeName.INT64).named("revenue")));
+            Path path =
+                    writeGroups(
+                            schema,
+                            (group, i) ->
+                                    group.append("pageviewId", PAGEVIEW_IDS[i])
+                                            .append("ecpm", 12_345L)
+                                            .append("revenue", (long) i));
+
+            assertThatThrownBy(() -> read(ECPM_BIGINT, path, null))
+                    .as("logical type %s", logicalType)
+                    .hasRootCauseInstanceOf(UnsupportedOperationException.class)
+                    .rootCause()
+                    .hasMessageContaining("INT64")
+                    .hasMessageContaining("BIGINT");
+        }
+    }
+
+    /** INTEGER(64,true) means the same as an unannotated INT64 and must stay readable. */
+    @Test
+    void testSignedInt64AnnotationReadAsBigInt() throws Exception {
+        MessageType schema =
+                new MessageType(
+                        "root",
+                        Arrays.asList(
+                                Types.optional(PrimitiveTypeName.BINARY)
+                                        .as(LogicalTypeAnnotation.stringType())
+                                        .named("pageviewId"),
+                                Types.optional(PrimitiveTypeName.INT64)
+                                        .as(LogicalTypeAnnotation.intType(64, true))
+                                        .named("ecpm"),
+                                Types.optional(PrimitiveTypeName.INT64).named("revenue")));
+        Path path =
+                writeGroups(
+                        schema,
+                        (group, i) ->
+                                group.append("pageviewId", PAGEVIEW_IDS[i])
+                                        .append("ecpm", ECPM_VALUES[i])
+                                        .append("revenue", (long) i));
+        PredicateBuilder builder = new PredicateBuilder(ECPM_BIGINT);
+
+        assertThat(longs(read(ECPM_BIGINT, path, null), 1)).containsExactly(10L, 150L, 3000L);
+        assertThat(
+                        longs(
+                                read(
+                                        ECPM_BIGINT,
+                                        path,
+                                        Collections.singletonList(builder.lessThan(1, 5000L))),
+                                1))
+                .containsExactly(10L, 150L, 3000L);
+        assertThat(
+                        read(
+                                ECPM_BIGINT,
+                                path,
+                                Collections.singletonList(builder.greaterThan(1, 99999L))))
+                .isEmpty();
+    }
+
     // ------------------------------------------------------------------
     // FLOAT -> DOUBLE, the same hole in the other numeric family.
     // ------------------------------------------------------------------
