@@ -137,15 +137,18 @@ jobs:
               python -m pip install "git+https://github.com/apache/paimon-rust.git@${PYPAIMON_RUST_REV}#subdirectory=bindings/python"
               python -m pip install "./paimon-python[sql]"
               python -c "import importlib.metadata as m; from pypaimon_rust.datafusion import PaimonCatalog, Split; assert m.version('pypaimon-rust') == '0.4.0'; assert hasattr(PaimonCatalog, 'get_table'); assert hasattr(Split, 'serialize')"
-              python -m pip check
             else
               python -m pip install pypaimon-rust==0.3.0
             fi
             python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
             if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"; then
-              python -m pip install vortex-data==0.70.0
+              # Vortex requires pyarrow >= 17, while Pypaimon requires pyarrow < 20 and != 19.
+              python -m pip install vortex-data==0.70.0 pyarrow==18.1.0
             fi
             python -m pip install 'paimon-mosaic>=0.1.0'
+            if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
+              python -m pip check
+            fi
           fi
           df -h
 
