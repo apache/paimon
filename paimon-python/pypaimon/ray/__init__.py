@@ -30,6 +30,8 @@ from pypaimon.ray.data_evolution_merge_transform import (
 )
 from pypaimon.ray.update_by_row_id import update_by_row_id
 from pypaimon.ray.read_by_row_id import read_by_row_id
+from pypaimon.ray.offset_source import PaimonOffsetSource
+from pypaimon.ray.incremental_write import delete_write_paimon_checkpoint
 
 __all__ = [
     "read_paimon",
@@ -40,6 +42,8 @@ __all__ = [
     "merge_into",
     "update_by_row_id",
     "read_by_row_id",
+    "PaimonOffsetSource",
+    "delete_write_paimon_checkpoint",
     "WhenMatched",
     "WhenNotMatched",
     "source_col",

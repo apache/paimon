@@ -280,7 +280,7 @@ def _looks_like_blob_descriptor(column):
 
 
 def write_paimon(
-    dataset: "ray.data.Dataset",
+    dataset,
     table_identifier: str,
     catalog_options: Dict[str, str],
     *,
@@ -288,7 +288,11 @@ def write_paimon(
     concurrency: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     hash_fixed_precluster: str = "auto",
-) -> None:
+    commit_mode: str = "atomic",
+    operation_id: Optional[str] = None,
+    commit_interval_seconds: Optional[float] = None,
+    update_cols: Optional[List[str]] = None,
+):
     """Write a Ray Dataset to a Paimon table.
 
     HASH_FIXED rows are assigned to the correct bucket by the Paimon
@@ -311,8 +315,39 @@ def write_paimon(
             and reject HASH_FIXED primary-key tables. ``"map_groups"``
             writes each HASH_FIXED primary-key group in one task and
             preserves the legacy single-group memory bound.
+        commit_mode: ``"atomic"`` or resumable ``"incremental"``.
+        operation_id: Stable ID used to resume an incremental write.
+        commit_interval_seconds: Target interval between incremental commits.
+        update_cols: Columns updated by an incremental primary-key write.
     """
     _require_ray_data()
+
+    if commit_mode not in ("atomic", "incremental"):
+        raise ValueError("commit_mode must be 'atomic' or 'incremental'.")
+    if commit_mode == "incremental":
+        if overwrite:
+            raise ValueError("incremental write_paimon cannot overwrite.")
+        if commit_interval_seconds is None:
+            raise ValueError(
+                "commit_interval_seconds is required for incremental writes.")
+        from pypaimon.ray.incremental_write import incremental_write_paimon
+
+        return incremental_write_paimon(
+            dataset,
+            table_identifier,
+            catalog_options,
+            operation_id=operation_id,
+            commit_interval_seconds=commit_interval_seconds,
+            update_cols=update_cols,
+            concurrency=concurrency,
+            ray_remote_args=ray_remote_args,
+        )
+    if operation_id is not None or commit_interval_seconds is not None:
+        raise ValueError(
+            "operation_id and commit_interval_seconds require "
+            "commit_mode='incremental'.")
+    if update_cols is not None:
+        raise ValueError("update_cols requires commit_mode='incremental'.")
 
     from pypaimon.catalog.catalog_factory import CatalogFactory
     from pypaimon.write.ray_datasink import write_paimon_dataset
