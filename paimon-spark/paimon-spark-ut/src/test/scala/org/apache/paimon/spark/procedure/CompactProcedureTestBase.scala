@@ -718,8 +718,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       val table = loadTable("T")
       val (_, activeDt) = writeExpiredAndActivePartitions()
 
-      spark.sql("ALTER TABLE T SET TBLPROPERTIES (" +
-        "'end-input.check-partition-expire'='true')")
+      spark.sql(
+        "ALTER TABLE T SET TBLPROPERTIES (" +
+          "'end-input.check-partition-expire'='true')")
 
       spark.sql(
         "CALL sys.compact(table => 'T', " +
@@ -737,21 +738,20 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       endInputCheck: Boolean): Unit = {
     val dynamicBucketOption =
       if (bucket == -1) ", 'dynamic-bucket.initial-buckets'='1'" else ""
-    spark.sql(
-      s"""
-         |CREATE TABLE T (id INT, value STRING, dt STRING)
-         |TBLPROPERTIES (
-         |  'primary-key'='id, dt',
-         |  'bucket'='$bucket',
-         |  'write-only'='true',
-         |  'partition.expiration-time'='7 d',
-         |  'partition.expiration-strategy'='$expirationStrategy',
-         |  'partition.timestamp-formatter'='yyyyMMdd',
-         |  'partition.expiration-check-interval'='999 d',
-         |  'end-input.check-partition-expire'='$endInputCheck'
-         |  $dynamicBucketOption)
-         |PARTITIONED BY (dt)
-         |""".stripMargin)
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, dt STRING)
+                 |TBLPROPERTIES (
+                 |  'primary-key'='id, dt',
+                 |  'bucket'='$bucket',
+                 |  'write-only'='true',
+                 |  'partition.expiration-time'='7 d',
+                 |  'partition.expiration-strategy'='$expirationStrategy',
+                 |  'partition.timestamp-formatter'='yyyyMMdd',
+                 |  'partition.expiration-check-interval'='999 d',
+                 |  'end-input.check-partition-expire'='$endInputCheck'
+                 |  $dynamicBucketOption)
+                 |PARTITIONED BY (dt)
+                 |""".stripMargin)
   }
 
   private def writeExpiredAndActivePartitions(): (String, String) = {
