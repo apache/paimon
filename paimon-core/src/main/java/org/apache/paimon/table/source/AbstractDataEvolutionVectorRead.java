@@ -618,7 +618,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         pinOptions.put(CoreOptions.SCAN_WATERMARK.key(), null);
         pinOptions.put(CoreOptions.SCAN_TIMESTAMP.key(), null);
         pinOptions.put(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), null);
-        return table.copy(pinOptions);
+        return table.copyWithoutTimeTravel(pinOptions);
     }
 
     protected static void splitSearchSplits(
