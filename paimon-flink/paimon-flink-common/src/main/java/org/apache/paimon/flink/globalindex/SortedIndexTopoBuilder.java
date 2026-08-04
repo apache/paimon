@@ -109,9 +109,10 @@ public class SortedIndexTopoBuilder {
         Optional<DataStream<Committable>> written =
                 buildIndexStream(
                         env,
-                        indexBuilderSupplier,
+                        indexScannerSupplier,
                         table,
                         indexColumns,
+                        indexType,
                         partitionPredicate,
                         userOptions);
         if (!written.isPresent()) {
@@ -130,9 +131,10 @@ public class SortedIndexTopoBuilder {
      */
     public static Optional<DataStream<Committable>> buildIndexStream(
             StreamExecutionEnvironment env,
-            Supplier<SortedGlobalIndexBuilder> indexBuilderSupplier,
+            Supplier<SortedGlobalIndexScanner> indexScannerSupplier,
             FileStoreTable table,
             List<String> indexColumns,
+            String indexType,
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {

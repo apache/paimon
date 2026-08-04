@@ -123,21 +123,22 @@ public class SortedIndexTopoBuilderTest {
 
     @Test
     public void testBuildIndexStreamReturnsEmptyWhenNoBuildTask() throws Exception {
-        SortedGlobalIndexBuilder indexBuilder = mock(SortedGlobalIndexBuilder.class);
-        when(indexBuilder.withIndexField("id")).thenReturn(indexBuilder);
-        when(indexBuilder.incrementalScan()).thenReturn(Optional.empty());
+        SortedGlobalIndexScanner indexScanner = mock(SortedGlobalIndexScanner.class);
+        when(indexScanner.withIndexField("id")).thenReturn(indexScanner);
+        when(indexScanner.incrementalScan()).thenReturn(Optional.empty());
         StreamExecutionEnvironment env = mock(StreamExecutionEnvironment.class);
 
         assertThat(
                         SortedIndexTopoBuilder.buildIndexStream(
                                 env,
-                                () -> indexBuilder,
+                                () -> indexScanner,
                                 mock(FileStoreTable.class),
                                 Collections.singletonList("id"),
+                                "btree",
                                 null,
                                 new Options()))
                 .isEmpty();
-        verify(indexBuilder).incrementalScan();
+        verify(indexScanner).incrementalScan();
         verifyNoInteractions(env);
     }
 
