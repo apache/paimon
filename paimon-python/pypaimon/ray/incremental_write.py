@@ -46,7 +46,6 @@ def incremental_write_paimon(
     """Write a Ray source with periodic commits and optional source checkpoints."""
     from pypaimon.catalog.catalog_factory import CatalogFactory
     from pypaimon.ray.offset_source import PaimonOffsetSource
-    from pypaimon.write.ray_datasink import _write_primary_key_groups
 
     resumable = isinstance(source, PaimonOffsetSource)
     if resumable:
@@ -73,6 +72,93 @@ def incremental_write_paimon(
             concurrency,
             ray_remote_args,
         )
+
+    return _write_offset_source(
+        source,
+        target,
+        catalog,
+        table,
+        operation_id,
+        commit_interval_seconds,
+        update_cols,
+        to_write_batch,
+        concurrency,
+        ray_remote_args,
+    )
+
+
+def _prepare_incremental_target(table, target, update_cols):
+    from pypaimon.common.options.core_options import MergeEngine
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    from pypaimon.table.bucket_mode import BucketMode
+
+    if not update_cols:
+        raise ValueError("update_cols must be non-empty.")
+    update_cols = list(dict.fromkeys(update_cols))
+
+    if not table.is_primary_key_table:
+        raise ValueError(
+            "incremental write_paimon requires a primary-key target.")
+    if table.bucket_mode() != BucketMode.HASH_FIXED:
+        raise ValueError(
+            "incremental write_paimon requires a fixed-bucket target.")
+    if table.cross_partition_update:
+        raise ValueError(
+            "incremental write_paimon does not support cross-partition "
+            "updates.")
+    if table.options.merge_engine() != MergeEngine.PARTIAL_UPDATE:
+        raise ValueError(
+            "incremental write_paimon requires "
+            "'merge-engine'='partial-update'.")
+    if table.options.sequence_field():
+        raise ValueError(
+            "incremental write_paimon does not support sequence fields.")
+
+    primary_keys = list(table.primary_keys)
+    invalid = [name for name in update_cols if name not in table.field_names]
+    if invalid:
+        raise ValueError(
+            "update column {!r} is not in target {!r}.".format(
+                invalid[0], target))
+    key_updates = [name for name in update_cols if name in primary_keys]
+    if key_updates:
+        raise ValueError(
+            "primary-key column {!r} cannot be updated.".format(
+                key_updates[0]))
+    omitted_non_null = [
+        field.name for field in table.table_schema.fields
+        if (field.name not in primary_keys
+            and field.name not in update_cols
+            and not field.type.nullable)
+    ]
+    if omitted_non_null:
+        raise ValueError(
+            "unprovided partial-update column {!r} must be nullable.".format(
+                omitted_non_null[0]))
+
+    target_schema = PyarrowFieldParser.from_paimon_schema(
+        table.table_schema.fields)
+    required = primary_keys + update_cols
+
+    def to_write_batch(batch):
+        missing = [name for name in required if name not in batch.column_names]
+        if missing:
+            raise ValueError("source is missing columns {}.".format(missing))
+        arrays = [
+            batch.column(field.name).cast(field.type)
+            if field.name in required
+            else pa.nulls(batch.num_rows, type=field.type)
+            for field in target_schema
+        ]
+        return pa.Table.from_arrays(arrays, schema=target_schema)
+    return update_cols, to_write_batch
+
+
+def _write_offset_source(
+        source, target, catalog, table, operation_id,
+        commit_interval_seconds, update_cols, to_write_batch,
+        concurrency, ray_remote_args):
+    from pypaimon.write.ray_datasink import _write_primary_key_groups
 
     commit_user = _commit_user(operation_id)
     checkpoint_tags = _checkpoint_tags(operation_id)
@@ -175,73 +261,6 @@ def incremental_write_paimon(
         if pending_messages:
             _abort_messages(table, pending_messages)
         raise
-
-
-def _prepare_incremental_target(table, target, update_cols):
-    from pypaimon.common.options.core_options import MergeEngine
-    from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.table.bucket_mode import BucketMode
-
-    if not update_cols:
-        raise ValueError("update_cols must be non-empty.")
-    update_cols = list(dict.fromkeys(update_cols))
-
-    if not table.is_primary_key_table:
-        raise ValueError(
-            "incremental write_paimon requires a primary-key target.")
-    if table.bucket_mode() != BucketMode.HASH_FIXED:
-        raise ValueError(
-            "incremental write_paimon requires a fixed-bucket target.")
-    if table.cross_partition_update:
-        raise ValueError(
-            "incremental write_paimon does not support cross-partition "
-            "updates.")
-    if table.options.merge_engine() != MergeEngine.PARTIAL_UPDATE:
-        raise ValueError(
-            "incremental write_paimon requires "
-            "'merge-engine'='partial-update'.")
-    if table.options.sequence_field():
-        raise ValueError(
-            "incremental write_paimon does not support sequence fields.")
-
-    primary_keys = list(table.primary_keys)
-    invalid = [name for name in update_cols if name not in table.field_names]
-    if invalid:
-        raise ValueError(
-            "update column {!r} is not in target {!r}.".format(
-                invalid[0], target))
-    key_updates = [name for name in update_cols if name in primary_keys]
-    if key_updates:
-        raise ValueError(
-            "primary-key column {!r} cannot be updated.".format(
-                key_updates[0]))
-    omitted_non_null = [
-        field.name for field in table.table_schema.fields
-        if (field.name not in primary_keys
-            and field.name not in update_cols
-            and not field.type.nullable)
-    ]
-    if omitted_non_null:
-        raise ValueError(
-            "unprovided partial-update column {!r} must be nullable.".format(
-                omitted_non_null[0]))
-
-    target_schema = PyarrowFieldParser.from_paimon_schema(
-        table.table_schema.fields)
-    required = primary_keys + update_cols
-
-    def to_write_batch(batch):
-        missing = [name for name in required if name not in batch.column_names]
-        if missing:
-            raise ValueError("source is missing columns {}.".format(missing))
-        arrays = [
-            batch.column(field.name).cast(field.type)
-            if field.name in required
-            else pa.nulls(batch.num_rows, type=field.type)
-            for field in target_schema
-        ]
-        return pa.Table.from_arrays(arrays, schema=target_schema)
-    return update_cols, to_write_batch
 
 
 def _write_dataset_periodically(
