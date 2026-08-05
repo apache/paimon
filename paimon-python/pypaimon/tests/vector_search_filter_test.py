@@ -36,6 +36,7 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.btree.btree_index_meta import BTreeIndexMeta
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta, GlobalIndexMeta
+from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluation
 from pypaimon.globalindex.global_index_reader import _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search import VectorSearch
@@ -1588,7 +1589,8 @@ class VectorSearchFilterTest(unittest.TestCase):
             "scalar-index.search-mode": "detail",
         }))
         scanner = mock.MagicMock()
-        scanner.scan.return_value = GlobalIndexResult.create_empty()
+        scanner.scan_with_coverage.return_value = GlobalIndexEvaluation(
+            GlobalIndexResult.create_empty(), frozenset([0]))
         scanner.unindexed_rows.return_value = GlobalIndexResult.create_empty()
         reader = DataEvolutionVectorRead(
             table,
@@ -1606,7 +1608,10 @@ class VectorSearchFilterTest(unittest.TestCase):
                 RawVectorSearchSplit([Range(0, 9)], [scalar_file])])
 
         scanner.unindexed_rows.assert_called_once_with(
-            predicate, search_mode=GlobalIndexSearchMode.DETAIL)
+            predicate,
+            search_mode=GlobalIndexSearchMode.DETAIL,
+            field_ids=frozenset([0]),
+        )
 
     def test_scan_threads_builder_options_to_raw_split_index_type(self):
         from pypaimon.table.source.vector_search_split import RawVectorSearchSplit

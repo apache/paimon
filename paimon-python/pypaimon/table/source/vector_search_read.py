@@ -192,15 +192,16 @@ class AbstractVectorSearchReadImpl:
         if scanner is None:
             return None
         try:
-            result = scanner.scan(self._filter)
-            if result is None:
+            evaluation = scanner.scan_with_coverage(self._filter)
+            if evaluation is None:
                 return None
-            include = result.results()
+            include = evaluation.result.results()
             include = RoaringBitmap64.or_(
                 include,
                 scanner.unindexed_rows(
                     self._filter,
                     search_mode=self._table.options.scalar_index_search_mode(),
+                    field_ids=evaluation.field_ids,
                 ).results())
             return RoaringBitmap64.and_(include, raw_rows)
         finally:

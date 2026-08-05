@@ -495,12 +495,15 @@ class FileScanner:
             if scanner is None:
                 return None
             with scanner:
-                result = scanner.scan(self.predicate)
-                if result is None:
+                evaluation = scanner.scan_with_coverage(self.predicate)
+                if evaluation is None:
                     return None
                 scalar_mode = self.table.options.scalar_index_search_mode()
-                return result.or_(
-                    scanner.unindexed_rows(self.predicate, search_mode=scalar_mode))
+                return evaluation.result.or_(scanner.unindexed_rows(
+                    self.predicate,
+                    search_mode=scalar_mode,
+                    field_ids=evaluation.field_ids,
+                ))
         except Exception:
             return None
 

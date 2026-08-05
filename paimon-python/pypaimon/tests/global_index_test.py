@@ -26,6 +26,7 @@ from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluation
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
@@ -239,7 +240,8 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         index_result = GlobalIndexResult.from_range(Range(1, 1))
         unindexed = GlobalIndexResult.from_range(Range(5, 6))
         fake_scanner = unittest.mock.MagicMock()
-        fake_scanner.scan.return_value = index_result
+        fake_scanner.scan_with_coverage.return_value = GlobalIndexEvaluation(
+            index_result, frozenset([0]))
         fake_scanner.unindexed_rows.return_value = unindexed
         fake_scanner.__enter__.return_value = fake_scanner
         fake_scanner.__exit__.return_value = None
@@ -254,7 +256,10 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             result.results().to_range_list(),
         )
         fake_scanner.unindexed_rows.assert_called_once_with(
-            predicate, search_mode=GlobalIndexSearchMode.FULL)
+            predicate,
+            search_mode=GlobalIndexSearchMode.FULL,
+            field_ids=frozenset([0]),
+        )
 
     def test_eval_global_index_keeps_none_as_full_scan(self):
         from pypaimon.read.scanner.file_scanner import FileScanner
@@ -273,7 +278,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         scanner.table = _Table()
 
         fake_scanner = unittest.mock.MagicMock()
-        fake_scanner.scan.return_value = None
+        fake_scanner.scan_with_coverage.return_value = None
         fake_scanner.__enter__.return_value = fake_scanner
         fake_scanner.__exit__.return_value = None
 

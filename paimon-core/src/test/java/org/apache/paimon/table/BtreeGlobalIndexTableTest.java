@@ -152,6 +152,32 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testFullSearchIgnoresUnindexedAndResidualForCoverage() throws Exception {
+        write(100L);
+        createIndex("f1");
+
+        FileStoreTable table =
+                tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.equal(1, BinaryString.fromString("a42")),
+                        builder.equal(2, BinaryString.fromString("b42")));
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
+        assertThat(
+                        plan.splits().stream()
+                                .map(IndexedSplit.class::cast)
+                                .flatMap(split -> split.rowRanges().stream())
+                                .collect(Collectors.toList()))
+                .containsExactly(new Range(42, 42));
+        assertThat(readF1(readBuilder, plan)).containsExactly("a42");
+    }
+
+    @Test
     public void testBTreeGlobalIndexTopNCandidatesAcrossRanges() throws Exception {
         write(100L);
         createIndex("f1");

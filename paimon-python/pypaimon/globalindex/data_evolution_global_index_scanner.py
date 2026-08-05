@@ -20,7 +20,10 @@
 from concurrent.futures import ThreadPoolExecutor
 from typing import Collection, Optional
 
-from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluator
+from pypaimon.globalindex.global_index_evaluator import (
+    GlobalIndexEvaluation,
+    GlobalIndexEvaluator,
+)
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, _map_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -209,11 +212,20 @@ class DataEvolutionGlobalIndexScanner:
         """Scan the global index with the given predicate."""
         return self._evaluator.evaluate(predicate)
 
+    def scan_with_coverage(
+        self, predicate: Optional[Predicate]
+    ) -> Optional[GlobalIndexEvaluation]:
+        return self._evaluator.evaluate_with_fields(predicate)
+
     def unindexed_rows(self, predicate: Optional[Predicate],
-                       search_mode=None) -> GlobalIndexResult:
+                       search_mode=None, field_ids=None) -> GlobalIndexResult:
         """Return coarse row ids not covered by global indexes."""
         if self._coverage is None:
             return GlobalIndexResult.create_empty()
+        if field_ids is not None:
+            return GlobalIndexResult.from_ranges(
+                self._coverage.unindexed_ranges(
+                    field_ids, search_mode=search_mode))
         return GlobalIndexResult.from_ranges(
             self._coverage.unindexed_ranges(
                 self._fields, predicate, search_mode=search_mode))
