@@ -40,6 +40,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.Triple;
 
 import javax.annotation.Nullable;
 
@@ -48,9 +49,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -76,6 +79,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     // per-file column pruning in postFilterManifestEntries.
     private final ConcurrentMap<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache =
             new ConcurrentHashMap<>();
+    private final EvolutionStatsCache evolutionStatsCache = new EvolutionStatsCache();
 
     public DataEvolutionFileStoreScan(
             ManifestsReader manifestsReader,
@@ -206,7 +210,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     }
 
     private boolean filterByStats(List<ManifestEntry> entries) {
-        EvolutionStats stats = evolutionStats(schema, this::scanTableSchema, entries);
+        EvolutionStats stats =
+                evolutionStats(schema, this::scanTableSchema, entries, evolutionStatsCache);
         return inputFilter.test(
                 stats.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
     }
@@ -258,19 +263,23 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 pair -> fileFieldIds(this::scanTableSchema, entry.file()));
     }
 
-    /** TODO: Optimize implementation of this method. */
     @VisibleForTesting
     static EvolutionStats evolutionStats(
             TableSchema schema,
             Function<Long, TableSchema> scanTableSchema,
-            List<ManifestEntry> metas) {
+            List<ManifestEntry> metas,
+            EvolutionStatsCache evolutionStatsCache) {
         Set<Integer> excludedFileFieldIds =
                 metas.stream()
                         .filter(
                                 entry ->
                                         isBlobFile(entry.file().fileName())
                                                 || isVectorStoreFile(entry.file().fileName()))
-                        .flatMap(entry -> fileFieldIds(scanTableSchema, entry.file()).stream())
+                        .flatMap(
+                                entry ->
+                                        evolutionStatsCache.get(scanTableSchema, entry.file())
+                                                .dataFileSchema().fields().stream()
+                                                .map(DataField::id))
                         .collect(Collectors.toSet());
         // exclude blob and vector-store files, useless for predicate eval
         metas =
@@ -303,21 +312,11 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
         for (int i = 0; i < metas.size(); i++) {
             DataFileMeta fileMeta = metas.get(i).file();
-
-            TableSchema dataFileSchema =
-                    scanTableSchema.apply(fileMeta.schemaId()).project(fileMeta.writeCols());
-
-            TableSchema dataFileSchemaWithStats = dataFileSchema.project(fileMeta.valueStatsCols());
-
-            int[] fieldIds =
-                    dataFileSchema.logicalRowType().getFields().stream()
-                            .mapToInt(DataField::id)
-                            .toArray();
-
-            int[] fieldIdsWithStats =
-                    dataFileSchemaWithStats.logicalRowType().getFields().stream()
-                            .mapToInt(DataField::id)
-                            .toArray();
+            ProjectedFileSchema projectedFileSchema =
+                    evolutionStatsCache.get(scanTableSchema, fileMeta);
+            TableSchema dataFileSchemaWithStats = projectedFileSchema.dataFileSchemaWithStats();
+            int[] fieldIds = projectedFileSchema.fieldIds();
+            int[] fieldIdsWithStats = projectedFileSchema.fieldIdsWithStats();
 
             loop1:
             for (int j = 0; j < fieldsCount; j++) {
@@ -368,6 +367,77 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         finalMax.setRows(max);
         finalNullCounts.setRows(nullCounts);
         return new EvolutionStats(groupRowCount, finalMin, finalMax, finalNullCounts);
+    }
+
+    @VisibleForTesting
+    static class EvolutionStatsCache {
+
+        private final Map<Triple<Long, List<String>, List<String>>, ProjectedFileSchema> cache =
+                new HashMap<>();
+
+        private ProjectedFileSchema get(
+                Function<Long, TableSchema> scanTableSchema, DataFileMeta fileMeta) {
+            Triple<Long, List<String>, List<String>> key =
+                    Triple.of(fileMeta.schemaId(), fileMeta.writeCols(), fileMeta.valueStatsCols());
+            return cache.computeIfAbsent(key, ignored -> projectFileSchema(scanTableSchema, key));
+        }
+
+        @VisibleForTesting
+        int size() {
+            return cache.size();
+        }
+
+        private static ProjectedFileSchema projectFileSchema(
+                Function<Long, TableSchema> scanTableSchema,
+                Triple<Long, List<String>, List<String>> key) {
+            TableSchema dataFileSchema = scanTableSchema.apply(key.f0).project(key.f1);
+            TableSchema dataFileSchemaWithStats = dataFileSchema.project(key.f2);
+            int[] fieldIds =
+                    dataFileSchema.logicalRowType().getFields().stream()
+                            .mapToInt(DataField::id)
+                            .toArray();
+            int[] fieldIdsWithStats =
+                    dataFileSchemaWithStats.logicalRowType().getFields().stream()
+                            .mapToInt(DataField::id)
+                            .toArray();
+            return new ProjectedFileSchema(
+                    dataFileSchema, dataFileSchemaWithStats, fieldIds, fieldIdsWithStats);
+        }
+    }
+
+    private static class ProjectedFileSchema {
+
+        private final TableSchema dataFileSchema;
+        private final TableSchema dataFileSchemaWithStats;
+        private final int[] fieldIds;
+        private final int[] fieldIdsWithStats;
+
+        private ProjectedFileSchema(
+                TableSchema dataFileSchema,
+                TableSchema dataFileSchemaWithStats,
+                int[] fieldIds,
+                int[] fieldIdsWithStats) {
+            this.dataFileSchema = dataFileSchema;
+            this.dataFileSchemaWithStats = dataFileSchemaWithStats;
+            this.fieldIds = fieldIds;
+            this.fieldIdsWithStats = fieldIdsWithStats;
+        }
+
+        private TableSchema dataFileSchema() {
+            return dataFileSchema;
+        }
+
+        private TableSchema dataFileSchemaWithStats() {
+            return dataFileSchemaWithStats;
+        }
+
+        private int[] fieldIds() {
+            return fieldIds;
+        }
+
+        private int[] fieldIdsWithStats() {
+            return fieldIdsWithStats;
+        }
     }
 
     /** Note: Keep this thread-safe. */
