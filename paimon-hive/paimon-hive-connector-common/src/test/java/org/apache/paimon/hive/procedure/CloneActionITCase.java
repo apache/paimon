@@ -107,6 +107,12 @@ public class CloneActionITCase extends ActionITCaseBase {
                         "target",
                         "--target_catalog_conf",
                         "warehouse=" + warehouse2,
+                        "--target_table_conf",
+                        "deletion-vectors.enabled=true",
+                        "--target_table_conf",
+                        "file.format.per.level=0:avro",
+                        "--target_table_conf",
+                        "metadata.stats-mode.per.level=0:none",
                         "--clone_from",
                         "paimon")
                 .run();
@@ -115,7 +121,13 @@ public class CloneActionITCase extends ActionITCaseBase {
         List<Row> result = sql(tEnv, "SELECT * FROM catalog2.`default`.target");
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1), Row.of(2, 2));
         List<Row> show = sql(tEnv, "SHOW CREATE TABLE catalog2.`default`.target");
-        assertThat(show.toString()).contains("PRIMARY KEY");
+        assertThat(show.toString())
+                .contains(
+                        "PRIMARY KEY",
+                        "'bucket' = '-2'",
+                        "'deletion-vectors.enabled' = 'true'",
+                        "'file.format.per.level' = '0:avro'",
+                        "'metadata.stats-mode.per.level' = '0:none'");
     }
 
     @Test
