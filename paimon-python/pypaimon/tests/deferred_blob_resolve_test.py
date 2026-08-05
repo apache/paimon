@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 import pyarrow as pa
 import pyarrow.compute as pc
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
@@ -270,6 +271,7 @@ class DeferredBlobResolveTest(unittest.TestCase):
         self.assertEqual(_ROW_COUNT, result.num_rows)
         self.assertEqual(_ROW_COUNT, counting_file_io.blobs_fetched)
 
+    @pytest.mark.python_plan
     def test_iterator_passes_remaining_limit_across_splits(self):
         table = self._create_table(
             "defer_iterator_limit_splits",
@@ -279,17 +281,19 @@ class DeferredBlobResolveTest(unittest.TestCase):
         )
         counting_file_io = _BlobCountingFileIO(table.file_io)
         table.file_io = counting_file_io
-        read_builder = table.new_read_builder().with_projection(
+        scan_builder = table.new_read_builder().with_projection(
             ["sample_id", "payload", "score"]
-        ).with_limit(2)
-        splits = read_builder.new_scan().plan().splits()
+        )
+        splits = scan_builder.new_scan().plan().splits()
+        table_read = scan_builder.with_limit(2).new_read()
 
-        rows = list(read_builder.new_read().to_iterator(splits))
+        rows = list(table_read.to_iterator(splits))
 
-        self.assertEqual(2, len(splits))
+        self.assertGreater(len(splits), 1)
         self.assertEqual(2, len(rows))
         self.assertEqual(2, counting_file_io.blobs_fetched)
 
+    @pytest.mark.python_plan
     def test_iterator_applies_limit_after_auth_filter(self):
         table = self._create_table(
             "defer_iterator_auth_limit_splits",
@@ -297,22 +301,28 @@ class DeferredBlobResolveTest(unittest.TestCase):
             partition_keys=["sample_id"],
             sample_ids=["a"] + ["b"] * (_ROW_COUNT - 1),
         )
-        read_builder = table.new_read_builder().with_projection(
+        scan_builder = table.new_read_builder().with_projection(
             ["sample_id", "payload", "score"]
-        ).with_limit(2)
+        )
         counting_file_io = _BlobCountingFileIO(table.file_io)
         table.file_io = counting_file_io
         auth_result = _RejectScoreOneAuthResult()
+        planned_splits = sorted(
+            scan_builder.new_scan().plan().splits(),
+            key=lambda split: tuple(split.partition.values),
+        )
         splits = [
             QueryAuthSplit(split, auth_result)
-            for split in read_builder.new_scan().plan().splits()
+            for split in planned_splits
         ]
+        table_read = scan_builder.with_limit(2).new_read()
 
         scores = [
             row.get_field(2)
-            for row in read_builder.new_read().to_iterator(splits)
+            for row in table_read.to_iterator(splits)
         ]
 
+        self.assertGreater(len(planned_splits), 1)
         self.assertEqual([0, 2], scores)
         self.assertEqual(2, counting_file_io.blobs_fetched)
 

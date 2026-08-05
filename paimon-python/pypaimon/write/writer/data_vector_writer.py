@@ -27,7 +27,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import VectorType
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.writer.data_writer import DataWriter
+from pypaimon.write.writer.data_writer import DataWriter, DataWriterPrepareTransaction
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +131,8 @@ class DataVectorWriter(DataWriter):
             self.abort()
             raise e
 
-    def prepare_commit(self) -> List[DataFileMeta]:
+    def _prepare_commit_data(self):
         self._close_current_writers()
-        return self.committed_files.copy()
 
     def close(self):
         if self.closed:
@@ -147,6 +146,7 @@ class DataVectorWriter(DataWriter):
         finally:
             self.closed = True
             self.pending_normal_data = None
+        self.abort()
 
     def abort(self):
         if self.vector_writer is not None:
@@ -187,12 +187,17 @@ class DataVectorWriter(DataWriter):
             self.committed_files.append(normal_meta)
 
         if self.vector_writer is not None:
-            vector_metas = self.vector_writer.prepare_commit()
-            if vector_metas:
-                if normal_meta is not None:
-                    self._validate_consistency(normal_meta, vector_metas)
-                self.committed_files.extend(vector_metas)
-            self.vector_writer.committed_files.clear()
+            transaction = DataWriterPrepareTransaction()
+            try:
+                vector_metas = transaction.stage(self.vector_writer).data_files
+                if vector_metas:
+                    if normal_meta is not None:
+                        self._validate_consistency(normal_meta, vector_metas)
+                    self.committed_files.extend(vector_metas)
+                transaction.complete()
+            except Exception:
+                transaction.abort()
+                raise
 
         self.pending_normal_data = None
 

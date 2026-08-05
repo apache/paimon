@@ -38,7 +38,7 @@ from pypaimon.write.row_utils import (
     row_to_named_values,
     row_values_to_arrow_table,
 )
-from pypaimon.write.writer.data_writer import DataWriter
+from pypaimon.write.writer.data_writer import DataWriter, DataWriterPrepareTransaction
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +133,7 @@ class DedicatedFormatWriter(DataWriter):
         # State management for blob writer
         self.record_count = 0
         self.closed = False
+        self.blob_consumer = blob_consumer
 
         # Track pending data for normal data only
         self.pending_normal_data: Optional[pa.Table] = None
@@ -309,11 +310,9 @@ class DedicatedFormatWriter(DataWriter):
 
         return value
 
-    def prepare_commit(self) -> List[DataFileMeta]:
+    def _prepare_commit_data(self):
         # Close any remaining data
         self._close_current_writers()
-
-        return self.committed_files.copy()
 
     def close(self):
         if self.closed:
@@ -328,6 +327,9 @@ class DedicatedFormatWriter(DataWriter):
         finally:
             self.closed = True
             self.pending_normal_data = None
+        # Anything not drained by prepare_commit is still owned by this
+        # writer and must not survive close as an unreachable file set.
+        self.abort()
 
     def abort(self):
         """Abort all writers and clean up resources."""
@@ -335,14 +337,23 @@ class DedicatedFormatWriter(DataWriter):
             blob_writer.abort()
         if self.vector_writer is not None:
             self.vector_writer.abort()
-        committed_non_blob_files = [
-            file_meta for file_meta in self.committed_files
-            if not DataFileMeta.is_blob_file(file_meta.file_name)
-        ]
-        self._delete_committed_files(committed_non_blob_files)
+        # A BlobConsumer receives descriptors as bytes are written and may retain
+        # them independently of this table commit. Preserve those BLOB files on
+        # abort, matching BlobWriter.abort(); normal and vector files are still
+        # exclusively owned by this writer and must be removed.
+        files_to_delete = self.committed_files
+        if self.blob_consumer is not None:
+            files_to_delete = [
+                file_meta for file_meta in self.committed_files
+                if not file_meta.file_name.endswith(
+                    ".%s" % CoreOptions.FILE_FORMAT_BLOB)
+            ]
+        self._delete_committed_files(files_to_delete)
         self.pending_normal_data = None
         self.pending_data = None
         self.committed_files.clear()
+        self.committed_changelog_files.clear()
+        self._active_prepared_commit = None
 
     def _split_data(self, data: pa.RecordBatch) -> Tuple[
             Optional[pa.RecordBatch], Dict[str, pa.RecordBatch], Optional[pa.RecordBatch]]:
@@ -469,21 +480,32 @@ class DedicatedFormatWriter(DataWriter):
             normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
             self.committed_files.append(normal_meta)
 
-        blob_metas = []
-        for blob_column in self.blob_file_column_names:
-            writer_metas = self.blob_writers[blob_column].prepare_commit()
-            if normal_meta is not None:
-                self._validate_consistency(normal_meta, writer_metas, blob_column)
-            blob_metas.extend(writer_metas)
-        self.committed_files.extend(blob_metas)
+        transaction = DataWriterPrepareTransaction()
+        try:
+            blob_metas = []
+            for blob_column in self.blob_file_column_names:
+                stage = transaction.stage(self.blob_writers[blob_column])
+                writer_metas = stage.data_files
+                if normal_meta is not None:
+                    self._validate_consistency(normal_meta, writer_metas, blob_column)
+                blob_metas.extend(writer_metas)
 
-        vector_metas = []
-        if self.vector_writer is not None:
-            vector_metas = self.vector_writer.prepare_commit()
-            if vector_metas and normal_meta is not None:
-                self._validate_consistency(normal_meta, vector_metas, 'vector')
+            vector_metas = []
+            if self.vector_writer is not None:
+                stage = transaction.stage(self.vector_writer)
+                vector_metas = stage.data_files
+                if vector_metas and normal_meta is not None:
+                    self._validate_consistency(normal_meta, vector_metas, 'vector')
+
+            # Parent ownership is established before child ownership is acknowledged.
+            # If acknowledgement unexpectedly fails, the parent's outer abort still
+            # has every file needed for cleanup.
+            self.committed_files.extend(blob_metas)
             self.committed_files.extend(vector_metas)
-            self.vector_writer.committed_files.clear()
+            transaction.complete()
+        except Exception:
+            transaction.abort()
+            raise
 
         self.pending_normal_data = None
 

@@ -20,7 +20,7 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 import pyarrow
 from pyarrow import types
@@ -300,6 +300,22 @@ def is_blob_file_type(data_type: DataType) -> bool:
 
 def is_blob_file_field(field: 'DataField') -> bool:
     return is_blob_file_type(field.type)
+
+
+def fields_in_blob_file(
+        fields: List['DataField'],
+        inline_fields: Optional[Set[str]] = None) -> List['DataField']:
+    inline = inline_fields or set()
+    return [
+        field for field in fields
+        if is_blob_file_field(field) and field.name not in inline
+    ]
+
+
+def field_names_in_blob_file(
+        fields: List['DataField'],
+        inline_fields: Optional[Set[str]] = None) -> Set[str]:
+    return {field.name for field in fields_in_blob_file(fields, inline_fields)}
 
 
 @dataclass

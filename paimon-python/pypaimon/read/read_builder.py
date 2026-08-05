@@ -24,7 +24,8 @@ from pypaimon.read.explain_render import render_predicate
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.split import Split
-from pypaimon.read.table_read import TableRead
+from pypaimon.read.table_read import (TableRead,
+                                      validate_primary_key_blob_predicate)
 from pypaimon.read.table_scan import TableScan
 from pypaimon.schema.data_types import DataField
 from pypaimon.table.special_fields import SpecialFields
@@ -80,6 +81,7 @@ class ReadBuilder:
         return self
 
     def new_scan(self) -> TableScan:
+        validate_primary_key_blob_predicate(self.table, self._predicate)
         scan = TableScan(
             table=self.table,
             predicate=self._predicate,

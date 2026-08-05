@@ -36,10 +36,36 @@ from pypaimon.read.split import Split
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.schema.data_types import (DataField, PyarrowFieldParser,
+                                        is_blob_file_type)
 from pypaimon.table.row.offset_row import OffsetRow
 
 ROW_KIND_COLUMN = "_row_kind"
+
+
+def validate_primary_key_blob_predicate(table, predicate: Optional[Predicate]) -> None:
+    """Reject unsupported value comparisons on primary-key BLOB fields."""
+    if not table.is_primary_key_table or predicate is None:
+        return
+
+    fields_by_name = {field.name: field for field in table.fields}
+
+    def validate(current: Predicate) -> None:
+        if current.method in ('and', 'or'):
+            for child in current.literals or []:
+                validate(child)
+            return
+        if current.method in ('isNull', 'isNotNull'):
+            return
+        field = fields_by_name.get(current.field)
+        if field is not None and is_blob_file_type(field.type):
+            raise ValueError(
+                "Primary-key BLOB, ARRAY<BLOB>, and MAP<X, BLOB> fields "
+                "only support isNull and isNotNull predicates, but got "
+                f"{current.method} for field '{current.field}'."
+            )
+
+    validate(predicate)
 
 
 class _RemainingRows:
@@ -97,6 +123,10 @@ class TableRead:
         from pypaimon.read.merge_engine_support import check_supported
         from pypaimon.table.file_store_table import FileStoreTable
 
+        self.table: FileStoreTable = table
+        self.predicate = predicate
+        validate_primary_key_blob_predicate(self.table, self.predicate)
+
         # Validate merge-engine support before any split-level dispatch.
         # Raw-convertible splits skip MergeFileSplitRead, so this guard
         # has to live at the read-builder level — otherwise unsupported
@@ -104,8 +134,6 @@ class TableRead:
         # silently ignored on fresh single-snapshot tables.
         check_supported(table)
 
-        self.table: FileStoreTable = table
-        self.predicate = predicate
         self.read_type = read_type
         # Split readers may need predicate-only columns that are absent from
         # the requested output. Read the widened schema internally, then use
@@ -762,7 +790,10 @@ class TableRead:
                     effective_read_type if outer_extract_name_paths else None),
                 limit=effective_limit,
             )
-        elif self.table.options.data_evolution_enabled():
+        # DataEvolutionSplitRead is an append-table reader. Primary-key
+        # tables always dispatch raw-convertible splits to RawFileSplitRead.
+        elif (not self.table.is_primary_key_table
+              and self.table.options.data_evolution_enabled()):
             if self.nested_name_paths and any(
                     len(p) > 1 for p in self.nested_name_paths):
                 raise NotImplementedError(

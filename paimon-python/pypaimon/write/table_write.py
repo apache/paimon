@@ -112,6 +112,11 @@ class TableWrite:
             ignore_existing=ignore_existing,
             base_snapshot_id=base_snapshot_id,
         )
+        self._hash_index_stream_maintenance = True
+        builder = getattr(self, "_stream_write_builder", None)
+        if builder is not None:
+            for commit in builder._stream_commits:
+                self.register_hash_index_commit_callbacks(commit)
         return self
 
     def write_arrow_batch_to_bucket(
@@ -226,6 +231,33 @@ class TableWrite:
         self.file_store_write.blob_consumer = blob_consumer
         return self
 
+    def register_hash_index_commit_callbacks(self, commit) -> None:
+        if not getattr(self, "_hash_index_stream_maintenance", False):
+            return
+        create_callback = getattr(
+            self.row_key_extractor, "create_hash_index_refresh_callback", None
+        )
+        if create_callback is None:
+            return
+        registered = getattr(self, "_hash_index_commit_callbacks", None)
+        if registered is None:
+            registered = {}
+            self._hash_index_commit_callbacks = registered
+        commit_id = id(commit)
+        previous = registered.get(commit_id)
+        if previous is not None:
+            commit.remove_commit_callback(previous)
+        callback = create_callback()
+        if callback is not None:
+            commit.add_commit_callback(callback)
+            registered[commit_id] = callback
+
+    def _unregister_hash_index_commit_callback(self, commit) -> None:
+        registered = getattr(self, "_hash_index_commit_callbacks", None)
+        if registered is None:
+            return
+        registered.pop(id(commit), None)
+
     def write_ray(
         self,
         dataset: "Dataset",
@@ -280,6 +312,13 @@ class TableWrite:
             self.file_store_write.close()
         finally:
             self._release_prepared_indexes()
+            registered = getattr(self, "_hash_index_commit_callbacks", None)
+            if registered is not None:
+                registered.clear()
+            builder = getattr(self, "_stream_write_builder", None)
+            if builder is not None:
+                builder._detach_writer(self)
+                self._stream_write_builder = None
 
     def abort(self):
         try:
@@ -290,38 +329,49 @@ class TableWrite:
                 abort()
 
     def _prepare_commit(self, commit_identifier) -> List[CommitMessage]:
-        commit_messages = self.file_store_write.prepare_commit(commit_identifier)
-        prepare_indexes = getattr(self.row_key_extractor, "prepare_commit", None)
-        if prepare_indexes is None:
-            return commit_messages
-
-        index_changes = prepare_indexes()
-        base_snapshot_id = getattr(
-            self.row_key_extractor, "base_snapshot_id", None
-        )
-        messages_by_bucket = {
-            (tuple(message.partition), message.bucket): message
-            for message in commit_messages
-        }
-        for (partition, bucket), changes in index_changes.items():
-            message = messages_by_bucket.get((partition, bucket))
-            if message is None:
-                message = CommitMessage(
-                    partition=partition,
-                    bucket=bucket,
-                    new_files=[],
+        prepared = None
+        try:
+            prepared = self.file_store_write.stage_commit(commit_identifier)
+            commit_messages = prepared.messages
+            prepare_indexes = getattr(self.row_key_extractor, "prepare_commit", None)
+            if prepare_indexes is not None:
+                index_changes = prepare_indexes()
+                base_snapshot_id = getattr(
+                    self.row_key_extractor, "base_snapshot_id", None
                 )
-                commit_messages.append(message)
-                messages_by_bucket[(partition, bucket)] = message
-            message.index_adds.extend(changes.additions)
-            message.index_deletes.extend(changes.deletions)
-        if base_snapshot_id is not None:
-            # Data-only upserts must participate too. A concurrent overwrite
-            # can rebuild the HASH index and move an existing key, making a
-            # stale data file unsafe even when this writer added no mapping.
-            for message in commit_messages:
-                message.hash_index_base_snapshot = base_snapshot_id
-        return commit_messages
+                messages_by_bucket = {
+                    (tuple(message.partition), message.bucket): message
+                    for message in commit_messages
+                }
+                for (partition, bucket), changes in index_changes.items():
+                    message = messages_by_bucket.get((partition, bucket))
+                    if message is None:
+                        message = CommitMessage(
+                            partition=partition,
+                            bucket=bucket,
+                            new_files=[],
+                        )
+                        commit_messages.append(message)
+                        messages_by_bucket[(partition, bucket)] = message
+                    message.index_adds.extend(changes.additions)
+                    message.index_deletes.extend(changes.deletions)
+                if base_snapshot_id is not None:
+                    # Data-only upserts must participate too. A concurrent overwrite
+                    # can rebuild the HASH index and move an existing key, making a
+                    # stale data file unsafe even when this writer added no mapping.
+                    for message in commit_messages:
+                        message.hash_index_base_snapshot = base_snapshot_id
+
+            messages = prepared.complete()
+            self._release_prepared_indexes()
+            return messages
+        except Exception:
+            if prepared is not None:
+                prepared.abort()
+            abort_indexes = getattr(self.row_key_extractor, "abort", None)
+            if abort_indexes is not None:
+                abort_indexes()
+            raise
 
     def _release_prepared_indexes(self) -> None:
         release = getattr(self.row_key_extractor, "release_prepared", None)
@@ -387,6 +437,4 @@ class BatchTableWrite(TableWrite):
 class StreamTableWrite(TableWrite):
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
-        messages = self._prepare_commit(commit_identifier)
-        self._release_prepared_indexes()
-        return messages
+        return self._prepare_commit(commit_identifier)
