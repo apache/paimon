@@ -227,7 +227,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
     }
   }
 
-  test("Postpone bucket table: staged write materializes deletion vectors without rescale") {
+  test("Postpone bucket table: staged fixed write does not compact") {
     withTable("t") {
       sql("""
             |CREATE TABLE t (
@@ -263,8 +263,8 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             |""".stripMargin)
       assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.EMPTY_ROW) == 1)
 
-      // The fixed writer restores the old bucket. Lookup compaction applies the old deletion
-      // vector while merging both a duplicate key and new keys into the existing layout.
+      // The fixed writer restores the old bucket but remains write-only. Existing deletion
+      // vectors and new level-0 files are left for background compaction.
       sql("""
             |INSERT INTO t
             |SELECT 2 AS k, 'updated-2' AS v
@@ -273,7 +273,16 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             |""".stripMargin)
 
       assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.EMPTY_ROW) == 1)
-      assert(deletionVectorCardinality("t") == 0L)
+      assert(deletionVectorCardinality("t") == 1L)
+      assert(
+        loadTable("t")
+          .newSnapshotReader()
+          .onlyReadRealBuckets()
+          .read()
+          .dataSplits()
+          .asScala
+          .flatMap(_.dataFiles().asScala)
+          .exists(_.level() == 0))
       checkAnswer(
         sql("SELECT * FROM t ORDER BY k"),
         Seq(
@@ -392,10 +401,9 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         .filter(_.partition() == partition0)
         .flatMap(_.dataFiles().asScala)
       assert(
-        resultFiles.forall(_.level() > 0),
+        resultFiles.exists(_.level() == 0),
         resultFiles.map(file => s"${file.fileName()}:L${file.level()}").mkString(", "))
-      checkAnswer(
-        sql("SELECT k, v, pt FROM t ORDER BY pt, k"),
+      val expected =
         Seq(
           Row(0, "base-0", 0),
           Row(1, "new-1", 0),
@@ -404,10 +412,12 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
           Row(50, "level-0", 0)) ++
           (100 until 108).map(id => Row(id, s"new-$id", 0)) ++
           Seq(Row(0, "base-0", 1), Row(1, "base-1", 1), Row(2, "updated-2", 1), Row(3, "base-3", 1))
-      )
-      checkAnswer(
-        sql("SELECT pt, count(*) FROM t GROUP BY pt ORDER BY pt"),
-        Seq(Row(0, 13L), Row(1, 4L)))
+      withSparkSQLConf("spark.paimon.deletion-vectors.merge-on-read" -> "true") {
+        checkAnswer(sql("SELECT k, v, pt FROM t ORDER BY pt, k"), expected)
+        checkAnswer(
+          sql("SELECT pt, count(*) FROM t GROUP BY pt ORDER BY pt"),
+          Seq(Row(0, 13L), Row(1, 4L)))
+      }
       checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(0L)))
     }
   }
@@ -807,7 +817,6 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             |  'postpone.batch-write-fixed-bucket' = 'true',
             |  'deletion-vectors.enabled' = 'true',
             |  'deletion-vectors.merge-on-read' = 'true',
-            |  'write-only' = 'true',
             |  'postpone.default-bucket-num' = '1',
             |  'postpone.batch-write-fixed-bucket.max-parallelism' = '1',
             |  'source.split.target-size' = '1 B'

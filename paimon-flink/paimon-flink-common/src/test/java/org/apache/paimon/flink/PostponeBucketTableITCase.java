@@ -1008,6 +1008,43 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
     }
 
     @Test
+    public void testFixedBucketWriteDoesNotCompact() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'postpone.batch-write-fixed-bucket.max-parallelism' = '1',\n"
+                        + "  'num-sorted-run.compaction-trigger' = '2'\n"
+                        + ")");
+
+        tEnv.executeSql("INSERT INTO T VALUES (1, 'a')").await();
+        tEnv.executeSql("INSERT INTO T VALUES (2, 'b')").await();
+
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, a]", "+I[2, b]");
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level = 0"))).hasSize(2);
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
+    }
+
+    @Test
     public void testWriteFixedBucketWithDifferentBucketNumber() throws Exception {
         String warehouse = getTempDirPath();
         TableEnvironment tEnv =
