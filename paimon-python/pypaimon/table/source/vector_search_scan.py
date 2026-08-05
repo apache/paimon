@@ -26,6 +26,7 @@ from pypaimon.table.source.vector_search_split import (
     IndexVectorSearchSplit,
     RawVectorSearchSplit,
 )
+from pypaimon.table.source.vector_search_split import VectorSearchSplit  # noqa F401
 from pypaimon.utils.range import Range
 
 
