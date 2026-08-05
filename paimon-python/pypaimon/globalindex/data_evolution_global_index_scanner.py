@@ -36,6 +36,9 @@ from pypaimon.schema.data_types import DataField
 from pypaimon.utils.range import Range
 
 
+_SUPPORTED_SCALAR_INDEX_TYPES = frozenset(('btree', 'bitmap', 'full-text'))
+
+
 class DataEvolutionGlobalIndexScanner:
     """Scanner for shard-based global indexes."""
 
@@ -51,6 +54,7 @@ class DataEvolutionGlobalIndexScanner:
         snapshot=None,
         partition_filter=None,
     ):
+        index_files = _supported_scalar_index_files(index_files)
         self._options = options or CoreOptions(Options.from_none())
         self._executor = ThreadPoolExecutor(
             max_workers=thread_num or 32
@@ -157,6 +161,7 @@ class DataEvolutionGlobalIndexScanner:
         from pypaimon.index.index_file_handler import IndexFileHandler
 
         if index_files is not None:
+            index_files = _supported_scalar_index_files(index_files)
             if len(index_files) == 0:
                 return None
             core_options = _core_options(table)
@@ -184,6 +189,8 @@ class DataEvolutionGlobalIndexScanner:
             if partition_filter is not None:
                 if not partition_filter.test(entry.partition):
                     return False
+            if not _is_supported_scalar_index(entry.index_file):
+                return False
             global_index_meta = entry.index_file.global_index_meta
             if global_index_meta is None:
                 return False
@@ -224,22 +231,27 @@ class DataEvolutionGlobalIndexScanner:
     def scan_with_coverage(
         self, predicate: Optional[Predicate]
     ) -> Optional[GlobalIndexEvaluation]:
-        return self._evaluator.evaluate_with_fields(predicate)
+        return self._evaluator.evaluate_with_contributing_fields(predicate)
 
     def unindexed_rows(self, predicate: Optional[Predicate],
-                       search_mode=None, field_ids=None) -> GlobalIndexResult:
+                       search_mode=None,
+                       contributing_field_ids=None) -> GlobalIndexResult:
         """Return coarse row ids not covered by global indexes."""
         return GlobalIndexResult.from_ranges(self.unindexed_ranges(
-            predicate, search_mode=search_mode, field_ids=field_ids))
+            predicate,
+            search_mode=search_mode,
+            contributing_field_ids=contributing_field_ids,
+        ))
 
     def unindexed_ranges(self, predicate: Optional[Predicate],
-                         search_mode=None, field_ids=None) -> List[Range]:
+                         search_mode=None,
+                         contributing_field_ids=None) -> List[Range]:
         """Return row ranges not covered by global indexes."""
         if self._coverage is None:
             return []
-        if field_ids is not None:
+        if contributing_field_ids is not None:
             return self._coverage.unindexed_ranges(
-                field_ids, search_mode=search_mode)
+                contributing_field_ids, search_mode=search_mode)
         return self._coverage.unindexed_ranges(
             self._fields, predicate, search_mode=search_mode)
 
@@ -353,6 +365,18 @@ def _resolve_snapshot(table, snapshot):
     except Exception:
         pass
     return snapshot_manager.get_latest_snapshot()
+
+
+def _is_supported_scalar_index(index_file):
+    return (
+        index_file.global_index_meta is not None
+        and index_file.index_type in _SUPPORTED_SCALAR_INDEX_TYPES
+    )
+
+
+def _supported_scalar_index_files(index_files):
+    return [index_file for index_file in index_files
+            if _is_supported_scalar_index(index_file)]
 
 
 def _core_options(table):

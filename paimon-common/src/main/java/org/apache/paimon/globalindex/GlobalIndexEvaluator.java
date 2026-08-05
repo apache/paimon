@@ -75,8 +75,8 @@ public class GlobalIndexEvaluator implements Closeable {
         return await(visitAsync(predicate)).map(Evaluation::result);
     }
 
-    /** Evaluate the predicate and return the field IDs used by the result. */
-    public Optional<Evaluation> evaluateWithFields(@Nullable Predicate predicate) {
+    /** Evaluate the predicate and return the fields whose supported indexes contributed. */
+    public Optional<Evaluation> evaluateWithContributingFields(@Nullable Predicate predicate) {
         if (predicate == null) {
             return Optional.empty();
         }
@@ -185,7 +185,7 @@ public class GlobalIndexEvaluator implements Closeable {
 
     private Optional<Evaluation> combineResults(
             List<Optional<Evaluation>> results, CompoundPredicate predicate) {
-        Set<Integer> fieldIds = new HashSet<>();
+        Set<Integer> contributingFieldIds = new HashSet<>();
         if (predicate.function() instanceof Or) {
             GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
             for (Optional<Evaluation> child : results) {
@@ -193,9 +193,9 @@ public class GlobalIndexEvaluator implements Closeable {
                     return Optional.empty();
                 }
                 compoundResult = compoundResult.or(child.get().result());
-                fieldIds.addAll(child.get().fieldIds());
+                contributingFieldIds.addAll(child.get().contributingFieldIds());
             }
-            return Optional.of(new Evaluation(compoundResult, fieldIds));
+            return Optional.of(new Evaluation(compoundResult, contributingFieldIds));
         } else {
             Optional<GlobalIndexResult> compoundResult = Optional.empty();
             for (Optional<Evaluation> child : results) {
@@ -206,33 +206,36 @@ public class GlobalIndexEvaluator implements Closeable {
                     } else {
                         compoundResult = Optional.of(child.get().result());
                     }
-                    fieldIds.addAll(child.get().fieldIds());
+                    contributingFieldIds.addAll(child.get().contributingFieldIds());
                 }
                 if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
                     break;
                 }
             }
-            return compoundResult.map(result -> new Evaluation(result, fieldIds));
+            return compoundResult.map(result -> new Evaluation(result, contributingFieldIds));
         }
     }
 
-    /** Global-index matches and the fields which produced them. */
+    /**
+     * Matches and fields whose supported index results contributed; discarded branches excluded.
+     */
     public static final class Evaluation {
 
         private final GlobalIndexResult result;
-        private final Set<Integer> fieldIds;
+        private final Set<Integer> contributingFieldIds;
 
-        private Evaluation(GlobalIndexResult result, Collection<Integer> fieldIds) {
+        private Evaluation(GlobalIndexResult result, Collection<Integer> contributingFieldIds) {
             this.result = result;
-            this.fieldIds = Collections.unmodifiableSet(new HashSet<>(fieldIds));
+            this.contributingFieldIds =
+                    Collections.unmodifiableSet(new HashSet<>(contributingFieldIds));
         }
 
         public GlobalIndexResult result() {
             return result;
         }
 
-        public Set<Integer> fieldIds() {
-            return fieldIds;
+        public Set<Integer> contributingFieldIds() {
+            return contributingFieldIds;
         }
     }
 

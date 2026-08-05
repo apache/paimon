@@ -515,7 +515,8 @@ class FileScanner:
                     scanner.unindexed_ranges(
                         self.predicate,
                         search_mode=scalar_mode,
-                        field_ids=evaluation.field_ids,
+                        contributing_field_ids=(
+                            evaluation.contributing_field_ids),
                     ),
                 )
         except Exception:

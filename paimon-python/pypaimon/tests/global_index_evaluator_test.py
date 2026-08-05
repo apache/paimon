@@ -190,10 +190,10 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
             ],
         )
 
-        evaluation = evaluator.evaluate_with_fields(predicate)
+        evaluation = evaluator.evaluate_with_contributing_fields(predicate)
 
         self.assertIsNotNone(evaluation)
-        self.assertEqual(frozenset([0]), evaluation.field_ids)
+        self.assertEqual(frozenset([0]), evaluation.contributing_field_ids)
         self.assertEqual([Range(42, 42)],
                          evaluation.result.results().to_range_list())
         evaluator.close()
@@ -223,10 +223,10 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
             ],
         )
 
-        evaluation = evaluator.evaluate_with_fields(predicate)
+        evaluation = evaluator.evaluate_with_contributing_fields(predicate)
 
         self.assertIsNotNone(evaluation)
-        self.assertEqual(frozenset([2]), evaluation.field_ids)
+        self.assertEqual(frozenset([2]), evaluation.contributing_field_ids)
         self.assertEqual([Range(42, 42)],
                          evaluation.result.results().to_range_list())
         evaluator.close()

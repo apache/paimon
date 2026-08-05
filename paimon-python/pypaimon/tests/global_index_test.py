@@ -263,7 +263,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         fake_scanner.unindexed_ranges.assert_called_once_with(
             predicate,
             search_mode=GlobalIndexSearchMode.FULL,
-            field_ids=frozenset([0]),
+            contributing_field_ids=frozenset([0]),
         )
 
     def test_split_planning_merges_indexed_and_unindexed_ranges(self):

@@ -241,10 +241,10 @@ class GlobalIndexEvaluatorTest {
         Predicate predicate = PredicateBuilder.and(builder.equal(0, 42), builder.equal(1, 99));
 
         Optional<GlobalIndexEvaluator.Evaluation> evaluation =
-                evaluator.evaluateWithFields(predicate);
+                evaluator.evaluateWithContributingFields(predicate);
 
         assertThat(evaluation).isPresent();
-        assertThat(evaluation.get().fieldIds()).containsExactly(0);
+        assertThat(evaluation.get().contributingFieldIds()).containsExactly(0);
         assertBitmapContainsExactly(evaluation.get().result().results(), 42L);
         evaluator.close();
     }
@@ -268,10 +268,10 @@ class GlobalIndexEvaluatorTest {
                         builder.equal(2, 42));
 
         Optional<GlobalIndexEvaluator.Evaluation> evaluation =
-                evaluator.evaluateWithFields(predicate);
+                evaluator.evaluateWithContributingFields(predicate);
 
         assertThat(evaluation).isPresent();
-        assertThat(evaluation.get().fieldIds()).containsExactly(2);
+        assertThat(evaluation.get().contributingFieldIds()).containsExactly(2);
         assertBitmapContainsExactly(evaluation.get().result().results(), 42L);
         evaluator.close();
     }

@@ -326,7 +326,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 GlobalIndexResult finalResult =
                         result.get()
                                 .result()
-                                .or(scanner.unindexedRowsForFields(result.get().fieldIds()));
+                                .or(
+                                        scanner.unindexedRowsForContributingFields(
+                                                result.get().contributingFieldIds()));
                 long coverageDuration = System.nanoTime() - coverageStart;
                 long totalDuration = System.nanoTime() - totalStart;
                 LOG.info(

@@ -227,7 +227,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                 return null;
             }
             include.or(result.get().result().results());
-            include.or(scanner.unindexedRowsForFields(result.get().fieldIds()).results());
+            include.or(
+                    scanner.unindexedRowsForContributingFields(result.get().contributingFieldIds())
+                            .results());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

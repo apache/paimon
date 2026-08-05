@@ -201,7 +201,8 @@ class AbstractVectorSearchReadImpl:
                 scanner.unindexed_rows(
                     self._filter,
                     search_mode=self._table.options.scalar_index_search_mode(),
-                    field_ids=evaluation.field_ids,
+                    contributing_field_ids=(
+                        evaluation.contributing_field_ids),
                 ).results())
             return RoaringBitmap64.and_(include, raw_rows)
         finally:

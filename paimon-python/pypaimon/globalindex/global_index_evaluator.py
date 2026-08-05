@@ -29,8 +29,10 @@ from pypaimon.schema.data_types import DataField
 
 
 class GlobalIndexEvaluation(NamedTuple):
+    """Matches and fields whose supported indexes contributed."""
+
     result: GlobalIndexResult
-    field_ids: FrozenSet[int]
+    contributing_field_ids: FrozenSet[int]
 
 
 class GlobalIndexEvaluator:
@@ -59,11 +61,11 @@ class GlobalIndexEvaluator:
         evaluation = self._visit_async(predicate).result()
         return evaluation.result if evaluation is not None else None
 
-    def evaluate_with_fields(
+    def evaluate_with_contributing_fields(
         self,
         predicate: Optional[Predicate]
     ) -> Optional[GlobalIndexEvaluation]:
-        """Evaluate and return the field ids used by the result."""
+        """Return matches and fields whose supported indexes contributed."""
         if predicate is None:
             return None
         return self._visit_async(predicate).result()
@@ -169,16 +171,16 @@ class GlobalIndexEvaluator:
     def _combine_results(
         self, results: List[Optional[GlobalIndexEvaluation]], method: str
     ) -> Optional[GlobalIndexEvaluation]:
-        field_ids = set()
+        contributing_field_ids = set()
         if method == 'or':
             compound_result = GlobalIndexResult.create_empty()
             for child in results:
                 if child is None:
                     return None
                 compound_result = compound_result.or_(child.result)
-                field_ids.update(child.field_ids)
+                contributing_field_ids.update(child.contributing_field_ids)
             return GlobalIndexEvaluation(compound_result,
-                                         frozenset(field_ids))
+                                         frozenset(contributing_field_ids))
         else:
             compound_result: Optional[GlobalIndexResult] = None
             for child in results:
@@ -187,13 +189,14 @@ class GlobalIndexEvaluator:
                         compound_result = compound_result.and_(child.result)
                     else:
                         compound_result = child.result
-                    field_ids.update(child.field_ids)
+                    contributing_field_ids.update(
+                        child.contributing_field_ids)
                 if compound_result is not None and compound_result.is_empty():
                     break
             if compound_result is None:
                 return None
             return GlobalIndexEvaluation(compound_result,
-                                         frozenset(field_ids))
+                                         frozenset(contributing_field_ids))
 
     def _flatten_children(self, method: str, children) -> list:
         result = []
