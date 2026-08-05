@@ -32,6 +32,7 @@ import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
@@ -1761,6 +1762,308 @@ public class IcebergRestMetadataCommitterTest {
         Set<Endpoint> endpoints = new HashSet<>((Set<Endpoint>) endpointsField.get(sessionCatalog));
         assertThat(endpoints.remove(Endpoint.V1_REGISTER_TABLE)).isTrue();
         endpointsField.set(sessionCatalog, endpoints);
+    }
+
+    /**
+     * The REST server (and the catalog table {@code mydb.t} on it) is shared across the tests in
+     * this class; in auto-recreate mode a leftover table from another test is silently dropped
+     * during the first commit, but the reconcile-mode tests refuse to touch a foreign table, so
+     * they must start clean.
+     */
+    private void dropLeftoverRestTable() {
+        TableIdentifier identifier = TableIdentifier.of("mydb", "t");
+        if (restCatalog.tableExists(identifier)) {
+            restCatalog.dropTable(identifier, false);
+        }
+    }
+
+    @Test
+    public void testReconcileWhenRestCatalogBehind() throws Exception {
+        // REST publication misses several snapshots (here: sidecar generation continues while the
+        // committer is off); with auto-recreate disabled the committer must replay the missing
+        // snapshots onto the existing catalog table instead of dropping it.
+        dropLeftoverRestTable();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(IcebergOptions.REST_AUTO_RECREATE.key(), "false");
+        customOptions.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE_LOCATION.key(), "catalog-location");
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        -1,
+                        "avro",
+                        customOptions);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        TableIdentifier identifier = TableIdentifier.of("mydb", "t");
+        BaseTable icebergTable = (BaseTable) restCatalog.loadTable(identifier);
+        assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(2);
+        String tableUuid = icebergTable.operations().current().uuid();
+
+        // keep generating local metadata but stop publishing to the REST catalog
+        Map<String, String> options = new HashMap<>();
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+        table = table.copy(options);
+        write.close();
+        write = table.newWrite(commitUser);
+        commit.close();
+        commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(3, 30));
+        commit.commit(3, write.prepareCommit(false, 3));
+        write.write(GenericRow.of(4, 40));
+        commit.commit(4, write.prepareCommit(false, 4));
+
+        // re-enable REST publication; the catalog is now three snapshots behind
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "rest-catalog");
+        table = table.copy(options);
+        write.close();
+        write = table.newWrite(commitUser);
+        commit.close();
+        commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(5, 50));
+        commit.commit(5, write.prepareCommit(false, 5));
+
+        icebergTable = (BaseTable) restCatalog.loadTable(identifier);
+        assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(5);
+        assertThat(icebergTable.operations().current().uuid()).isEqualTo(tableUuid);
+        assertThat(ImmutableList.copyOf(icebergTable.snapshots()).size()).isEqualTo(5);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, 10)",
+                        "Record(2, 20)",
+                        "Record(3, 30)",
+                        "Record(4, 40)",
+                        "Record(5, 50)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testRepublishAlreadyPublishedSnapshotIsNoOp() throws Exception {
+        // Re-driving a publication that already landed (e.g. after an ambiguous commit or a
+        // restart) must not change the catalog table in either mode; in particular the legacy
+        // auto-recreate mode must not drop and recreate it just to reproduce identical content.
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        -1,
+                        "avro",
+                        Collections.emptyMap());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        TableIdentifier identifier = TableIdentifier.of("mydb", "t");
+        BaseTable icebergTable = (BaseTable) restCatalog.loadTable(identifier);
+        assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(2);
+        String tableUuid = icebergTable.operations().current().uuid();
+
+        IcebergMetadata latestMetadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(catalogTableMetadataPath(table), "v2.metadata.json"));
+
+        // legacy mode (auto-recreate enabled, the default)
+        new IcebergRestMetadataCommitter(table).commitMetadata(latestMetadata, null);
+        icebergTable = (BaseTable) restCatalog.loadTable(identifier);
+        assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(2);
+        assertThat(icebergTable.operations().current().uuid()).isEqualTo(tableUuid);
+
+        // reconcile mode
+        FileStoreTable reconcileTable =
+                table.copy(
+                        Collections.singletonMap(IcebergOptions.REST_AUTO_RECREATE.key(), "false"));
+        new IcebergRestMetadataCommitter(reconcileTable).commitMetadata(latestMetadata, null);
+        icebergTable = (BaseTable) restCatalog.loadTable(identifier);
+        assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(2);
+        assertThat(icebergTable.operations().current().uuid()).isEqualTo(tableUuid);
+    }
+
+    @Test
+    public void testRestCatalogAheadFailsWithoutDrop() throws Exception {
+        // Publishing stale metadata against a catalog that is already ahead must fail with a
+        // precise error and leave the catalog table untouched when auto-recreate is disabled.
+        dropLeftoverRestTable();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        -1,
+                        "avro",
+                        Collections.singletonMap(IcebergOptions.REST_AUTO_RECREATE.key(), "false"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.write(GenericRow.of(3, 30));
+        commit.commit(3, write.prepareCommit(false, 3));
+        write.close();
+        commit.close();
+
+        TableIdentifier identifier = TableIdentifier.of("mydb", "t");
+        BaseTable icebergTable = (BaseTable) restCatalog.loadTable(identifier);
+        assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(3);
+        String tableUuid = icebergTable.operations().current().uuid();
+
+        IcebergMetadata staleMetadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(catalogTableMetadataPath(table), "v2.metadata.json"));
+
+        IcebergRestMetadataCommitter committer = new IcebergRestMetadataCommitter(table);
+        assertThatThrownBy(() -> committer.commitMetadata(staleMetadata, null))
+                .isInstanceOf(IcebergRestCatalogOutOfSyncException.class)
+                .hasMessageContaining("ahead");
+
+        icebergTable = (BaseTable) restCatalog.loadTable(identifier);
+        assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(3);
+        assertThat(icebergTable.operations().current().uuid()).isEqualTo(tableUuid);
+    }
+
+    @Test
+    public void testReconcileRegeneratedHistory() throws Exception {
+        // Locally regenerated metadata (deleted metadata directory + full-history rebuild) must
+        // be publishable onto the existing catalog table without dropping it: the head snapshot
+        // is replayed, stale entries whose sequence numbers cannot be reused are removed.
+        dropLeftoverRestTable();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(IcebergOptions.REST_AUTO_RECREATE.key(), "false");
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        -1,
+                        "avro",
+                        customOptions);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        TableIdentifier identifier = TableIdentifier.of("mydb", "t");
+        BaseTable icebergTable = (BaseTable) restCatalog.loadTable(identifier);
+        assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(2);
+        String tableUuid = icebergTable.operations().current().uuid();
+
+        // force a from-scratch rebuild of the local Iceberg metadata
+        table.fileIO().delete(catalogTableMetadataPath(table), true);
+        table =
+                table.copy(
+                        Collections.singletonMap(IcebergOptions.SYNC_FULL_HISTORY.key(), "true"));
+        write.close();
+        write = table.newWrite(commitUser);
+        commit.close();
+        commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(3, 30));
+        commit.commit(3, write.prepareCommit(false, 3));
+        write.close();
+        commit.close();
+
+        icebergTable = (BaseTable) restCatalog.loadTable(identifier);
+        assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(3);
+        assertThat(icebergTable.operations().current().uuid()).isEqualTo(tableUuid);
+        // snapshots 1 and 2 were regenerated under already-consumed sequence numbers, so the
+        // catalog keeps only the replayed head
+        assertThat(ImmutableList.copyOf(icebergTable.snapshots()).size()).isEqualTo(1);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)", "Record(3, 30)");
+    }
+
+    @Test
+    public void testRetryRepublishesExistingMetadata() throws Exception {
+        // A retried commit whose metadata file already exists must still re-drive the REST
+        // publication: the file only proves the metadata was generated, not that it reached the
+        // catalog.
+        dropLeftoverRestTable();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        -1,
+                        "avro",
+                        Collections.emptyMap());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        TableIdentifier identifier = TableIdentifier.of("mydb", "t");
+        Table icebergTable = restCatalog.loadTable(identifier);
+        assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(2);
+        String tableUuid = ((BaseTable) icebergTable).operations().current().uuid();
+
+        // simulate a publication that never reached the catalog for the latest snapshot
+        icebergTable.manageSnapshots().rollbackTo(1).commit();
+        assertThat(restCatalog.loadTable(identifier).currentSnapshot().snapshotId()).isEqualTo(1);
+
+        // a Flink-style retry of the last committable republishes from the existing files
+        try (IcebergCommitCallback callback = new IcebergCommitCallback(table, commitUser)) {
+            callback.retry(new ManifestCommittable(2L));
+        }
+
+        BaseTable reloaded = (BaseTable) restCatalog.loadTable(identifier);
+        assertThat(reloaded.currentSnapshot().snapshotId()).isEqualTo(2);
+        assertThat(reloaded.operations().current().uuid()).isEqualTo(tableUuid);
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
     }
 
     private static class TestRecord {
