@@ -529,20 +529,16 @@ class FileStoreCommit:
             return SuccessResult()
 
         latest_snapshot_id = latest_snapshot.id if latest_snapshot else 0
-        latest_schema = self.table.schema_manager.latest()
-        latest_schema_id = latest_schema.id if latest_schema is not None else None
-        snapshot_conflict = (
-            self.expected_base_snapshot_id is not None
-            and not self._is_allowed_protected_base(latest_snapshot_id)
-        )
-        if (self.expected_base_snapshot_id is not None
-                and (snapshot_conflict
-                     or latest_schema_id != self.expected_schema_id)):
-            conflict = RuntimeError(
-                "Concurrent target commit or schema change detected.")
-            if retry_result is None or retry_result.exception is None:
-                raise CommitConflictError(str(conflict)) from conflict
-            raise conflict
+        if self.expected_base_snapshot_id is not None:
+            latest_schema = self.table.schema_manager.latest()
+            latest_schema_id = latest_schema.id if latest_schema else None
+            if (not self._is_allowed_protected_base(latest_snapshot_id)
+                    or latest_schema_id != self.expected_schema_id):
+                conflict = RuntimeError(
+                    "Concurrent target commit or schema change detected.")
+                if retry_result is None or retry_result.exception is None:
+                    raise CommitConflictError(str(conflict)) from conflict
+                raise conflict
 
         if (
             hash_index_base_snapshot is not None
