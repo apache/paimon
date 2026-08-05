@@ -106,24 +106,30 @@ class DataEvolutionGlobalIndexScanner:
         options = self._options
 
         def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
+            groups = []
             group = index_metas.get(field.id)
             if group is not None:
-                return _create_readers(
-                    file_io, index_path, group.metas, field, executor, options)
+                groups.append(group)
 
             extra_groups = extra_index_metas.get(field.id)
-            if not extra_groups:
+            if extra_groups:
+                groups.extend(
+                    extra_group
+                    for extra_group in extra_groups
+                    if extra_group not in groups
+                )
+            if not groups:
                 return []
             union_coverage = Range.sort_and_merge_overlap(
                 [
                     range_key
-                    for group in extra_groups
+                    for group in groups
                     for range_key in group.coverage_ranges
                 ],
                 True,
             )
             readers = []
-            for group in extra_groups:
+            for group in groups:
                 pad_ranges = _exclude_ranges(union_coverage, group.coverage_ranges)
                 readers.extend(
                     _create_readers(
