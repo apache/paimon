@@ -21,8 +21,12 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
 
+import org.junit.jupiter.api.Test;
+
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ManifestFileMetaSerializer}. */
 public class ManifestFileMetaSerializerTest extends ObjectSerializerTestBase<ManifestFileMeta> {
@@ -30,6 +34,11 @@ public class ManifestFileMetaSerializerTest extends ObjectSerializerTestBase<Man
     private static final int NUM_ENTRIES_PER_FILE = 10;
 
     private final ManifestTestDataGenerator gen = ManifestTestDataGenerator.builder().build();
+
+    @Test
+    void testFormatIdentifier() {
+        assertThat(new ManifestFileMetaSerializer().toRow(object()).getInt(0)).isEqualTo(2);
+    }
 
     @Override
     protected ObjectSerializer<ManifestFileMeta> serializer() {

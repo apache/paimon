@@ -19,7 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.ObjectSerializer;
@@ -52,15 +52,12 @@ public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<I
                                 10,
                                 new GlobalIndexMeta(0, 9, 7, null, new byte[] {1}),
                                 null));
-        GenericRow serialized = (GenericRow) serializer.convertTo(entry);
-        assertThat(serialized.getRow(9, GlobalIndexMeta.SCHEMA.getFieldCount()).getFieldCount())
+        InternalRow serialized = serializer.toRow(entry);
+        assertThat(serialized.getInt(0)).isEqualTo(1);
+        assertThat(serialized.getRow(10, GlobalIndexMeta.SCHEMA.getFieldCount()).getFieldCount())
                 .isEqualTo(6);
 
-        GlobalIndexMeta restored =
-                serializer
-                        .convertFrom(serializer.getVersion(), serialized)
-                        .indexFile()
-                        .globalIndexMeta();
+        GlobalIndexMeta restored = serializer.fromRow(serialized).indexFile().globalIndexMeta();
 
         assertThat(restored.indexMeta()).containsExactly(1);
         assertThat(restored.sourceMeta()).isNull();
@@ -69,7 +66,6 @@ public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<I
     @Test
     void testGlobalIndexSourceMetaRoundTrip() throws IOException {
         IndexManifestEntrySerializer serializer = new IndexManifestEntrySerializer();
-        assertThat(serializer.getVersion()).isEqualTo(1);
         IndexManifestEntry entry =
                 new IndexManifestEntry(
                         FileKind.ADD,
@@ -83,6 +79,7 @@ public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<I
                                 new GlobalIndexMeta(
                                         0, 9, 7, null, new byte[] {3, 4}, new byte[] {1, 2}),
                                 null));
+        assertThat(serializer.toRow(entry).getInt(0)).isEqualTo(1);
 
         GlobalIndexMeta restored =
                 serializer

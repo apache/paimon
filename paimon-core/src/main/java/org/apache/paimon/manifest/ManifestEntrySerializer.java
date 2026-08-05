@@ -21,9 +21,11 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
-import org.apache.paimon.utils.VersionedObjectSerializer;
+import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.OffsetRow;
 
 import java.util.function.Function;
 
@@ -31,24 +33,30 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Serializer for {@link ManifestEntry}. */
-public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestEntry> {
+public class ManifestEntrySerializer extends ObjectSerializer<ManifestEntry> {
 
     private static final long serialVersionUID = 1L;
+
+    /**
+     * Permanent on-disk format identifier, not a schema version.
+     *
+     * <p>Do not change when adding nullable fields. Old manifest readers skip unknown fields.
+     */
+    private static final int FORMAT_IDENTIFIER = 2;
 
     private final DataFileMetaSerializer dataFileMetaSerializer;
 
     public ManifestEntrySerializer() {
-        super(ManifestEntry.SCHEMA);
+        super(ManifestSchemaUtils.withFormatIdentifier(ManifestEntry.SCHEMA));
         this.dataFileMetaSerializer = new DataFileMetaSerializer();
     }
 
     @Override
-    public int getVersion() {
-        return 2;
+    public InternalRow toRow(ManifestEntry entry) {
+        return new JoinedRow().replace(GenericRow.of(FORMAT_IDENTIFIER), toDataRow(entry));
     }
 
-    @Override
-    public InternalRow convertTo(ManifestEntry entry) {
+    private InternalRow toDataRow(ManifestEntry entry) {
         GenericRow row = new GenericRow(5);
         row.setField(0, entry.kind().toByteValue());
         row.setField(1, serializeBinaryRow(entry.partition()));
@@ -59,16 +67,24 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
     }
 
     @Override
-    public ManifestEntry convertFrom(int version, InternalRow row) {
-        if (version != 2) {
-            if (version == 1) {
+    public ManifestEntry fromRow(InternalRow row) {
+        checkFormatIdentifier(row.getInt(0));
+        return fromDataRow(new OffsetRow(row.getFieldCount() - 1, 1).replace(row));
+    }
+
+    private void checkFormatIdentifier(int formatIdentifier) {
+        if (formatIdentifier != FORMAT_IDENTIFIER) {
+            if (formatIdentifier == 1) {
                 throw new IllegalArgumentException(
                         String.format(
                                 "The current version %s is not compatible with the version %s, please recreate the table.",
-                                getVersion(), version));
+                                FORMAT_IDENTIFIER, formatIdentifier));
             }
-            throw new IllegalArgumentException("Unsupported version: " + version);
+            throw new IllegalArgumentException("Unsupported version: " + formatIdentifier);
         }
+    }
+
+    private ManifestEntry fromDataRow(InternalRow row) {
         return ManifestEntry.create(
                 FileKind.fromByteValue(row.getByte(0)),
                 deserializeBinaryRow(row.getBinary(1)),

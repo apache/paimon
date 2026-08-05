@@ -26,7 +26,6 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -37,7 +36,7 @@ import java.util.List;
 import static org.apache.paimon.index.IndexFileMetaSerializer.rowArrayDataToDvMetas;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
-/** A {@link VersionedObjectSerializer} for {@link IndexFileMeta}. */
+/** Deserializer for version 3 {@link IndexFileMeta}. */
 public class IndexFileMetaV3Deserializer implements Serializable {
 
     private static final long serialVersionUID = 1L;

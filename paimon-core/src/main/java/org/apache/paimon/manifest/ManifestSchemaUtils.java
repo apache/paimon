@@ -16,11 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.manifest;
 
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -28,40 +25,17 @@ import org.apache.paimon.types.RowType;
 import java.util.ArrayList;
 import java.util.List;
 
-/** A {@link ObjectSerializer} for versioned serialization. */
-public abstract class VersionedObjectSerializer<T> extends ObjectSerializer<T> {
+/** Utilities for manifest schemas. */
+final class ManifestSchemaUtils {
 
-    private static final long serialVersionUID = 1L;
+    private ManifestSchemaUtils() {}
 
-    public VersionedObjectSerializer(RowType rowType) {
-        super(versionType(rowType));
-    }
-
-    public static RowType versionType(RowType rowType) {
+    /** Adds the permanent on-disk format identifier field to a manifest row type. */
+    static RowType withFormatIdentifier(RowType rowType) {
         List<DataField> fields = new ArrayList<>();
+        // Keep the historical field name for compatibility with existing manifest files.
         fields.add(new DataField(-1, "_VERSION", new IntType(false)));
         fields.addAll(rowType.getFields());
         return new RowType(false, fields);
-    }
-
-    /**
-     * Gets the version with which this serializer serializes.
-     *
-     * @return The version of the serialization schema.
-     */
-    public abstract int getVersion();
-
-    public abstract InternalRow convertTo(T record);
-
-    public abstract T convertFrom(int version, InternalRow row);
-
-    @Override
-    public final InternalRow toRow(T record) {
-        return new JoinedRow().replace(GenericRow.of(getVersion()), convertTo(record));
-    }
-
-    @Override
-    public final T fromRow(InternalRow row) {
-        return convertFrom(row.getInt(0), new OffsetRow(row.getFieldCount() - 1, 1).replace(row));
     }
 }

@@ -25,7 +25,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
@@ -58,7 +57,7 @@ public interface ManifestEntry extends FileEntry {
                             new DataField(3, TOTAL_BUCKETS, new IntType(false)),
                             new DataField(4, FILE, DataFileMeta.SCHEMA)));
 
-    RowType MANIFEST_ROW_TYPE = VersionedObjectSerializer.versionType(SCHEMA);
+    RowType MANIFEST_ROW_TYPE = ManifestSchemaUtils.withFormatIdentifier(SCHEMA);
 
     static ManifestEntry create(
             FileKind kind, BinaryRow partition, int bucket, int totalBuckets, DataFileMeta file) {

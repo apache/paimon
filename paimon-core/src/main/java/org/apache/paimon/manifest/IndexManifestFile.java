@@ -29,7 +29,6 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
@@ -98,7 +97,7 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
         }
 
         public IndexManifestFile create() {
-            RowType schema = VersionedObjectSerializer.versionType(IndexManifestEntry.SCHEMA);
+            RowType schema = ManifestSchemaUtils.withFormatIdentifier(IndexManifestEntry.SCHEMA);
             return new IndexManifestFile(
                     fileIO,
                     schema,

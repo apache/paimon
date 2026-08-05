@@ -22,9 +22,11 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.utils.VersionedObjectSerializer;
+import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.OffsetRow;
 
 import java.util.function.Function;
 
@@ -34,20 +36,26 @@ import static org.apache.paimon.index.IndexFileMetaSerializer.rowArrayDataToDvMe
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** A {@link VersionedObjectSerializer} for {@link IndexManifestEntry}. */
-public class IndexManifestEntrySerializer extends VersionedObjectSerializer<IndexManifestEntry> {
+/** Serializer for {@link IndexManifestEntry}. */
+public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifestEntry> {
+
+    /**
+     * Permanent on-disk format identifier, not a schema version.
+     *
+     * <p>Do not change when adding nullable fields. Old manifest readers skip unknown fields.
+     */
+    private static final int FORMAT_IDENTIFIER = 1;
 
     public IndexManifestEntrySerializer() {
-        super(IndexManifestEntry.SCHEMA);
+        super(ManifestSchemaUtils.withFormatIdentifier(IndexManifestEntry.SCHEMA));
     }
 
     @Override
-    public int getVersion() {
-        return 1;
+    public InternalRow toRow(IndexManifestEntry record) {
+        return new JoinedRow().replace(GenericRow.of(FORMAT_IDENTIFIER), toDataRow(record));
     }
 
-    @Override
-    public InternalRow convertTo(IndexManifestEntry record) {
+    private InternalRow toDataRow(IndexManifestEntry record) {
         IndexFileMeta indexFile = record.indexFile();
         GlobalIndexMeta globalIndexMeta = indexFile.globalIndexMeta();
         InternalRow globalIndexRow =
@@ -76,11 +84,18 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
     }
 
     @Override
-    public IndexManifestEntry convertFrom(int version, InternalRow row) {
-        if (version != 1) {
-            throw new UnsupportedOperationException("Unsupported version: " + version);
-        }
+    public IndexManifestEntry fromRow(InternalRow row) {
+        checkFormatIdentifier(row.getInt(0));
+        return fromDataRow(new OffsetRow(row.getFieldCount() - 1, 1).replace(row));
+    }
 
+    private void checkFormatIdentifier(int formatIdentifier) {
+        if (formatIdentifier != FORMAT_IDENTIFIER) {
+            throw new UnsupportedOperationException("Unsupported version: " + formatIdentifier);
+        }
+    }
+
+    private IndexManifestEntry fromDataRow(InternalRow row) {
         GlobalIndexMeta globalIndexMeta = null;
         if (!row.isNullAt(9)) {
             InternalRow globalIndexRow = row.getRow(9, GlobalIndexMeta.SCHEMA.getFieldCount());

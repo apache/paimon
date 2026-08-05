@@ -30,7 +30,6 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -150,7 +149,7 @@ public class IndexManifestFileHandlerTest {
         List<DataField> legacyEntryFields = new ArrayList<>(IndexManifestEntry.SCHEMA.getFields());
         legacyEntryFields.set(9, legacyEntryFields.get(9).newType(legacyGlobalIndexSchema));
         RowType legacySchema =
-                VersionedObjectSerializer.versionType(new RowType(false, legacyEntryFields));
+                ManifestSchemaUtils.withFormatIdentifier(new RowType(false, legacyEntryFields));
         FormatReaderFactory legacyReaderFactory =
                 fileFormat.createReaderFactory(legacySchema, legacySchema, new ArrayList<>());
         Path path = fileStore.pathFactory().indexManifestFileFactory().toPath(manifestFile);

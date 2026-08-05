@@ -23,14 +23,13 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.ObjectSerializer;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import java.util.Collection;
 import java.util.LinkedHashMap;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 
-/** A {@link VersionedObjectSerializer} for {@link IndexFileMeta}. */
+/** Serializer for {@link IndexFileMeta}. */
 public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
 
     public IndexFileMetaSerializer() {
