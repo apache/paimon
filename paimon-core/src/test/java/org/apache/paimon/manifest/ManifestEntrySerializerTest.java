@@ -21,10 +21,19 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
 
-/** Tests for {@link ManifestEntrySerializerTest}. */
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Tests for {@link ManifestEntrySerializer}. */
 public class ManifestEntrySerializerTest extends ObjectSerializerTestBase<ManifestEntry> {
 
     private final ManifestTestDataGenerator gen = ManifestTestDataGenerator.builder().build();
+
+    @Test
+    void testFormatIdentifier() {
+        assertThat(new ManifestEntrySerializer().toRow(gen.next()).getInt(0)).isEqualTo(2);
+    }
 
     @Override
     protected ObjectSerializer<ManifestEntry> serializer() {
