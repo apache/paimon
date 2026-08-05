@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.utils.StringUtils;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -40,6 +41,8 @@ public class CloneActionFactory implements ActionFactory {
     private static final String EXCLUDED_TABLES = "excluded_tables";
     private static final String PREFER_FILE_FORMAT = "prefer_file_format";
     private static final String CLONE_FROM = "clone_from";
+    private static final String CLONE_MODE = "clone_mode";
+    private static final String PATH_MAPPING = "path_mapping";
     private static final String META_ONLY = "meta_only";
     private static final String CLONE_IF_EXISTS = "clone_if_exists";
 
@@ -77,6 +80,16 @@ public class CloneActionFactory implements ActionFactory {
         if (StringUtils.isNullOrWhitespaceOnly(cloneFrom)) {
             cloneFrom = "hive";
         }
+        String cloneMode = params.get(CLONE_MODE);
+        if (StringUtils.isNullOrWhitespaceOnly(cloneMode)) {
+            cloneMode = "logical";
+        } else {
+            cloneMode = cloneMode.trim();
+        }
+        List<String> pathMappings =
+                params.has(PATH_MAPPING)
+                        ? new ArrayList<>(params.getMultiParameter(PATH_MAPPING))
+                        : null;
         String preferFileFormat = params.get(PREFER_FILE_FORMAT);
 
         String metaOnlyStr = params.get(META_ONLY);
@@ -87,7 +100,8 @@ public class CloneActionFactory implements ActionFactory {
         String cloneIfExistsStr = params.get(CLONE_IF_EXISTS);
         boolean cloneIfExists =
                 StringUtils.isNullOrWhitespaceOnly(cloneIfExistsStr)
-                        || Boolean.parseBoolean(cloneIfExistsStr);
+                        ? !"full-history".equalsIgnoreCase(cloneMode)
+                        : Boolean.parseBoolean(cloneIfExistsStr);
 
         CloneAction cloneAction =
                 new CloneAction(
@@ -103,6 +117,8 @@ public class CloneActionFactory implements ActionFactory {
                         excludedTables,
                         preferFileFormat,
                         cloneFrom,
+                        cloneMode,
+                        pathMappings,
                         metaOnly,
                         cloneIfExists);
 
