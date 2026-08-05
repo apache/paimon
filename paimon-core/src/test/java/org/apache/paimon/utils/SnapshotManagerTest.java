@@ -37,6 +37,7 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -329,6 +330,14 @@ public class SnapshotManagerTest {
                 null);
     }
 
+    private static Map<Long, Long> watermarkMap(long... idsAndWatermarks) {
+        Map<Long, Long> watermarks = new HashMap<>();
+        for (int i = 0; i < idsAndWatermarks.length; i += 2) {
+            watermarks.put(idsAndWatermarks[i], idsAndWatermarks[i + 1]);
+        }
+        return watermarks;
+    }
+
     private Changelog createChangelogWithMillis(long id, long millis) {
         return new Changelog(
                 new Snapshot(
@@ -554,7 +563,7 @@ public class SnapshotManagerTest {
         SnapshotManager snapshotManager =
                 newSnapshotManager(localFileIO, new Path(tempDir.toString()));
         // create 10 snapshots, only snapshots 0, 4 and 9 carry a watermark
-        Map<Long, Long> watermarks = Map.of(0L, 100L, 4L, 200L, 9L, 300L);
+        Map<Long, Long> watermarks = watermarkMap(0, 100, 4, 200, 9, 300);
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
             localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
@@ -575,7 +584,7 @@ public class SnapshotManagerTest {
         SnapshotManager snapshotManager =
                 newSnapshotManager(localFileIO, new Path(tempDir.toString()));
         // create 5 snapshots, snapshots 2 and 3 do not carry a watermark
-        Map<Long, Long> watermarks = Map.of(0L, 100L, 1L, 150L, 4L, 300L);
+        Map<Long, Long> watermarks = watermarkMap(0, 100, 1, 150, 4, 300);
         for (long i = 0; i < 5; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
             localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
@@ -605,7 +614,7 @@ public class SnapshotManagerTest {
         SnapshotManager snapshotManager =
                 newSnapshotManager(localFileIO, new Path(tempDir.toString()));
         // create 4 snapshots, snapshots 2 and 3 do not carry a watermark
-        Map<Long, Long> watermarks = Map.of(0L, 100L, 1L, 200L);
+        Map<Long, Long> watermarks = watermarkMap(0, 100, 1, 200);
         for (long i = 0; i < 4; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
             localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
@@ -638,7 +647,7 @@ public class SnapshotManagerTest {
         SnapshotManager snapshotManager =
                 newSnapshotManager(localFileIO, new Path(tempDir.toString()));
         // create 10 snapshots, only snapshots 0, 4 and 9 carry a watermark
-        Map<Long, Long> watermarks = Map.of(0L, 100L, 4L, 200L, 9L, 300L);
+        Map<Long, Long> watermarks = watermarkMap(0, 100, 4, 200, 9, 300);
         for (long i = 0; i < 10; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
             localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
@@ -655,7 +664,7 @@ public class SnapshotManagerTest {
         SnapshotManager snapshotManager =
                 newSnapshotManager(localFileIO, new Path(tempDir.toString()));
         // create 5 snapshots, snapshots 2 and 3 do not carry a watermark
-        Map<Long, Long> watermarks = Map.of(0L, 100L, 1L, 150L, 4L, 300L);
+        Map<Long, Long> watermarks = watermarkMap(0, 100, 1, 150, 4, 300);
         for (long i = 0; i < 5; i++) {
             Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
             localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
