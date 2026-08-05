@@ -28,7 +28,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
@@ -113,7 +112,7 @@ public class ManifestListTest {
     private ManifestList createLegacyManifestListPaimon10() {
         FileStorePathFactory pathFactory = createPathFactory(tempDir.toString());
         RowType legacyMetaType =
-                VersionedObjectSerializer.versionType(
+                ManifestSchemaUtils.withFormatIdentifier(
                         LegacyManifestFileMetaSerializerPaimon10.SCHEMA);
         return new ManifestList(
                 LocalFileIO.create(),

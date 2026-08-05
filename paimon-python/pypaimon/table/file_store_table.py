@@ -428,6 +428,12 @@ class FileStoreTable(Table):
     def new_batch_write_builder(self) -> BatchWriteBuilder:
         return BatchWriteBuilder(self)
 
+    def new_postpone_fixed_bucket_write_builder(self):
+        from pypaimon.write.postpone_batch_table_write import (
+            PostponeFixedBucketWriteBuilder,
+        )
+        return PostponeFixedBucketWriteBuilder(self)
+
     def new_stream_write_builder(self) -> StreamWriteBuilder:
         return StreamWriteBuilder(self)
 

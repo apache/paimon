@@ -56,7 +56,7 @@ public final class PostponeMergeReadBuilder implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final FileStoreTable table;
-    private final Snapshot snapshot;
+    private final @Nullable Snapshot snapshot;
 
     @Nullable private Predicate filter;
     @Nullable private PartitionPredicate partitionFilter;
@@ -65,9 +65,17 @@ public final class PostponeMergeReadBuilder implements Serializable {
     @Nullable private transient String readProtectionTagName;
     private int defaultBucketNum = 1;
 
-    private PostponeMergeReadBuilder(FileStoreTable table, Snapshot snapshot) {
+    private PostponeMergeReadBuilder(FileStoreTable table, @Nullable Snapshot snapshot) {
         this.table = table;
         this.snapshot = snapshot;
+    }
+
+    /** Creates a builder for execution-engine supplied postpone and real-bucket splits. */
+    public static PostponeMergeReadBuilder createForSplits(FileStoreTable table) {
+        checkArgument(
+                table.bucketMode() == BucketMode.POSTPONE_MODE && !table.primaryKeys().isEmpty(),
+                "Postpone merge read requires a primary-key postpone bucket table.");
+        return new PostponeMergeReadBuilder(table, null);
     }
 
     /** Creates a snapshot-bound builder when the selected partitions contain postpone files. */
@@ -179,6 +187,7 @@ public final class PostponeMergeReadBuilder implements Serializable {
     }
 
     public PostponeMergePlan plan() {
+        checkArgument(snapshot != null, "Snapshot-bound postpone merge plan requires a snapshot.");
         RowType resultReadType = resultReadType();
         RowType mergeReadType = mergeReadType(resultReadType);
 
@@ -220,6 +229,21 @@ public final class PostponeMergeReadBuilder implements Serializable {
                         mergeReadType);
         maybeCreateReadProtectionTag(snapshot.id());
         return plan;
+    }
+
+    /** Builds a plan from splits and routing metadata supplied by an execution engine. */
+    public PostponeMergePlan plan(
+            List<DataSplit> realSplits,
+            List<DataSplit> postponeSplits,
+            PostponeUtils.PostponeBucketRouter bucketRouter) {
+        RowType resultReadType = resultReadType();
+        return new PostponeMergePlan(
+                realSplits,
+                PostponeUtils.groupPostponeFiles(postponeSplits),
+                bucketRouter,
+                keyType(),
+                resultReadType,
+                mergeReadType(resultReadType));
     }
 
     /** Rebuilds only the routing metadata of an existing plan with a new default bucket number. */

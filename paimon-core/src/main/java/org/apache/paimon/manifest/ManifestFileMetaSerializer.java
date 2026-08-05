@@ -21,25 +21,33 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.utils.VersionedObjectSerializer;
+import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.OffsetRow;
 
 /** Serializer for {@link ManifestFileMeta}. */
-public class ManifestFileMetaSerializer extends VersionedObjectSerializer<ManifestFileMeta> {
+public class ManifestFileMetaSerializer extends ObjectSerializer<ManifestFileMeta> {
 
     private static final long serialVersionUID = 1L;
 
+    /**
+     * Permanent on-disk format identifier, not a schema version.
+     *
+     * <p>Do not change when adding nullable fields. Old manifest readers skip unknown fields.
+     */
+    private static final int FORMAT_IDENTIFIER = 2;
+
     public ManifestFileMetaSerializer() {
-        super(ManifestFileMeta.SCHEMA);
+        super(ManifestSchemaUtils.withFormatIdentifier(ManifestFileMeta.SCHEMA));
     }
 
     @Override
-    public int getVersion() {
-        return 2;
+    public InternalRow toRow(ManifestFileMeta meta) {
+        return new JoinedRow().replace(GenericRow.of(FORMAT_IDENTIFIER), toDataRow(meta));
     }
 
-    @Override
-    public InternalRow convertTo(ManifestFileMeta meta) {
+    private InternalRow toDataRow(ManifestFileMeta meta) {
         return GenericRow.of(
                 BinaryString.fromString(meta.fileName()),
                 meta.fileSize(),
@@ -56,17 +64,24 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
     }
 
     @Override
-    public ManifestFileMeta convertFrom(int version, InternalRow row) {
-        if (version != 2) {
-            if (version == 1) {
+    public ManifestFileMeta fromRow(InternalRow row) {
+        checkFormatIdentifier(row.getInt(0));
+        return fromDataRow(new OffsetRow(row.getFieldCount() - 1, 1).replace(row));
+    }
+
+    private void checkFormatIdentifier(int formatIdentifier) {
+        if (formatIdentifier != FORMAT_IDENTIFIER) {
+            if (formatIdentifier == 1) {
                 throw new IllegalArgumentException(
                         String.format(
                                 "The current version %s is not compatible with the version %s, please recreate the table.",
-                                getVersion(), version));
+                                FORMAT_IDENTIFIER, formatIdentifier));
             }
-            throw new IllegalArgumentException("Unsupported version: " + version);
+            throw new IllegalArgumentException("Unsupported version: " + formatIdentifier);
         }
+    }
 
+    private ManifestFileMeta fromDataRow(InternalRow row) {
         return new ManifestFileMeta(
                 row.getString(0).toString(),
                 row.getLong(1),

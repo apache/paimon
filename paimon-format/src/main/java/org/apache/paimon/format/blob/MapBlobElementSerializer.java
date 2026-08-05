@@ -468,6 +468,7 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                 DecimalType decimalType = (DecimalType) keyType;
                 return new DecimalKeySerializer(decimalType.getPrecision(), decimalType.getScale());
             case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
                 return new IntKeySerializer();
             case CHAR:
             case VARCHAR:

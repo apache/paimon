@@ -248,8 +248,14 @@ append-only partitions should use the default mode or
 `hash_fixed_precluster="off"`.
 
 For non-HASH_FIXED append-only tables, the dataset is written as-is.
-Postpone-bucket primary-key tables (`bucket = -2`) are also written
-as-is to the `bucket-postpone` directory. HASH_DYNAMIC and
+Postpone-bucket tables (`bucket = -2`) follow
+`postpone.batch-write-fixed-bucket` (default: `true`). Existing partitions
+reuse their bucket count; new partitions infer one from the configured target
+row count or size. Ray materializes the input for this global plan, then sorts
+by partition, bucket, and primary-key hash. One primary key stays with one
+writer, while a large bucket can span multiple Ray blocks. Set
+`hash_fixed_precluster="off"` to retain `bucket-postpone` writes. Fixed-bucket
+postpone writes support `bucket-function.type=default` only. HASH_DYNAMIC and
 CROSS_PARTITION primary-key Ray writes are not supported and fail fast,
 including the default dynamic-bucket primary-key table (`bucket = -1`).
 Ray write tasks create independent Paimon writers, which can assign
@@ -261,18 +267,16 @@ overlapping buckets or sequence numbers for those modes.
 - `catalog_options`: kwargs forwarded to `CatalogFactory.create()`.
 - `overwrite`: if `True`, overwrite existing data in the table.
 - `concurrency`: optional max number of Ray write tasks to run concurrently.
-  For HASH_FIXED primary-key `map_groups` writes, this limits the group
-  writer tasks.
+  For HASH_FIXED primary-key and postpone-bucket writes, this limits writer
+  tasks.
 - `ray_remote_args`: optional kwargs passed to `ray.remote()` in write tasks
-  (e.g. `{"num_cpus": 2}`). For HASH_FIXED primary-key `map_groups`
-  writes, these options apply to the group writer tasks.
-- `hash_fixed_precluster`: HASH_FIXED pre-clustering mode. `"auto"` and
-  `"off"` write append-only HASH_FIXED tables directly and reject
-  HASH_FIXED primary-key tables. `"map_groups"` enables the legacy
-  small-file optimization for append-only tables and runs one writer per
-  HASH_FIXED primary-key group. Each `(partition_keys..., bucket)` group
-  must fit in memory on one Ray node. This option does not enable Ray
-  writes for HASH_DYNAMIC or CROSS_PARTITION primary-key tables.
+  (e.g. `{"num_cpus": 2}`). These options also apply to HASH_FIXED
+  primary-key and postpone-bucket writer tasks.
+- `hash_fixed_precluster`: pre-clustering mode. `"auto"` follows table options,
+  `"off"` disables pre-clustering, and `"map_groups"` explicitly enables
+  HASH_FIXED grouping. This option does not enable HASH_DYNAMIC or
+  CROSS_PARTITION primary-key writes.
+
 ### Incremental write
 
 Long-running updates can commit periodically and resume by `operation_id`:
@@ -294,10 +298,10 @@ write_paimon(
 
 Use a fixed-bucket, partial-update target. Source rows need unique primary keys
 and all `update_cols`; missing keys are inserted. Source splits run in bounded
-windows, so the actual
-interval may be longer. Concurrent target writes or schema changes fail. After
-success, `delete_write_paimon_checkpoint` releases retained snapshots. An
-`operation_id` must not be reused after changing the source transformation.
+windows, so the actual interval may be longer. Concurrent target writes or
+schema changes fail. After success, `delete_write_paimon_checkpoint` releases
+retained snapshots. An `operation_id` must not be reused after changing the
+source transformation.
 
 ### `TableWrite.write_ray()` (lower-level)
 
@@ -338,6 +342,9 @@ table_write.write_ray(
 # 3. Close resources
 table_write.close()
 ```
+
+An explicit `new_postpone_fixed_bucket_write_builder()` also enables the
+real-bucket path without setting `hash_fixed_precluster`.
 
 ### Overwrite
 

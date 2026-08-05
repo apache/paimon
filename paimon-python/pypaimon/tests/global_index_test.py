@@ -19,6 +19,7 @@ import unittest
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
 from pypaimon.common.options.options import Options
@@ -294,6 +295,7 @@ class PlanSnapshotFetchRegressionTest(
         'bucket': '-1',
     }
 
+    @pytest.mark.python_plan
     def test_plan_fetches_latest_snapshot_only_once(self):
         table = self._create_table()
         self._write_arrow(table, pa.table(
@@ -321,6 +323,7 @@ class PlanSnapshotFetchRegressionTest(
                 "duplicate from #7513: manifest_scanner + "
                 "DataEvolutionGlobalIndexScanner.create both fetch independently.")
 
+    @pytest.mark.python_plan
     def test_time_travel_plan(self):
         table = self._create_table()
         self._write_arrow(table, pa.table(

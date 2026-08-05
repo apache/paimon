@@ -213,6 +213,7 @@ case class SparkPostponeCompactProcedure(
               realTable.store().newScan(),
               realTable.store().newIndexFileHandler(),
               snapshotId))
+          dataWrite.write.getWrite().withIgnoreNumBucketCheck(true)
           var commitInvoked = false
           try {
             val pendingBuckets = mutable.LinkedHashMap

@@ -18,15 +18,17 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.catalog.{Catalog, CatalogLoader, DelegateCatalog, Identifier}
+import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
 import org.apache.paimon.fs.Path
-import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase, PostponeMergeInputScan}
+import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase, PostponeMergeInputScan, SparkTable}
 import org.apache.paimon.spark.PaimonMetrics._
-import org.apache.paimon.spark.commands.PaimonSparkWriter
 import org.apache.paimon.spark.execution.PostponeMergeOnReadExec
 import org.apache.paimon.spark.procedure.SparkPostponeCompactProcedure
-import org.apache.paimon.table.{BucketMode, CatalogEnvironment, FileStoreTableFactory}
+import org.apache.paimon.table.{BucketMode, CatalogEnvironment, FileStoreTableFactory, PostponeUtils}
+import org.apache.paimon.table.source.ScanMode
 
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.Row
@@ -36,12 +38,474 @@ import scala.collection.JavaConverters._
 
 class PostponeBucketTableTest extends PaimonSparkTestBase {
 
-  test("Postpone bucket table: cap inferred row-count buckets before Int conversion") {
-    assert(
-      PaimonSparkWriter.computeBucketNumByRowCount(
-        Integer.MAX_VALUE.toLong + 1L,
-        targetRowNumPerBucket = 1L,
-        maxNumBuckets = 2048) == 2048)
+  test("Postpone bucket table: staged fixed write respects non-ignored empty commit") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'true',
+            |  'postpone.target-row-num-per-bucket' = '10',
+            |  'snapshot.ignore-empty-commit' = 'false'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO t SELECT CAST(id AS INT), CAST(id AS STRING) FROM range(0)")
+
+      val latestSnapshot = loadTable("t").latestSnapshot()
+      assert(latestSnapshot.isPresent)
+      assert(latestSnapshot.get().id() == 1L)
+      assert(latestSnapshot.get().deltaRecordCount() == 0L)
+    }
+  }
+
+  test("Postpone bucket table: staged fixed write uses V1 and supports dynamic partitions") {
+    withTable("t") {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+        sql("""
+              |CREATE TABLE t (
+              |  k INT,
+              |  v STRING,
+              |  pt INT
+              |) PARTITIONED BY (pt)
+              |TBLPROPERTIES (
+              |  'primary-key' = 'k, pt',
+              |  'bucket' = '-2',
+              |  'postpone.batch-write-fixed-bucket' = 'true',
+              |  'postpone.target-row-num-per-bucket' = '10',
+              |  'postpone.batch-write-fixed-bucket.max-parallelism' = '32'
+              |)
+              |""".stripMargin)
+        assert(!SparkTable(loadTable("t")).useV2Write)
+
+        sql("""
+              |INSERT INTO t SELECT
+              |CAST(id AS INT) AS k,
+              |CAST(id AS STRING) AS v,
+              |CASE WHEN id < 5 THEN 0 WHEN id < 26 THEN 1 ELSE 2 END AS pt
+              |FROM range(0, 68)
+              |""".stripMargin)
+
+        checkAnswer(
+          sql("SELECT pt, count(*) FROM t GROUP BY pt ORDER BY pt"),
+          Seq(Row(0, 5L), Row(1, 21L), Row(2, 42L)))
+        val knownBuckets = PostponeUtils.getKnownNumBuckets(loadTable("t")).asScala
+        assert(knownBuckets(BinaryRow.singleColumn(0)) == 1)
+        assert(knownBuckets(BinaryRow.singleColumn(1)) == 4)
+        assert(knownBuckets(BinaryRow.singleColumn(2)) == 8)
+        checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(0L)))
+        assert(loadTable("t").latestSnapshot().get().id() == 1L)
+      }
+    }
+  }
+
+  test("Postpone bucket table: staged rescale supports per-partition layouts") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  pt INT
+            |) PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'k, pt',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'true',
+            |  'postpone.target-row-num-per-bucket' = '1',
+            |  'postpone.batch-write-fixed-bucket.max-parallelism' = '64'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t
+            |SELECT 0 AS k, 'p0-initial' AS v, 0 AS pt
+            |UNION ALL
+            |SELECT CAST(id AS INT), CAST(id AS STRING), 1 AS pt FROM range(0, 8)
+            |UNION ALL
+            |SELECT 0 AS k, 'p3-initial' AS v, 3 AS pt
+            |""".stripMargin)
+
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        sql("""INSERT INTO t VALUES
+              |(0, 'historical-update', 0),
+              |(9999, 'historical-only', 0),
+              |(8888, 'untouched-postpone', 2)
+              |""".stripMargin)
+      }
+      checkAnswer(
+        sql("SELECT count(*) FROM `t$buckets` WHERE partition = '{0}' AND bucket = -2"),
+        Seq(Row(1L)))
+      checkAnswer(
+        sql("SELECT count(*) FROM `t$buckets` WHERE partition = '{2}' AND bucket = -2"),
+        Seq(Row(1L)))
+
+      sql("""
+            |INSERT INTO t
+            |SELECT CAST(id AS INT), CONCAT('current-', CAST(id AS STRING)), 0 AS pt
+            |FROM range(0, 130)
+            |UNION ALL
+            |SELECT 100 AS k, 'p1-new' AS v, 1 AS pt
+            |UNION ALL
+            |SELECT CAST(id AS INT), CONCAT('p3-', CAST(id AS STRING)), 3 AS pt
+            |FROM range(0, 33)
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT pt, count(*) FROM t GROUP BY pt ORDER BY pt"),
+        Seq(Row(0, 130L), Row(1, 9L), Row(3, 33L)))
+      checkAnswer(
+        sql("SELECT k, v FROM t WHERE pt = 0 AND k IN (0, 9999) ORDER BY k"),
+        Seq(Row(0, "current-0")))
+      val knownBuckets = PostponeUtils.getKnownNumBuckets(loadTable("t")).asScala
+      assert(knownBuckets(BinaryRow.singleColumn(0)) == 64)
+      assert(knownBuckets(BinaryRow.singleColumn(1)) == 8)
+      assert(knownBuckets(BinaryRow.singleColumn(3)) == 64)
+      checkAnswer(
+        sql("SELECT count(*) FROM `t$buckets` WHERE partition = '{0}' AND bucket = -2"),
+        Seq(Row(1L)))
+      checkAnswer(
+        sql("SELECT count(*) FROM `t$buckets` WHERE partition = '{2}' AND bucket = -2"),
+        Seq(Row(1L)))
+      assert(loadTable("t").latestSnapshot().get().id() == 4L)
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        checkAnswer(
+          sql("SELECT k, v, pt FROM t WHERE k IN (8888, 9999) ORDER BY k"),
+          Seq(Row(8888, "untouched-postpone", 2), Row(9999, "historical-only", 0)))
+      }
+    }
+  }
+
+  test("Postpone bucket table: load-factor rescale") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'changelog-producer' = 'input',
+            |  'postpone.batch-write-fixed-bucket' = 'true',
+            |  'postpone.target-row-num-per-bucket' = '1',
+            |  'postpone.batch-write-fixed-bucket.max-parallelism' = '16',
+            |  'postpone.batch-write-fixed-bucket.rescale-load-factor' = '32'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO t VALUES (0, 'initial')")
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.EMPTY_ROW) == 1)
+
+      sql("""
+            |INSERT INTO t
+            |SELECT CAST(id AS INT), CAST(id AS STRING) FROM range(1, 33)
+            |""".stripMargin)
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.EMPTY_ROW) == 1)
+
+      sql("""
+            |INSERT INTO t
+            |SELECT CAST(id AS INT), CAST(id AS STRING) FROM range(33, 66)
+            |""".stripMargin)
+
+      checkAnswer(sql("SELECT count(*), sum(k) FROM t"), Seq(Row(66L, 2145L)))
+      val resultTable = loadTable("t")
+      assert(PostponeUtils.getKnownNumBuckets(resultTable).get(BinaryRow.EMPTY_ROW) == 16)
+      checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(0L)))
+      assert(resultTable.latestSnapshot().get().id() == 4L)
+      assert(resultTable.snapshotManager().snapshot(3L).commitKind() == CommitKind.OVERWRITE)
+      assert(resultTable.snapshotManager().snapshot(3L).changelogManifestList() == null)
+      assert(resultTable.snapshotManager().snapshot(4L).commitKind() == CommitKind.APPEND)
+      assert(
+        !resultTable
+          .newSnapshotReader()
+          .withMode(ScanMode.CHANGELOG)
+          .read()
+          .dataSplits()
+          .isEmpty)
+    }
+  }
+
+  test("Postpone bucket table: staged fixed write does not compact") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '1',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'deletion-vectors.merge-on-read' = 'true',
+            |  'deletion-vectors.bitmap64' = 'false'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t
+            |SELECT CAST(id AS INT), CONCAT('base-', CAST(id AS STRING)) FROM range(0, 4)
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (3, 'updated-3')")
+      assert(deletionVectorCardinality("t") == 1L)
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY k"),
+        Seq(Row(0, "base-0"), Row(1, "base-1"), Row(2, "base-2"), Row(3, "updated-3")))
+
+      sql("""
+            |ALTER TABLE t SET TBLPROPERTIES (
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'true',
+            |  'postpone.target-row-num-per-bucket' = '4',
+            |  'postpone.batch-write-fixed-bucket.max-parallelism' = '8',
+            |  'postpone.batch-write-fixed-bucket.rescale-load-factor' = '2'
+            |)
+            |""".stripMargin)
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.EMPTY_ROW) == 1)
+
+      // The fixed writer restores the old bucket but remains write-only. Existing deletion
+      // vectors and new level-0 files are left for background compaction.
+      sql("""
+            |INSERT INTO t
+            |SELECT 2 AS k, 'updated-2' AS v
+            |UNION ALL
+            |SELECT CAST(id AS INT), CONCAT('new-', CAST(id AS STRING)) FROM range(4, 8)
+            |""".stripMargin)
+
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.EMPTY_ROW) == 1)
+      assert(deletionVectorCardinality("t") == 1L)
+      assert(
+        loadTable("t")
+          .newSnapshotReader()
+          .onlyReadRealBuckets()
+          .read()
+          .dataSplits()
+          .asScala
+          .flatMap(_.dataFiles().asScala)
+          .exists(_.level() == 0))
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY k"),
+        Seq(
+          Row(0, "base-0"),
+          Row(1, "base-1"),
+          Row(2, "updated-2"),
+          Row(3, "updated-3"),
+          Row(4, "new-4"),
+          Row(5, "new-5"),
+          Row(6, "new-6"),
+          Row(7, "new-7"))
+      )
+      checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(8L)))
+      checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(0L)))
+    }
+  }
+
+  test("Postpone bucket table: staged rescale reads level 0 and applies deletion vectors") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  pt INT
+            |) PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'k, pt',
+            |  'bucket' = '1',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'deletion-vectors.merge-on-read' = 'false',
+            |  'deletion-vectors.bitmap64' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t
+            |SELECT CAST(id AS INT), CONCAT('base-', CAST(id AS STRING)), 0 AS pt
+            |FROM range(0, 4)
+            |UNION ALL
+            |SELECT CAST(id AS INT), CONCAT('base-', CAST(id AS STRING)), 1 AS pt
+            |FROM range(0, 4)
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (2, 'updated-2', 0), (2, 'updated-2', 1)")
+      assert(deletionVectorCardinality("t") == 2L)
+      assert(deletionVectorCardinality("t", BinaryRow.singleColumn(0)) == 1L)
+      assert(deletionVectorCardinality("t", BinaryRow.singleColumn(1)) == 1L)
+      checkAnswer(
+        sql("SELECT k, v, pt FROM t ORDER BY pt, k"),
+        Seq(
+          Row(0, "base-0", 0),
+          Row(1, "base-1", 0),
+          Row(2, "updated-2", 0),
+          Row(3, "base-3", 0),
+          Row(0, "base-0", 1),
+          Row(1, "base-1", 1),
+          Row(2, "updated-2", 1),
+          Row(3, "base-3", 1)
+        )
+      )
+
+      // Ordinary batch scans skip DV level-0 files when merge-on-read is false. Keep one such
+      // file in partition 0 to verify that rescale still reads the complete logical snapshot.
+      sql("ALTER TABLE t SET TBLPROPERTIES ('write-only' = 'true')")
+      sql("INSERT INTO t VALUES (50, 'level-0', 0)")
+      val partition0 = BinaryRow.singleColumn(0)
+      assert(
+        loadTable("t")
+          .newSnapshotReader()
+          .onlyReadRealBuckets()
+          .read()
+          .dataSplits()
+          .asScala
+          .filter(_.partition() == partition0)
+          .flatMap(_.dataFiles().asScala)
+          .exists(_.level() == 0))
+      checkAnswer(sql("SELECT * FROM t WHERE k = 50 AND pt = 0"), Seq.empty)
+
+      sql("""
+            |ALTER TABLE t SET TBLPROPERTIES (
+            |  'bucket' = '-2',
+            |  'write-only' = 'false',
+            |  'postpone.batch-write-fixed-bucket' = 'true',
+            |  'postpone.target-row-num-per-bucket' = '4',
+            |  'postpone.batch-write-fixed-bucket.max-parallelism' = '8',
+            |  'postpone.batch-write-fixed-bucket.rescale-load-factor' = '2'
+            |)
+            |""".stripMargin)
+      val initialBuckets = PostponeUtils.getKnownNumBuckets(loadTable("t"))
+      assert(initialBuckets.get(partition0) == 1)
+      assert(initialBuckets.get(BinaryRow.singleColumn(1)) == 1)
+      assert(!loadTable("t").coreOptions().writeOnly())
+      assert(loadTable("t").coreOptions().needLookup())
+
+      // Only partition 0 exceeds the load factor. Its old file and deletion vectors are
+      // materialized into the new layout, while partition 1 and its deletion vectors stay intact.
+      sql("""
+            |INSERT INTO t
+            |SELECT 1 AS k, 'new-1' AS v, 0 AS pt
+            |UNION ALL
+            |SELECT CAST(id AS INT), CONCAT('new-', CAST(id AS STRING)), 0 AS pt
+            |FROM range(100, 108)
+            |""".stripMargin)
+
+      val resultBuckets = PostponeUtils.getKnownNumBuckets(loadTable("t"))
+      assert(resultBuckets.get(partition0) == 4)
+      assert(resultBuckets.get(BinaryRow.singleColumn(1)) == 1)
+      assert(deletionVectorCardinality("t") == 1L)
+      assert(deletionVectorCardinality("t", partition0) == 0L)
+      assert(deletionVectorCardinality("t", BinaryRow.singleColumn(1)) == 1L)
+      val resultFiles = loadTable("t")
+        .newSnapshotReader()
+        .onlyReadRealBuckets()
+        .read()
+        .dataSplits()
+        .asScala
+        .filter(_.partition() == partition0)
+        .flatMap(_.dataFiles().asScala)
+      assert(
+        resultFiles.exists(_.level() == 0),
+        resultFiles.map(file => s"${file.fileName()}:L${file.level()}").mkString(", "))
+      val expected =
+        Seq(
+          Row(0, "base-0", 0),
+          Row(1, "new-1", 0),
+          Row(2, "updated-2", 0),
+          Row(3, "base-3", 0),
+          Row(50, "level-0", 0)) ++
+          (100 until 108).map(id => Row(id, s"new-$id", 0)) ++
+          Seq(Row(0, "base-0", 1), Row(1, "base-1", 1), Row(2, "updated-2", 1), Row(3, "base-3", 1))
+      withSparkSQLConf("spark.paimon.deletion-vectors.merge-on-read" -> "true") {
+        checkAnswer(sql("SELECT k, v, pt FROM t ORDER BY pt, k"), expected)
+        checkAnswer(
+          sql("SELECT pt, count(*) FROM t GROUP BY pt ORDER BY pt"),
+          Seq(Row(0, 13L), Row(1, 4L)))
+      }
+
+      // Background compaction materializes the level-0 files and deletion vectors.
+      sql("CALL sys.compact(table => 't')")
+      val compactedFiles = loadTable("t")
+        .newSnapshotReader()
+        .onlyReadRealBuckets()
+        .read()
+        .dataSplits()
+        .asScala
+        .flatMap(_.dataFiles().asScala)
+      assert(
+        compactedFiles.forall(_.level() > 0),
+        compactedFiles.map(file => s"${file.fileName()}:L${file.level()}").mkString(", "))
+      checkAnswer(sql("SELECT k, v, pt FROM t ORDER BY pt, k"), expected)
+      checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(0L)))
+    }
+  }
+
+  test("Postpone bucket table: staged write preserves historical postpone without rescale") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'true',
+            |  'postpone.target-row-num-per-bucket' = '1',
+            |  'postpone.batch-write-fixed-bucket.max-parallelism' = '16'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO t SELECT CAST(id AS INT), CAST(id AS STRING) FROM range(0, 8)")
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.EMPTY_ROW) == 8)
+
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        sql("INSERT INTO t VALUES (0, 'historical-update'), (100, 'historical-only')")
+      }
+      sql("INSERT INTO t VALUES (0, 'current-update')")
+
+      checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(8L)))
+      checkAnswer(
+        sql("SELECT * FROM t WHERE k IN (0, 100) ORDER BY k"),
+        Seq(Row(0, "current-update")))
+      checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(1L)))
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.EMPTY_ROW) == 8)
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        checkAnswer(sql("SELECT * FROM t WHERE k = 100"), Seq(Row(100, "historical-only")))
+      }
+    }
+  }
+
+  test("Postpone bucket table: real-bucket rescale preserves historical postpone data") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  pt INT
+            |) PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'k, pt',
+            |  'bucket' = '-2',
+            |  'dynamic-partition-overwrite' = 'true',
+            |  'postpone.batch-write-fixed-bucket' = 'true',
+            |  'postpone.target-row-num-per-bucket' = '1',
+            |  'postpone.batch-write-fixed-bucket.max-parallelism' = '16'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO t VALUES (1, 'base', 0)")
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        sql("DELETE FROM t WHERE k = 1 AND pt = 0")
+      }
+      sql("""
+            |INSERT INTO t
+            |SELECT CAST(id AS INT), CAST(id AS STRING), 0 AS pt FROM range(2, 35)
+            |""".stripMargin)
+
+      checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(34L)))
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.singleColumn(0)) == 16)
+      checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(1L)))
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(33L)))
+        checkAnswer(sql("SELECT * FROM t WHERE k = 1"), Seq.empty)
+      }
+    }
   }
 
   test("Postpone bucket table: write with different bucket number") {
@@ -99,7 +563,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             |""".stripMargin)
       checkAnswer(
         sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{5}' ORDER BY bucket"),
-        Seq(Row(0), Row(1), Row(2))
+        Seq(Row(0), Row(1))
       )
     }
   }
@@ -134,7 +598,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
       )
       checkAnswer(
         sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{1}' ORDER BY bucket"),
-        Seq(Row(0), Row(1), Row(2))
+        Seq(Row(0), Row(1), Row(2), Row(3))
       )
 
       // Existing partitions keep their bucket number even when the new data volume changes.
@@ -150,7 +614,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         Seq(Row(0))
       )
 
-      // Postpone rows are included when a partition gets real buckets for the first time.
+      // Historical postpone rows neither participate in inference nor enter the fixed write.
       withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
         sql("""
               |INSERT INTO t SELECT
@@ -169,8 +633,13 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             |""".stripMargin)
       checkAnswer(
         sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{2}' ORDER BY bucket"),
-        Seq(Row(-2), Row(0), Row(1))
+        Seq(Row(-2), Row(0))
       )
+      checkAnswer(sql("SELECT count(*) FROM t WHERE pt = 2"), Seq(Row(100L)))
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.singleColumn(2)) == 1)
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        checkAnswer(sql("SELECT count(*) FROM t WHERE pt = 2"), Seq(Row(250L)))
+      }
     }
   }
 
@@ -205,43 +674,47 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
     ).foreach {
       case (partitionOverwriteMode, overwriteSql) =>
         withTable("t") {
-          sql("""
-                |CREATE TABLE t (
-                |  k INT,
-                |  v STRING,
-                |  pt INT
-                |) PARTITIONED BY (pt)
-                |TBLPROPERTIES (
-                |  'primary-key' = 'k, pt',
-                |  'bucket' = '-2',
-                |  'postpone.batch-write-fixed-bucket' = 'false',
-                |  'postpone.target-row-num-per-bucket' = '100'
-                |)
-                |""".stripMargin)
+          withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+            sql("""
+                  |CREATE TABLE t (
+                  |  k INT,
+                  |  v STRING,
+                  |  pt INT
+                  |) PARTITIONED BY (pt)
+                  |TBLPROPERTIES (
+                  |  'primary-key' = 'k, pt',
+                  |  'bucket' = '-2',
+                  |  'postpone.batch-write-fixed-bucket' = 'false',
+                  |  'postpone.target-row-num-per-bucket' = '100'
+                  |)
+                  |""".stripMargin)
+            assert(SparkTable(loadTable("t")).useV2Write)
 
-          sql("""
-                |INSERT INTO t SELECT
-                |id AS k,
-                |CAST(id AS STRING) AS v,
-                |0 AS pt
-                |FROM range (0, 1000)
-                |""".stripMargin)
+            sql("""
+                  |INSERT INTO t SELECT
+                  |id AS k,
+                  |CAST(id AS STRING) AS v,
+                  |0 AS pt
+                  |FROM range (0, 1000)
+                  |""".stripMargin)
 
-          withSparkSQLConf(
-            "spark.paimon.postpone.batch-write-fixed-bucket" -> "true",
-            "spark.sql.sources.partitionOverwriteMode" -> partitionOverwriteMode) {
-            sql(overwriteSql)
+            withSparkSQLConf(
+              "spark.paimon.postpone.batch-write-fixed-bucket" -> "true",
+              "spark.sql.sources.partitionOverwriteMode" -> partitionOverwriteMode) {
+              sql(overwriteSql)
+            }
+
+            checkAnswer(sql("SELECT count(*), sum(k) FROM t"), Seq(Row(100L, 104950L)))
+            checkAnswer(
+              sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{0}'"),
+              Seq(Row(0)))
+            checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(0L)))
           }
-
-          checkAnswer(
-            sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{0}'"),
-            Seq(Row(0))
-          )
         }
     }
   }
 
-  test("Postpone bucket table: infer bucket number from serialized data size") {
+  test("Postpone bucket table: infer bucket number from staged file size") {
     withTable("t") {
       sql("""
             |CREATE TABLE t (
@@ -258,43 +731,45 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             |""".stripMargin)
 
       sql("""
-            |INSERT INTO t SELECT /*+ REPARTITION(20) */
+            |INSERT INTO t SELECT /*+ REPARTITION(1) */
             |id AS k,
-            |CASE WHEN id < 100 THEN repeat('x', 100) ELSE repeat('x', 1000) END AS v,
-            |CASE WHEN id < 100 THEN 0 ELSE 1 END AS pt
-            |FROM range (0, 200)
+            |CASE WHEN id < 10 THEN sha2(CAST(id AS STRING), 256)
+            |     ELSE array_join(transform(sequence(0, 63),
+            |       x -> sha2(concat(CAST(id AS STRING), '-', CAST(x AS STRING)), 256)), '')
+            |END AS v,
+            |CASE WHEN id < 10 THEN 0 ELSE 1 END AS pt
+            |FROM range (0, 110)
             |""".stripMargin)
 
-      checkAnswer(
-        sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{0}' ORDER BY bucket"),
-        Seq(Row(0))
-      )
-      checkAnswer(
-        sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{1}' ORDER BY bucket"),
-        Seq(Row(0), Row(1), Row(2), Row(3))
-      )
+      val initialBuckets = PostponeUtils.getKnownNumBuckets(loadTable("t"))
+      assert(initialBuckets.get(BinaryRow.singleColumn(0)) == 1)
+      assert(initialBuckets.get(BinaryRow.singleColumn(1)) > 1)
 
-      // Estimate existing postpone data with the average serialized size of incoming rows.
+      // Historical postpone data is ignored; only the exactly measured current batch is inferred.
       withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
         sql("""
               |INSERT INTO t SELECT
               |id AS k,
-              |repeat('x', 1000) AS v,
+              |array_join(transform(sequence(0, 63),
+              |  x -> sha2(concat(CAST(id AS STRING), '-', CAST(x AS STRING)), 256)), '') AS v,
               |2 AS pt
               |FROM range (1000, 1100)
               |""".stripMargin)
       }
       sql("""
-            |INSERT INTO t SELECT /*+ REPARTITION(20) */
+            |INSERT INTO t SELECT /*+ REPARTITION(1) */
             |id AS k,
-            |repeat('x', 1000) AS v,
+            |array_join(transform(sequence(0, 63),
+            |  x -> sha2(concat(CAST(id AS STRING), '-', CAST(x AS STRING)), 256)), '') AS v,
             |2 AS pt
             |FROM range (2000, 2100)
             |""".stripMargin)
-      checkAnswer(
-        sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{2}' ORDER BY bucket"),
-        Seq(Row(-2), Row(0), Row(1), Row(2), Row(3), Row(4), Row(5), Row(6))
-      )
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).get(BinaryRow.singleColumn(2)) > 1)
+      checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(1L)))
+      checkAnswer(sql("SELECT count(*) FROM t WHERE pt = 2"), Seq(Row(100L)))
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        checkAnswer(sql("SELECT count(*) FROM t WHERE pt = 2"), Seq(Row(200L)))
+      }
     }
   }
 
@@ -357,6 +832,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             |  'deletion-vectors.enabled' = 'true',
             |  'deletion-vectors.merge-on-read' = 'true',
             |  'postpone.default-bucket-num' = '1',
+            |  'postpone.batch-write-fixed-bucket.max-parallelism' = '1',
             |  'source.split.target-size' = '1 B'
             |)
             |""".stripMargin)
@@ -722,6 +1198,19 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         // Core must retain seq after Spark projects v.
         checkAnswer(sql("SELECT v FROM t ORDER BY v"), Seq(Row("base-1"), Row("newer")))
       }
+
+      // The fixed write ignores historical postpone rows. They still participate when merge-on-read
+      // is enabled, where the user sequence field takes precedence.
+      sql("INSERT INTO t VALUES (1, 'current', 15), (2, 'current-older', 15)")
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY k"),
+        Seq(Row(1, "current", 15), Row(2, "current-older", 15)))
+      checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(1L)))
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY k"),
+          Seq(Row(1, "current", 15), Row(2, "newer", 20)))
+      }
     }
   }
 
@@ -862,6 +1351,19 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         checkAnswer(sql("SELECT total FROM aggregation_t"), Seq(Row(13L)))
         checkAnswer(sql("SELECT * FROM partial_t WHERE v2 = 'b'"), Seq(Row(1, "a", "b")))
         checkAnswer(sql("SELECT * FROM aggregation_t WHERE total = 13"), Seq(Row(1, 13L)))
+      }
+
+      sql("INSERT INTO partial_t VALUES (1, 'c', CAST(NULL AS STRING))")
+      sql("INSERT INTO aggregation_t VALUES (1, 7L)")
+      checkAnswer(sql("SELECT * FROM partial_t"), Seq(Row(1, "c", null)))
+      checkAnswer(sql("SELECT * FROM aggregation_t"), Seq(Row(1, 17L)))
+      checkAnswer(sql("SELECT count(*) FROM `partial_t$buckets` WHERE bucket = -2"), Seq(Row(1L)))
+      checkAnswer(
+        sql("SELECT count(*) FROM `aggregation_t$buckets` WHERE bucket = -2"),
+        Seq(Row(1L)))
+      withSparkSQLConf("spark.paimon.postpone.merge-on-read" -> "true") {
+        checkAnswer(sql("SELECT * FROM partial_t"), Seq(Row(1, "c", "b")))
+        checkAnswer(sql("SELECT * FROM aggregation_t"), Seq(Row(1, 20L)))
       }
     }
   }
@@ -1153,17 +1655,27 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
   }
 
   private def deletionVectorCardinality(tableName: String): Long = {
+    deletionVectorCardinality(tableName, None)
+  }
+
+  private def deletionVectorCardinality(tableName: String, partition: BinaryRow): Long = {
+    deletionVectorCardinality(tableName, Some(partition))
+  }
+
+  private def deletionVectorCardinality(tableName: String, partition: Option[BinaryRow]): Long = {
     val table = loadTable(tableName)
     table
       .store()
       .newIndexFileHandler()
       .scan(table.latestSnapshot().get(), DELETION_VECTORS_INDEX)
       .asScala
+      .filter(entry => partition.forall(_ == entry.partition()))
       .flatMap(entry => Option(entry.indexFile().dvRanges()).toSeq)
       .flatMap(_.values().asScala)
       .flatMap(meta => Option(meta.cardinality()).map(_.longValue()))
       .sum
   }
+
 }
 
 object PostponeBucketTableTest {

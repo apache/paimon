@@ -1522,6 +1522,7 @@ public class JavaPyE2ETest {
                                 "high_decimal_payloads",
                                 DataTypes.MAP(DataTypes.DECIMAL(20, 2), DataTypes.BLOB()))
                         .column("date_payloads", DataTypes.MAP(DataTypes.DATE(), DataTypes.BLOB()))
+                        .column("time_payloads", DataTypes.MAP(DataTypes.TIME(3), DataTypes.BLOB()))
                         .option(ROW_TRACKING_ENABLED.key(), "true")
                         .option(DATA_EVOLUTION_ENABLED.key(), "true")
                         .option(BUCKET.key(), "-1")
@@ -1546,6 +1547,8 @@ public class JavaPyE2ETest {
                 new BlobData("java-high-decimal".getBytes(StandardCharsets.UTF_8)));
         Map<Object, Object> datePayloads = new LinkedHashMap<>();
         datePayloads.put(-1, new BlobData("java-date".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> timePayloads = new LinkedHashMap<>();
+        timePayloads.put(45_296_789, new BlobData("java-time".getBytes(StandardCharsets.UTF_8)));
 
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
@@ -1558,12 +1561,19 @@ public class JavaPyE2ETest {
                             new GenericMap(booleanPayloads),
                             new GenericMap(compactDecimalPayloads),
                             new GenericMap(highDecimalPayloads),
-                            new GenericMap(datePayloads)));
+                            new GenericMap(datePayloads),
+                            new GenericMap(timePayloads)));
             write.write(
                     GenericRow.of(
-                            2, new GenericMap(Collections.emptyMap()), null, null, null, null));
-            write.write(GenericRow.of(3, null, null, null, null, null));
-            write.write(GenericRow.of(4, new GenericMap(last), null, null, null, null));
+                            2,
+                            new GenericMap(Collections.emptyMap()),
+                            null,
+                            null,
+                            null,
+                            null,
+                            null));
+            write.write(GenericRow.of(3, null, null, null, null, null, null));
+            write.write(GenericRow.of(4, new GenericMap(last), null, null, null, null, null));
             commit.commit(write.prepareCommit());
         }
 
@@ -1653,6 +1663,10 @@ public class JavaPyE2ETest {
                         InternalMap dateMap = row.getMap(5);
                         assertThat(dateMap.keyArray().getInt(0)).isEqualTo(-1);
                         assertSingleBlobValue(dateMap, valuePrefix + "-date");
+
+                        InternalMap timeMap = row.getMap(6);
+                        assertThat(timeMap.keyArray().getInt(0)).isEqualTo(45_296_789);
+                        assertSingleBlobValue(timeMap, valuePrefix + "-time");
                     });
         }
         assertThat(found[0]).isTrue();

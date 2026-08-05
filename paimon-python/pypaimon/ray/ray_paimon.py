@@ -297,11 +297,12 @@ def write_paimon(
 
     HASH_FIXED rows are assigned to the correct bucket by the Paimon
     writer. For primary-key tables, ``map_groups`` writes each complete
-    ``(partition_keys..., bucket)`` group in one Ray task and returns
-    commit messages to the driver. It should only be used when every
-    group fits in memory. HASH_DYNAMIC and CROSS_PARTITION primary-key
-    Ray writes are rejected because Ray write tasks create independent
-    Paimon writers.
+    ``(partition_keys..., bucket)`` group in one Ray task. Postpone-bucket
+    writes follow ``postpone.batch-write-fixed-bucket`` by default. Their
+    bucket plan is resolved once on the driver and workers write sorted
+    blocks to real buckets.
+    HASH_DYNAMIC and CROSS_PARTITION primary-key Ray writes are rejected
+    because Ray write tasks create independent Paimon writers.
 
     Args:
         dataset: The Ray Dataset to write.
@@ -310,11 +311,9 @@ def write_paimon(
         overwrite: If ``True``, overwrite existing data in the table.
         concurrency: Optional max number of Ray write tasks to run concurrently.
         ray_remote_args: Optional kwargs passed to ``ray.remote`` in write tasks.
-        hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
-            and ``"off"`` write append-only HASH_FIXED tables directly
-            and reject HASH_FIXED primary-key tables. ``"map_groups"``
-            writes each HASH_FIXED primary-key group in one task and
-            preserves the legacy single-group memory bound.
+        hash_fixed_precluster: Pre-clustering mode. ``"auto"`` follows
+            table options, ``"off"`` disables it, and ``"map_groups"``
+            explicitly enables HASH_FIXED grouping.
         commit_mode: ``"atomic"`` or resumable ``"incremental"``.
         operation_id: Stable ID used to resume an incremental write.
         commit_interval_seconds: Target interval between incremental commits.

@@ -227,6 +227,46 @@ class CoreOptions:
         )
     )
 
+    POSTPONE_BATCH_WRITE_FIXED_BUCKET: ConfigOption[bool] = (
+        ConfigOptions.key("postpone.batch-write-fixed-bucket")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether to write data into fixed buckets for batch writes to a "
+            "postpone bucket table."
+        )
+    )
+
+    POSTPONE_BATCH_WRITE_FIXED_BUCKET_MAX_PARALLELISM: ConfigOption[int] = (
+        ConfigOptions.key("postpone.batch-write-fixed-bucket.max-parallelism")
+        .int_type()
+        .default_value(2048)
+        .with_description(
+            "Maximum bucket number inferred for a postpone batch write."
+        )
+    )
+
+    POSTPONE_TARGET_ROW_NUM_PER_BUCKET: ConfigOption[int] = (
+        ConfigOptions.key("postpone.target-row-num-per-bucket")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Target row number per bucket when batch writing a postpone "
+            "partition without real bucket data."
+        )
+    )
+
+    POSTPONE_TARGET_SIZE_PER_BUCKET: ConfigOption[MemorySize] = (
+        ConfigOptions.key("postpone.target-size-per-bucket")
+        .memory_type()
+        .default_value(MemorySize.parse("1 gb"))
+        .with_description(
+            "Target uncompressed input size per bucket when batch writing a "
+            "postpone partition without real bucket data. This option is "
+            "ignored when postpone.target-row-num-per-bucket is configured."
+        )
+    )
+
     SCAN_MANIFEST_PARALLELISM: ConfigOption[int] = (
         ConfigOptions.key("scan.manifest.parallelism")
         .int_type()
@@ -1065,6 +1105,33 @@ class CoreOptions:
 
     def dynamic_bucket_max_buckets(self, default=None):
         return self.options.get(CoreOptions.DYNAMIC_BUCKET_MAX_BUCKETS, default)
+
+    def postpone_batch_write_fixed_bucket(self, default=None):
+        return self.options.get(
+            CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET, default
+        )
+
+    def postpone_batch_write_fixed_bucket_max_parallelism(self, default=None):
+        return self.options.get(
+            CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET_MAX_PARALLELISM,
+            default,
+        )
+
+    def postpone_target_row_num_per_bucket(self, default=None):
+        return self.options.get(
+            CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET, default
+        )
+
+    def postpone_target_size_per_bucket(self, default=None):
+        if default is not None and not isinstance(default, MemorySize):
+            default = (
+                MemorySize.of_bytes(default)
+                if isinstance(default, int)
+                else MemorySize.parse(default)
+            )
+        return self.options.get(
+            CoreOptions.POSTPONE_TARGET_SIZE_PER_BUCKET, default
+        ).get_bytes()
 
     def scan_manifest_parallelism(self, default=None):
         return self.options.get(CoreOptions.SCAN_MANIFEST_PARALLELISM, default)

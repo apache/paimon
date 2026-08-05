@@ -37,7 +37,7 @@ import java.util.Set;
 import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Collects exact managed BLOB dependencies from the final rows of one data file. */
+/** Collects managed BLOB dependencies from non-retract key-values written to one data file. */
 public class ManagedBlobReferenceCollector {
 
     private final FileIO fileIO;

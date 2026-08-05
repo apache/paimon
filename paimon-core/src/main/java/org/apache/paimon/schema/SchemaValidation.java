@@ -34,6 +34,7 @@ import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
@@ -90,6 +91,10 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.format.FileFormat.vectorFileFormat;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOption;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOptionCandidate;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.sequenceGroupOrderingFields;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.sequenceGroupProtectedFields;
 import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFactory;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
@@ -156,6 +161,8 @@ public class SchemaValidation {
 
         validateSequenceField(schema, options);
 
+        validateSequenceGroupOrderingFields(schema, options);
+
         validateMergeFunction(schema);
 
         ChangelogProducer changelogProducer = options.changelogProducer();
@@ -220,6 +227,7 @@ public class SchemaValidation {
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
                 validateBlobViewFields(tableRowType, options, blobDescriptorFields);
+        validatePrimaryKeyBlobKeyConfiguration(schema, options);
         validatePrimaryKeyBlobConfiguration(schema, options);
         Set<String> blobInlineFields = new HashSet<>(blobDescriptorFields);
         blobInlineFields.addAll(blobViewFields);
@@ -1423,6 +1431,89 @@ public class SchemaValidation {
             return;
         }
 
+        checkArgument(
+                options.mergeEngine() == MergeEngine.DEDUPLICATE
+                        || options.mergeEngine() == MergeEngine.PARTIAL_UPDATE,
+                "Primary-key managed BLOB tables only support the deduplicate or "
+                        + "partial-update merge engine.");
+        checkArgument(
+                options.changelogProducer() == ChangelogProducer.NONE,
+                "Primary-key managed BLOB tables only support changelog-producer 'none'.");
+        checkArgument(
+                options.dataFileExternalPaths() == null,
+                "Primary-key managed BLOB tables do not support '%s'.",
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key());
+        checkArgument(
+                !options.pkClusteringOverride(),
+                "Primary-key managed BLOB tables do not support '%s'.",
+                CoreOptions.PK_CLUSTERING_OVERRIDE.key());
+
+        if (options.mergeEngine() == MergeEngine.PARTIAL_UPDATE && !options.ignoreDelete()) {
+            Set<String> fieldsProtectedBySequenceGroup =
+                    options.toMap().entrySet().stream()
+                            .filter(entry -> isSequenceGroupOption(entry.getKey()))
+                            .flatMap(
+                                    entry ->
+                                            sequenceGroupProtectedFields(entry.getValue()).stream())
+                            .collect(Collectors.toSet());
+            for (String field : managedBlobFields) {
+                if (!fieldsProtectedBySequenceGroup.contains(field)) {
+                    continue;
+                }
+                String aggregateFunction = options.fieldAggFunc(field);
+                if (aggregateFunction == null) {
+                    aggregateFunction = options.fieldsDefaultFunc();
+                }
+                checkArgument(
+                        aggregateFunction == null
+                                || FieldLastValueAggFactory.NAME.equals(aggregateFunction)
+                                || options.fieldAggIgnoreRetract(field),
+                        "Managed BLOB field '%s' cannot use aggregate function '%s' because "
+                                + "managed BLOB payloads are not retained in retract messages. "
+                                + "Set 'fields.%s.ignore-retract' to true to ignore retract messages.",
+                        field,
+                        aggregateFunction,
+                        field);
+            }
+        }
+    }
+
+    private static void validateSequenceGroupOrderingFields(
+            TableSchema schema, CoreOptions options) {
+        if (options.mergeEngine() != MergeEngine.PARTIAL_UPDATE) {
+            return;
+        }
+
+        RowType rowType = new RowType(schema.fields());
+        for (String optionKey : options.toMap().keySet()) {
+            if (!isSequenceGroupOptionCandidate(optionKey)) {
+                continue;
+            }
+            for (String fieldName : sequenceGroupOrderingFields(optionKey)) {
+                DataField field = rowType.getField(fieldName);
+                checkArgument(
+                        !containsType(field.type(), type -> type.is(DataTypeRoot.BLOB)),
+                        "Field '%s' with type %s cannot be used as a sequence-group ordering "
+                                + "field in option '%s'.",
+                        fieldName,
+                        field.type(),
+                        optionKey);
+            }
+        }
+    }
+
+    private static void validatePrimaryKeyBlobKeyConfiguration(
+            TableSchema schema, CoreOptions options) {
+        if (schema.primaryKeys().isEmpty()) {
+            return;
+        }
+
+        Set<String> managedBlobFields =
+                fieldNamesInBlobFile(new RowType(schema.fields()), options.blobInlineField());
+        if (managedBlobFields.isEmpty()) {
+            return;
+        }
+
         List<String> primaryKeyBlobFields =
                 managedBlobFields.stream()
                         .filter(schema.primaryKeys()::contains)
@@ -1449,21 +1540,6 @@ public class SchemaValidation {
                 sequenceBlobFields.isEmpty(),
                 "Managed BLOB fields cannot be sequence fields: %s.",
                 sequenceBlobFields);
-
-        checkArgument(
-                options.mergeEngine() == MergeEngine.DEDUPLICATE,
-                "Primary-key managed BLOB tables only support the deduplicate merge engine.");
-        checkArgument(
-                options.changelogProducer() == ChangelogProducer.NONE,
-                "Primary-key managed BLOB tables only support changelog-producer 'none'.");
-        checkArgument(
-                options.dataFileExternalPaths() == null,
-                "Primary-key managed BLOB tables do not support '%s'.",
-                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key());
-        checkArgument(
-                !options.pkClusteringOverride(),
-                "Primary-key managed BLOB tables do not support '%s'.",
-                CoreOptions.PK_CLUSTERING_OVERRIDE.key());
     }
 
     private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {

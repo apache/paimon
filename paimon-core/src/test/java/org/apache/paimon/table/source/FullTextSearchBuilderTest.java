@@ -19,6 +19,10 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -65,7 +69,9 @@ import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.table.source.DeletionVectorTestUtils.commitDeletionVectors;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -160,6 +166,101 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(result.results()).contains(2L, 3L);
         assertThat(result.results()).doesNotContain(0L, 1L);
         assertThat(readIds(table, result)).containsExactlyInAnyOrder(2, 3);
+    }
+
+    @Test
+    public void testFullTextSearchPinsLiveRowFilterToPlanSnapshot() throws Exception {
+        Identifier identifier = identifier("full_text_pinned_live_rows");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.STRING())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+
+        String[] documents = {
+            "paimon keyword", "paimon keyword", "paimon keyword", "paimon keyword"
+        };
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+
+        FullTextSearchBuilder builder =
+                table.newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("keyword"))
+                        .withLimit(4);
+        FullTextScan.Plan plan = builder.newFullTextScan().scan();
+        assertThat(plan.snapshot()).isNotNull();
+
+        // Row 0 was live when the index plan was created, so a later DV must not affect this read.
+        commitDeletionVectors(table, 0L);
+
+        GlobalIndexResult result = builder.newFullTextRead().read(plan);
+        assertThat(result.results()).containsExactlyInAnyOrder(0L, 1L, 2L, 3L);
+    }
+
+    @Test
+    public void testFullTextRawFallbackPinsDataReadToPlanSnapshot() throws Exception {
+        Identifier identifier = identifier("full_text_pinned_raw_fallback");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.STRING())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .option(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE.key(), "full")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+
+        String[] documents = {"indexed keyword", "raw keyword"};
+        writeDocuments(table, documents);
+        buildAndCommitIndexRange(
+                table,
+                new String[] {documents[0]},
+                Collections.singletonList(table.rowType().getField(TEXT_FIELD_NAME)),
+                0);
+
+        FullTextSearchBuilder builder =
+                table.newFullTextSearchBuilder()
+                        .withQuery(TEXT_FIELD_NAME, matchQuery("keyword"))
+                        .withLimit(2);
+        FullTextScan.Plan plan = builder.newFullTextScan().scan();
+        assertThat(plan.splits()).anyMatch(RawFullTextSearchSplit.class::isInstance);
+
+        // Materialization rewrites the surviving row ids after planning. Both the indexed and raw
+        // sides must still be evaluated against the pre-compaction snapshot carried by the plan.
+        commitDeletionVectors(table, 0L);
+        Map<String, String> compactOptions = new HashMap<>();
+        compactOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
+        FileStoreTable compactTable = table.copy(compactOptions);
+        Snapshot compactSnapshot = compactTable.latestSnapshot().get();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(compactTable, false, false, compactSnapshot);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks)
+                .singleElement()
+                .extracting(DataEvolutionCompactTask::type)
+                .isEqualTo(DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
+        List<CommitMessage> messages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            messages.add(task.doCompact(compactTable, "test-full-text-snapshot-pin"));
+        }
+        messages.addAll(
+                new DataEvolutionCompactionCommitPreparation(compactTable, compactSnapshot)
+                        .prepare(messages));
+        try (BatchTableCommit commit = compactTable.newBatchWriteBuilder().newCommit()) {
+            commit.commit(messages);
+        }
+
+        GlobalIndexResult result = builder.newFullTextRead().read(plan);
+        assertThat(result.results()).containsExactlyInAnyOrder(0L, 1L);
     }
 
     @Test

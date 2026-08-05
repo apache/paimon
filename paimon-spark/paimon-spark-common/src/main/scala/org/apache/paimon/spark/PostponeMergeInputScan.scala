@@ -255,7 +255,7 @@ private[spark] object PostponeMergeInputScan {
 
   private def bucketKey(split: DataSplit) = (split.partition(), split.bucket())
 
-  private def mergeRealSplits(splits: Seq[DataSplit]): DataSplit = {
+  private[spark] def mergeRealSplits(splits: Seq[DataSplit]): DataSplit = {
     if (splits.size == 1) {
       splits.head
     } else {

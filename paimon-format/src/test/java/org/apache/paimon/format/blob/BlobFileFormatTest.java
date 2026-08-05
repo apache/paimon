@@ -499,6 +499,7 @@ public class BlobFileFormatTest {
                     DataTypes.DECIMAL(10, 2),
                     DataTypes.DECIMAL(20, 2),
                     DataTypes.DATE(),
+                    DataTypes.TIME(3),
                     DataTypes.CHAR(10),
                     DataTypes.VARCHAR(10)
                 };
@@ -512,6 +513,7 @@ public class BlobFileFormatTest {
                     Decimal.fromBigDecimal(new BigDecimal("12.34"), 10, 2),
                     Decimal.fromBigDecimal(new BigDecimal("123456789012345678.90"), 20, 2),
                     -1,
+                    45_296_789,
                     BinaryString.fromString("char"),
                     BinaryString.fromString("varchar")
                 };
@@ -535,6 +537,7 @@ public class BlobFileFormatTest {
                         (byte) 0xd2
                     },
                     {(byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff},
+                    {(byte) 0x95, 0x2c, (byte) 0xb3, 0x02},
                     "char".getBytes(),
                     "varchar".getBytes()
                 };

@@ -181,24 +181,27 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     @Override
     protected boolean postFilterManifestEntriesEnabled() {
-        // Always enable post-filtering. The list filterByStats handles predicate-based pruning
-        // and pruneByReadType strips per-file columns that are not requested — both
-        // need row-id-range grouping that single filterByStats(ManifestEntry) cannot see.
-        return inputFilter != null || readType != null;
+        return true;
     }
 
     @Override
     protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
-        // group by row id range
-        RangeHelper<ManifestEntry> rangeHelper =
-                new RangeHelper<>(e -> e.file().nonNullRowIdRange());
-        List<List<ManifestEntry>> splitByRowId = rangeHelper.mergeOverlappingRanges(entries);
+        if (inputFilter != null || readType != null) {
+            // group by row id range
+            RangeHelper<ManifestEntry> rangeHelper =
+                    new RangeHelper<>(e -> e.file().nonNullRowIdRange());
+            List<List<ManifestEntry>> splitByRowId = rangeHelper.mergeOverlappingRanges(entries);
 
-        return splitByRowId.stream()
-                .filter(group -> inputFilter == null || filterByStats(group))
-                .flatMap(group -> pruneByReadType(group).stream())
-                .map(entry -> dropStats ? dropStats(entry) : entry)
-                .collect(Collectors.toList());
+            return splitByRowId.stream()
+                    .filter(group -> inputFilter == null || filterByStats(group))
+                    .flatMap(group -> pruneByReadType(group).stream())
+                    .map(entry -> dropStats ? dropStats(entry) : entry)
+                    .collect(Collectors.toList());
+        } else if (dropStats) {
+            return entries.stream().map(this::dropStats).collect(Collectors.toList());
+        } else {
+            return entries;
+        }
     }
 
     private boolean filterByStats(List<ManifestEntry> entries) {
