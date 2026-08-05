@@ -53,18 +53,18 @@ public class IncrementalDiffStartingScanner extends AbstractStartingScanner {
         this.start = start;
         this.end = end;
         this.startingSnapshotId = start.id();
+    }
 
+    @Override
+    public Result scan(SnapshotReader reader) {
         TimeTravelUtil.checkRescaleBucketForIncrementalDiffQuery(
                 new SchemaManager(
                         snapshotManager.fileIO(),
                         snapshotManager.tablePath(),
                         snapshotManager.branch()),
+                reader,
                 start,
                 end);
-    }
-
-    @Override
-    public Result scan(SnapshotReader reader) {
         return StartingScanner.fromPlan(reader.withSnapshot(end).readIncrementalDiff(start));
     }
 

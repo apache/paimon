@@ -25,6 +25,7 @@ import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.FileStoreScan;
@@ -347,8 +348,7 @@ public class PostponeUtils {
     }
 
     public static Map<BinaryRow, Integer> getKnownNumBuckets(FileStoreTable table) {
-        return getKnownNumBuckets(
-                table.store().newScan().onlyReadRealBuckets().readSimpleEntries());
+        return getKnownNumBuckets(table.store().newScan().onlyReadRealBuckets().readFileIterator());
     }
 
     public static Map<BinaryRow, Integer> getKnownNumBuckets(
@@ -371,19 +371,24 @@ public class PostponeUtils {
                         .readSimpleEntries());
     }
 
+    public static Map<BinaryRow, Integer> getKnownNumBuckets(
+            SnapshotReader reader, long snapshotId) {
+        return getKnownNumBuckets(reader.withSnapshot(snapshotId).readFileIterator());
+    }
+
     static Map<BinaryRow, Integer> getKnownNumBuckets(
             FileStoreTable table, long snapshotId, @Nullable PartitionPredicate partitionFilter) {
         FileStoreScan scan = table.store().newScan().withSnapshot(snapshotId).onlyReadRealBuckets();
         if (partitionFilter != null) {
             scan.withPartitionFilter(partitionFilter);
         }
-        return getKnownNumBuckets(scan.readSimpleEntries());
+        return getKnownNumBuckets(scan.readFileIterator());
     }
 
-    private static Map<BinaryRow, Integer> getKnownNumBuckets(
-            List<SimpleFileEntry> simpleFileEntries) {
+    private static Map<BinaryRow, Integer> getKnownNumBuckets(Iterator<ManifestEntry> fileEntries) {
         Map<BinaryRow, Integer> knownNumBuckets = new HashMap<>();
-        for (SimpleFileEntry entry : simpleFileEntries) {
+        while (fileEntries.hasNext()) {
+            FileEntry entry = fileEntries.next();
             if (entry.totalBuckets() >= 0) {
                 Integer oldTotalBuckets =
                         knownNumBuckets.put(entry.partition(), entry.totalBuckets());
