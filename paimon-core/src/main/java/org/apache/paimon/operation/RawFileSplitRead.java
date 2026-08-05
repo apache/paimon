@@ -125,6 +125,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Override
     public SplitRead<InternalRow> withReadType(RowType readRowType) {
         this.readRowType = readRowType;
+        formatReaderMappings.clear();
         return this;
     }
 
@@ -334,7 +335,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
-                        schema.logicalRowType(),
+                        dataFileReaderOutputType(file),
                         formatReaderMapping.getReaderFactory(),
                         formatReaderContext,
                         ignoreCorruptFiles,
@@ -357,5 +358,18 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             return new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
         }
         return fileRecordReader;
+    }
+
+    private RowType dataFileReaderOutputType(DataFileMeta file) {
+        String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
+        // Partitioned Mosaic files may contain only non-partition columns physically. Keep the
+        // requested projection as the reader output type so manifest partition values are mapped
+        // into the requested positions instead of first expanding to the full logical row type.
+        // Other formats and unpartitioned Mosaic tables retain the existing behavior.
+        if (CoreOptions.FILE_FORMAT_MOSAIC.equalsIgnoreCase(formatIdentifier)
+                && !schema.partitionKeys().isEmpty()) {
+            return readRowType;
+        }
+        return schema.logicalRowType();
     }
 }

@@ -1,0 +1,209 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.operation;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFileRecordReader;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.FileRecordIterator;
+import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+/** Tests for {@link RawFileSplitRead}. */
+class RawFileSplitReadTest {
+
+    @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    void parquetKeepsLogicalReaderOutputType() throws Exception {
+        assertLegacyReaderOutputType("parquet");
+    }
+
+    @Test
+    void mosaicUsesProjectedReaderOutputTypeOnlyForPartitionedTables() throws Exception {
+        assertMosaicReaderOutputType("unpartitioned-mosaic", false);
+        assertMosaicReaderOutputType("partitioned-mosaic", true);
+    }
+
+    @Test
+    void readerMappingIsRebuiltWhenReadTypeChanges() throws Exception {
+        Path tablePath = new Path(tempDir.resolve("mapping-cache").toUri());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.BUCKET_KEY, "first");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("first", DataTypes.STRING())
+                        .column("second", DataTypes.INT())
+                        .options(options.toMap())
+                        .build();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(new SchemaManager(LocalFileIO.create(), tablePath), schema);
+        FileStoreTable table =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(BinaryString.fromString("value"), 42));
+            commit.commit(write.prepareCommit());
+        }
+
+        DataSplit split = table.newSnapshotReader().read().dataSplits().get(0);
+        RawFileSplitRead read = (RawFileSplitRead) table.store().newRead();
+
+        read.withReadType(table.rowType().project("first"));
+        try (FileRecordReader<InternalRow> fileReader = read.createFileReader(split, null)) {
+            FileRecordIterator<InternalRow> batch = fileReader.readBatch();
+            assertThat(batch).isNotNull();
+            assertThat(batch.next().getString(0).toString()).isEqualTo("value");
+            batch.releaseBatch();
+        }
+
+        RowType secondProjection = table.rowType().project("second");
+        read.withReadType(secondProjection);
+        try (FileRecordReader<InternalRow> fileReader = read.createFileReader(split, null)) {
+            assertOutputType(fileReader, table.rowType());
+
+            FileRecordIterator<InternalRow> batch = fileReader.readBatch();
+            assertThat(batch).isNotNull();
+            InternalRow row = batch.next();
+            assertThat(row).isNotNull();
+            assertThat(row.getFieldCount()).isEqualTo(1);
+            assertThat(row.getInt(0)).isEqualTo(42);
+            assertThat(batch.next()).isNull();
+            batch.releaseBatch();
+        }
+    }
+
+    private void assertLegacyReaderOutputType(String fileFormat) throws Exception {
+        Path tablePath = new Path(tempDir.resolve(fileFormat).toUri());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.BUCKET_KEY, "first");
+        options.set(CoreOptions.FILE_FORMAT, fileFormat);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("first", DataTypes.STRING())
+                        .column("second", DataTypes.INT())
+                        .options(options.toMap())
+                        .build();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(new SchemaManager(LocalFileIO.create(), tablePath), schema);
+        FileStoreTable table =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(BinaryString.fromString("value"), 42));
+            commit.commit(write.prepareCommit());
+        }
+
+        DataSplit split = table.newSnapshotReader().read().dataSplits().get(0);
+        RawFileSplitRead read = (RawFileSplitRead) table.store().newRead();
+        RowType projectedType = table.rowType().project("first");
+        read.withReadType(projectedType);
+
+        try (FileRecordReader<InternalRow> fileReader = read.createFileReader(split, null)) {
+            assertOutputType(fileReader, table.rowType());
+
+            FileRecordIterator<InternalRow> batch = fileReader.readBatch();
+            assertThat(batch).isNotNull();
+            InternalRow row = batch.next();
+            assertThat(row).isNotNull();
+            assertThat(row.getFieldCount()).isEqualTo(1);
+            assertThat(row.getString(0).toString()).isEqualTo("value");
+            assertThat(batch.next()).isNull();
+            batch.releaseBatch();
+        }
+    }
+
+    private void assertMosaicReaderOutputType(String tableName, boolean partitioned)
+            throws Exception {
+        Path tablePath = new Path(tempDir.resolve(tableName).toUri());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+
+        Schema.Builder schemaBuilder =
+                Schema.newBuilder()
+                        .column("value", DataTypes.STRING())
+                        .column("dt", DataTypes.STRING())
+                        .options(options.toMap());
+        if (partitioned) {
+            schemaBuilder.partitionKeys("dt");
+        }
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath), schemaBuilder.build());
+        FileStoreTable table =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+
+        RowType logicalType = table.rowType();
+        RowType projectedType = logicalType.project("value");
+        RawFileSplitRead read = (RawFileSplitRead) table.store().newRead();
+        read.withReadType(projectedType);
+
+        DataFileMeta file = mock(DataFileMeta.class);
+        when(file.fileName()).thenReturn("data-file.mosaic");
+        Method outputTypeMethod =
+                RawFileSplitRead.class.getDeclaredMethod(
+                        "dataFileReaderOutputType", DataFileMeta.class);
+        outputTypeMethod.setAccessible(true);
+        assertThat(outputTypeMethod.invoke(read, file))
+                .isEqualTo(partitioned ? projectedType : logicalType);
+    }
+
+    private static void assertOutputType(
+            FileRecordReader<InternalRow> fileReader, RowType expectedType) throws Exception {
+        assertThat(fileReader).isInstanceOf(DataFileRecordReader.class);
+        Field outputType = DataFileRecordReader.class.getDeclaredField("tableRowType");
+        outputType.setAccessible(true);
+        assertThat(outputType.get(fileReader)).isEqualTo(expectedType);
+    }
+}
