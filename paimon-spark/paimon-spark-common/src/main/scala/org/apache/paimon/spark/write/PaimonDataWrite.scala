@@ -50,9 +50,6 @@ case class PaimonDataWrite(
     if (writeRowTracking) {
       _write.withWriteType(writeType)
     }
-    if (postponePartitionBucketComputer.isDefined) {
-      _write.getWrite.withIgnoreNumBucketCheck(true)
-    }
     _write
   }
 
@@ -65,27 +62,17 @@ case class PaimonDataWrite(
   }
 
   def write(row: Row, bucket: Int): Unit = {
-    postWrite(write.writeAndReturn(toPaimonRow(row), bucket))
+    val paimonRow = toPaimonRow(row)
+    val sinkRecord = postponePartitionBucketComputer match {
+      case Some(numBuckets) =>
+        write.writeAndReturn(paimonRow, bucket, numBuckets(write.getPartition(paimonRow)))
+      case None => write.writeAndReturn(paimonRow, bucket)
+    }
+    postWrite(sinkRecord)
   }
 
   override def commitImpl(): Seq[CommitMessage] = {
-    val commitMessages = write.prepareCommit().asScala.toSeq
-
-    if (postponePartitionBucketComputer.isDefined) {
-      commitMessages.map {
-        case message: CommitMessageImpl =>
-          new CommitMessageImpl(
-            message.partition(),
-            message.bucket(),
-            postponePartitionBucketComputer.get.apply(message.partition()),
-            message.newFilesIncrement(),
-            message.compactIncrement()
-          )
-        case _ => throw new RuntimeException()
-      }
-    } else {
-      commitMessages
-    }
+    write.prepareCommit().asScala.toSeq
   }
 
   override def close(): Unit = {

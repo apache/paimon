@@ -41,6 +41,11 @@ from pypaimon.write.commit.commit_scanner import CommitScanner
 from pypaimon.write.commit.conflict_detection import (
     CommitConflictError,
     ConflictDetection,
+    RowIdExistenceConflict,
+)
+from pypaimon.write.commit.row_id_conflict_rewriter import (
+    RowIdConflictRewriter,
+    RowIdRewriteResult,
 )
 from pypaimon.write.commit.overwrite_changes_provider import OverwriteChangesProvider
 from pypaimon.table.special_fields import SpecialFields
@@ -79,6 +84,15 @@ class RetryResult(CommitResult):
         return False
 
 
+class RewriteResult(CommitResult):
+
+    def __init__(self, rewrite: RowIdRewriteResult):
+        self.rewrite = rewrite
+
+    def is_success(self) -> bool:
+        return False
+
+
 class FileStoreCommit:
     """
     Core commit logic for file store operations.
@@ -112,6 +126,9 @@ class FileStoreCommit:
         self.commit_timeout = table.options.commit_timeout()
         self.commit_min_retry_wait = table.options.commit_min_retry_wait()
         self.commit_max_retry_wait = table.options.commit_max_retry_wait()
+        self.row_id_conflict_rewrite_max_size = (
+            table.options.data_evolution_row_id_conflict_rewrite_max_size()
+        )
 
         self.commit_scanner = CommitScanner(table, self.manifest_list_manager)
 
@@ -360,10 +377,15 @@ class FileStoreCommit:
 
         retry_count = 0
         retry_result = None
+        rewritten_commit_entries = None
         start_time_ms = int(time.time() * 1000)
         while True:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-            commit_entries = commit_entries_plan(latest_snapshot)
+            commit_entries = (
+                rewritten_commit_entries
+                if rewritten_commit_entries is not None
+                else commit_entries_plan(latest_snapshot)
+            )
 
             # No entries to commit (e.g. drop_partitions with no matching data): skip commit
             # to avoid creating manifest/snapshot with empty partition_stats (causes read errors).
@@ -384,7 +406,22 @@ class FileStoreCommit:
                 hash_index_base_snapshot=hash_index_base_snapshot,
             )
 
-            if result.is_success():
+            if isinstance(result, RewriteResult):
+                rewritten_commit_entries = result.rewrite.commit_entries
+                self.conflict_detection._row_id_check_from_snapshot = (
+                    latest_snapshot.id
+                )
+                # No snapshot commit was attempted for the conflicting files,
+                # so the rewritten attempt is still deterministic.
+                retry_result = None
+                logger.info(
+                    "Rewrote %d stale row-id file(s) against snapshot %d "
+                    "before retrying commit to table %s.",
+                    result.rewrite.rewritten_file_count,
+                    latest_snapshot.id,
+                    self.table.identifier,
+                )
+            elif result.is_success():
                 commit_duration_ms = int(time.time() * 1000) - start_time_ms
                 if commit_kind == "OVERWRITE":
                     logger.info(
@@ -399,8 +436,8 @@ class FileStoreCommit:
                         commit_duration_ms,
                     )
                 break
-
-            retry_result = result
+            else:
+                retry_result = result
 
             elapsed_ms = int(time.time() * 1000) - start_time_ms
             if elapsed_ms > self.commit_timeout or retry_count >= self.commit_max_retries:
@@ -421,7 +458,7 @@ class FileStoreCommit:
                     f"after {elapsed_ms} millis with {retry_count} retries, "
                     f"there maybe exist commit conflicts between multiple jobs."
                 )
-                if retry_result.exception:
+                if retry_result is not None and retry_result.exception:
                     raise RuntimeError(error_msg) from retry_result.exception
                 else:
                     raise RuntimeError(error_msg)
@@ -505,6 +542,18 @@ class FileStoreCommit:
             )
 
             if conflict_exception is not None:
+                rewrite_result = self._try_rewrite_row_id_conflict(
+                    retry_result,
+                    conflict_exception,
+                    latest_snapshot,
+                    base_data_files,
+                    commit_entries,
+                    commit_kind,
+                    commit_identifier,
+                    changelog_entries,
+                )
+                if rewrite_result is not None:
+                    return RewriteResult(rewrite_result)
                 if allow_rollback and self.rollback is not None:
                     if self.rollback.try_to_rollback(latest_snapshot):
                         # Rolled back: base/snapshot no longer valid; next attempt
@@ -615,7 +664,11 @@ class FileStoreCommit:
         # Use SnapshotCommit for atomic commit
         try:
             with self.snapshot_commit:
-                success = self.snapshot_commit.commit(snapshot_data, statistics)
+                success = self.snapshot_commit.commit(
+                    latest_snapshot.uuid if latest_snapshot else None,
+                    snapshot_data,
+                    statistics,
+                )
                 if not success:
                     commit_time_s = (int(time.time() * 1000) - start_millis) / 1000
                     logger.warning(
@@ -653,6 +706,49 @@ class FileStoreCommit:
                 callback.call(context)
 
         return SuccessResult()
+
+    def _try_rewrite_row_id_conflict(
+            self,
+            retry_result,
+            conflict_exception,
+            latest_snapshot,
+            base_data_files,
+            commit_entries,
+            commit_kind,
+            commit_identifier,
+            changelog_entries):
+        if not isinstance(conflict_exception, RowIdExistenceConflict):
+            return None
+        if commit_kind != "APPEND" or changelog_entries:
+            return None
+        if retry_result is not None and retry_result.exception is not None:
+            return None
+
+        non_compaction_conflict = (
+            self.conflict_detection.check_row_id_from_snapshot(
+                latest_snapshot,
+                commit_entries,
+                check_compaction=False,
+            )
+        )
+        if non_compaction_conflict is not None:
+            return None
+
+        try:
+            return RowIdConflictRewriter(
+                self.table,
+                self.commit_user,
+                commit_identifier,
+                self.row_id_conflict_rewrite_max_size,
+            ).rewrite(
+                latest_snapshot,
+                base_data_files,
+                commit_entries,
+            )
+        except RuntimeError as rewrite_error:
+            raise CommitConflictError(
+                "{} {}".format(conflict_exception, rewrite_error)
+            ) from conflict_exception
 
     def _write_manifest_files(self, commit_entries, base_name):
         return self.manifest_file_manager.rolling_write(

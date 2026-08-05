@@ -152,12 +152,14 @@ public class IndexFileMeta {
                 && fileSize == that.fileSize
                 && rowCount == that.rowCount
                 && Objects.equals(dvRanges, that.dvRanges)
-                && Objects.equals(externalPath, that.externalPath);
+                && Objects.equals(externalPath, that.externalPath)
+                && Objects.equals(globalIndexMeta, that.globalIndexMeta);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(indexType, fileName, fileSize, rowCount, dvRanges, externalPath);
+        return Objects.hash(
+                indexType, fileName, fileSize, rowCount, dvRanges, externalPath, globalIndexMeta);
     }
 
     @Override

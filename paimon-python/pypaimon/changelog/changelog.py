@@ -36,6 +36,7 @@ class Changelog(Snapshot):
         """Create a Changelog from a Snapshot instance."""
         return Changelog(
             version=snapshot.version,
+            uuid=snapshot.uuid,
             id=snapshot.id,
             schema_id=snapshot.schema_id,
             base_manifest_list=snapshot.base_manifest_list,

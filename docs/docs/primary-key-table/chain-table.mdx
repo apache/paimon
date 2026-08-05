@@ -46,6 +46,8 @@ Based on the regular table, chain table introduces snapshot and delta branches t
 data respectively. When writing, you specify the branch to write full or incremental data. When reading, paimon 
 automatically chooses the appropriate strategy based on the read mode, such as full, incremental, or hybrid.
 
+## Enable Chain Table
+
 To enable chain table, you must config `chain-table.enabled` to true in the table options when creating the
 table, and the snapshot and delta branch need to be created as well.
 
@@ -129,29 +131,46 @@ ALTER TABLE `default`.`t$branch_delta` SET (
 Notice that:
 - Chain table is only supported for primary key table, which means you should define `bucket` and `bucket-key` for the table.
 - Chain table should ensure that the schema of each branch is consistent.
-- Deletion vector is not supported for chain table.
+- Deletion vector is only supported for chain table with the `DEDUPLICATE` merge engine.
 - The delta branch must use the `DEDUPLICATE` merge engine (default) if you plan
   to use streaming read or lookup join. Other merge engine types are not supported
   on the delta branch for these incremental read paths. Batch read is not affected.
+- Chain table requires `sequence.field`, so the `FIRST_ROW` and `AGGREGATE` merge engines are not supported.
 
-After creating a chain table, you can read and write data in the following ways.
+## Write Data
 
-- Full Write: Write data to t$branch_snapshot.
+After creating a chain table, you can write data to the snapshot or delta branch.
+
+### Full Write
+
+Write data to `t$branch_snapshot`.
+
 ```sql
 insert overwrite `default`.`t$branch_snapshot` partition (date = '20250810') 
     values ('1', '1', '1'); 
 ```
 
-- Incremental Write: Write data to t$branch_delta.
+### Incremental Write
+
+Write data to `t$branch_delta`.
+
 ```sql
 insert overwrite `default`.`t$branch_delta` partition (date = '20250811') 
     values ('2', '1', '1');
 ```
 
-- Full Query: If the snapshot branch has full partition, read it directly; otherwise, read on chain merge mode.
+## Read Data
+
+You can query chain table in full, incremental, or hybrid mode.
+
+### Full Query
+
+If the snapshot branch has full partition, read it directly; otherwise, read on chain merge mode.
+
 ```sql
 select t1, t2, t3 from default.t where date = '20250811'
 ```
+
 you will get the following result:
 ```text
 +---+----+-----+
@@ -162,10 +181,14 @@ you will get the following result:
 +---+----+-----+
 ```
 
-- Incremental Query: Read the incremental partition from t$branch_delta
+### Incremental Query
+
+Read the incremental partition from `t$branch_delta`.
+
 ```sql
 select t1, t2, t3 from `default`.`t$branch_delta` where date = '20250811'
 ```
+
 you will get the following result:
 ```text
 +---+----+-----+
@@ -175,12 +198,16 @@ you will get the following result:
 +---+----+-----+
 ```
 
-- Hybrid Query: Read both full and incremental data simultaneously.
+### Hybrid Query
+
+Read both full and incremental data simultaneously.
+
 ```sql
 select t1, t2, t3 from default.t where date = '20250811'
 union all
 select t1, t2, t3 from `default`.`t$branch_delta` where date = '20250811'
 ```
+
 you will get the following result:
 ```text
 +---+----+-----+
@@ -192,9 +219,11 @@ you will get the following result:
 +---+----+-----+
 ```
 
-- Chain Table Compaction: Merge data from snapshot and delta branches into the snapshot branch.
-  This is useful for periodically compacting incremental data into full snapshots.
-  You can use the `compact_chain_table` procedure to merge a specific partition:
+## Chain Table Compaction
+
+Merge data from snapshot and delta branches into the snapshot branch.
+This is useful for periodically compacting incremental data into full snapshots.
+You can use the `compact_chain_table` procedure to merge a specific partition:
 
 ```sql
 CALL sys.compact_chain_table(table => 'default.t', partition => 'date="20250811"');

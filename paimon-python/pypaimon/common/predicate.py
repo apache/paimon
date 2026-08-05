@@ -72,15 +72,35 @@ class Predicate:
         if self.method == 'or':
             return any(p.test_by_simple_stats(stat, row_count) for p in self.literals)
 
-        null_count = stat.null_counts[self.index]
+        index = self.index
+        if index is None or index < 0:
+            # Missing stats cannot prove that the file does not match.
+            return True
+
+        null_count = (
+            stat.null_counts[index]
+            if stat.null_counts is not None and index < len(stat.null_counts)
+            else None
+        )
 
         if self.method == 'isNull':
             return null_count is None or null_count > 0
         if self.method == 'isNotNull':
             return null_count is None or row_count is None or null_count < row_count
 
-        min_value = stat.min_values.get_field(self.index)
-        max_value = stat.max_values.get_field(self.index)
+        try:
+            min_value = (
+                stat.min_values.get_field(index)
+                if index < len(stat.min_values)
+                else None
+            )
+            max_value = (
+                stat.max_values.get_field(index)
+                if index < len(stat.max_values)
+                else None
+            )
+        except IndexError:
+            return True
 
         if min_value is None or max_value is None or (null_count is not None and null_count == row_count):
             # invalid stats, skip validation

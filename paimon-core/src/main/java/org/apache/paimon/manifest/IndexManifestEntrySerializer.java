@@ -83,17 +83,14 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
 
         GlobalIndexMeta globalIndexMeta = null;
         if (!row.isNullAt(9)) {
-            InternalRow globalIndexRow = row.getRow(9, 6);
+            InternalRow globalIndexRow = row.getRow(9, GlobalIndexMeta.SCHEMA.getFieldCount());
             long rowRangeStart = globalIndexRow.getLong(0);
             long rowRangeEnd = globalIndexRow.getLong(1);
             int indexFieldId = globalIndexRow.getInt(2);
             int[] extralFields =
                     globalIndexRow.isNullAt(3) ? null : globalIndexRow.getArray(3).toIntArray();
             byte[] indexMeta = globalIndexRow.isNullAt(4) ? null : globalIndexRow.getBinary(4);
-            byte[] sourceMeta =
-                    globalIndexRow.getFieldCount() <= 5 || globalIndexRow.isNullAt(5)
-                            ? null
-                            : globalIndexRow.getBinary(5);
+            byte[] sourceMeta = globalIndexRow.isNullAt(5) ? null : globalIndexRow.getBinary(5);
             globalIndexMeta =
                     new GlobalIndexMeta(
                             rowRangeStart,

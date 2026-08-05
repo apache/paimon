@@ -60,6 +60,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
+import org.apache.paimon.table.sink.PostponeFixedBucketWriteBuilder;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
@@ -210,6 +211,60 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         assertThat(file.fileName()).endsWith(".avro");
         assertThat(file.level()).isEqualTo(0);
         assertThat(file.valueStatsCols()).isEmpty();
+    }
+
+    @Test
+    public void testPostponeFixedBucketWriteBuilder() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
+        PostponeFixedBucketWriteBuilder builder = table.newPostponeFixedBucketWriteBuilder();
+
+        List<CommitMessage> conflictingMessages = new ArrayList<>();
+        try (TableWriteImpl<?> write = builder.newWrite()) {
+            write.writeAndReturn(rowData(1, 1, 1L), 0, 2);
+            conflictingMessages.addAll(write.prepareCommit());
+        }
+        try (TableWriteImpl<?> write = builder.newWrite()) {
+            write.writeAndReturn(rowData(1, 2, 2L), 1, 3);
+            conflictingMessages.addAll(write.prepareCommit());
+        }
+        try (BatchTableCommit commit = builder.newCommit()) {
+            assertThatThrownBy(() -> commit.commit(conflictingMessages))
+                    .hasMessageContaining("new bucket num 3")
+                    .hasMessageContaining("previous bucket num is 2");
+        }
+        assertThat(table.latestSnapshot()).isEmpty();
+
+        List<CommitMessage> messages;
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            assertThatThrownBy(() -> write.writeAndReturn(rowData(1, 1, 1L), 0, 0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("must be positive");
+            assertThatThrownBy(() -> write.writeAndReturn(rowData(1, 1, 1L), 2, 2))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("out of range");
+            write.writeAndReturn(rowData(1, 1, 1L), 0, 2);
+            assertThatThrownBy(() -> write.writeAndReturn(rowData(1, 3, 3L), 1, 3))
+                    .hasMessageContaining("new bucket num 3")
+                    .hasMessageContaining("previous bucket num is 2");
+            write.writeAndReturn(rowData(2, 2, 2L), 2, 3);
+            messages = write.prepareCommit();
+            assertThat(messages)
+                    .extracting(message -> ((CommitMessageImpl) message).totalBuckets())
+                    .containsExactlyInAnyOrder(2, 3);
+            commit.commit(messages);
+        }
+
+        assertThat(PostponeUtils.getKnownNumBuckets(table))
+                .containsEntry(binaryRow(1), 2)
+                .containsEntry(binaryRow(2), 3);
+
+        try (TableWriteImpl<?> write = builder.newWrite()) {
+            assertThatThrownBy(() -> write.writeAndReturn(rowData(1, 3, 3L), 0, 3))
+                    .hasMessageContaining("new bucket num 3")
+                    .hasMessageContaining("previous bucket num is 2");
+        }
     }
 
     @ParameterizedTest(name = "format-{0}")
@@ -2131,6 +2186,85 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testForceUpLevel0CompactionConsidersLevel2() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CoreOptions.NUM_LEVELS, 3);
+                            options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+                            options.set(CoreOptions.COMPACTION_FORCE_UP_LEVEL_0, true);
+                        });
+        FileStoreTable writeOnlyTable =
+                table.copy(singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
+
+        // Build a large level 2 file.
+        writeRowsWithoutCompaction(writeOnlyTable, 0, 0, 1000);
+        compactPartition(table, 1, true);
+
+        List<DataFileMeta> files = currentDataFiles(table);
+        assertThat(files).singleElement().satisfies(file -> assertThat(file.level()).isEqualTo(2));
+
+        // Build a slightly smaller level 1 file without including level 2.
+        writeRowsWithoutCompaction(writeOnlyTable, 2, 1000, 900);
+        compactPartition(table, 3, false);
+
+        files = currentDataFiles(table);
+        assertThat(files).extracting(DataFileMeta::level).containsExactlyInAnyOrder(1, 2);
+
+        // Add a small level 0 file. Level 0 alone cannot pick level 1, but level 0 and level 1
+        // together are large enough to pick level 2.
+        writeRowsWithoutCompaction(writeOnlyTable, 4, 1900, 200);
+
+        files = currentDataFiles(table);
+        assertThat(files).extracting(DataFileMeta::level).containsExactlyInAnyOrder(0, 1, 2);
+        Map<Integer, Long> fileSizeByLevel =
+                files.stream()
+                        .collect(Collectors.toMap(DataFileMeta::level, DataFileMeta::fileSize));
+        long level0Size = fileSizeByLevel.get(0);
+        long level1Size = fileSizeByLevel.get(1);
+        long level2Size = fileSizeByLevel.get(2);
+        assertThat(level0Size * 101).isLessThan(level1Size * 100);
+        assertThat((level0Size + level1Size) * 101).isGreaterThanOrEqualTo(level2Size * 100);
+
+        compactPartition(table, 5, false);
+
+        files = currentDataFiles(table);
+        assertThat(files)
+                .singleElement()
+                .satisfies(
+                        file -> {
+                            assertThat(file.level()).isEqualTo(2);
+                            assertThat(file.rowCount()).isEqualTo(2100);
+                        });
+    }
+
+    private void writeRowsWithoutCompaction(
+            FileStoreTable table, long commitIdentifier, int start, int count) throws Exception {
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int i = start; i < start + count; i++) {
+                write.write(rowData(1, i, (long) i));
+            }
+            commit.commit(commitIdentifier, write.prepareCommit(true, commitIdentifier));
+        }
+    }
+
+    private void compactPartition(
+            FileStoreTable table, long commitIdentifier, boolean fullCompaction) throws Exception {
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.compact(binaryRow(1), 0, fullCompaction);
+            commit.commit(commitIdentifier, write.prepareCommit(true, commitIdentifier));
+        }
+    }
+
+    private List<DataFileMeta> currentDataFiles(FileStoreTable table) throws Exception {
+        return table.newSnapshotReader().read().dataSplits().stream()
+                .flatMap(split -> split.dataFiles().stream())
+                .collect(Collectors.toList());
     }
 
     @Test

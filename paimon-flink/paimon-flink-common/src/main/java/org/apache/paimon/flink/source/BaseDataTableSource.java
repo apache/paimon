@@ -166,8 +166,10 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             return createPushedAggregateScan();
         }
 
+        Table scanTable = tableForScan();
+
         WatermarkStrategy<RowData> watermarkStrategy = this.watermarkStrategy;
-        Options options = Options.fromMap(table.options());
+        Options options = Options.fromMap(scanTable.options());
         if (watermarkStrategy != null) {
             WatermarkEmitStrategy emitStrategy = options.get(SCAN_WATERMARK_EMIT_STRATEGY);
             if (emitStrategy == WatermarkEmitStrategy.ON_EVENT) {
@@ -189,10 +191,10 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         }
 
         FlinkSourceBuilder sourceBuilder =
-                new FlinkSourceBuilder(table)
+                new FlinkSourceBuilder(scanTable)
                         .sourceName(tableIdentifier.asSummaryString())
                         .sourceBounded(!unbounded)
-                        .projection(projectFields)
+                        .projection(projectFieldsForScan())
                         .predicate(predicate)
                         .partitionPredicate(partitionPredicate)
                         .limit(limit)
@@ -201,7 +203,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         return new PaimonDataStreamScanProvider(
                 !unbounded,
                 env ->
-                        PostponeMergeOnRead.usesCustomSource(table)
+                        PostponeMergeOnRead.usesCustomSource(scanTable)
                                 ? sourceBuilder.env(env).build()
                                 : sourceBuilder
                                         .sourceParallelism(inferSourceParallelism(env))
@@ -209,6 +211,15 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                                         .build(),
                 tableIdentifier.asSummaryString(),
                 table);
+    }
+
+    protected Table tableForScan() {
+        return table;
+    }
+
+    @Nullable
+    protected int[][] projectFieldsForScan() {
+        return projectFields;
     }
 
     private ScanRuntimeProvider createPushedAggregateScan() {

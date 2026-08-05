@@ -67,13 +67,6 @@ public class GenericGlobalIndexBuilder implements Serializable {
                         + "but table '%s' has bucket = %d.",
                 table.name(),
                 table.coreOptions().bucket());
-        checkArgument(
-                !table.coreOptions().deletionVectorsEnabled(),
-                "Generic global index does not support tables with deletion vectors enabled. "
-                        + "Table '%s' has 'deletion-vectors.enabled' = true, which may cause "
-                        + "deleted rows to be indexed.",
-                table.name());
-
         scanSnapshot = table.snapshotManager().latestSnapshot();
         if (scanSnapshot == null) {
             return Collections.emptyList();

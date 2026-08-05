@@ -519,6 +519,12 @@ under the License.
             <td>Strictly contiguous same-partition logical row-id runs containing more than this number of rows are excluded from row-id reassignment. Set to 0 to disable this filtering.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.row-id-conflict-rewrite.max-size</h5></td>
+            <td style="word-wrap: break-word;">256 mb</td>
+            <td>MemorySize</td>
+            <td>Maximum total size of current data files whose row-id ranges PyPaimon may automatically rebase staged updates against when a concurrent compaction changes file boundaries. Set to 0 B to disable.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.row-sidecar.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

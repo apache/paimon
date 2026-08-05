@@ -136,7 +136,7 @@ All available procedures are listed below.
             including_tables => 'table_.*', 
             excluding_tables => 'ignore', 
             table_options => 'sink.parallelism=4',
-            compat_strategy => 'full')
+            compact_strategy => 'full')
       </td>
    </tr>
    <tr>

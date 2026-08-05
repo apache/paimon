@@ -210,6 +210,15 @@ public class OffsetSeekableInputStreamTest {
     }
 
     @Test
+    public void testConstructorSeekFailureClosesWrapped() throws IOException {
+        SeekableInputStream mockStream = mock(SeekableInputStream.class);
+        org.mockito.Mockito.doThrow(new IOException("seek failed")).when(mockStream).seek(5);
+        assertThatThrownBy(() -> new OffsetSeekableInputStream(mockStream, 5, 10))
+                .isInstanceOf(IOException.class);
+        verify(mockStream, times(1)).close();
+    }
+
+    @Test
     public void testReadWithUnlimitedLength() throws IOException {
         long offset = 5;
         long length = -1; // Unlimited length

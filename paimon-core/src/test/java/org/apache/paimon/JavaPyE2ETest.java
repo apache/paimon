@@ -29,6 +29,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.DataFormatTestUtil;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
@@ -92,6 +93,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -1500,7 +1502,7 @@ public class JavaPyE2ETest {
         assertThat(rows.get(4).get(0)).isEqualTo(lastValue.getBytes(StandardCharsets.UTF_8));
     }
 
-    /** Java writes a MAP&lt;INT, BLOB&gt; table for Python to read. */
+    /** Java writes MAP&lt;K, BLOB&gt; columns for Python to read. */
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testJavaWriteMapBlobTable() throws Exception {
@@ -1510,6 +1512,16 @@ public class JavaPyE2ETest {
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
                         .column("payloads", DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB()))
+                        .column(
+                                "boolean_payloads",
+                                DataTypes.MAP(DataTypes.BOOLEAN(), DataTypes.BLOB()))
+                        .column(
+                                "compact_decimal_payloads",
+                                DataTypes.MAP(DataTypes.DECIMAL(10, 2), DataTypes.BLOB()))
+                        .column(
+                                "high_decimal_payloads",
+                                DataTypes.MAP(DataTypes.DECIMAL(20, 2), DataTypes.BLOB()))
+                        .column("date_payloads", DataTypes.MAP(DataTypes.DATE(), DataTypes.BLOB()))
                         .option(ROW_TRACKING_ENABLED.key(), "true")
                         .option(DATA_EVOLUTION_ENABLED.key(), "true")
                         .option(BUCKET.key(), "-1")
@@ -1522,28 +1534,51 @@ public class JavaPyE2ETest {
         first.put(3, new BlobData(new byte[0]));
         Map<Object, Object> last = new LinkedHashMap<>();
         last.put(4, new BlobData("java-omega".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> booleanPayloads = new LinkedHashMap<>();
+        booleanPayloads.put(true, new BlobData("java-boolean".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> compactDecimalPayloads = new LinkedHashMap<>();
+        compactDecimalPayloads.put(
+                Decimal.fromBigDecimal(new BigDecimal("12.34"), 10, 2),
+                new BlobData("java-compact-decimal".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> highDecimalPayloads = new LinkedHashMap<>();
+        highDecimalPayloads.put(
+                Decimal.fromBigDecimal(new BigDecimal("123456789012345678.90"), 20, 2),
+                new BlobData("java-high-decimal".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> datePayloads = new LinkedHashMap<>();
+        datePayloads.put(-1, new BlobData("java-date".getBytes(StandardCharsets.UTF_8)));
 
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
-            write.write(GenericRow.of(1, new GenericMap(first)));
-            write.write(GenericRow.of(2, new GenericMap(Collections.emptyMap())));
-            write.write(GenericRow.of(3, null));
-            write.write(GenericRow.of(4, new GenericMap(last)));
+            write.write(
+                    GenericRow.of(
+                            1,
+                            new GenericMap(first),
+                            new GenericMap(booleanPayloads),
+                            new GenericMap(compactDecimalPayloads),
+                            new GenericMap(highDecimalPayloads),
+                            new GenericMap(datePayloads)));
+            write.write(
+                    GenericRow.of(
+                            2, new GenericMap(Collections.emptyMap()), null, null, null, null));
+            write.write(GenericRow.of(3, null, null, null, null, null));
+            write.write(GenericRow.of(4, new GenericMap(last), null, null, null, null));
             commit.commit(write.prepareCommit());
         }
 
         assertMapBlobRows(readMapBlobRows(table), "java-alpha", "java-omega");
+        assertAdditionalMapBlobKeyTypes(table, "java");
     }
 
-    /** Java reads a MAP&lt;INT, BLOB&gt; table written by Python. */
+    /** Java reads MAP&lt;K, BLOB&gt; columns written by Python. */
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testJavaReadMapBlobTable() throws Exception {
         FileStoreTable table =
                 (FileStoreTable) catalog.getTable(identifier("map_blob_python_test"));
         assertMapBlobRows(readMapBlobRows(table), "python-alpha", "python-omega");
+        assertAdditionalMapBlobKeyTypes(table, "python");
     }
 
     private Map<Integer, Map<Integer, byte[]>> readMapBlobRows(FileStoreTable table)
@@ -1586,6 +1621,47 @@ public class JavaPyE2ETest {
         assertThat(rows.get(3)).isNull();
         assertThat(rows.get(4)).containsOnlyKeys(4);
         assertThat(rows.get(4).get(4)).isEqualTo(lastValue.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void assertAdditionalMapBlobKeyTypes(FileStoreTable table, String valuePrefix)
+            throws Exception {
+        boolean[] found = new boolean[1];
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        try (org.apache.paimon.reader.RecordReader<InternalRow> reader =
+                table.newRead().createReader(splits)) {
+            reader.forEachRemaining(
+                    row -> {
+                        if (row.getInt(0) != 1) {
+                            return;
+                        }
+                        found[0] = true;
+
+                        InternalMap booleanMap = row.getMap(2);
+                        assertThat(booleanMap.keyArray().getBoolean(0)).isTrue();
+                        assertSingleBlobValue(booleanMap, valuePrefix + "-boolean");
+
+                        InternalMap compactDecimalMap = row.getMap(3);
+                        assertThat(compactDecimalMap.keyArray().getDecimal(0, 10, 2).toBigDecimal())
+                                .isEqualByComparingTo("12.34");
+                        assertSingleBlobValue(compactDecimalMap, valuePrefix + "-compact-decimal");
+
+                        InternalMap highDecimalMap = row.getMap(4);
+                        assertThat(highDecimalMap.keyArray().getDecimal(0, 20, 2).toBigDecimal())
+                                .isEqualByComparingTo("123456789012345678.90");
+                        assertSingleBlobValue(highDecimalMap, valuePrefix + "-high-decimal");
+
+                        InternalMap dateMap = row.getMap(5);
+                        assertThat(dateMap.keyArray().getInt(0)).isEqualTo(-1);
+                        assertSingleBlobValue(dateMap, valuePrefix + "-date");
+                    });
+        }
+        assertThat(found[0]).isTrue();
+    }
+
+    private void assertSingleBlobValue(InternalMap map, String expectedValue) {
+        assertThat(map.size()).isOne();
+        assertThat(map.valueArray().getBlob(0).toData())
+                .isEqualTo(expectedValue.getBytes(StandardCharsets.UTF_8));
     }
 
     /** Java writes a VARIANT-column table for Python to read (Java→Python E2E). */

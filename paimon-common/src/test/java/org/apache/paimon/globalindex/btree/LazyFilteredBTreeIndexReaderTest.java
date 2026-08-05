@@ -26,10 +26,12 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.btree.BTreeIndexReader.KeyRowIds;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
@@ -57,6 +59,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -96,6 +101,37 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
             }
         }
         return -1;
+    }
+
+    @TestTemplate
+    public void testGlobalTopNCandidatesAcrossFiles() throws Exception {
+        int limit = 5;
+        List<GlobalIndexIOMeta> written = writeData();
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(fileReader, written, newDirectExecutorService())) {
+            GlobalIndexResult result =
+                    reader.visitTopN(new TopN(ref, DESCENDING, NULLS_LAST, limit)).join().get();
+            assertThat(result.results().getLongCardinality()).isEqualTo(limit);
+
+            Object boundary = data.get(dataNum - limit).getKey();
+            Object[] valuesByRowId = new Object[dataNum];
+            data.forEach(pair -> valuesByRowId[pair.getValue().intValue()] = pair.getKey());
+            for (long rowId : result.results()) {
+                assertThat(comparator.compare(valuesByRowId[(int) rowId], boundary))
+                        .isGreaterThanOrEqualTo(0);
+            }
+
+            GlobalIndexResult ascending =
+                    reader.visitTopN(new TopN(ref, ASCENDING, NULLS_LAST, limit)).join().get();
+            assertThat(ascending.results().getLongCardinality()).isEqualTo(limit);
+            boundary = data.get(limit - 1).getKey();
+            for (long rowId : ascending.results()) {
+                assertThat(comparator.compare(valuesByRowId[(int) rowId], boundary))
+                        .isLessThanOrEqualTo(0);
+            }
+        }
     }
 
     @TestTemplate
@@ -218,7 +254,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
 
                 // Collect all entries from iterator
                 while (iter.hasNext()) {
-                    BTreeIndexReader.KeyRowIds entry = iter.next();
+                    KeyRowIds entry = iter.next();
                     Object key = entry.key();
                     long[] rowIds = entry.rowIds();
 

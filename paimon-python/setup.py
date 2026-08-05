@@ -24,12 +24,12 @@ import tarfile
 import tempfile
 from setuptools import find_packages, setup
 
-VERSION = "1.5.dev"
+VERSION = "2.1.dev"
 
 
 def get_dev_version():
     """Generate dev version with commit date.
-    Format: 1.5.devYYYYMMDD (e.g. 1.5.dev20260415)
+    Format: 2.1.devYYYYMMDD (e.g. 2.1.dev20260415)
     Uses the commit date (author date) for reproducibility.
     """
     base = VERSION.rstrip(".")
@@ -115,7 +115,10 @@ def _build_dev_package():
 
 atexit.register(_build_dev_package)
 
-PACKAGES = find_packages(include=["pypaimon*"], exclude=["pypaimon.tests*"])
+PACKAGES = find_packages(
+    include=["pypaimon*"],
+    exclude=["pypaimon.tests*", "pypaimon.acceptance*"],
+)
 
 
 def read_requirements():
@@ -213,6 +216,8 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
     ],
     python_requires=">=3.6",
 )

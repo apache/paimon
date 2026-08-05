@@ -322,13 +322,17 @@ public class CompactProcedure extends BaseProcedure {
         if (partitionPredicate != null) {
             snapshotReader.withPartitionFilter(partitionPredicate);
         }
+        boolean filterByPartitionIdleTime = partitionIdleTime != null;
         Set<BinaryRow> partitionToBeCompacted =
-                getHistoryPartition(snapshotReader, partitionIdleTime);
+                getPartitionsToCompact(snapshotReader, partitionIdleTime);
         List<Pair<byte[], Integer>> partitionBuckets =
                 snapshotReader.bucketEntries().stream()
                         .map(entry -> Pair.of(entry.partition(), entry.bucket()))
                         .distinct()
-                        .filter(pair -> partitionToBeCompacted.contains(pair.getKey()))
+                        .filter(
+                                pair ->
+                                        !filterByPartitionIdleTime
+                                                || partitionToBeCompacted.contains(pair.getKey()))
                         .map(
                                 p ->
                                         Pair.of(
@@ -536,6 +540,7 @@ public class CompactProcedure extends BaseProcedure {
                     LOG.info("Task plan is empty, no compact job to execute.");
                     continue;
                 }
+                boolean containsMaterializeDeletion = containsMaterializeDeletion(compactionTasks);
 
                 DataEvolutionCompactTaskSerializer serializer =
                         new DataEvolutionCompactTaskSerializer();
@@ -576,6 +581,9 @@ public class CompactProcedure extends BaseProcedure {
 
                 List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
                 try (TableCommitImpl commit = table.newCommit(commitUser)) {
+                    if (containsMaterializeDeletion) {
+                        commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id());
+                    }
                     List<CommitMessage> messages =
                             deserializeCommitMessagesAndReleaseSerializedBytes(
                                     messageSerializerser, serializedMessages);
@@ -592,6 +600,14 @@ public class CompactProcedure extends BaseProcedure {
         }
     }
 
+    static boolean containsMaterializeDeletion(List<DataEvolutionCompactTask> compactionTasks) {
+        return compactionTasks.stream()
+                .anyMatch(
+                        task ->
+                                task.type()
+                                        == DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
+    }
+
     private static List<CommitMessage> deserializeCommitMessagesAndReleaseSerializedBytes(
             CommitMessageSerializer serializer, List<byte[]> serializedMessages)
             throws IOException {
@@ -603,29 +619,25 @@ public class CompactProcedure extends BaseProcedure {
         return messages;
     }
 
-    private Set<BinaryRow> getHistoryPartition(
+    static Set<BinaryRow> getPartitionsToCompact(
             SnapshotReader snapshotReader, @Nullable Duration partitionIdleTime) {
-        Set<Pair<BinaryRow, Long>> partitionInfo =
-                snapshotReader.partitionEntries().stream()
-                        .map(
-                                partitionEntry ->
-                                        Pair.of(
-                                                partitionEntry.partition(),
-                                                partitionEntry.lastFileCreationTime()))
-                        .collect(Collectors.toSet());
-        if (partitionIdleTime != null) {
-            long historyMilli =
-                    LocalDateTime.now()
-                            .minus(partitionIdleTime)
-                            .atZone(ZoneId.systemDefault())
-                            .toInstant()
-                            .toEpochMilli();
-            partitionInfo =
-                    partitionInfo.stream()
-                            .filter(partition -> partition.getValue() <= historyMilli)
-                            .collect(Collectors.toSet());
-        }
-        return partitionInfo.stream().map(Pair::getKey).collect(Collectors.toSet());
+        return partitionIdleTime == null
+                ? Collections.emptySet()
+                : getHistoryPartition(snapshotReader, partitionIdleTime);
+    }
+
+    private static Set<BinaryRow> getHistoryPartition(
+            SnapshotReader snapshotReader, Duration partitionIdleTime) {
+        long historyMilli =
+                LocalDateTime.now()
+                        .minus(partitionIdleTime)
+                        .atZone(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli();
+        return snapshotReader.partitionEntries().stream()
+                .filter(partition -> partition.lastFileCreationTime() <= historyMilli)
+                .map(PartitionEntry::partition)
+                .collect(Collectors.toSet());
     }
 
     private void sortCompactUnAwareBucketTable(

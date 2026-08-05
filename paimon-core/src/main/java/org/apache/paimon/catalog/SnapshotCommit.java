@@ -21,11 +21,17 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.partition.PartitionStatistics;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Interface to commit snapshot atomically. */
 public interface SnapshotCommit extends AutoCloseable {
 
-    boolean commit(Snapshot snapshot, String branch, List<PartitionStatistics> statistics)
+    boolean commit(
+            @Nullable String baseSnapshotUuid,
+            Snapshot snapshot,
+            String branch,
+            List<PartitionStatistics> statistics)
             throws Exception;
 }

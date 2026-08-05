@@ -82,6 +82,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -2872,6 +2873,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         Snapshot staleSnapshot =
                 new Snapshot(
                         latest.version(),
+                        UUID.randomUUID().toString(),
                         latest.id(),
                         latest.schemaId(),
                         latest.baseManifestList(),

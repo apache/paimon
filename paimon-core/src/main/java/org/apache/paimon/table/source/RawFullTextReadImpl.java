@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -64,6 +66,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 class RawFullTextReadImpl {
 
     private final FileStoreTable table;
+    @Nullable private final Snapshot planSnapshot;
     @Nullable private final PartitionPredicate partitionFilter;
     private final int limit;
     private final DataField textColumn;
@@ -71,11 +74,13 @@ class RawFullTextReadImpl {
 
     RawFullTextReadImpl(
             FileStoreTable table,
+            @Nullable Snapshot planSnapshot,
             @Nullable PartitionPredicate partitionFilter,
             int limit,
             DataField textColumn,
             IndexSearch indexSearch) {
         this.table = table;
+        this.planSnapshot = planSnapshot;
         this.partitionFilter = partitionFilter;
         this.limit = limit;
         this.textColumn = textColumn;
@@ -243,11 +248,28 @@ class RawFullTextReadImpl {
     }
 
     private ReadBuilder rawReadBuilder(RowType readType) {
-        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
+        ReadBuilder readBuilder = rawReadTable().newReadBuilder().withReadType(readType);
         if (partitionFilter != null) {
             readBuilder.withPartitionFilter(partitionFilter);
         }
         return readBuilder;
+    }
+
+    private FileStoreTable rawReadTable() {
+        if (planSnapshot == null) {
+            return table;
+        }
+
+        Map<String, String> pinOptions = new HashMap<>();
+        pinOptions.put(
+                CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_SNAPSHOT.toString());
+        pinOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(planSnapshot.id()));
+        pinOptions.put(CoreOptions.SCAN_VERSION.key(), null);
+        pinOptions.put(CoreOptions.SCAN_TAG_NAME.key(), null);
+        pinOptions.put(CoreOptions.SCAN_WATERMARK.key(), null);
+        pinOptions.put(CoreOptions.SCAN_TIMESTAMP.key(), null);
+        pinOptions.put(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), null);
+        return table.copyWithoutTimeTravel(pinOptions);
     }
 
     private Options rawSearchOptions() {

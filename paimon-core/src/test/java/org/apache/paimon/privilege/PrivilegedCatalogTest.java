@@ -27,6 +27,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -73,6 +76,37 @@ public class PrivilegedCatalogTest extends FileSystemCatalogTest {
         assertThat(dataTable2.snapshotManager().latestSnapshotId()).isNull();
         assertThat(dataTable2.latestSnapshot()).isEqualTo(Optional.empty());
         assertThatThrownBy(() -> dataTable2.snapshot(0)).isNotNull();
+    }
+
+    @Test
+    public void testCreatePartitionsWithIgnoreIfExistsRequiresPrivilege() throws Exception {
+        catalog.createDatabase("test_db", false);
+
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+
+        PrivilegedCatalog rootCatalog = ((PrivilegedCatalog) catalog);
+        rootCatalog.createPrivilegedUser(USERNAME_TEST_USER, PASSWORD_TEST_USER);
+        Catalog userCatalogWithoutPrivilege =
+                create(rootCatalog.wrapped(), USERNAME_TEST_USER, PASSWORD_TEST_USER);
+
+        Map<String, String> partitionSpec = new HashMap<>();
+        partitionSpec.put("pk", "0");
+
+        // The 3-arg overload (identifier, partitions, ignoreIfExists) must also be guarded:
+        // without this, a user could bypass the INSERT privilege check that the 2-arg overload
+        // enforces, since DelegateCatalog#createPartitions(3 args) forwards straight to the
+        // wrapped catalog.
+        assertNoPrivilege(
+                () ->
+                        userCatalogWithoutPrivilege.createPartitions(
+                                identifier, Collections.singletonList(partitionSpec), true));
+
+        rootCatalog.grantPrivilegeOnTable(USERNAME_TEST_USER, identifier, PrivilegeType.INSERT);
+        Catalog userCatalogWithPrivilege =
+                create(rootCatalog.wrapped(), USERNAME_TEST_USER, PASSWORD_TEST_USER);
+        userCatalogWithPrivilege.createPartitions(
+                identifier, Collections.singletonList(partitionSpec), true);
     }
 
     private PrivilegedCatalog create(Catalog catalog, String user, String password) {

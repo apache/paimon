@@ -341,15 +341,6 @@ public class PostponeUtils {
         return rowCounts;
     }
 
-    public static FileStoreTable tableForFixBucketWrite(FileStoreTable table) {
-        Map<String, String> batchWriteOptions = new HashMap<>();
-        batchWriteOptions.put(WRITE_ONLY.key(), "true");
-        // It's just used to create merge tree writer for writing files to fixed bucket.
-        // The real bucket number is determined at runtime.
-        batchWriteOptions.put(BUCKET.key(), "1");
-        return table.copy(batchWriteOptions);
-    }
-
     public static FileStoreTable tableForPostponeCompact(
             FileStoreTable table, int numBuckets, long snapshotId) {
         Map<String, String> compactOptions = new HashMap<>();
@@ -357,11 +348,6 @@ public class PostponeUtils {
         compactOptions.put(WRITE_ONLY.key(), "false");
         compactOptions.put(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), String.valueOf(snapshotId));
         return table.copy(compactOptions);
-    }
-
-    public static FileStoreTable tableForCommit(FileStoreTable table) {
-        return table.copy(
-                Collections.singletonMap(BUCKET.key(), String.valueOf(BucketMode.POSTPONE_BUCKET)));
     }
 
     /** Snapshot-bound bucket-count assignment. */

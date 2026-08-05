@@ -21,6 +21,7 @@ package org.apache.paimon.privilege;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.DelegatedFileStoreTable;
@@ -70,6 +71,14 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     public ChangelogManager changelogManager() {
         privilegeChecker.assertCanSelectOrInsert(identifier);
         return wrapped.changelogManager();
+    }
+
+    @Override
+    public ConsumerManager consumerManager() {
+        // Resetting/deleting a consumer's progress affects what data downstream streaming
+        // readers will (re)consume, so treat it as a write/insert-level operation.
+        privilegeChecker.assertCanInsert(identifier);
+        return wrapped.consumerManager();
     }
 
     @Override
@@ -262,6 +271,13 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     public TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId) {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newWrite(commitUser, writeId);
+    }
+
+    @Override
+    public TableWriteImpl<?> newPostponeFixedBucketWrite(
+            String commitUser, @Nullable Integer writeId) {
+        privilegeChecker.assertCanInsert(identifier);
+        return wrapped.newPostponeFixedBucketWrite(commitUser, writeId);
     }
 
     @Override

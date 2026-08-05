@@ -287,7 +287,7 @@ public class OrcFilterConverterTest {
                 Tuple4.of(new MultisetType(new TimeType()), null, null, false),
                 Tuple4.of(new ArrayType(new TimeType()), null, null, false),
                 Tuple4.of(new MapType(new BooleanType(), new BooleanType()), null, null, false),
-                Tuple4.of(new TimeType(), null, null, false),
+                Tuple4.of(new TimeType(), PredicateLeaf.Type.LONG, 10, true),
                 Tuple4.of(new BinaryType(), PredicateLeaf.Type.STRING, LocalDateTime.now(), false),
                 Tuple4.of(
                         new VarBinaryType(), PredicateLeaf.Type.STRING, LocalDateTime.now(), false),

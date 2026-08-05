@@ -271,7 +271,13 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
 
     @VisibleForTesting
     static String normalizeColumnComment(@Nullable String comment) {
-        if (comment == null || comment.length() <= HIVE_COLUMN_COMMENT_MAX_LENGTH) {
+        if (comment == null) {
+            return comment;
+        }
+
+        comment = comment.replace('\n', ' ').replace('\r', ' ');
+
+        if (comment.length() <= HIVE_COLUMN_COMMENT_MAX_LENGTH) {
             return comment;
         }
 

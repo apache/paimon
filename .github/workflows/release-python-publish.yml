@@ -1,0 +1,131 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+################################################################################
+
+name: Release PyPaimon Publish
+
+on:
+  workflow_call:
+    inputs:
+      release_version:
+        required: true
+        type: string
+    secrets:
+      TEST_PYPI_API_TOKEN:
+        required: true
+      PYPI_API_TOKEN:
+        required: true
+
+concurrency:
+  group: release-python-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  publish:
+    name: Publish PyPaimon
+    if: >-
+      github.repository == 'apache/paimon' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: pypaimon-distributions
+          path: dist
+
+      - name: Verify package versions
+        id: package_version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_version="$(
+            sed -n 's/^VERSION = "\(.*\)"/\1/p' \
+              paimon-python/setup.py
+          )"
+          release_version="${{ inputs.release_version }}"
+          if [[ "${source_version}" != "${release_version}" ]]; then
+            echo "PyPaimon version ${source_version:-missing} does not match Paimon ${release_version}" >&2
+            exit 1
+          fi
+
+          expected_version="${release_version}"
+          if [[ "${GITHUB_REF_NAME}" == *-rc* ]]; then
+            expected_version="${release_version}rc${GITHUB_REF_NAME##*-rc}"
+          fi
+
+          test -f "dist/pypaimon-${expected_version}.tar.gz"
+          compgen -G "dist/pypaimon-${expected_version}-*.whl" > /dev/null
+
+          shopt -s nullglob
+          distributions=(dist/*)
+          if [[ "${#distributions[@]}" -ne 2 ]]; then
+            echo "Expected one sdist and one wheel, found ${#distributions[@]} files" >&2
+            printf '%s\n' "${distributions[@]}" >&2
+            exit 1
+          fi
+
+          echo "version=${expected_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Reject existing TestPyPI RC version
+        if: contains(github.ref_name, '-rc')
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ steps.package_version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          status="$(
+            curl --silent --show-error --output /dev/null \
+              --write-out '%{http_code}' \
+              "https://test.pypi.org/pypi/pypaimon/${EXPECTED_VERSION}/json"
+          )"
+
+          case "${status}" in
+            404)
+              ;;
+            200)
+              echo "pypaimon ${EXPECTED_VERSION} already exists on TestPyPI; create a new RC" >&2
+              exit 1
+              ;;
+            *)
+              echo "TestPyPI version check returned HTTP ${status}; refusing to publish" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Publish RC to TestPyPI
+        if: contains(github.ref_name, '-rc')
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: false
+          packages-dir: dist
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+
+      - name: Publish final release to PyPI
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
+        with:
+          packages-dir: dist
+          password: ${{ secrets.PYPI_API_TOKEN }}

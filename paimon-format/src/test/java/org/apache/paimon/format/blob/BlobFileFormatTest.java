@@ -25,6 +25,7 @@ import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobMapPlaceholder;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
@@ -51,6 +52,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -493,6 +495,10 @@ public class BlobFileFormatTest {
                     DataTypes.SMALLINT(),
                     DataTypes.INT(),
                     DataTypes.BIGINT(),
+                    DataTypes.BOOLEAN(),
+                    DataTypes.DECIMAL(10, 2),
+                    DataTypes.DECIMAL(20, 2),
+                    DataTypes.DATE(),
                     DataTypes.CHAR(10),
                     DataTypes.VARCHAR(10)
                 };
@@ -502,8 +508,35 @@ public class BlobFileFormatTest {
                     (short) 2,
                     3,
                     4L,
+                    true,
+                    Decimal.fromBigDecimal(new BigDecimal("12.34"), 10, 2),
+                    Decimal.fromBigDecimal(new BigDecimal("123456789012345678.90"), 20, 2),
+                    -1,
                     BinaryString.fromString("char"),
                     BinaryString.fromString("varchar")
+                };
+        byte[][] serializedKeys =
+                new byte[][] {
+                    {1},
+                    {2, 0},
+                    {3, 0, 0, 0},
+                    {4, 0, 0, 0, 0, 0, 0, 0},
+                    {1},
+                    {(byte) 0xd2, 0x04, 0, 0, 0, 0, 0, 0},
+                    {
+                        0,
+                        (byte) 0xab,
+                        0x54,
+                        (byte) 0xa9,
+                        (byte) 0x8c,
+                        (byte) 0xeb,
+                        0x1f,
+                        0x0a,
+                        (byte) 0xd2
+                    },
+                    {(byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff},
+                    "char".getBytes(),
+                    "varchar".getBytes()
                 };
 
         for (int i = 0; i < keyTypes.length; i++) {
@@ -518,6 +551,24 @@ public class BlobFileFormatTest {
                                 .create(out, null);
                 writer.addElement(GenericRow.of(new GenericMap(entries)));
                 writer.close();
+            }
+
+            try (SeekableInputStream input = fileIO.newInputStream(mapFile)) {
+                BlobFileMeta fileMeta = new BlobFileMeta(input, fileIO.getFileSize(mapFile), null);
+                int keyPosition =
+                        Math.toIntExact(
+                                fileMeta.blobOffset(0)
+                                        + Integer.BYTES
+                                        + Integer.BYTES
+                                        + Byte.BYTES
+                                        + Integer.BYTES);
+                byte[] fileBytes = Files.readAllBytes(Paths.get(mapFile.toUri()));
+                assertThat(
+                                Arrays.copyOfRange(
+                                        fileBytes,
+                                        keyPosition,
+                                        keyPosition + serializedKeys[i].length))
+                        .isEqualTo(serializedKeys[i]);
             }
 
             FormatReaderFactory readerFactory =
@@ -538,7 +589,7 @@ public class BlobFileFormatTest {
         assertThatThrownBy(
                         () ->
                                 BlobElementSerializerFactory.create(
-                                        DataTypes.MAP(DataTypes.BOOLEAN(), DataTypes.BLOB())))
+                                        DataTypes.MAP(DataTypes.FLOAT(), DataTypes.BLOB())))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported key type");
         assertThatThrownBy(

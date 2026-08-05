@@ -97,6 +97,16 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
     void write(BinaryRow partition, int bucket, T data) throws Exception;
 
     /**
+     * Write data with the total number of buckets explicitly determined at runtime.
+     *
+     * <p>This is used when a partition's bucket count is not a static table option. All writes to
+     * the same partition must use the same {@code totalBuckets}.
+     */
+    default void write(BinaryRow partition, int bucket, int totalBuckets, T data) throws Exception {
+        throw new UnsupportedOperationException("Runtime bucket counts are not supported.");
+    }
+
+    /**
      * Compact data stored in given partition and bucket. Note that compaction process is only
      * submitted and may not be completed when the method returns.
      *

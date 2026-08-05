@@ -34,6 +34,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -53,19 +55,33 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class DataEvolutionFullTextScan implements FullTextScan {
 
     private final FileStoreTable table;
-    private final PartitionPredicate partitionFilter;
+    @Nullable private final PartitionPredicate partitionFilter;
     private final List<DataField> textColumns;
+    @Nullable private final Snapshot pinnedSnapshot;
 
     public DataEvolutionFullTextScan(
-            FileStoreTable table, PartitionPredicate partitionFilter, DataField textColumn) {
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            DataField textColumn) {
         this(table, partitionFilter, Collections.singletonList(textColumn));
     }
 
     public DataEvolutionFullTextScan(
-            FileStoreTable table, PartitionPredicate partitionFilter, List<DataField> textColumns) {
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            List<DataField> textColumns) {
+        this(table, partitionFilter, textColumns, null);
+    }
+
+    public DataEvolutionFullTextScan(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            List<DataField> textColumns,
+            @Nullable Snapshot pinnedSnapshot) {
         this.table = table;
         this.partitionFilter = partitionFilter;
         this.textColumns = textColumns;
+        this.pinnedSnapshot = pinnedSnapshot;
     }
 
     @Override
@@ -82,7 +98,9 @@ public class DataEvolutionFullTextScan implements FullTextScan {
             idToColumn.put(textColumn.id(), textColumn.name());
         }
 
-        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(table);
+        @Nullable
+        Snapshot snapshot =
+                pinnedSnapshot != null ? pinnedSnapshot : TimeTravelUtil.tryTravelOrLatest(table);
         IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
         Filter<IndexManifestEntry> indexFileFilter =
                 entry -> {
@@ -128,7 +146,19 @@ public class DataEvolutionFullTextScan implements FullTextScan {
             }
         }
 
-        return () -> splits;
+        @Nullable Snapshot planSnapshot = snapshot;
+        return new Plan() {
+            @Override
+            public List<FullTextSearchSplit> splits() {
+                return splits;
+            }
+
+            @Override
+            @Nullable
+            public Snapshot snapshot() {
+                return planSnapshot;
+            }
+        };
     }
 
     /**

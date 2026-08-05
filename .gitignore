@@ -29,7 +29,6 @@ dependency-reduced-pom.xml
 metastore_db/
 *.class
 *.jar
-!**/resources/**/*.jar
 *.log
 .java-version
 .version.properties

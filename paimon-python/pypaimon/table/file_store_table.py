@@ -503,6 +503,13 @@ class FileStoreTable(Table):
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
 
     def copy(self, options: dict) -> 'FileStoreTable':
+        return self._copy(options, resolve_time_travel=True)
+
+    def copy_without_time_travel(self, options: dict) -> 'FileStoreTable':
+        """Copy this table while preserving its already resolved schema."""
+        return self._copy(options, resolve_time_travel=False)
+
+    def _copy(self, options: dict, resolve_time_travel: bool) -> 'FileStoreTable':
         if CoreOptions.BUCKET.key() in options and int(options.get(CoreOptions.BUCKET.key())) != self.options.bucket():
             raise ValueError("Cannot change bucket number")
         new_options = CoreOptions.copy(self.options).options.to_map()
@@ -514,9 +521,10 @@ class FileStoreTable(Table):
 
         new_table_schema = self.table_schema.copy(new_options=new_options)
 
-        time_travel_schema = self._try_time_travel(Options(new_options))
-        if time_travel_schema is not None:
-            new_table_schema = time_travel_schema
+        if resolve_time_travel:
+            time_travel_schema = self._try_time_travel(Options(new_options))
+            if time_travel_schema is not None:
+                new_table_schema = time_travel_schema
 
         # Re-encode the branch into the identifier when the option changes, so
         # current_branch() and any catalog-routed snapshot commit see the

@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+import uuid
 from datetime import datetime
 from unittest.mock import MagicMock, Mock, patch
 
@@ -23,8 +24,12 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_commit import FileStoreCommit
+from pypaimon.write.file_store_commit import (
+    FileStoreCommit,
+    RewriteResult,
+)
 
 
 @patch('pypaimon.write.file_store_commit.ManifestFileManager')
@@ -425,6 +430,7 @@ class TestFileStoreCommit(unittest.TestCase):
 
         latest_snapshot = Mock()
         latest_snapshot.id = 3
+        latest_snapshot.uuid = "base-snapshot-uuid"
         latest_snapshot.total_record_count = 10
         latest_snapshot.index_manifest = "index-manifest-existing"
 
@@ -444,9 +450,15 @@ class TestFileStoreCommit(unittest.TestCase):
 
         self.assertTrue(result.is_success())
         self.assertEqual(
-            "index-manifest-existing",
-            snapshot_commit.commit.call_args[0][0].index_manifest
+            "base-snapshot-uuid",
+            snapshot_commit.commit.call_args[0][0],
         )
+        committed_snapshot = snapshot_commit.commit.call_args[0][1]
+        self.assertEqual(
+            "index-manifest-existing",
+            committed_snapshot.index_manifest
+        )
+        self.assertEqual(str(uuid.UUID(committed_snapshot.uuid)), committed_snapshot.uuid)
 
     def test_null_partition_value(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
@@ -494,6 +506,38 @@ class TestFileStoreCommit(unittest.TestCase):
 
         result = file_store_commit._write_manifest_files(entries, "manifest-test")
         self.assertIsNotNone(result)
+
+    def test_row_id_rewrite_respects_commit_retry_limit(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        file_store_commit.commit_max_retries = 1
+        file_store_commit.commit_timeout = 10 ** 9
+        file_store_commit._commit_retry_wait = Mock()
+
+        latest_snapshot = Mock()
+        latest_snapshot.id = 7
+        file_store_commit.snapshot_manager.get_latest_snapshot.return_value = (
+            latest_snapshot
+        )
+
+        commit_entry = Mock()
+        rewrite = RewriteResult(RowIdRewriteResult([commit_entry], 1))
+        file_store_commit._try_commit_once = Mock(side_effect=[
+            rewrite,
+            rewrite,
+            AssertionError("rewrite retry budget was not enforced"),
+        ])
+
+        with self.assertRaises(RuntimeError) as ctx:
+            file_store_commit._try_commit(
+                commit_kind="APPEND",
+                commit_identifier=11,
+                commit_entries_plan=lambda snapshot: [commit_entry],
+            )
+
+        self.assertIn("with 1 retries", str(ctx.exception))
+        self.assertEqual(2, file_store_commit._try_commit_once.call_count)
+        file_store_commit._commit_retry_wait.assert_called_once_with(0)
 
     @staticmethod
     def _to_entries(commit_messages):

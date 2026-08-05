@@ -170,7 +170,7 @@ This section introduce all available spark procedures about paimon.
             <li>time_retained: The maximum time retained for the existing tag, it is optional.</li>
       </td>
       <td>
-         CALL sys.replace_tag(table => 'default.T', tag_name => 'tag1', snapshot => 10, time_retained => '1 d')
+         CALL sys.replace_tag(table => 'default.T', tag => 'tag1', snapshot => 10, time_retained => '1 d')
       </td>
     </tr>
     <tr>
