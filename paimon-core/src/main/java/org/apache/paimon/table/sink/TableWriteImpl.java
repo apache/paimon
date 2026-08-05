@@ -28,7 +28,6 @@ import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.BundleFileStoreWriter;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
@@ -248,16 +247,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Override
     public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
         write.compact(partition, bucket, fullCompaction);
-    }
-
-    /** Compact a bucket whose partition-level total bucket count is determined at runtime. */
-    public void compact(BinaryRow partition, int bucket, int totalBuckets, boolean fullCompaction)
-            throws Exception {
-        checkState(
-                write instanceof AbstractFileStoreWrite,
-                "Runtime bucket counts require an AbstractFileStoreWrite.");
-        ((AbstractFileStoreWrite<?>) write)
-                .compact(partition, bucket, totalBuckets, fullCompaction);
     }
 
     @Override

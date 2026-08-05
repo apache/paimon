@@ -166,7 +166,6 @@ case class SparkPostponeCompactProcedure(
                   row.copy(),
                   SerializationUtils.serializeBinaryRow(partition),
                   row.getInt(bucketColIdx),
-                  bucketAssigner.assign(partition),
                   compactMarker = false)
             }
         }
@@ -179,7 +178,6 @@ case class SparkPostponeCompactProcedure(
           null,
           SerializationUtils.serializeBinaryRow(bucket.partition()),
           bucket.bucket(),
-          bucket.totalBuckets(),
           compactMarker = true)
     }
     val markerRdd =
@@ -215,23 +213,23 @@ case class SparkPostponeCompactProcedure(
               realTable.store().newScan(),
               realTable.store().newIndexFileHandler(),
               snapshotId))
+          dataWrite.write.getWrite().withIgnoreNumBucketCheck(true)
           var commitInvoked = false
           try {
             val pendingBuckets = mutable.LinkedHashMap
-              .empty[SparkPostponeCompactProcedure.PostponeCompactKey, (Array[Byte], Int)]
+              .empty[SparkPostponeCompactProcedure.PostponeCompactKey, Array[Byte]]
             works.foreach {
               case (key, work) =>
-                pendingBuckets.put(key, (work.partition, work.totalBuckets))
+                pendingBuckets.put(key, work.partition)
                 if (!work.compactMarker) {
                   dataWrite.write(work.row, work.bucket)
                 }
             }
             pendingBuckets.foreach {
-              case (key, (partition, totalBuckets)) =>
+              case (key, partition) =>
                 dataWrite.write.compact(
                   SerializationUtils.deserializeBinaryRow(partition),
                   key.bucket,
-                  totalBuckets,
                   false)
             }
             commitInvoked = true
@@ -304,7 +302,6 @@ object SparkPostponeCompactProcedure {
       row: Row,
       partition: Array[Byte],
       bucket: Int,
-      totalBuckets: Int,
       compactMarker: Boolean)
     extends Serializable
 
