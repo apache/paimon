@@ -67,28 +67,28 @@ class RayIncrementalWriteTest(unittest.TestCase):
             ray.shutdown()
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
+    def _create_table(self, prefix, schema, **schema_options):
+        identifier = "default.{}_{}".format(
+            prefix, uuid.uuid4().hex[:8])
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(schema, **schema_options),
+            False,
+        )
+        return identifier
+
     def _create_tables(self, source_rows=2):
-        suffix = uuid.uuid4().hex[:8]
-        target = "default.pk_target_{}".format(suffix)
-        source = "default.pk_source_{}".format(suffix)
-        self.catalog.create_table(
-            target,
-            Schema.from_pyarrow_schema(
-                self.target_schema,
-                primary_keys=["id"],
-                options={
-                    "bucket": "2",
-                    "merge-engine": "partial-update",
-                },
-            ),
-            False,
+        target = self._create_table(
+            "pk_target",
+            self.target_schema,
+            primary_keys=["id"],
+            options={
+                "bucket": "2",
+                "merge-engine": "partial-update",
+            },
         )
-        self.catalog.create_table(
-            source,
-            Schema.from_pyarrow_schema(
-                self.source_schema, partition_keys=["id"]),
-            False,
-        )
+        source = self._create_table(
+            "pk_source", self.source_schema, partition_keys=["id"])
         self._write(target, pa.table({
             "id": [1, 2, 3],
             "payload": ["a", "b", "c"],
@@ -134,16 +134,18 @@ class RayIncrementalWriteTest(unittest.TestCase):
             writer.close()
             commit.close()
 
-    def _read(self, identifier):
+    def _read(self, identifier, sort_by="id"):
         table = self.catalog.get_table(identifier)
         builder = table.new_read_builder()
         return builder.new_read().to_arrow(
-            builder.new_scan().plan().splits()).sort_by("id")
+            builder.new_scan().plan().splits()).sort_by(sort_by)
 
-    def _incremental_write(
-            self, target, source, operation_id, interval=10):
+    def _write_incrementally(
+            self, target, source, operation_id=None, interval=10):
         if isinstance(source, str):
             source = PaimonOffsetSource(source)
+        elif isinstance(source, pa.Table):
+            source = ray.data.from_arrow(source)
         return write_paimon(
             source,
             target,
@@ -154,21 +156,19 @@ class RayIncrementalWriteTest(unittest.TestCase):
             update_cols=["feature"],
         )
 
-    def _dataset_write(
-            self, target, data, interval=10, operation_id=None):
-        dataset = (
-            data if hasattr(data, "map_batches")
-            else ray.data.from_arrow(data)
-        )
-        return write_paimon(
-            dataset,
-            target,
-            self.catalog_options,
-            commit_mode="incremental",
-            operation_id=operation_id,
-            commit_interval_seconds=interval,
-            update_cols=["feature"],
-        )
+    @staticmethod
+    def _clock(*values):
+        side_effect = values or itertools.count(step=10)
+        return mock.patch(
+            "pypaimon.ray.incremental_write.time.monotonic",
+            side_effect=side_effect)
+
+    def _snapshot_id(self, target):
+        return self.catalog.get_table(
+            target).snapshot_manager().get_latest_snapshot().id
+
+    def _assert_features(self, target, expected):
+        self.assertEqual(expected, self._read(target)["feature"].to_pylist())
 
     def _prepare_update(self, target, ids, features):
         table = self.catalog.get_table(target)
@@ -191,22 +191,14 @@ class RayIncrementalWriteTest(unittest.TestCase):
         }, schema=self.source_schema)
         updates = ray.data.from_arrow([
             updates.slice(0, 10), updates.slice(10, 10)])
-        before = self.catalog.get_table(
-            target).snapshot_manager().get_latest_snapshot().id
+        before = self._snapshot_id(target)
 
-        clock = itertools.count(step=10)
-        with mock.patch(
-                "pypaimon.ray.incremental_write.time.monotonic",
-                side_effect=lambda: next(clock)):
-            self._dataset_write(target, updates, interval=1)
+        with self._clock():
+            self._write_incrementally(target, updates, interval=1)
 
-        after = self.catalog.get_table(
-            target).snapshot_manager().get_latest_snapshot().id
+        after = self._snapshot_id(target)
         self.assertEqual(2, after - before)
-        self.assertEqual(
-            list(range(101, 121)),
-            self._read(target)["feature"].to_pylist(),
-        )
+        self._assert_features(target, list(range(101, 121)))
 
     def test_ray_dataset_retry_recomputes_source(self):
         target, _ = self._create_tables()
@@ -220,22 +212,17 @@ class RayIncrementalWriteTest(unittest.TestCase):
             kwargs["on_group_result"](first_group)
             raise RuntimeError("injected worker failure")
 
-        clock = itertools.count(step=10)
-        with mock.patch(
-                "pypaimon.ray.incremental_write.time.monotonic",
-                side_effect=lambda: next(clock)), mock.patch(
+        with self._clock(), mock.patch(
                 "pypaimon.write.ray_datasink._write_primary_key_groups",
                 side_effect=fail_after_first_group):
             with self.assertRaisesRegex(
                     RuntimeError, "injected worker failure"):
-                self._dataset_write(target, updates, interval=1)
+                self._write_incrementally(target, updates, interval=1)
 
-        self.assertEqual(
-            [101, 20, 30], self._read(target)["feature"].to_pylist())
+        self._assert_features(target, [101, 20, 30])
 
-        self._dataset_write(target, updates)
-        self.assertEqual(
-            [101, 102, 30], self._read(target)["feature"].to_pylist())
+        self._write_incrementally(target, updates)
+        self._assert_features(target, [101, 102, 30])
 
     def test_ray_dataset_allows_compaction_between_commits(self):
         target, _ = self._create_tables()
@@ -259,16 +246,12 @@ class RayIncrementalWriteTest(unittest.TestCase):
             kwargs["on_group_result"](groups[calls])
             calls += 1
 
-        clock = itertools.count(step=10)
-        with mock.patch(
-                "pypaimon.ray.incremental_write.time.monotonic",
-                side_effect=lambda: next(clock)), mock.patch(
+        with self._clock(), mock.patch(
                 "pypaimon.write.ray_datasink._write_primary_key_groups",
                 side_effect=compact_between_groups):
-            self._dataset_write(target, updates, interval=1)
+            self._write_incrementally(target, updates, interval=1)
 
-        self.assertEqual(
-            [101, 20, 103], self._read(target)["feature"].to_pylist())
+        self._assert_features(target, [101, 20, 103])
 
     def test_ray_dataset_rejects_operation_id(self):
         target, _ = self._create_tables()
@@ -278,29 +261,25 @@ class RayIncrementalWriteTest(unittest.TestCase):
 
         with self.assertRaisesRegex(
                 ValueError, "does not expose resumable source offsets"):
-            self._dataset_write(
+            self._write_incrementally(
                 target, updates, operation_id="not-resumable")
 
     def test_partitioned_composite_key_dataset(self):
-        identifier = "default.partitioned_{}".format(uuid.uuid4().hex[:8])
         schema = pa.schema([
             pa.field("key", pa.string(), nullable=False),
             pa.field("partition", pa.string(), nullable=False),
             ("payload", pa.string()),
             ("feature", pa.int32()),
         ])
-        self.catalog.create_table(
-            identifier,
-            Schema.from_pyarrow_schema(
-                schema,
-                partition_keys=["partition"],
-                primary_keys=["key", "partition"],
-                options={
-                    "bucket": "4096",
-                    "merge-engine": "partial-update",
-                },
-            ),
-            False,
+        identifier = self._create_table(
+            "partitioned",
+            schema,
+            partition_keys=["partition"],
+            primary_keys=["key", "partition"],
+            options={
+                "bucket": "4096",
+                "merge-engine": "partial-update",
+            },
         )
         self._write(identifier, pa.table({
             "key": ["a", "b"],
@@ -323,16 +302,12 @@ class RayIncrementalWriteTest(unittest.TestCase):
             update_cols=["feature"],
         )
 
-        table = self.catalog.get_table(identifier)
-        builder = table.new_read_builder()
-        actual = builder.new_read().to_arrow(
-            builder.new_scan().plan().splits()).sort_by("key")
         self.assertEqual({
             "key": ["a", "b"],
             "partition": ["p1", "p1"],
             "payload": ["keep-a", "keep-b"],
             "feature": [101, 102],
-        }, actual.to_pydict())
+        }, self._read(identifier, "key").to_pydict())
 
     def test_transform_identity_ignores_runtime_state(self):
         class RuntimeState:
@@ -389,29 +364,26 @@ class RayIncrementalWriteTest(unittest.TestCase):
 
         with mock.patch(
                 "pypaimon.ray.incremental_write._SPLITS_PER_WINDOW", 1), \
-                mock.patch(
-                "pypaimon.ray.incremental_write.time.monotonic",
-                side_effect=[0, 11, 11]), mock.patch.object(
+                self._clock(0, 11, 11), mock.patch.object(
                 ray_datasink, "_write_primary_key_groups",
                 side_effect=fail_second_window):
             with self.assertRaisesRegex(
                     RuntimeError, "injected driver failure"):
-                self._incremental_write(target, source, operation_id)
+                self._write_incrementally(target, source, operation_id)
 
         partial = self._read(target).to_pydict()
         self.assertIn(partial["feature"], ([101, 20, 30], [10, 102, 30]))
 
         self._compact(target)
-        self._incremental_write(target, source, operation_id)
-        self.assertEqual([101, 102, 30], self._read(target)["feature"].to_pylist())
+        self._write_incrementally(target, source, operation_id)
+        self._assert_features(target, [101, 102, 30])
 
     def test_time_trigger_batches_completed_windows(self):
         target, source = self._create_tables(source_rows=4)
         operation_id = "time-{}".format(uuid.uuid4().hex)
         from pypaimon.write import ray_datasink
 
-        before = self.catalog.get_table(
-            target).snapshot_manager().get_latest_snapshot().id
+        before = self._snapshot_id(target)
         real_prepare = ray_datasink._write_primary_key_groups
         calls = 0
 
@@ -422,15 +394,12 @@ class RayIncrementalWriteTest(unittest.TestCase):
 
         with mock.patch(
                 "pypaimon.ray.incremental_write._SPLITS_PER_WINDOW", 2), \
-                mock.patch(
-                "pypaimon.ray.incremental_write.time.monotonic",
-                side_effect=[0, 11, 11]), mock.patch.object(
+                self._clock(0, 11, 11), mock.patch.object(
                 ray_datasink, "_write_primary_key_groups",
                 side_effect=count_windows):
-            self._incremental_write(target, source, operation_id)
+            self._write_incrementally(target, source, operation_id)
 
-        after = self.catalog.get_table(
-            target).snapshot_manager().get_latest_snapshot().id
+        after = self._snapshot_id(target)
         self.assertEqual(2, calls)
         self.assertEqual(3, after - before)
         self.assertEqual({
@@ -451,18 +420,12 @@ class RayIncrementalWriteTest(unittest.TestCase):
         operation_id = "empty-transform-{}".format(uuid.uuid4().hex)
         source = PaimonOffsetSource(source, transform=lambda data: data.limit(0))
 
-        self._incremental_write(target, source, operation_id)
-        snapshot_id = self.catalog.get_table(
-            target).snapshot_manager().get_latest_snapshot().id
+        self._write_incrementally(target, source, operation_id)
+        snapshot_id = self._snapshot_id(target)
 
-        self.assertEqual([10, 20, 30],
-                         self._read(target)["feature"].to_pylist())
-        self._incremental_write(target, source, operation_id)
-        self.assertEqual(
-            snapshot_id,
-            self.catalog.get_table(
-                target).snapshot_manager().get_latest_snapshot().id,
-        )
+        self._assert_features(target, [10, 20, 30])
+        self._write_incrementally(target, source, operation_id)
+        self.assertEqual(snapshot_id, self._snapshot_id(target))
         self.catalog.alter_table(target, [
             SchemaChange.add_column(
                 "later", AtomicType("STRING"))], False)
@@ -552,14 +515,13 @@ class RayIncrementalWriteTest(unittest.TestCase):
                         ray_datasink, "_write_primary_key_groups",
                         side_effect=mutate_target):
                     with self.assertRaisesRegex(RuntimeError, error):
-                        self._incremental_write(
+                        self._write_incrementally(
                             target, source,
                             "concurrent-{}".format(uuid.uuid4().hex))
 
                 expected = ([10, 20, 30, 40] if change == "data"
                             else [10, 20, 30])
-                self.assertEqual(
-                    expected, self._read(target)["feature"].to_pylist())
+                self._assert_features(target, expected)
 
 if __name__ == "__main__":
     unittest.main()
