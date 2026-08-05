@@ -36,15 +36,18 @@ import java.util.function.Supplier;
 /** A {@link TableRead} for data-evolution enabled append-only tables. */
 public class DataEvolutionTableRead extends AppendTableRead {
 
+    private final CoreOptions options;
     @Nullable private final CatalogContext catalogContext;
     @Nullable private final Supplier<InnerTableRead> readFactory;
 
     public DataEvolutionTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
             TableSchema schema,
+            CoreOptions options,
             @Nullable CatalogContext catalogContext,
             @Nullable Supplier<InnerTableRead> readFactory) {
         super(providerFactories, schema);
+        this.options = options;
         this.catalogContext = catalogContext;
         this.readFactory = readFactory;
     }
@@ -52,7 +55,6 @@ public class DataEvolutionTableRead extends AppendTableRead {
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
-        CoreOptions options = CoreOptions.fromMap(schema().options());
         int[] blobViewFields =
                 BlobViewTableReadSupport.blobViewFieldIndexes(currentReadType(), options);
         if (catalogContext != null && blobViewFields.length > 0) {
@@ -69,11 +71,11 @@ public class DataEvolutionTableRead extends AppendTableRead {
                     predicate(),
                     topN,
                     limit,
-                    shouldExecuteFilter(),
+                    executeFilter,
                     () -> createDataReader(queryAuthContext.split(), queryAuthContext.authResult()),
                     () -> {
                         InnerTableRead prescanRead = readFactory.get();
-                        if (shouldExecuteFilter()) {
+                        if (executeFilter) {
                             prescanRead.executeFilter();
                         }
                         return prescanRead;

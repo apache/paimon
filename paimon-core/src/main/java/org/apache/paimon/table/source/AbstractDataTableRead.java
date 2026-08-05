@@ -44,7 +44,7 @@ import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 public abstract class AbstractDataTableRead implements InnerTableRead {
 
     private RowType readType;
-    private boolean executeFilter = false;
+    protected boolean executeFilter = false;
     private Predicate predicate;
     private final TableSchema schema;
 
@@ -101,10 +101,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     @Nullable
     protected Predicate predicate() {
         return predicate;
-    }
-
-    protected boolean shouldExecuteFilter() {
-        return executeFilter;
     }
 
     @Override

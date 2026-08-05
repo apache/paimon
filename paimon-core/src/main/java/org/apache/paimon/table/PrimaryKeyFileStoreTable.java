@@ -153,6 +153,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                 () -> store().newRead(),
                 () -> store().newBatchRawFileRead(),
                 schema(),
+                coreOptions(),
                 catalogEnvironment.dependencyReadContext());
     }
 

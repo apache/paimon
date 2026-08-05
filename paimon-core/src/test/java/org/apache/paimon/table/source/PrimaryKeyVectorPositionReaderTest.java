@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -95,7 +96,9 @@ class PrimaryKeyVectorPositionReaderTest {
                 new KeyValueTableRead(
                         () -> mock(MergeFileSplitRead.class),
                         () -> rawRead,
-                        mock(TableSchema.class));
+                        mock(TableSchema.class),
+                        CoreOptions.fromMap(Collections.emptyMap()),
+                        null);
 
         assertThat(tableRead.createReader(split)).isInstanceOf(PrimaryKeyIndexPositionReader.class);
         verify(rawRead, never()).createReader(split);

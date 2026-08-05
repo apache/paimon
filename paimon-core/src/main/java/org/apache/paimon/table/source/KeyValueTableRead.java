@@ -49,6 +49,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
+import static org.apache.paimon.table.source.BlobViewTableReadSupport.blobViewFieldIndexes;
+
 /**
  * An abstraction layer above {@link MergeFileSplitRead} to provide reading of {@link InternalRow}.
  */
@@ -57,6 +59,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     private final Supplier<MergeFileSplitRead> mergeReadSupplier;
     private final Supplier<RawFileSplitRead> batchRawReadSupplier;
     private final List<SplitReadProvider> readProviders;
+    private final CoreOptions options;
     @Nullable private final CatalogContext catalogContext;
 
     @Nullable private RowType readType = null;
@@ -69,18 +72,13 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     public KeyValueTableRead(
             Supplier<MergeFileSplitRead> mergeReadSupplier,
             Supplier<RawFileSplitRead> batchRawReadSupplier,
-            TableSchema schema) {
-        this(mergeReadSupplier, batchRawReadSupplier, schema, null);
-    }
-
-    public KeyValueTableRead(
-            Supplier<MergeFileSplitRead> mergeReadSupplier,
-            Supplier<RawFileSplitRead> batchRawReadSupplier,
             TableSchema schema,
+            CoreOptions options,
             @Nullable CatalogContext catalogContext) {
         super(schema);
         this.mergeReadSupplier = mergeReadSupplier;
         this.batchRawReadSupplier = batchRawReadSupplier;
+        this.options = options;
         this.catalogContext = catalogContext;
         this.readProviders =
                 Arrays.asList(
@@ -157,46 +155,47 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
         RecordReader<InternalRow> reader;
-        if (catalogContext != null) {
-            CoreOptions options = CoreOptions.fromMap(schema().options());
-            int[] blobViewFields =
-                    BlobViewTableReadSupport.blobViewFieldIndexes(currentReadType(), options);
-            if (blobViewFields.length > 0) {
-                reader =
-                        BlobViewTableReadSupport.createBlobViewReader(
-                                catalogContext,
-                                queryAuthContext.split(),
-                                queryAuthContext.authResult(),
-                                blobViewFields,
-                                currentReadType(),
-                                predicate(),
-                                topN,
-                                limit,
-                                shouldExecuteFilter(),
-                                () ->
-                                        createDataReader(
-                                                queryAuthContext.split(),
-                                                queryAuthContext.authResult()),
-                                this::createBlobViewPrescanRead);
-            } else {
-                reader = createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
-            }
+        int[] blobViewFields = blobViewFieldIndexes(currentReadType(), options);
+        if (catalogContext != null && blobViewFields.length > 0) {
+            reader = createReaderWithBlobView(queryAuthContext, blobViewFields);
         } else {
             reader = createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
         }
         return LimitRecordReader.limit(reader, limit);
     }
 
+    private RecordReader<InternalRow> createReaderWithBlobView(
+            QueryAuthContext queryAuthContext, int[] blobViewFields) throws IOException {
+        RecordReader<InternalRow> reader;
+        reader =
+                BlobViewTableReadSupport.createBlobViewReader(
+                        catalogContext,
+                        queryAuthContext.split(),
+                        queryAuthContext.authResult(),
+                        blobViewFields,
+                        currentReadType(),
+                        predicate(),
+                        topN,
+                        limit,
+                        executeFilter,
+                        () ->
+                                createDataReader(
+                                        queryAuthContext.split(), queryAuthContext.authResult()),
+                        this::createBlobViewPrescanRead);
+        return reader;
+    }
+
     private InnerTableRead createBlobViewPrescanRead() {
         KeyValueTableRead read =
-                new KeyValueTableRead(mergeReadSupplier, batchRawReadSupplier, schema(), null);
+                new KeyValueTableRead(
+                        mergeReadSupplier, batchRawReadSupplier, schema(), options, null);
         if (ioManager != null) {
             read.withIOManager(ioManager);
         }
         if (forceKeepDelete) {
             read.forceKeepDelete();
         }
-        if (shouldExecuteFilter()) {
+        if (executeFilter) {
             read.executeFilter();
         }
         return read;
