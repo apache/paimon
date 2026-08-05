@@ -70,22 +70,30 @@ Postpone bucket mode is configured by `'bucket' = '-2'`.
 This mode aims to solve the difficulty to determine a fixed number of buckets
 and support different buckets for different partitions.
 
-By default, batch writes set `postpone.batch-write-fixed-bucket` to `true`
-and write records directly to real buckets.
-For a Spark batch write to a partition without real bucket files,
-Spark calculates the bucket number from the uncompressed Paimon `BinaryRow` serialized size.
-The target size is configured by `postpone.target-size-per-bucket` and defaults to `1 GB`.
-Existing postpone files do not record their uncompressed serialized size, so Spark estimates their
-size using their row count and the average serialized size of incoming rows in the same partition.
-You can instead configure `postpone.target-row-num-per-bucket` to calculate the bucket number
-from row counts; this option takes precedence over the target size.
-The calculated bucket number is at least `1` and is limited by
-`postpone.batch-write-fixed-bucket.max-parallelism`.
-The serialized size is measured before file encoding and compression, so it is not the exact
-ORC or Parquet size on storage.
-Inferring the data amount adds a statistics stage; Spark caches the batch so that inference and
-writing use the same input rows. Spark skips this stage for an unpartitioned table that already
-has real bucket files, or when `postpone.batch-write-fixed-bucket.max-parallelism` is `1`.
+By default, `postpone.batch-write-fixed-bucket` is `true`. This staged fixed-bucket flow uses
+Spark's DataSource V1 write path, even when `spark.paimon.write.use-v2-write` is enabled. Spark
+completes each batch in three steps:
+
+1. Write the current batch to uncommitted bucket `-2` files. Spark derives each partition's row
+   count and file size directly from the staged file metadata; there is no extra input scan, cache,
+   or per-row statistics pass.
+2. Calculate the required bucket number per touched partition. `postpone.target-row-num-per-bucket`,
+   when configured, takes precedence over `postpone.target-size-per-bucket` (default `1 GB`). The
+   result is at least `1`, rounded up to a power of two, and capped by
+   `postpone.batch-write-fixed-bucket.max-parallelism`.
+3. Route the staged records to real buckets and commit them. The current batch becomes visible only
+   in this commit.
+
+An existing partition normally keeps its bucket number. Spark first rescales its real buckets when
+the uncapped required bucket number is greater than the existing bucket number multiplied by
+`postpone.batch-write-fixed-bucket.rescale-load-factor` (default `32`), and the capped result is
+larger than the existing layout. Different partitions may have different target bucket numbers.
+The rescale is a separate overwrite commit which changes real buckets only; the current batch is
+appended in the following commit.
+
+Previously committed bucket `-2` files are not included in the calculation, read, rewritten, or
+deleted by an append or rescale. They remain available to merge-on-read and regular postpone
+compaction. `INSERT OVERWRITE` still follows its normal replacement semantics.
 
 When `postpone.batch-write-fixed-bucket` is `false`,
 records are first stored in the `bucket-postpone` directory of each partition
