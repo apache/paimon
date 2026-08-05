@@ -29,7 +29,6 @@ import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 import java.util.{IdentityHashMap, Map => JMap, Optional, UUID}
 
-import scala.collection.mutable
 import scala.util.control.NonFatal
 
 /** Driver-side access to metadata planned for a Paimon streaming micro-batch. */
@@ -62,40 +61,78 @@ object PaimonSparkMicroBatchMetadata {
     }
 
     val visited = new IdentityHashMap[RDD[_], java.lang.Boolean]()
-    val metadata = mutable.ArrayBuffer.empty[PaimonMicroBatchMetadata]
-    var incompletePaimonSource = false
+    var only: PaimonMicroBatchMetadata = null
 
-    def visit(rdd: RDD[_]): Unit = {
-      if (!visited.containsKey(rdd)) {
-        visited.put(rdd, java.lang.Boolean.TRUE)
-        rdd match {
-          case dataSourceRDD: DataSourceRDD =>
-            dataSourceRDD.partitions.foreach {
-              partition =>
-                SparkShimLoader.shim.dataSourceInputPartitions(partition).foreach {
-                  case input: PaimonMicroBatchInputPartition => metadata += input.metadata
-                  case _: PaimonInputPartition => incompletePaimonSource = true
-                  case _ =>
-                }
-            }
-          case _ =>
+    def inspectOccurrence(dataSourceRDD: DataSourceRDD): Boolean = {
+      var occurrenceOnly: PaimonMicroBatchMetadata = null
+      var inputCount = 0
+      var valid = true
+      val partitions = dataSourceRDD.partitions
+      var partitionIndex = 0
+
+      while (valid && partitionIndex < partitions.length) {
+        val inputs =
+          SparkShimLoader.shim.dataSourceInputPartitions(partitions(partitionIndex)).iterator
+        while (valid && inputs.hasNext) {
+          inputs.next() match {
+            case input: PaimonMicroBatchInputPartition =>
+              val current = input.metadata
+              if (current eq null) {
+                valid = false
+              } else if (occurrenceOnly eq null) {
+                occurrenceOnly = current
+                inputCount += 1
+              } else if ((occurrenceOnly eq current) || occurrenceOnly == current) {
+                inputCount += 1
+              } else {
+                valid = false
+              }
+            case _: PaimonInputPartition => valid = false
+            case _ =>
+          }
         }
-        rdd.dependencies.foreach(dependency => visit(dependency.rdd))
+        partitionIndex += 1
+      }
+
+      if (!valid || ((occurrenceOnly ne null) && inputCount != occurrenceOnly.splitCount)) {
+        false
+      } else if (occurrenceOnly eq null) {
+        true
+      } else if (only eq null) {
+        only = occurrenceOnly
+        true
+      } else {
+        (only eq occurrenceOnly) || only == occurrenceOnly
       }
     }
 
-    visit(batch.queryExecution.toRdd)
+    def visit(rdd: RDD[_]): Boolean = {
+      if (visited.containsKey(rdd)) {
+        true
+      } else {
+        visited.put(rdd, java.lang.Boolean.TRUE)
+        val valid =
+          rdd match {
+            case dataSourceRDD: DataSourceRDD => inspectOccurrence(dataSourceRDD)
+            case _ => true
+          }
+        if (!valid) {
+          false
+        } else {
+          val dependencies = rdd.dependencies.iterator
+          var complete = true
+          while (complete && dependencies.hasNext) {
+            complete = visit(dependencies.next().rdd)
+          }
+          complete
+        }
+      }
+    }
 
-    val distinct = metadata.distinct
-    if (incompletePaimonSource || distinct.size != 1) {
+    if (!visit(batch.queryExecution.toRdd) || (only eq null)) {
       Optional.empty()
     } else {
-      val only = distinct.head
-      if (metadata.size != only.splitCount) {
-        Optional.empty()
-      } else {
-        Optional.of(only.writtenColumns)
-      }
+      Optional.of(only.writtenColumns)
     }
   }
 
