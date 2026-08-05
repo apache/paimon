@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import itertools
 import json
 import os
 import shutil
@@ -152,6 +153,186 @@ class RayIncrementalWriteTest(unittest.TestCase):
             commit_interval_seconds=interval,
             update_cols=["feature"],
         )
+
+    def _dataset_write(
+            self, target, data, interval=10, operation_id=None):
+        dataset = (
+            data if hasattr(data, "map_batches")
+            else ray.data.from_arrow(data)
+        )
+        return write_paimon(
+            dataset,
+            target,
+            self.catalog_options,
+            commit_mode="incremental",
+            operation_id=operation_id,
+            commit_interval_seconds=interval,
+            update_cols=["feature"],
+        )
+
+    def _prepare_update(self, target, ids, features):
+        table = self.catalog.get_table(target)
+        writer = table.new_batch_write_builder().new_write()
+        try:
+            writer.write_arrow(pa.table({
+                "id": ids,
+                "payload": [None] * len(ids),
+                "feature": features,
+            }, schema=self.target_schema))
+            return writer.prepare_commit()
+        finally:
+            writer.close()
+
+    def test_ray_dataset_commits_periodically(self):
+        target, _ = self._create_tables()
+        updates = pa.table({
+            "id": list(range(1, 21)),
+            "feature": list(range(101, 121)),
+        }, schema=self.source_schema)
+        updates = ray.data.from_arrow([
+            updates.slice(0, 10), updates.slice(10, 10)])
+        before = self.catalog.get_table(
+            target).snapshot_manager().get_latest_snapshot().id
+
+        clock = itertools.count(step=10)
+        with mock.patch(
+                "pypaimon.ray.incremental_write.time.monotonic",
+                side_effect=lambda: next(clock)):
+            self._dataset_write(target, updates, interval=1)
+
+        after = self.catalog.get_table(
+            target).snapshot_manager().get_latest_snapshot().id
+        self.assertEqual(2, after - before)
+        self.assertEqual(
+            list(range(101, 121)),
+            self._read(target)["feature"].to_pylist(),
+        )
+
+    def test_ray_dataset_retry_recomputes_source(self):
+        target, _ = self._create_tables()
+        updates = pa.table({
+            "id": [1, 2],
+            "feature": [101, 102],
+        }, schema=self.source_schema)
+        first_group = self._prepare_update(target, [1], [101])
+
+        def fail_after_first_group(*_args, **kwargs):
+            kwargs["on_group_result"](first_group)
+            raise RuntimeError("injected worker failure")
+
+        clock = itertools.count(step=10)
+        with mock.patch(
+                "pypaimon.ray.incremental_write.time.monotonic",
+                side_effect=lambda: next(clock)), mock.patch(
+                "pypaimon.write.ray_datasink._write_primary_key_groups",
+                side_effect=fail_after_first_group):
+            with self.assertRaisesRegex(
+                    RuntimeError, "injected worker failure"):
+                self._dataset_write(target, updates, interval=1)
+
+        self.assertEqual(
+            [101, 20, 30], self._read(target)["feature"].to_pylist())
+
+        self._dataset_write(target, updates)
+        self.assertEqual(
+            [101, 102, 30], self._read(target)["feature"].to_pylist())
+
+    def test_ray_dataset_allows_compaction_between_commits(self):
+        target, _ = self._create_tables()
+        updates = pa.table({
+            "id": [1, 3],
+            "feature": [101, 103],
+        }, schema=self.source_schema)
+        updates = ray.data.from_arrow([
+            updates.slice(0, 1), updates.slice(1, 1)])
+        groups = [
+            self._prepare_update(target, [1], [101]),
+            self._prepare_update(target, [3], [103]),
+        ]
+
+        calls = 0
+
+        def compact_between_groups(*_args, **kwargs):
+            nonlocal calls
+            if calls == 1:
+                self._compact(target)
+            kwargs["on_group_result"](groups[calls])
+            calls += 1
+
+        clock = itertools.count(step=10)
+        with mock.patch(
+                "pypaimon.ray.incremental_write.time.monotonic",
+                side_effect=lambda: next(clock)), mock.patch(
+                "pypaimon.write.ray_datasink._write_primary_key_groups",
+                side_effect=compact_between_groups):
+            self._dataset_write(target, updates, interval=1)
+
+        self.assertEqual(
+            [101, 20, 103], self._read(target)["feature"].to_pylist())
+
+    def test_ray_dataset_rejects_operation_id(self):
+        target, _ = self._create_tables()
+        updates = pa.table({
+            "id": [1], "feature": [101],
+        }, schema=self.source_schema)
+
+        with self.assertRaisesRegex(
+                ValueError, "does not expose resumable source offsets"):
+            self._dataset_write(
+                target, updates, operation_id="not-resumable")
+
+    def test_partitioned_composite_key_dataset(self):
+        identifier = "default.partitioned_{}".format(uuid.uuid4().hex[:8])
+        schema = pa.schema([
+            pa.field("key", pa.string(), nullable=False),
+            pa.field("partition", pa.string(), nullable=False),
+            ("payload", pa.string()),
+            ("feature", pa.int32()),
+        ])
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(
+                schema,
+                partition_keys=["partition"],
+                primary_keys=["key", "partition"],
+                options={
+                    "bucket": "4096",
+                    "merge-engine": "partial-update",
+                },
+            ),
+            False,
+        )
+        self._write(identifier, pa.table({
+            "key": ["a", "b"],
+            "partition": ["p1", "p1"],
+            "payload": ["keep-a", "keep-b"],
+            "feature": [1, 2],
+        }, schema=schema))
+        updates = pa.table({
+            "key": ["a", "b"],
+            "partition": ["p1", "p1"],
+            "feature": [101, 102],
+        })
+
+        write_paimon(
+            ray.data.from_arrow(updates),
+            identifier,
+            self.catalog_options,
+            commit_mode="incremental",
+            commit_interval_seconds=10,
+            update_cols=["feature"],
+        )
+
+        table = self.catalog.get_table(identifier)
+        builder = table.new_read_builder()
+        actual = builder.new_read().to_arrow(
+            builder.new_scan().plan().splits()).sort_by("key")
+        self.assertEqual({
+            "key": ["a", "b"],
+            "partition": ["p1", "p1"],
+            "payload": ["keep-a", "keep-b"],
+            "feature": [101, 102],
+        }, actual.to_pydict())
 
     def test_transform_identity_ignores_runtime_state(self):
         class RuntimeState:

@@ -305,7 +305,7 @@ def write_paimon(
     because Ray write tasks create independent Paimon writers.
 
     Args:
-        dataset: The Ray Dataset to write.
+        dataset: The Ray Dataset or ``PaimonOffsetSource`` to write.
         table_identifier: Full table name, e.g. ``"db_name.table_name"``.
         catalog_options: Options passed to ``CatalogFactory.create()``.
         overwrite: If ``True``, overwrite existing data in the table.
@@ -314,8 +314,8 @@ def write_paimon(
         hash_fixed_precluster: Pre-clustering mode. ``"auto"`` follows
             table options, ``"off"`` disables it, and ``"map_groups"``
             explicitly enables HASH_FIXED grouping.
-        commit_mode: ``"atomic"`` or resumable ``"incremental"``.
-        operation_id: Stable ID used to resume an incremental write.
+        commit_mode: ``"atomic"`` or periodic ``"incremental"``.
+        operation_id: Stable resume ID for a ``PaimonOffsetSource``.
         commit_interval_seconds: Target interval between incremental commits.
         update_cols: Columns updated by an incremental primary-key write.
     """

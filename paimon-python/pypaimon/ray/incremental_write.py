@@ -43,7 +43,7 @@ def incremental_write_paimon(
         update_cols,
         concurrency=None,
         ray_remote_args=None):
-    """Write a replayable Paimon source with periodic checkpoints."""
+    """Write a Ray source with periodic commits and optional source checkpoints."""
     from pypaimon.catalog.catalog_factory import CatalogFactory
     from pypaimon.common.options.core_options import MergeEngine
     from pypaimon.ray.offset_source import PaimonOffsetSource
@@ -51,10 +51,17 @@ def incremental_write_paimon(
     from pypaimon.table.bucket_mode import BucketMode
     from pypaimon.write.ray_datasink import _write_primary_key_groups
 
-    if not isinstance(source, PaimonOffsetSource):
+    resumable = isinstance(source, PaimonOffsetSource)
+    if not resumable and not hasattr(source, "map_batches"):
         raise ValueError(
-            "incremental write_paimon requires a PaimonOffsetSource.")
-    _validate_operation_id(operation_id)
+            "incremental write_paimon requires a ray.data.Dataset or "
+            "PaimonOffsetSource.")
+    if resumable:
+        _validate_operation_id(operation_id)
+    elif operation_id is not None:
+        raise ValueError(
+            "operation_id requires a PaimonOffsetSource; a plain Ray Dataset "
+            "does not expose resumable source offsets.")
     if (isinstance(commit_interval_seconds, bool)
             or not isinstance(commit_interval_seconds, (int, float))
             or commit_interval_seconds <= 0):
@@ -104,6 +111,31 @@ def incremental_write_paimon(
         raise ValueError(
             "unprovided partial-update column {!r} must be nullable.".format(
                 omitted_non_null[0]))
+
+    target_schema = PyarrowFieldParser.from_paimon_schema(
+        table.table_schema.fields)
+    required = primary_keys + update_cols
+
+    def to_write_batch(batch):
+        missing = [name for name in required if name not in batch.column_names]
+        if missing:
+            raise ValueError("source is missing columns {}.".format(missing))
+        arrays = [
+            batch.column(field.name).cast(field.type)
+            if field.name in required
+            else pa.nulls(batch.num_rows, type=field.type)
+            for field in target_schema
+        ]
+        return pa.Table.from_arrays(arrays, schema=target_schema)
+
+    if not resumable:
+        return _write_dataset_periodically(
+            source.map_batches(to_write_batch, batch_format="pyarrow"),
+            table,
+            commit_interval_seconds,
+            concurrency,
+            ray_remote_args,
+        )
 
     commit_user = _commit_user(operation_id)
     checkpoint_tags = _checkpoint_tags(operation_id)
@@ -156,22 +188,6 @@ def incremental_write_paimon(
         if bound.num_units == 0:
             return
 
-    target_schema = PyarrowFieldParser.from_paimon_schema(
-        table.table_schema.fields)
-    required = primary_keys + update_cols
-
-    def to_write_batch(batch):
-        missing = [name for name in required if name not in batch.column_names]
-        if missing:
-            raise ValueError("source is missing columns {}.".format(missing))
-        arrays = [
-            batch.column(field.name).cast(field.type)
-            if field.name in required
-            else pa.nulls(batch.num_rows, type=field.type)
-            for field in target_schema
-        ]
-        return pa.Table.from_arrays(arrays, schema=target_schema)
-
     pending_messages = []
     pending_offset = next_offset
     last_commit_time = time.monotonic()
@@ -222,6 +238,125 @@ def incremental_write_paimon(
         if pending_messages:
             _abort_messages(table, pending_messages)
         raise
+
+
+def _write_dataset_periodically(
+        dataset, table, commit_interval_seconds, concurrency,
+        ray_remote_args):
+    from pypaimon.write.ray_datasink import _write_primary_key_groups
+
+    committer = _PeriodicDatasetCommitter(
+        table,
+        table.snapshot_manager().get_latest_snapshot(),
+        table.table_schema.id)
+    windows = _dataset_windows(dataset, commit_interval_seconds)
+    try:
+        try:
+            for window in windows:
+                _write_primary_key_groups(
+                    window,
+                    table,
+                    overwrite=False,
+                    static_partition=None,
+                    concurrency=concurrency,
+                    ray_remote_args=ray_remote_args,
+                    on_group_result=committer.add_group,
+                )
+                committer.commit()
+        except Exception:
+            # Preserve completed groups before surfacing a source or worker error.
+            committer.commit()
+            raise
+    except Exception:
+        committer.abort_pending()
+        raise
+    finally:
+        windows.close()
+        committer.close()
+
+
+def _dataset_windows(dataset, interval):
+    """Yield time windows without copying Ray blocks through the driver."""
+    import ray.data
+
+    bundles = []
+    source = dataset.iter_internal_ref_bundles()
+    last_window = time.monotonic()
+    try:
+        for bundle in source:
+            bundles.append(bundle)
+            if time.monotonic() - last_window < interval:
+                continue
+            current, bundles = bundles, []
+            try:
+                yield ray.data.from_arrow_refs([
+                    ref for item in current for ref in item.block_refs])
+            finally:
+                for item in current:
+                    item.destroy_if_owned()
+            last_window = time.monotonic()
+        if bundles:
+            current, bundles = bundles, []
+            try:
+                yield ray.data.from_arrow_refs([
+                    ref for item in current for ref in item.block_refs])
+            finally:
+                for item in current:
+                    item.destroy_if_owned()
+    finally:
+        for item in bundles:
+            item.destroy_if_owned()
+        close = getattr(source, "close", None)
+        if close is not None:
+            close()
+
+
+class _PeriodicDatasetCommitter:
+
+    def __init__(self, table, base_snapshot, schema_id):
+        self._table = table
+        self._base_snapshot = base_snapshot
+        self._schema_id = schema_id
+        builder = table.new_stream_write_builder()
+        self._commit_user = builder.commit_user
+        self._commit = builder.new_commit()
+        self._pending = []
+        self._next_commit_id = 1
+
+    def add_group(self, messages):
+        self._pending.extend(message for message in messages
+                             if not message.is_empty())
+
+    def commit(self):
+        if not self._pending:
+            return
+        messages = self._pending
+        self._pending = []
+        commit_id = self._next_commit_id
+        base_id = self._base_snapshot.id if self._base_snapshot is not None else 0
+        self._commit.protect_from_external_commits(
+            self._base_snapshot, self._schema_id, allow_maintenance=True)
+        self._commit.commit(messages, commit_id)
+        committed = _find_committed_snapshot(
+            self._table, self._commit_user, commit_id, base_id)
+        if committed is None:
+            raise RuntimeError("Committed periodic write snapshot is missing.")
+        self._base_snapshot = committed
+        _validate_schema(self._table, self._schema_id)
+        self._next_commit_id += 1
+
+    def abort_pending(self):
+        if not self._pending:
+            return
+        messages = self._pending
+        self._pending = []
+        _abort_messages(self._table, messages)
+
+    def close(self):
+        try:
+            self._commit.close()
+        except Exception:
+            logger.warning("Failed to close periodic write commit.", exc_info=True)
 
 
 def delete_write_paimon_checkpoint(
@@ -379,6 +514,14 @@ def _read_checkpoint(snapshot, strict=True):
 
 
 def _find_checkpoint_snapshot(table, commit_user, checkpoint_id, after_id):
+    snapshot = _find_committed_snapshot(
+        table, commit_user, checkpoint_id, after_id)
+    if snapshot is None or _read_checkpoint(snapshot, strict=False) is None:
+        return None
+    return snapshot
+
+
+def _find_committed_snapshot(table, commit_user, commit_id, after_id):
     manager = table.snapshot_manager()
     latest = manager.get_latest_snapshot()
     if latest is None:
@@ -387,8 +530,7 @@ def _find_checkpoint_snapshot(table, commit_user, checkpoint_id, after_id):
         snapshot = manager.get_snapshot_by_id(snapshot_id)
         if (snapshot is not None
                 and snapshot.commit_user == commit_user
-                and snapshot.commit_identifier == checkpoint_id
-                and _read_checkpoint(snapshot, strict=False) is not None):
+                and snapshot.commit_identifier == commit_id):
             return snapshot
     return None
 

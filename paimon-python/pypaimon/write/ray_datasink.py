@@ -466,6 +466,7 @@ def _consume_write_results(
     message_col,
     error_col=None,
     prepare_only=False,
+    on_write_result=None,
 ):
     import pickle
 
@@ -481,9 +482,12 @@ def _consume_write_results(
             for blob, error in zip(messages, batch_errors):
                 commit_messages = pickle.loads(blob)
                 write_returns.append(commit_messages)
-                coordinator.add_pending_commit_messages(commit_messages)
+                if on_write_result is None:
+                    coordinator.add_pending_commit_messages(commit_messages)
                 if error is not None:
                     errors.append(error)
+                elif on_write_result is not None:
+                    on_write_result(commit_messages)
         if errors:
             raise RuntimeError(
                 "One or more Ray write tasks failed:\n{}".format(
@@ -492,7 +496,8 @@ def _consume_write_results(
             )
         if prepare_only:
             return [message for result in write_returns for message in result]
-        coordinator.on_write_complete(write_returns)
+        if on_write_result is None:
+            coordinator.on_write_complete(write_returns)
     except Exception as error:
         coordinator.on_write_failed(error)
         raise
@@ -552,6 +557,7 @@ def _write_primary_key_groups(
     bucket_extractor=None,
     postpone_bucket_plan=None,
     prepare_only=False,
+    on_group_result=None,
 ):
     import pickle
 
@@ -619,6 +625,7 @@ def _write_primary_key_groups(
             message_col,
             error_col,
             prepare_only,
+            on_group_result,
         )
     except Exception:
         if prepare_only:

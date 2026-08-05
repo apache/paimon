@@ -279,7 +279,22 @@ overlapping buckets or sequence numbers for those modes.
 
 ### Incremental write
 
-Long-running updates can commit periodically and resume by `operation_id`:
+An existing Ray Dataset can commit target groups periodically:
+
+```python
+write_paimon(
+    updates,
+    "database_name.target",
+    {"warehouse": "/path/to/warehouse"},
+    commit_mode="incremental",
+    update_cols=["feature"],
+    commit_interval_seconds=600,
+)
+```
+
+Committed groups survive failure, but retrying recomputes the Dataset lineage.
+Pin the starting snapshot when the Dataset reads from the target table itself.
+Use `PaimonOffsetSource` with an `operation_id` to also resume source progress:
 
 ```python
 from pypaimon.ray import PaimonOffsetSource, write_paimon
@@ -298,10 +313,10 @@ write_paimon(
 
 Use a fixed-bucket, partial-update target. Source rows need unique primary keys
 and all `update_cols`; missing keys are inserted. Source splits run in bounded
-windows, so the actual interval may be longer. Concurrent target writes or
-schema changes fail. After success, `delete_write_paimon_checkpoint` releases
-retained snapshots. An `operation_id` must not be reused after changing the
-source transformation.
+windows, so the actual interval may be longer. Concurrent data changes or schema
+changes fail; compaction is allowed. After success,
+`delete_write_paimon_checkpoint` releases retained snapshots. An `operation_id`
+must not be reused after changing the source transformation.
 
 ### `TableWrite.write_ray()` (lower-level)
 
