@@ -115,7 +115,7 @@ class TestFileStoreCommit(unittest.TestCase):
             [merged], _try_replace_manifest_files([], [], [merged]))
         self.assertIsNone(_try_replace_manifest_files([a], [], [merged]))
 
-    def test_manifest_merge_result_copies_lists(
+    def test_manifest_merge_result_copies_and_freezes_lists(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         before = [self._manifest_meta('before')]
         after = [self._manifest_meta('after')]
@@ -124,6 +124,8 @@ class TestFileStoreCommit(unittest.TestCase):
         before.clear()
         after.clear()
 
+        self.assertIsInstance(result.merge_before_manifests, tuple)
+        self.assertIsInstance(result.merge_after_manifests, tuple)
         self.assertEqual(
             ['before'],
             [manifest.file_name

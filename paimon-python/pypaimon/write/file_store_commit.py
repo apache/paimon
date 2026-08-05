@@ -110,8 +110,8 @@ class ManifestMergeResult:
     """Manifest merge input and output retained for a deterministic retry."""
 
     def __init__(self, merge_before_manifests, merge_after_manifests):
-        self.merge_before_manifests = list(merge_before_manifests)
-        self.merge_after_manifests = list(merge_after_manifests)
+        self.merge_before_manifests = tuple(merge_before_manifests)
+        self.merge_after_manifests = tuple(merge_after_manifests)
 
 
 def _try_reuse_manifest_merge_result(retry_result, current_manifests):
