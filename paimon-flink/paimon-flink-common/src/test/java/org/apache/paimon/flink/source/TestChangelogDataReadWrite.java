@@ -155,8 +155,8 @@ public class TestChangelogDataReadWrite {
         return new KeyValueTableRead(
                 () -> read,
                 () -> rawFileRead,
-                null,
-                CoreOptions.fromMap(Collections.emptyMap()),
+                schema,
+                options,
                 null);
     }
 
