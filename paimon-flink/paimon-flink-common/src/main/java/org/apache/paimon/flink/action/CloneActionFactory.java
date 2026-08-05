@@ -34,6 +34,7 @@ public class CloneActionFactory implements ActionFactory {
     private static final String TARGET_DATABASE = "target_database";
     private static final String TARGET_TABLE = "target_table";
     private static final String TARGET_CATALOG_CONF = "target_catalog_conf";
+    private static final String TARGET_TABLE_CONF = "target_table_conf";
     private static final String PARALLELISM = "parallelism";
     private static final String WHERE = "where";
     private static final String INCLUDED_TABLES = "included_tables";
@@ -54,6 +55,8 @@ public class CloneActionFactory implements ActionFactory {
 
         Map<String, String> targetCatalogConfig =
                 new HashMap<>(optionalConfigMap(params, TARGET_CATALOG_CONF));
+        Map<String, String> targetTableConfig =
+                new HashMap<>(optionalConfigMap(params, TARGET_TABLE_CONF));
         String targetWarehouse = params.get(TARGET_WAREHOUSE);
         if (targetWarehouse != null && !targetCatalogConfig.containsKey(WAREHOUSE)) {
             targetCatalogConfig.put(WAREHOUSE, targetWarehouse);
@@ -97,6 +100,7 @@ public class CloneActionFactory implements ActionFactory {
                         params.get(TARGET_DATABASE),
                         params.get(TARGET_TABLE),
                         targetCatalogConfig,
+                        targetTableConfig,
                         parallelism == null ? null : Integer.parseInt(parallelism),
                         params.get(WHERE),
                         includedTables,
@@ -114,5 +118,8 @@ public class CloneActionFactory implements ActionFactory {
         System.out.println(
                 "Action \"clone\" clones the source files and migrate them to paimon table.");
         System.out.println();
+        System.out.println(
+                "Use repeated '--target_table_conf <key=value>' options to override options "
+                        + "when creating target tables.");
     }
 }
