@@ -170,7 +170,7 @@ def _bitmap(*row_ids):
 
 def _install_raw_vector_read_builder(table, vector_column_name, row_id_to_vector,
                                      calls=None):
-    """Install a fake raw read builder which honors GlobalIndexResult ranges."""
+    """Install a fake raw read builder which honors row ranges."""
     import pyarrow as pa
 
     calls = calls if calls is not None else {}
@@ -186,10 +186,9 @@ def _install_raw_vector_read_builder(table, vector_column_name, row_id_to_vector
         def __init__(self):
             self._row_ids = []
 
-        def with_global_index_result(self, result):
-            ranges = result.results().to_range_list()
+        def with_row_ranges(self, ranges):
             calls["raw_read_count"] = calls.get("raw_read_count", 0) + 1
-            calls["global_index_ranges"] = ranges
+            calls["global_index_ranges"] = list(ranges)
             self._row_ids = [
                 row_id
                 for row_id in sorted(row_id_to_vector)
@@ -235,7 +234,7 @@ def _install_raw_vector_read_builder(table, vector_column_name, row_id_to_vector
 
 def _install_raw_full_text_read_builder(table, text_column_name, row_id_to_text,
                                         calls=None):
-    """Install a fake raw read builder which honors GlobalIndexResult ranges."""
+    """Install a fake raw read builder which honors row ranges."""
     import pyarrow as pa
 
     calls = calls if calls is not None else {}
@@ -251,9 +250,8 @@ def _install_raw_full_text_read_builder(table, text_column_name, row_id_to_text,
         def __init__(self):
             self._row_ids = []
 
-        def with_global_index_result(self, result):
-            ranges = result.results().to_range_list()
-            calls["global_index_ranges"] = ranges
+        def with_row_ranges(self, ranges):
+            calls["global_index_ranges"] = list(ranges)
             self._row_ids = [
                 row_id
                 for row_id in sorted(row_id_to_text)
@@ -1652,6 +1650,32 @@ class VectorSearchFilterTest(unittest.TestCase):
             contributing_field_ids=frozenset([0]),
         )
 
+    def test_raw_vector_read_passes_ranges_without_bitmap(self):
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+
+        table = _StubTable(fields=[self.embedding_field], entries=[])
+        calls = _install_raw_vector_read_builder(
+            table,
+            "embedding",
+            {10: [1.0, 0.0, 0.0, 0.0]},
+        )
+        ranges = [Range(10, 10 ** 12)]
+        reader = DataEvolutionVectorRead(
+            table,
+            limit=1,
+            vector_column=self.embedding_field,
+            query_vector=[1.0, 0.0, 0.0, 0.0],
+        )
+
+        with mock.patch.object(
+                GlobalIndexResult,
+                "from_ranges",
+                side_effect=AssertionError("row ranges entered a bitmap")):
+            result = reader._read_raw_arrow(ranges, include_filter=True)
+
+        self.assertEqual(ranges, calls["global_index_ranges"])
+        self.assertEqual(1, result.num_rows)
+
     def test_scan_threads_builder_options_to_raw_split_index_type(self):
         from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
 
@@ -2111,70 +2135,66 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    def test_native_fulltext_index_is_dispatched_by_scanner(self):
-        """Non-btree scalar global indexes (full-text, etc.) must be
-        instantiated by DataEvolutionGlobalIndexScanner — previously only 'btree' was
-        handled and everything else was silently dropped, making text-column
-        pre-filter a no-op."""
-        from pypaimon.globalindex.global_index_result import GlobalIndexResult
+    def test_full_text_index_is_not_scalar_coverage(self):
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.globalindex.data_evolution_global_index_scanner import (
             DataEvolutionGlobalIndexScanner,
         )
 
-        name_field = _field(0, "name", "STRING")
-        emb_field = _field(1, "embedding", "FLOAT")
-        full_text_shard = _entry(
-            None, field_id=0, index_type="full-text",
-            file_name="name-ft.index",
-            row_range_start=0, row_range_end=9,
-            external_path="oss://bucket/name-ft.index").index_file
-        table = _StubTable(fields=[name_field, emb_field], entries=[])
+        field = _field(0, "name", "STRING")
+        btree = _entry(None, field_id=0, index_type="btree",
+                       file_name="name-btree.index",
+                       row_range_start=0, row_range_end=4).index_file
+        full_text = _entry(None, field_id=0, index_type="full-text",
+                           file_name="name-ft.index",
+                           row_range_start=5, row_range_end=9).index_file
+        table = _StubTable(fields=[field], entries=[])
+        table.options = CoreOptions(Options({
+            "scalar-index.search-mode": "full",
+        }))
 
-        captured_ctor_args = []
-        visit_calls = []
-
-        from pypaimon.globalindex.global_index_reader import _completed_future as _cf
-
-        class _StubFullTextReader:
-            def __init__(self_inner, file_io, index_path, io_metas):
-                captured_ctor_args.append(
-                    (file_io, index_path, list(io_metas)))
-
+        class _StubReader(GlobalIndexReader):
             def visit_equal(self_inner, field_ref, literal):
-                visit_calls.append(("equal", literal))
                 bm = RoaringBitmap64()
-                bm.add(4)
-                return _cf(GlobalIndexResult.create(bm))
+                bm.add(1)
+                return _completed_future(GlobalIndexResult.create(bm))
 
             def close(self_inner):
                 pass
 
+        observed_types = []
+
+        def _stub_create_inner_readers(
+                index_type, file_io, index_path, field, io_metas,
+                executor=None, options=None):
+            observed_types.append(index_type)
+            return [_StubReader()]
+
         with mock.patch(
-                "pypaimon.globalindex.full_text.NativeFullTextGlobalIndexReader",
-                _StubFullTextReader):
-            scanner = DataEvolutionGlobalIndexScanner(
-                fields=table.fields,
-                file_io=table.file_io,
-                index_path="/unused",
-                index_files=[full_text_shard],
+                "pypaimon.globalindex.data_evolution_global_index_scanner."
+                "_create_inner_readers",
+                side_effect=_stub_create_inner_readers):
+            scanner = DataEvolutionGlobalIndexScanner.create(
+                table,
+                index_files=[btree, full_text],
+                snapshot=types.SimpleNamespace(next_row_id=10),
             )
             try:
-                result = scanner.scan(
+                evaluation = scanner.scan_with_coverage(
                     Predicate(method="equal", index=0, field="name",
                               literals=["x"]))
+                fallback = scanner.unindexed_ranges(
+                    None,
+                    search_mode=GlobalIndexSearchMode.FULL,
+                    contributing_field_ids=(
+                        evaluation.contributing_field_ids),
+                )
             finally:
                 scanner.close()
 
-        # Native full-text reader was instantiated (it would NOT be before this fix).
-        self.assertEqual(1, len(captured_ctor_args))
-        _, _, io_metas = captured_ctor_args[0]
-        self.assertEqual("oss://bucket/name-ft.index",
-                         io_metas[0].external_path)
-        # visit_equal was dispatched all the way through evaluator → union →
-        # offset → stub native full-text reader.
-        self.assertEqual([("equal", "x")], visit_calls)
-        # Row id 4 is inside [0,9] so offset rebase is a no-op.
-        self.assertEqual([4], sorted(list(result.results())))
+        self.assertEqual(["btree"], observed_types)
+        self.assertEqual([1], sorted(evaluation.result.results()))
+        self.assertEqual([Range(5, 9)], fallback)
 
     def test_like_predicate_is_dispatched_to_reader(self):
         """Evaluator must dispatch ``like`` to reader.visit_like — otherwise
@@ -2903,8 +2923,8 @@ class VectorSearchManySplitsTest(unittest.TestCase):
                 return ["split"]
 
         class _Scan:
-            def with_global_index_result(self_inner, result):
-                calls["global_index_ranges"] = result.results().to_range_list()
+            def with_row_ranges(self_inner, ranges):
+                calls["global_index_ranges"] = list(ranges)
                 return self_inner
 
             def plan(self_inner):

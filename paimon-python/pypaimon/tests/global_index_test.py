@@ -36,6 +36,7 @@ from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
 )
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.utils.range import Range
 
 
@@ -337,6 +338,27 @@ class PlanSnapshotFetchRegressionTest(
         'global-index.enabled': 'true',
         'bucket': '-1',
     }
+
+    @pytest.mark.python_plan
+    def test_plan_accepts_row_ranges_without_bitmap(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {'id': [1, 2, 3], 'name': ['a', 'b', 'c'],
+             'age': [10, 20, 30], 'city': ['x', 'y', 'z']},
+            schema=self.pa_schema))
+
+        read_builder = table.new_read_builder()
+        ranges = [Range(0, 10 ** 12)]
+        with patch.object(
+                RoaringBitmap64,
+                'to_range_list',
+                side_effect=AssertionError('row ranges entered a bitmap')):
+            plan = read_builder.new_scan().with_row_ranges(ranges).plan()
+
+        result = read_builder.new_read().to_arrow(plan.splits())
+        self.assertEqual([1, 2, 3], sorted(result.column('id').to_pylist()))
+        self.assertEqual(
+            [], read_builder.new_scan().with_row_ranges([]).plan().splits())
 
     @pytest.mark.python_plan
     def test_plan_fetches_latest_snapshot_only_once(self):

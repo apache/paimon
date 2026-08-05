@@ -64,6 +64,7 @@ def _scan(native_enabled, file_scanner):
     file_scanner.start_pos_of_this_subtask = None  # no slice
     file_scanner.chunk_shuffle = None              # no chunk-shuffle
     file_scanner._global_index_result = None       # no global-index result
+    file_scanner._row_ranges = None                # no explicit row ranges
     file_scanner.deletion_vectors_enabled = False  # no deletion vectors
     file_scanner.data_evolution = False            # no data evolution
     file_scanner.only_read_real_buckets = False    # not postpone bucket
@@ -174,8 +175,8 @@ class NativePlanTest(unittest.TestCase):
         )
 
     def test_plan_falls_back_when_scan_is_not_plain(self):
-        # Native planning does not carry shard/slice, global-index, or
-        # incremental scans -> must fall back to the file scanner.
+        # Native planning does not carry shard/slice, global-index, row ranges,
+        # or incremental scans -> must fall back to the file scanner.
         def check(setup):
             fs = Mock(partition_key_predicate=None)
             sentinel = object()
@@ -191,6 +192,7 @@ class NativePlanTest(unittest.TestCase):
         check(lambda s, fs: setattr(fs, 'start_pos_of_this_subtask', 0))
         check(lambda s, fs: setattr(fs, 'chunk_shuffle', (1, 100)))
         check(lambda s, fs: setattr(fs, '_global_index_result', object()))
+        check(lambda s, fs: setattr(fs, '_row_ranges', [object()]))
         check(lambda s, fs: setattr(fs, 'deletion_vectors_enabled', True))
         check(lambda s, fs: setattr(fs, 'only_read_real_buckets', True))
         check(lambda s, fs: (setattr(s.table, 'is_primary_key_table', True),

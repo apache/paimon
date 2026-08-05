@@ -326,8 +326,7 @@ class AbstractVectorSearchReadImpl:
             read_builder = read_builder.with_filter(self._filter)
         read_builder = read_builder.with_projection(
             self._raw_search_projection(include_filter))
-        plan = read_builder.new_scan().with_global_index_result(
-            GlobalIndexResult.from_ranges(raw_row_ranges)).plan()
+        plan = read_builder.new_scan().with_row_ranges(raw_row_ranges).plan()
         return read_builder.new_read().to_arrow(plan.splits())
 
     def _score_raw_vectors(self, candidates, raw_vectors, query_vector, metric, top_k):

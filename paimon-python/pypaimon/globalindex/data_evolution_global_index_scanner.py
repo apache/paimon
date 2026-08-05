@@ -36,7 +36,7 @@ from pypaimon.schema.data_types import DataField
 from pypaimon.utils.range import Range
 
 
-_SUPPORTED_SCALAR_INDEX_TYPES = frozenset(('btree', 'bitmap', 'full-text'))
+_SUPPORTED_SCALAR_INDEX_TYPES = frozenset(('btree', 'bitmap'))
 
 
 class DataEvolutionGlobalIndexScanner:
@@ -461,16 +461,6 @@ def _create_inner_readers(
             executor=executor,
             fallback_scan_max_size=core_options.bitmap_index_fallback_scan_max_size(),
         )]
-
-    from pypaimon.globalindex.full_text import (
-        FULL_TEXT_IDENTIFIER,
-        NativeFullTextGlobalIndexReader,
-    )
-    if index_type == FULL_TEXT_IDENTIFIER:
-        return [
-            NativeFullTextGlobalIndexReader(file_io, index_path, [io_meta])
-            for io_meta in io_metas
-        ]
 
     raise ValueError(
         "Unsupported global-index type in scanner: '%s'" % index_type)
