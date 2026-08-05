@@ -368,7 +368,7 @@ public class PostponeUtils {
                         .withSnapshot(snapshotId)
                         .withPartitionFilter(partitions)
                         .onlyReadRealBuckets()
-                        .readSimpleEntries());
+                        .readFileIterator());
     }
 
     public static Map<BinaryRow, Integer> getKnownNumBuckets(
