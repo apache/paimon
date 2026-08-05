@@ -153,6 +153,13 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     @Override
+    public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+        // the interface default (temp file + rename) would bypass the inner FileIO's atomic
+        // override
+        return fileIO().tryToWriteAtomic(path, content);
+    }
+
+    @Override
     public String createBlobPresignedUrl(
             Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
         if (!path.equals(tableRoot)) {

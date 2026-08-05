@@ -32,11 +32,13 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -77,5 +79,37 @@ class RESTTokenFileIOTest {
                                         new Path("oss://bucket/other"), descriptor, validity))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("bound table root");
+    }
+
+    @Test
+    void testTryToWriteAtomicReachesInnerOverride() throws IOException {
+        Path tableRoot = new Path("oss://bucket/table");
+        FileIO delegate = mock(FileIO.class);
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        // a unique token, so the static token-keyed FileIO cache cannot serve another test's
+        // delegate
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap("token", UUID.randomUUID().toString()),
+                                Long.MAX_VALUE));
+        RESTTokenFileIO fileIO =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options(), loader, null),
+                        api,
+                        identifier,
+                        tableRoot);
+
+        Path target = new Path("oss://bucket/table/snapshot/LATEST");
+        when(delegate.tryToWriteAtomic(target, "content")).thenReturn(true);
+
+        assertThat(fileIO.tryToWriteAtomic(target, "content")).isTrue();
+        verify(delegate).tryToWriteAtomic(target, "content");
+        // the interface default would have written a temp file and renamed it instead
+        verify(delegate, never()).rename(any(), any());
     }
 }
