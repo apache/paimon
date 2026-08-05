@@ -55,12 +55,12 @@ public class PostponeUtilsTest {
     public void testGetKnownNumBucketsFromSnapshot() {
         BinaryRow partition = partition(1);
         PartitionPredicate partitionFilter = mock(PartitionPredicate.class);
-        SimpleFileEntry entry = mock(SimpleFileEntry.class);
+        ManifestEntry entry = mock(ManifestEntry.class);
         when(entry.partition()).thenReturn(partition);
         when(entry.totalBuckets()).thenReturn(4);
 
         FileStoreScan scan = mock(FileStoreScan.class, RETURNS_SELF);
-        when(scan.readSimpleEntries()).thenReturn(Collections.singletonList(entry));
+        when(scan.readFileIterator()).thenReturn(Collections.singletonList(entry).iterator());
         FileStore store = mock(FileStore.class);
         when(store.newScan()).thenReturn(scan);
         FileStoreTable table = mock(FileStoreTable.class);
@@ -77,12 +77,12 @@ public class PostponeUtilsTest {
     public void testGetKnownNumBucketsByPartitions() {
         BinaryRow partition = partition(1);
         List<BinaryRow> partitions = Collections.singletonList(partition);
-        SimpleFileEntry entry = mock(SimpleFileEntry.class);
+        ManifestEntry entry = mock(ManifestEntry.class);
         when(entry.partition()).thenReturn(partition);
         when(entry.totalBuckets()).thenReturn(4);
 
         FileStoreScan scan = mock(FileStoreScan.class, RETURNS_SELF);
-        when(scan.readSimpleEntries()).thenReturn(Collections.singletonList(entry));
+        when(scan.readFileIterator()).thenReturn(Collections.singletonList(entry).iterator());
         FileStore store = mock(FileStore.class);
         when(store.newScan()).thenReturn(scan);
         FileStoreTable table = mock(FileStoreTable.class);
