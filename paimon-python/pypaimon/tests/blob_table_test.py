@@ -23,6 +23,7 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.schema_change import SchemaChange
@@ -2254,6 +2255,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             5: b'blob-5',
         })
 
+    @pytest.mark.python_plan
     def test_blob_write_read_partition(self):
         """Test complete end-to-end blob functionality: write blob data and read it back to verify correctness."""
         from pypaimon import Schema

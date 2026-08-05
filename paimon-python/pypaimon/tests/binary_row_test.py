@@ -23,6 +23,7 @@ import unittest
 from typing import List
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
@@ -81,6 +82,7 @@ class BinaryRowTest(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
+    @pytest.mark.python_plan
     def test_not_equal_append(self):
         table = self.catalog.get_table('default.test_append')
         self._overwrite_manifest_entry(table)
@@ -92,6 +94,7 @@ class BinaryRowTest(unittest.TestCase):
         self.assertEqual(expected, actual)
         self.assertEqual(len(expected), len(splits))
 
+    @pytest.mark.python_plan
     def test_less_than_append(self):
         table = self.catalog.get_table('default.test_append')
 
@@ -115,6 +118,7 @@ class BinaryRowTest(unittest.TestCase):
         self.assertEqual(expected, actual)
         self.assertEqual(len(expected), len(splits))
 
+    @pytest.mark.python_plan
     def test_is_not_null_append(self):
         table = self.catalog.get_table('default.test_append')
         file_scanner = FileScanner(table, lambda: ([], None))
@@ -140,6 +144,7 @@ class BinaryRowTest(unittest.TestCase):
         self.assertEqual(expected, actual)
         self.assertEqual(len(expected), len(splits))
 
+    @pytest.mark.python_plan
     def test_is_in_append(self):
         table = self.catalog.get_table('default.test_append')
         self._overwrite_manifest_entry(table)
@@ -161,6 +166,7 @@ class BinaryRowTest(unittest.TestCase):
         self.assertEqual(expected, actual)
         self.assertEqual(len(splits), len(expected))  # test partition filter when filtering ManifestEntry
 
+    @pytest.mark.python_plan
     def test_not_equal_pk(self):
         table = self.catalog.get_table('default.test_pk')
         read_builder = table.new_read_builder()
@@ -171,6 +177,7 @@ class BinaryRowTest(unittest.TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(len(splits), len(expected))  # test partition filter when filtering ManifestEntry
 
+    @pytest.mark.python_plan
     def test_less_than_pk(self):
         table = self.catalog.get_table('default.test_pk')
         read_builder = table.new_read_builder()
@@ -190,6 +197,7 @@ class BinaryRowTest(unittest.TestCase):
         expected = self.data.slice(4, 1)
         self.assertEqual(actual, expected)
 
+    @pytest.mark.python_plan
     def test_is_not_null_pk(self):
         table = self.catalog.get_table('default.test_pk')
         read_builder = table.new_read_builder()
@@ -199,6 +207,7 @@ class BinaryRowTest(unittest.TestCase):
         expected = self.data.slice(0, 4)
         self.assertEqual(actual, expected)
 
+    @pytest.mark.python_plan
     def test_is_in_pk(self):
         table = self.catalog.get_table('default.test_pk')
         read_builder = table.new_read_builder()
@@ -210,6 +219,7 @@ class BinaryRowTest(unittest.TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(len(splits), len(expected))  # test key stats filter when filtering ManifestEntry
 
+    @pytest.mark.python_plan
     def test_append_multi_cols(self):
         # Create a 10-column append table and write 10 rows
         pa_schema = pa.schema([

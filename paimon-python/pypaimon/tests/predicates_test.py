@@ -23,6 +23,7 @@ import unittest
 
 import pandas as pd
 import pyarrow as pa
+import pytest
 import pyarrow.dataset as ds
 
 from pypaimon import CatalogFactory, Schema
@@ -557,6 +558,7 @@ class PredicateTest(unittest.TestCase):
 
         self.assertEqual(scanner.to_table().to_pydict(), {"val": [3]})
 
+    @pytest.mark.python_plan
     def test_pk_reader_with_filter(self):
         pa_schema = pa.schema([
             pa.field('key1', pa.int32(), nullable=False),
