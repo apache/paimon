@@ -35,6 +35,8 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.scalatest.time.Span
 
 import java.lang.reflect.{InvocationHandler, Method, Proxy}
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -656,6 +658,118 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       spark.sql(s"SELECT * FROM T ORDER BY id"),
       Row(1, "a", "p1") :: Row(2, "b", "p2") :: Row(3, "c", "p1") :: Row(4, "d", "p2") ::
         Row(5, "e", "p1") :: Row(6, "f", "p2") :: Nil)
+  }
+
+  test("Paimon Procedure: compact skips expired partitions for aware bucket table") {
+    Seq(1, -1).foreach {
+      bucket =>
+        withClue(s"bucket=$bucket") {
+          withTable("T") {
+            createPartitionExpireTable(bucket, "values-time", endInputCheck = false)
+            val table = loadTable("T")
+            val (expiredDt, activeDt) = writeExpiredAndActivePartitions()
+
+            spark.sql(
+              "CALL sys.compact(table => 'T', " +
+                "options => 'compaction.skip-expired-partitions=true')")
+
+            Assertions.assertThat(lastSnapshotCommand(table)).isEqualTo(CommitKind.COMPACT)
+            val fileCounts = partitionFileCounts(table)
+            Assertions.assertThat(fileCounts(expiredDt)).isEqualTo(2)
+            Assertions.assertThat(fileCounts(activeDt)).isEqualTo(1)
+          }
+        }
+    }
+  }
+
+  test("Paimon Procedure: compact does not skip expired partitions by default") {
+    withTable("T") {
+      createPartitionExpireTable(1, "values-time", endInputCheck = false)
+      val table = loadTable("T")
+      val (expiredDt, activeDt) = writeExpiredAndActivePartitions()
+
+      spark.sql("CALL sys.compact(table => 'T')")
+
+      val fileCounts = partitionFileCounts(table)
+      Assertions.assertThat(fileCounts(expiredDt)).isEqualTo(1)
+      Assertions.assertThat(fileCounts(activeDt)).isEqualTo(1)
+    }
+  }
+
+  test("Paimon Procedure: compact skip expired partitions ignores update-time strategy") {
+    withTable("T") {
+      createPartitionExpireTable(1, "update-time", endInputCheck = false)
+      val table = loadTable("T")
+      val (expiredDt, activeDt) = writeExpiredAndActivePartitions()
+
+      spark.sql(
+        "CALL sys.compact(table => 'T', " +
+          "options => 'compaction.skip-expired-partitions=true')")
+
+      val fileCounts = partitionFileCounts(table)
+      Assertions.assertThat(fileCounts(expiredDt)).isEqualTo(1)
+      Assertions.assertThat(fileCounts(activeDt)).isEqualTo(1)
+    }
+  }
+
+  test("Paimon Procedure: compact end input still expires skipped partitions") {
+    withTable("T") {
+      createPartitionExpireTable(1, "values-time", endInputCheck = false)
+      val table = loadTable("T")
+      val (_, activeDt) = writeExpiredAndActivePartitions()
+
+      spark.sql(
+        "ALTER TABLE T SET TBLPROPERTIES (" +
+          "'end-input.check-partition-expire'='true')")
+
+      spark.sql(
+        "CALL sys.compact(table => 'T', " +
+          "options => 'compaction.skip-expired-partitions=true')")
+
+      val fileCounts = partitionFileCounts(table)
+      Assertions.assertThat(fileCounts.asJava).containsOnlyKeys(activeDt)
+      Assertions.assertThat(fileCounts(activeDt)).isEqualTo(1)
+    }
+  }
+
+  private def createPartitionExpireTable(
+      bucket: Int,
+      expirationStrategy: String,
+      endInputCheck: Boolean): Unit = {
+    val dynamicBucketOption =
+      if (bucket == -1) ", 'dynamic-bucket.initial-buckets'='1'" else ""
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, dt STRING)
+                 |TBLPROPERTIES (
+                 |  'primary-key'='id, dt',
+                 |  'bucket'='$bucket',
+                 |  'write-only'='true',
+                 |  'partition.expiration-time'='7 d',
+                 |  'partition.expiration-strategy'='$expirationStrategy',
+                 |  'partition.timestamp-formatter'='yyyyMMdd',
+                 |  'partition.expiration-check-interval'='999 d',
+                 |  'end-input.check-partition-expire'='$endInputCheck'
+                 |  $dynamicBucketOption)
+                 |PARTITIONED BY (dt)
+                 |""".stripMargin)
+  }
+
+  private def writeExpiredAndActivePartitions(): (String, String) = {
+    val formatter = DateTimeFormatter.ofPattern("yyyyMMdd")
+    val expiredDt = LocalDate.now.minusDays(30).format(formatter)
+    val activeDt = LocalDate.now.format(formatter)
+    spark.sql(s"INSERT INTO T VALUES (1, 'old', '$expiredDt'), (1, 'new', '$activeDt')")
+    spark.sql(s"INSERT INTO T VALUES (2, 'old', '$expiredDt'), (2, 'new', '$activeDt')")
+    (expiredDt, activeDt)
+  }
+
+  private def partitionFileCounts(table: FileStoreTable): Map[String, Int] = {
+    table.newSnapshotReader.read.dataSplits.asScala
+      .groupBy(_.partition().getString(0).toString)
+      .map {
+        case (partition, splits) =>
+          partition -> splits.map(_.dataFiles().size()).sum
+      }
   }
 
   test("Paimon Procedure: compact with partition_idle_time for pk table") {
