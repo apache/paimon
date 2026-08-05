@@ -35,6 +35,7 @@ from pypaimon.ray import (
     delete_write_paimon_checkpoint,
     write_paimon,
 )
+from pypaimon.ray.offset_source import _stable_units
 
 
 class RayIncrementalWriteTest(unittest.TestCase):
@@ -184,6 +185,12 @@ class RayIncrementalWriteTest(unittest.TestCase):
                 transform=changed_transform)._transform_identity(),
         )
 
+    def test_offset_units_have_stable_order(self):
+        first, first_ids = _stable_units([("p2", 2), ("p1", 1)])
+        second, second_ids = _stable_units([("p1", 1), ("p2", 2)])
+        self.assertEqual(first, second)
+        self.assertEqual(first_ids, second_ids)
+
     def test_resume_allows_compaction(self):
         target, source = self._create_tables()
         operation_id = "resume-{}".format(uuid.uuid4().hex)
@@ -211,7 +218,7 @@ class RayIncrementalWriteTest(unittest.TestCase):
                 self._incremental_write(target, source, operation_id)
 
         partial = self._read(target).to_pydict()
-        self.assertEqual([101, 20, 30], partial["feature"])
+        self.assertIn(partial["feature"], ([101, 20, 30], [10, 102, 30]))
 
         self._compact(target)
         self._incremental_write(target, source, operation_id)

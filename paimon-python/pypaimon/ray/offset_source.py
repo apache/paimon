@@ -47,6 +47,16 @@ def _code_identity(code):
     )
 
 
+def _stable_units(units):
+    """Order source units deterministically for checkpoint offsets."""
+    keyed = [
+        (hashlib.sha256(pickle.dumps(unit, protocol=4)).digest(), unit)
+        for unit in units
+    ]
+    keyed.sort(key=lambda item: item[0])
+    return [item[1] for item in keyed], tuple(item[0] for item in keyed)
+
+
 class PaimonOffsetSource:
     """A snapshot-pinned Paimon source processed in stable offset units.
 
@@ -118,10 +128,11 @@ class PaimonOffsetSource:
 
         read_type = read_builder.read_type()
         nested_name_paths = read_builder._nested_name_paths()
-        units = list(read_builder.new_scan().plan().splits())
+        units, unit_ids = _stable_units(
+            read_builder.new_scan().plan().splits())
         fingerprint = hashlib.sha256(pickle.dumps((
             self.table_identifier, snapshot_id, self.projection,
-            self.filter, self._transform_identity(), read_type, units),
+            self.filter, self._transform_identity(), read_type, unit_ids),
             protocol=4)).hexdigest()
         plan = {
             "table": self.table_identifier,
