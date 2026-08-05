@@ -120,6 +120,9 @@ class DataEvolutionGlobalIndexScanner:
                 )
             if not groups:
                 return []
+            if len(groups) == 1:
+                return _create_readers(
+                    file_io, index_path, groups[0].metas, field, executor, options)
             union_coverage = Range.sort_and_merge_overlap(
                 [
                     range_key

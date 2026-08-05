@@ -1734,23 +1734,29 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             has_nulls=False)
 
         with mock.patch(
-                "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexReader",
-                _StubBTreeReader):
+                "pypaimon.globalindex.data_evolution_global_index_scanner."
+                "_exclude_ranges",
+                side_effect=AssertionError("single group must not compute padding")):
             with mock.patch(
-                    "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
-                    return_value=wide_meta):
-                scanner = DataEvolutionGlobalIndexScanner(
-                    fields=table.fields,
-                    file_io=table.file_io,
-                    index_path="/unused",
-                    index_files=[shard_a, shard_b],
-                )
-                try:
-                    result = scanner.scan(
-                        Predicate(method="equal", index=0, field="id",
-                                  literals=[7]))
-                finally:
-                    scanner.close()
+                    "pypaimon.globalindex.btree.lazy_filtered_btree_reader."
+                    "BTreeIndexReader",
+                    _StubBTreeReader):
+                with mock.patch(
+                        "pypaimon.globalindex.sorted_file_global_index_reader."
+                        "SortedIndexFileMeta.deserialize",
+                        return_value=wide_meta):
+                    scanner = DataEvolutionGlobalIndexScanner(
+                        fields=table.fields,
+                        file_io=table.file_io,
+                        index_path="/unused",
+                        index_files=[shard_a, shard_b],
+                    )
+                    try:
+                        result = scanner.scan(
+                            Predicate(method="equal", index=0, field="id",
+                                      literals=[7]))
+                    finally:
+                        scanner.close()
 
         self.assertIsNotNone(result)
         hits = sorted(list(result.results()))
