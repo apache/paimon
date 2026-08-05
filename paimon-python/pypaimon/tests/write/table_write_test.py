@@ -142,13 +142,29 @@ class TableWriteTest(unittest.TestCase):
             commit.close()
 
     @staticmethod
+    def _groups_from_rows(partitions, buckets, num_rows):
+        """Mirror RowKeyExtractor.extract_partition_bucket_groups' contract from
+        per-row (partition, bucket) values: list of (partition, bucket,
+        row_indices) with row_indices None when the whole batch is one group."""
+        grouped = {}
+        for i in range(num_rows):
+            grouped.setdefault((tuple(partitions[i]), buckets[i]), []).append(i)
+        out = []
+        for (partition, bucket), idxs in grouped.items():
+            row_indices = None if len(idxs) == num_rows \
+                else pa.array(idxs, type=pa.int64())
+            out.append((partition, bucket, row_indices))
+        return out
+
+    @staticmethod
     def _mock_table_write(partitions, buckets):
         table_write = object.__new__(TableWrite)
         table_write._validate_pyarrow_schema = Mock()
         table_write.row_key_extractor = Mock()
         table_write.file_store_write = Mock()
-        table_write.row_key_extractor.extract_partition_bucket_batch.return_value = (
-            partitions, buckets)
+        table_write.row_key_extractor.extract_partition_bucket_groups.side_effect = (
+            lambda data: TableWriteTest._groups_from_rows(
+                partitions, buckets, data.num_rows))
         return table_write
 
     def test_write_arrow_batch_reuses_full_batch(self):
@@ -206,6 +222,143 @@ class TableWriteTest(unittest.TestCase):
                          calls[0][0][2].to_pydict())
         self.assertEqual({'id': [1, 3], 'payload': [b'b', b'd']},
                          calls[1][0][2].to_pydict())
+
+    def test_write_arrow_batch_handles_unsorted_row_indices(self):
+        # Arrow's grouped list aggregation runs multi-threaded and does NOT
+        # guarantee ascending order within a group. A non-contiguous group whose
+        # scrambled endpoints happen to span exactly len(group) must not be
+        # mistaken for a contiguous slice. Here ('p1',) = rows {0, 2, 3} arrives
+        # out of order as [0, 3, 2]: endpoints 0 and 2 span 3 == len, so a
+        # first/last positional check would wrongly slice rows 0,1,2.
+        data = pa.RecordBatch.from_pydict({
+            'id': [0, 1, 2, 3],
+            'payload': [b'a', b'b', b'c', b'd'],
+        })
+        table_write = object.__new__(TableWrite)
+        table_write._validate_pyarrow_schema = Mock()
+        table_write.file_store_write = Mock()
+        table_write.row_key_extractor = Mock()
+        table_write.row_key_extractor.extract_partition_bucket_groups.return_value = [
+            (('p1',), 0, pa.array([0, 3, 2], type=pa.int64())),
+            (('p2',), 0, pa.array([1], type=pa.int64())),
+        ]
+
+        table_write.write_arrow_batch(data)
+
+        calls = table_write.file_store_write.write.call_args_list
+        self.assertEqual(2, len(calls))
+        # Membership is what matters, not row order within the group.
+        self.assertEqual({0, 2, 3}, set(calls[0][0][2].column('id').to_pylist()))
+        self.assertEqual({1}, set(calls[1][0][2].column('id').to_pylist()))
+
+    def test_write_arrow_batch_contiguous_group_detected_despite_unsorted(self):
+        # A contiguous group delivered shuffled ([3, 1, 2]) must still be
+        # recognized via min/max and take the zero-copy slice path.
+        data = pa.RecordBatch.from_pydict({
+            'id': [0, 1, 2, 3],
+            'payload': [b'a', b'b', b'c', b'd'],
+        })
+        table_write = object.__new__(TableWrite)
+        table_write._validate_pyarrow_schema = Mock()
+        table_write.file_store_write = Mock()
+        table_write.row_key_extractor = Mock()
+        table_write.row_key_extractor.extract_partition_bucket_groups.return_value = [
+            (('p0',), 0, pa.array([0], type=pa.int64())),
+            (('p1',), 0, pa.array([3, 1, 2], type=pa.int64())),
+        ]
+
+        with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
+            table_write.write_arrow_batch(data)
+
+        take.assert_not_called()
+        calls = table_write.file_store_write.write.call_args_list
+        self.assertEqual({1, 2, 3}, set(calls[1][0][2].column('id').to_pylist()))
+
+    def _unaware_partitioned_extractor(self, name, partition_keys):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=partition_keys,
+            options={'bucket': '-1'})
+        self.catalog.create_table(name, schema, False)
+        return self.catalog.get_table(name).create_row_key_extractor()
+
+    def test_extract_partition_bucket_groups_multi_partition(self):
+        ex = self._unaware_partitioned_extractor(
+            'default.t_groups_multi', ['dt'])
+        data = pa.RecordBatch.from_pydict({
+            'user_id': [1, 2, 3, 4],
+            'item_id': [1, 2, 3, 4],
+            'behavior': ['a', 'b', 'c', 'd'],
+            'dt': ['p1', 'p2', 'p1', 'p2'],   # interleaved -> non-contiguous
+        }, schema=self.pa_schema)
+
+        groups = ex.extract_partition_bucket_groups(data)
+        # Membership, not within-group order (Arrow's threaded aggregation does
+        # not guarantee an order); sort so the assertion stays deterministic.
+        self.assertEqual(
+            {(('p1',), 0): [0, 2], (('p2',), 0): [1, 3]},
+            {(p, b): sorted(idx.to_pylist()) for p, b, idx in groups})
+
+    def test_extract_partition_bucket_groups_single_group_is_none(self):
+        ex = self._unaware_partitioned_extractor(
+            'default.t_groups_single', ['dt'])
+        data = pa.RecordBatch.from_pydict({
+            'user_id': [1, 2, 3],
+            'item_id': [1, 2, 3],
+            'behavior': ['a', 'b', 'c'],
+            'dt': ['p1', 'p1', 'p1'],   # one partition -> whole batch
+        }, schema=self.pa_schema)
+
+        groups = ex.extract_partition_bucket_groups(data)
+        self.assertEqual(1, len(groups))
+        partition, bucket, row_indices = groups[0]
+        self.assertEqual(('p1',), partition)
+        self.assertEqual(0, bucket)
+        # None signals "reuse the original batch" (no BLOB copy via take).
+        self.assertIsNone(row_indices)
+
+    def test_extract_partition_bucket_groups_arrow_matches_fallback(self):
+        ex = self._unaware_partitioned_extractor(
+            'default.t_groups_equiv', ['behavior', 'dt'])
+        data = pa.RecordBatch.from_pydict({
+            'user_id': [1, 2, 3, 4, 5],
+            'item_id': [1, 2, 3, 4, 5],
+            'behavior': ['a', 'b', 'a', 'b', 'a'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2'],
+        }, schema=self.pa_schema)
+        buckets = ex._extract_buckets_batch(data)
+
+        def norm(groups):
+            # Compare group membership, not within-group order: Arrow's threaded
+            # list aggregation does not guarantee an order for the arrow path.
+            return {
+                (p, b): (None if idx is None else sorted(idx.to_pylist()))
+                for p, b, idx in groups
+            }
+
+        self.assertEqual(
+            norm(ex._group_indices_arrow(data, buckets)),
+            norm(ex._group_indices_python(data, buckets)))
+
+    def test_extract_partition_bucket_groups_without_arrow_group_by(self):
+        # pyarrow < 7.0.0 (e.g. 6.0.1 on the Python 3.6 lane) has no
+        # Table.group_by; extract_partition_bucket_groups must transparently use
+        # the per-row fallback instead of raising AttributeError.
+        ex = self._unaware_partitioned_extractor(
+            'default.t_groups_no_group_by', ['dt'])
+        data = pa.RecordBatch.from_pydict({
+            'user_id': [1, 2, 3, 4],
+            'item_id': [1, 2, 3, 4],
+            'behavior': ['a', 'b', 'c', 'd'],
+            'dt': ['p1', 'p2', 'p1', 'p2'],
+        }, schema=self.pa_schema)
+
+        with patch('pypaimon.write.row_key_extractor._ARROW_GROUP_BY_SUPPORTED',
+                   False):
+            groups = ex.extract_partition_bucket_groups(data)
+
+        self.assertEqual(
+            {(('p1',), 0): [0, 2], (('p2',), 0): [1, 3]},
+            {(p, b): sorted(idx.to_pylist()) for p, b, idx in groups})
 
     def test_write_snapshot(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])

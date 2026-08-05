@@ -15,12 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import logging
 import math
 import random
 import struct
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
@@ -29,6 +31,13 @@ from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 from pypaimon.table.row.internal_row import RowKind
+
+logger = logging.getLogger(__name__)
+
+# pyarrow's group_by/aggregate (Acero) API was introduced in 7.0.0. Older
+# pyarrow (e.g. 6.0.1 on the Python 3.6 lane) has no ``Table.group_by``, so the
+# write path must use the per-row grouping fallback there instead of raising.
+_ARROW_GROUP_BY_SUPPORTED = hasattr(pa.Table, "group_by")
 
 _MURMUR_C1 = 0xCC9E2D51
 _MURMUR_C2 = 0x1B873593
@@ -94,6 +103,91 @@ class RowKeyExtractor(ABC):
     def extract_partitions_batch(self, data: pa.RecordBatch) -> List[Tuple]:
         """Return partition tuples without calculating bucket hashes."""
         return self._extract_partitions_batch(data)
+
+    def extract_partition_bucket_groups(
+            self, data: pa.RecordBatch) -> List[Tuple[Tuple, int, Optional[pa.Array]]]:
+        """Group row indices by (partition, bucket) for the write path.
+
+        Returns a list of ``(partition, bucket, row_indices)`` where
+        ``row_indices`` is an Arrow ``int64`` array of the rows belonging to the
+        group, or ``None`` when the whole batch is a single group (so callers can
+        pass the original batch through without copying large values, e.g. BLOBs).
+
+        The grouping is done in Arrow so only the distinct group keys are
+        materialized into Python objects, instead of one ``.as_py()`` scalar per
+        row. The old per-row loop held the GIL for the entire batch, which
+        serialized multi-threaded writers down to ~1 core.
+
+        Buckets are computed once here, in row order, via ``_extract_buckets_batch``
+        so stateful extractors (dynamic bucket) keep their exact assignment
+        sequence and side effects regardless of which grouping path runs.
+        """
+        buckets = self._extract_buckets_batch(data)
+        if _ARROW_GROUP_BY_SUPPORTED:
+            try:
+                return self._group_indices_arrow(data, buckets)
+            except (pa.ArrowNotImplementedError, pa.ArrowInvalid):
+                # Only Arrow's own "can't group this column type" errors fall
+                # back to the legacy per-row grouping; any other exception is a
+                # real bug and must propagate rather than silently degrade to the
+                # GIL-bound path. `buckets` is reused (never recomputed) so
+                # stateful extractors are not double-notified. Log so the
+                # (GIL-bound) fallback is visible.
+                logger.warning(
+                    "Arrow group_by could not handle the partition/bucket key "
+                    "types; falling back to per-row grouping (GIL-bound).",
+                    exc_info=True)
+        # pyarrow < 7.0.0 has no group_by; use the per-row grouping directly.
+        return self._group_indices_python(data, buckets)
+
+    def _group_indices_arrow(
+            self, data: pa.RecordBatch,
+            buckets: List[int]) -> List[Tuple[Tuple, int, Optional[pa.Array]]]:
+        num_rows = data.num_rows
+        columns = {}
+        key_names = []
+        for k, pi in enumerate(self.partition_indices):
+            name = f"__p{k}"
+            columns[name] = data.column(pi)
+            key_names.append(name)
+        columns["__bucket"] = pa.array(buckets, type=pa.int32())
+        key_names.append("__bucket")
+        # Build the row index with numpy (C speed, releases the GIL). Using a
+        # Python range() here makes pyarrow iterate it element by element under
+        # the GIL, which dominates this method and kills multi-thread scaling.
+        columns["__idx"] = pa.array(np.arange(num_rows, dtype=np.int64))
+
+        grouped = pa.table(columns).group_by(key_names).aggregate([("__idx", "list")])
+        num_groups = grouped.num_rows
+
+        num_part = len(self.partition_indices)
+        part_values = [grouped.column(f"__p{k}").to_pylist() for k in range(num_part)]
+        bucket_values = grouped.column("__bucket").to_pylist()
+        idx_lists = grouped.column("__idx_list")
+
+        groups = []
+        for gi in range(num_groups):
+            partition = tuple(part_values[k][gi] for k in range(num_part))
+            row_indices = None if num_groups == 1 else idx_lists[gi].values
+            groups.append((partition, bucket_values[gi], row_indices))
+        return groups
+
+    def _group_indices_python(
+            self, data: pa.RecordBatch,
+            buckets: List[int]) -> List[Tuple[Tuple, int, Optional[pa.Array]]]:
+        partitions = self._extract_partitions_batch(data)
+        num_rows = data.num_rows
+        partition_bucket_groups = {}
+        for i in range(num_rows):
+            partition_bucket_groups.setdefault(
+                (tuple(partitions[i]), buckets[i]), []).append(i)
+
+        groups = []
+        for (partition, bucket), row_indices in partition_bucket_groups.items():
+            indices = None if len(row_indices) == num_rows \
+                else pa.array(row_indices, type=pa.int64())
+            groups.append((partition, bucket, indices))
+        return groups
 
     def extract_partition_bucket_row(
             self, values_by_name: Dict[str, Any]) -> Tuple[Tuple, int]:
