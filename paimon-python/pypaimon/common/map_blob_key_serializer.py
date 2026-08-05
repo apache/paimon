@@ -157,6 +157,38 @@ class DateMapBlobKeySerializer(MapBlobKeySerializer):
         return _EPOCH_DATE + datetime.timedelta(days=struct.unpack('<i', data)[0])
 
 
+class TimeMapBlobKeySerializer(MapBlobKeySerializer):
+
+    def __init__(self, type_name: str):
+        self._type_name = type_name
+        self.fixed_length = 4
+
+    def serialize(self, key) -> bytes:
+        if not isinstance(key, datetime.time):
+            raise ValueError(
+                f"MAP<X, BLOB> {self._type_name} key must be a datetime.time."
+            )
+        millis = (
+            (key.hour * 3600 + key.minute * 60 + key.second) * 1000
+            + key.microsecond // 1000
+        )
+        return struct.pack('<i', millis)
+
+    def deserialize(self, data: bytes):
+        if len(data) != self.fixed_length:
+            raise ValueError(
+                f"Expected {self.fixed_length} key bytes, but found {len(data)}."
+            )
+        millis = struct.unpack('<i', data)[0]
+        seconds, millis = divmod(millis, 1000)
+        minutes, second = divmod(seconds, 60)
+        hour, minute = divmod(minutes, 60)
+        try:
+            return datetime.time(hour, minute, second, millis * 1000)
+        except ValueError as error:
+            raise ValueError("Invalid MAP<X, BLOB> TIME key.") from error
+
+
 def create_map_blob_key_serializer(data_type: DataType) -> MapBlobKeySerializer:
     if not isinstance(data_type, AtomicType):
         raise ValueError(f"Unsupported key type for MAP<X, BLOB>: {data_type}")
@@ -177,6 +209,8 @@ def create_map_blob_key_serializer(data_type: DataType) -> MapBlobKeySerializer:
         return DecimalMapBlobKeySerializer(type_name, precision, scale)
     if type_name == 'DATE':
         return DateMapBlobKeySerializer()
+    if type_name == 'TIME' or type_name.startswith('TIME('):
+        return TimeMapBlobKeySerializer(type_name)
     if type_name == 'STRING' or type_name.startswith('CHAR') or type_name.startswith('VARCHAR'):
         return MapBlobKeySerializer(type_name)
     raise ValueError(f"Unsupported key type for MAP<X, BLOB>: {data_type}")
