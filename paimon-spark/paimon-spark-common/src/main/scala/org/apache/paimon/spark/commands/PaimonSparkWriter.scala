@@ -66,10 +66,6 @@ case class PaimonSparkWriter(
   private val fullCompactionDeltaCommits: Option[Int] =
     Option.apply(coreOptions.fullCompactionDeltaCommits())
 
-  private val forceFullCompaction = fullCompactionDeltaCommits.exists {
-    deltaCommits => deltaCommits > 0 && batchId.forall(id => (id + 1) % deltaCommits == 0)
-  }
-
   @transient private lazy val serializer = new CommitMessageSerializer
 
   @transient private var stagedSparkSession: SparkSession = _
@@ -295,11 +291,6 @@ case class PaimonSparkWriter(
           )
         }
 
-      case POSTPONE_MODE if postponeBatchWriteFixedBucket =>
-        // Job 1 only materializes the input into uncommitted postpone files. The driver computes
-        // the per-partition bucket layout after this job, and following jobs write real files.
-        writeWithoutBucket(withInitBucketCol)
-
       case BUCKET_UNAWARE | POSTPONE_MODE =>
         var input = data
         if (tableSchema.partitionKeys().size() > 0) {
@@ -437,8 +428,7 @@ case class PaimonSparkWriter(
         table,
         stagedSparkSession,
         postponeBaseSnapshotId,
-        overwritePartitionSpec,
-        forceFullCompaction).commit(commitMessages, finalOperation)
+        overwritePartitionSpec).commit(commitMessages, finalOperation)
       postCommit(finalMessages)
       return
     }

@@ -38,29 +38,6 @@ import scala.collection.JavaConverters._
 
 class PostponeBucketTableTest extends PaimonSparkTestBase {
 
-  test("Postpone bucket table: staged fixed write preserves full compaction") {
-    withTable("t") {
-      sql("""
-            |CREATE TABLE t (
-            |  k INT,
-            |  v STRING
-            |) TBLPROPERTIES (
-            |  'primary-key' = 'k',
-            |  'bucket' = '-2',
-            |  'postpone.batch-write-fixed-bucket' = 'true',
-            |  'postpone.target-row-num-per-bucket' = '10',
-            |  'full-compaction.delta-commits' = '1'
-            |)
-            |""".stripMargin)
-
-      sql("INSERT INTO t VALUES (1, 'one')")
-      sql("INSERT INTO t VALUES (2, 'two')")
-
-      checkAnswer(sql("SELECT * FROM t ORDER BY k"), Seq(Row(1, "one"), Row(2, "two")))
-      assert(loadTable("t").latestSnapshot().get().commitKind() == CommitKind.COMPACT)
-    }
-  }
-
   test("Postpone bucket table: staged fixed write respects non-ignored empty commit") {
     withTable("t") {
       sql("""

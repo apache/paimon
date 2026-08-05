@@ -51,8 +51,7 @@ private[spark] class SparkPostponeStagedCommitter(
     table: FileStoreTable,
     @transient spark: SparkSession,
     baseSnapshotId: Option[Long],
-    overwritePartitionSpec: Option[Map[String, String]],
-    forceFullCompaction: Boolean)
+    overwritePartitionSpec: Option[Map[String, String]])
   extends Serializable {
 
   import SparkPostponeStagedCommitter._
@@ -275,8 +274,7 @@ private[spark] class SparkPostponeStagedCommitter(
       bucketNums,
       replacePreviousFiles,
       restoreSnapshotId = restoreSnapshotId,
-      writeBuilder = fixedWriteBuilder,
-      fullCompaction = forceFullCompaction)
+      writeBuilder = fixedWriteBuilder)
   }
 
   private def rewriteRealBuckets(
@@ -293,8 +291,7 @@ private[spark] class SparkPostponeStagedCommitter(
       targetBucketNums,
       replacePreviousFiles = true,
       restoreSnapshotId = None,
-      writeBuilder = rescaleWriteBuilder,
-      fullCompaction = false)
+      writeBuilder = rescaleWriteBuilder)
   }
 
   private def writeRoutedRecords(
@@ -302,8 +299,7 @@ private[spark] class SparkPostponeStagedCommitter(
       bucketNums: Map[BinaryRow, Int],
       replacePreviousFiles: Boolean,
       restoreSnapshotId: Option[Long],
-      writeBuilder: PostponeFixedBucketWriteBuilder,
-      fullCompaction: Boolean): Seq[CommitMessage] = {
+      writeBuilder: PostponeFixedBucketWriteBuilder): Seq[CommitMessage] = {
     val written = records.mapPartitions {
       input =>
         if (!input.hasNext) {
@@ -339,9 +335,6 @@ private[spark] class SparkPostponeStagedCommitter(
                 val row = SerializationUtils.deserializeBinaryRow(record.value)
                 row.setRowKind(RowKind.fromByteValue(record.rowKind))
                 write.writeAndReturn(row, bucket, bucketNums(partition))
-              }
-              if (fullCompaction) {
-                write.compact(partition, bucket, true)
               }
             }
             val serializer = new CommitMessageSerializer()
