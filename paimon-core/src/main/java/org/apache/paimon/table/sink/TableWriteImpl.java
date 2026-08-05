@@ -249,6 +249,12 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         write.compact(partition, bucket, fullCompaction);
     }
 
+    /** Compact a bucket whose partition-level total bucket count is determined at runtime. */
+    public void compact(BinaryRow partition, int bucket, int totalBuckets, boolean fullCompaction)
+            throws Exception {
+        write.compact(partition, bucket, totalBuckets, fullCompaction);
+    }
+
     @Override
     public TableWriteImpl<T> withMetricRegistry(MetricRegistry metricRegistry) {
         write.withMetricRegistry(metricRegistry);

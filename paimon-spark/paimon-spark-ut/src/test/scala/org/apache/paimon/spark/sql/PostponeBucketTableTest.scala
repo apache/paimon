@@ -418,6 +418,20 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
           sql("SELECT pt, count(*) FROM t GROUP BY pt ORDER BY pt"),
           Seq(Row(0, 13L), Row(1, 4L)))
       }
+
+      // Background compaction materializes the level-0 files and deletion vectors.
+      sql("CALL sys.compact(table => 't')")
+      val compactedFiles = loadTable("t")
+        .newSnapshotReader()
+        .onlyReadRealBuckets()
+        .read()
+        .dataSplits()
+        .asScala
+        .flatMap(_.dataFiles().asScala)
+      assert(
+        compactedFiles.forall(_.level() > 0),
+        compactedFiles.map(file => s"${file.fileName()}:L${file.level()}").mkString(", "))
+      checkAnswer(sql("SELECT k, v, pt FROM t ORDER BY pt, k"), expected)
       checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(0L)))
     }
   }

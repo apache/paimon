@@ -166,6 +166,7 @@ case class SparkPostponeCompactProcedure(
                   row.copy(),
                   SerializationUtils.serializeBinaryRow(partition),
                   row.getInt(bucketColIdx),
+                  bucketAssigner.assign(partition),
                   compactMarker = false)
             }
         }
@@ -178,6 +179,7 @@ case class SparkPostponeCompactProcedure(
           null,
           SerializationUtils.serializeBinaryRow(bucket.partition()),
           bucket.bucket(),
+          bucket.totalBuckets(),
           compactMarker = true)
     }
     val markerRdd =
@@ -216,19 +218,20 @@ case class SparkPostponeCompactProcedure(
           var commitInvoked = false
           try {
             val pendingBuckets = mutable.LinkedHashMap
-              .empty[SparkPostponeCompactProcedure.PostponeCompactKey, Array[Byte]]
+              .empty[SparkPostponeCompactProcedure.PostponeCompactKey, (Array[Byte], Int)]
             works.foreach {
               case (key, work) =>
-                pendingBuckets.put(key, work.partition)
+                pendingBuckets.put(key, (work.partition, work.totalBuckets))
                 if (!work.compactMarker) {
                   dataWrite.write(work.row, work.bucket)
                 }
             }
             pendingBuckets.foreach {
-              case (key, partition) =>
+              case (key, (partition, totalBuckets)) =>
                 dataWrite.write.compact(
                   SerializationUtils.deserializeBinaryRow(partition),
                   key.bucket,
+                  totalBuckets,
                   false)
             }
             commitInvoked = true
@@ -301,6 +304,7 @@ object SparkPostponeCompactProcedure {
       row: Row,
       partition: Array[Byte],
       bucket: Int,
+      totalBuckets: Int,
       compactMarker: Boolean)
     extends Serializable
 

@@ -117,6 +117,12 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
      */
     void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
 
+    /** Compact a bucket whose partition-level total bucket count is determined at runtime. */
+    default void compact(BinaryRow partition, int bucket, int totalBuckets, boolean fullCompaction)
+            throws Exception {
+        throw new UnsupportedOperationException("Runtime bucket counts are not supported.");
+    }
+
     /**
      * Notify that some new files are created at given snapshot in given bucket.
      *

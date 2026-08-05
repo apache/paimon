@@ -214,6 +214,18 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
+    public void compact(BinaryRow partition, int bucket, int totalBuckets, boolean fullCompaction)
+            throws Exception {
+        checkArgument(totalBuckets > 0, "Total number of buckets must be positive.");
+        checkArgument(
+                bucket >= 0 && bucket < totalBuckets,
+                "Bucket %s is out of range [0, %s).",
+                bucket,
+                totalBuckets);
+        getWriterWrapper(partition, bucket, totalBuckets).writer.compact(fullCompaction);
+    }
+
+    @Override
     public void notifyNewFiles(
             long snapshotId, BinaryRow partition, int bucket, List<DataFileMeta> files) {
         WriterContainer<T> writerContainer = getWriterWrapper(partition, bucket);
