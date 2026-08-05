@@ -73,9 +73,11 @@ class SuccessResult(CommitResult):
 class RetryResult(CommitResult):
 
     def __init__(self, latest_snapshot, exception: Optional[Exception] = None,
-                 base_data_files: Optional[List[ManifestEntry]] = None):
+                 base_data_files: Optional[List[ManifestEntry]] = None,
+                 commit_result_may_be_uncertain: bool = False):
         self.latest_snapshot = latest_snapshot
         self.exception = exception
+        self.commit_result_may_be_uncertain = commit_result_may_be_uncertain
         # Base entries as of latest_snapshot, carried so the next attempt reuses
         # them and reads only the incremental changes.
         self.base_data_files = base_data_files
@@ -210,6 +212,10 @@ class FileStoreCommit:
             detect_conflicts = True
         if self.conflict_detection.has_hash_index_changes(
                 index_adds + index_deletes):
+            detect_conflicts = True
+        if any(message.total_buckets is not None
+               for message in commit_messages):
+            # Detect concurrent bucket-count changes in postpone APPENDs.
             detect_conflicts = True
 
         self._try_commit(commit_kind=commit_kind,
@@ -377,6 +383,8 @@ class FileStoreCommit:
 
         retry_count = 0
         retry_result = None
+        commit_result_may_be_uncertain = False
+        uncertain_commit_exception = None
         rewritten_commit_entries = None
         start_time_ms = int(time.time() * 1000)
         while True:
@@ -404,6 +412,7 @@ class FileStoreCommit:
                 index_deletes=index_deletes,
                 index_adds=index_adds,
                 hash_index_base_snapshot=hash_index_base_snapshot,
+                commit_result_may_be_uncertain=commit_result_may_be_uncertain,
             )
 
             if isinstance(result, RewriteResult):
@@ -438,6 +447,10 @@ class FileStoreCommit:
                 break
             else:
                 retry_result = result
+                if result.commit_result_may_be_uncertain:
+                    commit_result_may_be_uncertain = True
+                    if uncertain_commit_exception is None:
+                        uncertain_commit_exception = result.exception
 
             elapsed_ms = int(time.time() * 1000) - start_time_ms
             if elapsed_ms > self.commit_timeout or retry_count >= self.commit_max_retries:
@@ -458,6 +471,10 @@ class FileStoreCommit:
                     f"after {elapsed_ms} millis with {retry_count} retries, "
                     f"there maybe exist commit conflicts between multiple jobs."
                 )
+                if commit_result_may_be_uncertain:
+                    raise RuntimeError(error_msg) from uncertain_commit_exception
+                if retry_result is not None and retry_result.exception is None:
+                    raise CommitConflictError(error_msg)
                 if retry_result is not None and retry_result.exception:
                     raise RuntimeError(error_msg) from retry_result.exception
                 else:
@@ -475,7 +492,8 @@ class FileStoreCommit:
                          allow_rollback: bool = False,
                          index_deletes=None,
                          index_adds=None,
-                         hash_index_base_snapshot=None) -> CommitResult:
+                         hash_index_base_snapshot=None,
+                         commit_result_may_be_uncertain: bool = False) -> CommitResult:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
             return SuccessResult()
@@ -491,7 +509,7 @@ class FileStoreCommit:
                     hash_index_base_snapshot, latest_snapshot_id
                 )
             )
-            if retry_result is None:
+            if not commit_result_may_be_uncertain:
                 raise CommitConflictError(str(conflict)) from conflict
             raise conflict
 
@@ -543,7 +561,7 @@ class FileStoreCommit:
 
             if conflict_exception is not None:
                 rewrite_result = self._try_rewrite_row_id_conflict(
-                    retry_result,
+                    commit_result_may_be_uncertain,
                     conflict_exception,
                     latest_snapshot,
                     base_data_files,
@@ -559,7 +577,7 @@ class FileStoreCommit:
                         # Rolled back: base/snapshot no longer valid; next attempt
                         # re-scans from scratch (matches Java RollbackRetryResult).
                         return RetryResult(None, conflict_exception)
-                if retry_result is None:
+                if not commit_result_may_be_uncertain:
                     raise CommitConflictError(
                         str(conflict_exception)
                     ) from conflict_exception
@@ -684,7 +702,12 @@ class FileStoreCommit:
         except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
             logger.warning("Retry commit for exception.", exc_info=True)
-            return RetryResult(latest_snapshot, e, base_data_files=base_data_files)
+            return RetryResult(
+                latest_snapshot,
+                e,
+                base_data_files=base_data_files,
+                commit_result_may_be_uncertain=True,
+            )
 
         logger.info(
             "Successfully commit snapshot %d to table %s by user %s "
@@ -709,7 +732,7 @@ class FileStoreCommit:
 
     def _try_rewrite_row_id_conflict(
             self,
-            retry_result,
+            commit_result_may_be_uncertain,
             conflict_exception,
             latest_snapshot,
             base_data_files,
@@ -721,7 +744,7 @@ class FileStoreCommit:
             return None
         if commit_kind != "APPEND" or changelog_entries:
             return None
-        if retry_result is not None and retry_result.exception is not None:
+        if commit_result_may_be_uncertain:
             return None
 
         non_compaction_conflict = (
@@ -839,12 +862,17 @@ class FileStoreCommit:
         changelog_entries = []
         for msg in commit_messages:
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            total_buckets = (
+                msg.total_buckets
+                if msg.total_buckets is not None
+                else self.table.total_buckets
+            )
             for file in msg.changelog_files:
                 changelog_entries.append(ManifestEntry(
                     kind=0,
                     partition=partition,
                     bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
+                    total_buckets=total_buckets,
                     file=file
                 ))
         return changelog_entries
@@ -853,12 +881,17 @@ class FileStoreCommit:
         commit_entries = []
         for msg in commit_messages:
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            total_buckets = (
+                msg.total_buckets
+                if msg.total_buckets is not None
+                else self.table.total_buckets
+            )
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,
                     partition=partition,
                     bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
+                    total_buckets=total_buckets,
                     file=file,
                 ))
             for file in msg.deleted_files:
@@ -866,7 +899,7 @@ class FileStoreCommit:
                     kind=1,
                     partition=partition,
                     bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
+                    total_buckets=total_buckets,
                     file=file,
                 ))
         return commit_entries
@@ -994,6 +1027,8 @@ class FileStoreCommit:
                     'last_file_creation_time': 0,
                     'total_buckets': entry.total_buckets
                 }
+            partition_stats[partition_key]['total_buckets'] = (
+                entry.total_buckets)
 
             # Following Java implementation: PartitionEntry.fromDataFile()
             file_meta = entry.file

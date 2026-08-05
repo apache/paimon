@@ -175,6 +175,35 @@ class TestFileStoreCommit(unittest.TestCase):
         expected_time = file_meta_2.creation_time_epoch_millis()
         self.assertEqual(stat.last_file_creation_time, expected_time)
 
+    def test_partition_statistics_use_replacement_bucket_count(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        file_meta = Mock(row_count=1, file_size=10, creation_time=None)
+
+        for old_buckets, new_buckets in [(-2, 2), (2, 3)]:
+            with self.subTest(old=old_buckets, new=new_buckets):
+                partition = GenericRow(['2024-01-15', 'us-east-1'], None)
+                entries = [
+                    ManifestEntry(
+                        kind=1,
+                        partition=partition,
+                        bucket=0,
+                        total_buckets=old_buckets,
+                        file=file_meta,
+                    ),
+                    ManifestEntry(
+                        kind=0,
+                        partition=partition,
+                        bucket=0,
+                        total_buckets=new_buckets,
+                        file=file_meta,
+                    ),
+                ]
+
+                statistics = (
+                    file_store_commit._generate_partition_statistics(entries))
+                self.assertEqual(new_buckets, statistics[0].total_buckets)
+
     def test_generate_partition_statistics_multiple_partitions(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         """Test partition statistics generation with multiple different partitions."""

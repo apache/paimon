@@ -24,7 +24,10 @@ import pyarrow as pa
 from ray.data._internal.execution.interfaces import TaskContext
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.ray_datasink import PaimonDatasink
+from pypaimon.write.ray_datasink import (
+    PaimonDatasink,
+    _consume_write_results,
+)
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_write import TableWrite
 
@@ -304,6 +307,48 @@ class RaySinkTest(unittest.TestCase):
             mock_write.prepare_commit.assert_called_once()
             mock_write.abort.assert_called_once()
 
+    def test_postpone_worker_uses_driver_bucket_plan_without_manifest_scan(self):
+        from pypaimon.write.postpone_bucket import (
+            PostponeBucketPlan,
+            PostponeBucketPlanner,
+        )
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('value', pa.float64()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={
+                'bucket': '-2',
+            },
+        )
+        identifier = 'test_db.test_postpone_worker_plan'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        datasink = PaimonDatasink(
+            table,
+            postpone_bucket_plan=PostponeBucketPlan({(): 2}),
+        )
+        data = pa.Table.from_pydict({
+            'id': list(range(20)),
+            'name': ['name-{}'.format(i) for i in range(20)],
+            'value': [float(i) for i in range(20)],
+        }, schema=pa_schema)
+
+        with patch.object(
+            PostponeBucketPlanner,
+            '_load_bucket_metadata',
+            side_effect=AssertionError("worker must not scan manifests"),
+        ) as load:
+            messages = datasink.write([data], Mock(spec=TaskContext))
+
+        load.assert_not_called()
+        self.assertEqual({0, 1}, {message.bucket for message in messages})
+        self.assertEqual({2}, {message.total_buckets for message in messages})
+
     def test_write_does_not_return_prepared_messages_when_dedicated_close_aborts(self):
         from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
 
@@ -561,6 +606,67 @@ class RaySinkTest(unittest.TestCase):
         self.assertEqual(abort_args[1], commit_msg2)
         mock_commit.close.assert_called_once()
         self.assertEqual(datasink._pending_commit_messages, [])
+
+    def test_consume_write_results_stages_messages_before_late_failure(self):
+        import pickle
+
+        message_col = '__messages__'
+
+        class FailingResults:
+            def iter_batches(self, batch_format):
+                if batch_format != 'pyarrow':
+                    raise AssertionError(batch_format)
+                yield pa.table({
+                    message_col: pa.array(
+                        [pickle.dumps(['first'])], type=pa.binary()
+                    ),
+                })
+                raise RuntimeError('late failure')
+
+        coordinator = Mock()
+        with self.assertRaisesRegex(RuntimeError, 'late failure'):
+            _consume_write_results(
+                FailingResults(), coordinator, message_col
+            )
+
+        coordinator.add_pending_commit_messages.assert_called_once_with(
+            ['first']
+        )
+        coordinator.on_write_complete.assert_not_called()
+        coordinator.on_write_failed.assert_called_once()
+
+    def test_consume_write_results_drains_errors_as_data(self):
+        import pickle
+
+        message_col = '__messages__'
+        error_col = '__errors__'
+        results = Mock()
+        results.iter_batches.return_value = iter([
+            pa.table({
+                message_col: pa.array([
+                    pickle.dumps(['first']),
+                    pickle.dumps([]),
+                    pickle.dumps(['last']),
+                ], type=pa.binary()),
+                error_col: pa.array(
+                    [None, 'worker failure', None], type=pa.string()
+                ),
+            }),
+        ])
+        coordinator = Mock()
+
+        with self.assertRaisesRegex(RuntimeError, 'worker failure'):
+            _consume_write_results(
+                results, coordinator, message_col, error_col
+            )
+
+        self.assertEqual(
+            [call.args[0] for call in
+             coordinator.add_pending_commit_messages.call_args_list],
+            [['first'], [], ['last']],
+        )
+        coordinator.on_write_complete.assert_not_called()
+        coordinator.on_write_failed.assert_called_once()
 
         # Test abort failure handling (should not raise exception)
         datasink = PaimonDatasink(self.table, overwrite=False)

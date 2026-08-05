@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 # runtime by ``_pick_bucket_col_name`` so user tables that happen to
 # contain a column with this name still work correctly.
 BUCKET_KEY_COL = "__paimon_bucket__"
+WRITER_KEY_COL = "__paimon_writer_key__"
 HASH_FIXED_PRECLUSTER_AUTO = "auto"
 HASH_FIXED_PRECLUSTER_OFF = "off"
 HASH_FIXED_PRECLUSTER_MAP_GROUPS = "map_groups"
@@ -55,15 +56,18 @@ HASH_FIXED_PRECLUSTER_MODES = frozenset([
 ])
 
 
-def _pick_bucket_col_name(existing_names) -> str:
-    """Return a bucket column name guaranteed not to collide with
-    ``existing_names``. Falls back to a UUID suffix on collision."""
-    if BUCKET_KEY_COL not in existing_names:
-        return BUCKET_KEY_COL
+def _pick_internal_col_name(existing_names, default_name) -> str:
+    if default_name not in existing_names:
+        return default_name
     while True:
-        candidate = "__paimon_bucket_{}_".format(uuid.uuid4().hex[:8])
+        candidate = "{}_{}_".format(default_name, uuid.uuid4().hex[:8])
         if candidate not in existing_names:
             return candidate
+
+
+def _pick_bucket_col_name(existing_names) -> str:
+    """Return a collision-free transient bucket column name."""
+    return _pick_internal_col_name(existing_names, BUCKET_KEY_COL)
 
 
 def maybe_apply_repartition(
@@ -126,9 +130,11 @@ def maybe_apply_repartition(
 def _group_by_partition_bucket(
         dataset: "ray.data.Dataset",
         table: "Table",
+        extractor=None,
 ):
     partition_keys = list(table.table_schema.partition_keys or [])
-    extractor = table.create_row_key_extractor()
+    if extractor is None:
+        extractor = table.create_row_key_extractor()
     col_names = set(f.name for f in table.table_schema.fields)
     bucket_col = _pick_bucket_col_name(col_names)
     bucket_udf = _make_bucket_udf(extractor, bucket_col)
@@ -138,6 +144,57 @@ def _group_by_partition_bucket(
     )
     group_keys: List[str] = partition_keys + [bucket_col]
     return ds_with_bucket.groupby(group_keys), bucket_col
+
+
+def _sort_by_partition_bucket_primary_key(
+        dataset: "ray.data.Dataset",
+        table: "Table",
+        extractor,
+):
+    """Sort rows so one primary key is owned by one Ray block."""
+    partition_keys = list(table.table_schema.partition_keys or [])
+    existing_names = set(f.name for f in table.table_schema.fields)
+    bucket_col = _pick_bucket_col_name(existing_names)
+    existing_names.add(bucket_col)
+    writer_key_col = _pick_internal_col_name(
+        existing_names, WRITER_KEY_COL
+    )
+    key_columns = list(table.trimmed_primary_keys)
+    key_fields = table.trimmed_primary_keys_fields
+
+    def _routing_keys(batch: pa.Table) -> pa.Table:
+        if batch.num_rows == 0:
+            buckets = []
+            writer_keys = []
+        else:
+            record_batch = batch.combine_chunks().to_batches()[0]
+            _, buckets = extractor.extract_partition_bucket_batch(
+                record_batch
+            )
+            columns = [batch.column(name) for name in key_columns]
+            writer_keys = [
+                extractor._binary_row_hash_code(
+                    tuple(
+                        column[row_index].as_py()
+                        for column in columns
+                    ),
+                    key_fields,
+                )
+                for row_index in range(batch.num_rows)
+            ]
+        return batch.append_column(
+            bucket_col, pa.array(buckets, type=pa.int32())
+        ).append_column(
+            writer_key_col, pa.array(writer_keys, type=pa.uint32())
+        )
+
+    with_keys = dataset.map_batches(
+        _routing_keys, batch_format="pyarrow", zero_copy_batch=True,
+    )
+    # Ray keeps equal sort keys in one block. Hash collisions only
+    # co-locate additional primary keys.
+    sort_keys: List[str] = partition_keys + [bucket_col, writer_key_col]
+    return with_keys.sort(sort_keys), [bucket_col, writer_key_col]
 
 
 def _identity_batch(batch: pa.Table) -> pa.Table:

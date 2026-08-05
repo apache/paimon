@@ -577,7 +577,7 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
 
 
 class PostponeBucketRowKeyExtractor(RowKeyExtractor):
-    """Extractor for unaware bucket mode (bucket = -1, no primary keys)."""
+    """Extractor for postpone bucket mode which writes to bucket -2."""
 
     def __init__(self, table_schema: TableSchema):
         super().__init__(table_schema)
@@ -590,3 +590,68 @@ class PostponeBucketRowKeyExtractor(RowKeyExtractor):
 
     def _extract_bucket_row(self, values_by_name: Dict[str, Any]) -> int:
         return BucketMode.POSTPONE_BUCKET.value
+
+
+class PostponeFixedBucketRowKeyExtractor(RowKeyExtractor):
+    """Route postpone batches using a resolved bucket plan."""
+
+    def __init__(self, table, bucket_plan):
+        super().__init__(table.table_schema)
+        if table.options.bucket() != BucketMode.POSTPONE_BUCKET.value:
+            raise ValueError(
+                "Postpone fixed bucket writes require bucket = -2, got {}".format(
+                    table.options.bucket()
+                )
+            )
+        bucket_function = str(
+            table.table_schema.options.get("bucket-function.type", "default")
+        ).strip().lower()
+        if bucket_function != "default":
+            raise ValueError(
+                "Postpone fixed bucket writes only support "
+                "bucket-function.type=default, got {}"
+                .format(bucket_function)
+            )
+        self.bucket_keys = table.table_schema.bucket_keys
+        self.bucket_key_indices = self._get_field_indices(self.bucket_keys)
+        self._bucket_key_fields = table.table_schema.logical_bucket_key_fields
+        self._bucket_plan = bucket_plan
+
+    def with_bucket_plan(self, bucket_plan) -> None:
+        self._bucket_plan = bucket_plan
+
+    def num_buckets(self, partition: Tuple) -> int:
+        return self._bucket_plan.num_buckets(partition)
+
+    def extract_partition_bucket_batch(
+        self, data: pa.RecordBatch
+    ) -> Tuple[List[Tuple], List[int]]:
+        partitions = self._extract_partitions_batch(data)
+        columns = [data.column(i) for i in self.bucket_key_indices]
+        buckets = [
+            _bucket_from_hash(
+                self._binary_row_hash_code(
+                    tuple(col[row_idx].as_py() for col in columns),
+                    self._bucket_key_fields,
+                ),
+                self.num_buckets(partition),
+            )
+            for row_idx, partition in enumerate(partitions)
+        ]
+        return partitions, buckets
+
+    def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
+        return self.extract_partition_bucket_batch(data)[1]
+
+    def _extract_bucket_row(self, values_by_name: Dict[str, Any]) -> int:
+        partition = tuple(
+            values_by_name[self.table_schema.fields[i].name]
+            for i in self.partition_indices
+        )
+        return _bucket_from_hash(
+            self._binary_row_hash_code(
+                tuple(values_by_name[name] for name in self.bucket_keys),
+                self._bucket_key_fields,
+            ),
+            self.num_buckets(partition),
+        )

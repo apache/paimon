@@ -321,6 +321,11 @@ table_write.close()
 table_commit.close()
 ```
 
+`new_batch_write_builder()` keeps postpone-bucket writes in `bucket-postpone`.
+Use `new_postpone_fixed_bucket_write_builder()` to write real buckets. New
+partitions are buffered until `prepare_commit()`; existing ones are incremental.
+This builder currently supports `bucket-function.type=default` only.
+
 By default, the data will be appended to table. If you want to overwrite table, you should use `TableWrite#overwrite`
 API:
 

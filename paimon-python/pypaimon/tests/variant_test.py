@@ -78,6 +78,11 @@ from pypaimon.schema.data_types import (
     RowType,
     is_variant_struct,
 )
+from pypaimon.table.row.generic_row import (
+    GenericRow,
+    GenericRowDeserializer,
+    GenericRowSerializer,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +419,23 @@ class TestJsonRoundtrip(unittest.TestCase):
 # 3. Plain VARIANT — PyArrow-level Parquet sanity check
 #    (verifies the physical struct<value, metadata> layout works in Parquet)
 # ===========================================================================
+
+
+class TestVariantBinaryRow(unittest.TestCase):
+
+    def test_round_trip_non_utf8_payload(self):
+        field = DataField(0, 'v', AtomicType('VARIANT'))
+        variant = GenericVariant.from_python(-1)
+
+        serialized = GenericRowSerializer.to_bytes(
+            GenericRow([variant], [field]))
+        result = GenericRowDeserializer.from_bytes(
+            serialized, [field]).values[0]
+
+        self.assertEqual(variant.value(), result.value())
+        self.assertEqual(variant.metadata(), result.metadata())
+        self.assertEqual(-1, result.to_python())
+
 
 def _make_variant_bytes(json_str: str) -> bytes:
     """Produce a minimal VARIANT value payload encoding a long-string primitive."""
