@@ -320,14 +320,14 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             ProjectedFileSchema projectedFileSchema =
                     evolutionStatsCache.get(scanTableSchema, fileMeta);
             DataType[] statsFieldTypes = projectedFileSchema.statsFieldTypes();
-            Map<Integer, Integer> statsFieldIndexes = projectedFileSchema.statsFieldIndexes();
+            Map<Integer, Integer> fieldIdToStatsIndex = projectedFileSchema.fieldIdToStatsIndex();
 
             for (int j = 0; j < fieldsCount; j++) {
                 if (rowOffsets[j] != -1) {
                     continue;
                 }
                 int targetFieldId = allFields[j];
-                Integer statsIndex = statsFieldIndexes.get(targetFieldId);
+                Integer statsIndex = fieldIdToStatsIndex.get(targetFieldId);
                 if (statsIndex == null) {
                     continue;
                 }
@@ -397,18 +397,18 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             TableSchema dataFileSchema = scanTableSchema.apply(key.f0).project(key.f1);
             TableSchema dataFileSchemaWithStats = dataFileSchema.project(key.f2);
             List<DataField> fields = dataFileSchema.fields();
-            Map<Integer, Integer> statsFieldIndexes = new HashMap<>(fields.size() * 2);
+            Map<Integer, Integer> fieldIdToStatsIndex = new HashMap<>(fields.size() * 2);
             for (DataField field : fields) {
-                statsFieldIndexes.put(field.id(), NO_STATS_FIELD_INDEX);
+                fieldIdToStatsIndex.put(field.id(), NO_STATS_FIELD_INDEX);
             }
             List<DataField> statsFields = dataFileSchemaWithStats.fields();
             DataType[] statsFieldTypes = new DataType[statsFields.size()];
             for (int i = 0; i < statsFields.size(); i++) {
                 DataField statsField = statsFields.get(i);
-                statsFieldIndexes.put(statsField.id(), i);
+                fieldIdToStatsIndex.put(statsField.id(), i);
                 statsFieldTypes[i] = statsField.type();
             }
-            return new ProjectedFileSchema(dataFileSchema, statsFieldTypes, statsFieldIndexes);
+            return new ProjectedFileSchema(dataFileSchema, statsFieldTypes, fieldIdToStatsIndex);
         }
     }
 
@@ -416,15 +416,15 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
         private final TableSchema dataFileSchema;
         private final DataType[] statsFieldTypes;
-        private final Map<Integer, Integer> statsFieldIndexes;
+        private final Map<Integer, Integer> fieldIdToStatsIndex;
 
         private ProjectedFileSchema(
                 TableSchema dataFileSchema,
                 DataType[] statsFieldTypes,
-                Map<Integer, Integer> statsFieldIndexes) {
+                Map<Integer, Integer> fieldIdToStatsIndex) {
             this.dataFileSchema = dataFileSchema;
             this.statsFieldTypes = statsFieldTypes;
-            this.statsFieldIndexes = statsFieldIndexes;
+            this.fieldIdToStatsIndex = fieldIdToStatsIndex;
         }
 
         private TableSchema dataFileSchema() {
@@ -435,8 +435,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             return statsFieldTypes;
         }
 
-        private Map<Integer, Integer> statsFieldIndexes() {
-            return statsFieldIndexes;
+        private Map<Integer, Integer> fieldIdToStatsIndex() {
+            return fieldIdToStatsIndex;
         }
     }
 

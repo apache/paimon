@@ -147,6 +147,56 @@ public class DataEvolutionFileStoreScanTest {
     }
 
     @Test
+    public void testEvolutionStatsCacheSeparatesStatsProjections() {
+        Schema schema = createSchema("f0", "f1");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+        EvolutionStatsCache cache = new EvolutionStatsCache();
+
+        ManifestEntry f0StatsEntry =
+                createManifestEntryWithDifferentCols(
+                        0L,
+                        new String[] {"f0", "f1"},
+                        new String[] {"f0"},
+                        createSimpleStats(
+                                GenericRow.of(1),
+                                GenericRow.of(5),
+                                createBinaryArray(new int[] {0}),
+                                new int[] {0}));
+        ManifestEntry f1StatsEntry =
+                createManifestEntryWithDifferentCols(
+                        0L,
+                        new String[] {"f0", "f1"},
+                        new String[] {"f1"},
+                        createSimpleStats(
+                                GenericRow.of(BinaryString.fromString("a")),
+                                GenericRow.of(BinaryString.fromString("z")),
+                                createBinaryArray(new int[] {0}),
+                                new int[] {1}));
+
+        EvolutionStats f0Stats =
+                DataEvolutionFileStoreScan.evolutionStats(
+                        tableSchema,
+                        scanTableSchema,
+                        Collections.singletonList(f0StatsEntry),
+                        cache);
+        EvolutionStats f1Stats =
+                DataEvolutionFileStoreScan.evolutionStats(
+                        tableSchema,
+                        scanTableSchema,
+                        Collections.singletonList(f1StatsEntry),
+                        cache);
+
+        DataEvolutionRow f0Min = (DataEvolutionRow) f0Stats.minValues();
+        DataEvolutionRow f1Min = (DataEvolutionRow) f1Stats.minValues();
+        assertThat(f0Min.getInt(0)).isEqualTo(1);
+        assertThat(f0Min.isNullAt(1)).isTrue();
+        assertThat(f1Min.isNullAt(0)).isTrue();
+        assertThat(f1Min.getString(1).toString()).isEqualTo("a");
+        assertThat(cache.size()).isEqualTo(2);
+    }
+
+    @Test
     public void testEvolutionStatsMultipleFiles() {
         Schema schema = createSchema("f0", "f1", "f2");
         TableSchema tableSchema = TableSchema.create(0L, schema);
