@@ -48,9 +48,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -274,7 +276,6 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         return ids;
     }
 
-    /** TODO: Optimize implementation of this method. */
     @VisibleForTesting
     static EvolutionStats evolutionStats(
             TableSchema schema,
@@ -301,6 +302,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         metas.sort(Comparator.comparingLong(maxSeqFunc).reversed());
 
         int[] allFields = schema.fields().stream().mapToInt(DataField::id).toArray();
+        DataType[] targetTypes =
+                schema.fields().stream().map(DataField::type).toArray(DataType[]::new);
         int fieldsCount = schema.fields().size();
         int[] rowOffsets = new int[fieldsCount];
         int[] fieldOffsets = new int[fieldsCount];
@@ -319,6 +322,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             nullCounts[i] = stats.nullCounts();
         }
 
+        // number of fields not resolved yet; stop scanning files once all are resolved
+        int unresolvedFields = fieldsCount;
         for (int i = 0; i < metas.size(); i++) {
             DataFileMeta fileMeta = metas.get(i).file();
 
@@ -327,41 +332,45 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
             TableSchema dataFileSchemaWithStats = dataFileSchema.project(fileMeta.valueStatsCols());
 
-            int[] fieldIds =
-                    dataFileSchema.logicalRowType().getFields().stream()
-                            .mapToInt(DataField::id)
-                            .toArray();
+            List<DataField> fileFields = dataFileSchema.fields();
+            List<DataField> statsFields = dataFileSchemaWithStats.fields();
+            // fieldId -> index maps for O(1) lookup, avoiding linear scans of the
+            // file's column list for every target field
+            Map<Integer, Integer> fileFieldIndexes = new HashMap<>(fileFields.size() * 2);
+            for (int k = 0; k < fileFields.size(); k++) {
+                fileFieldIndexes.put(fileFields.get(k).id(), k);
+            }
+            Map<Integer, Integer> statsFieldIndexes = new HashMap<>(statsFields.size() * 2);
+            for (int k = 0; k < statsFields.size(); k++) {
+                statsFieldIndexes.put(statsFields.get(k).id(), k);
+            }
 
-            int[] fieldIdsWithStats =
-                    dataFileSchemaWithStats.logicalRowType().getFields().stream()
-                            .mapToInt(DataField::id)
-                            .toArray();
-
-            loop1:
             for (int j = 0; j < fieldsCount; j++) {
                 if (rowOffsets[j] != -1) {
                     continue;
                 }
                 int targetFieldId = allFields[j];
-                DataType targetType = schema.fields().get(j).type();
-                for (int fieldId : fieldIds) {
-                    if (targetFieldId == fieldId) {
-                        for (int k = 0; k < fieldIdsWithStats.length; k++) {
-                            if (fieldId == fieldIdsWithStats[k]) {
-                                DataType fileType = dataFileSchemaWithStats.fields().get(k).type();
-                                if (!fileType.equalsIgnoreFieldId(targetType)) {
-                                    typeMismatchedFieldIds.add(targetFieldId);
-                                    continue loop1;
-                                }
-                                rowOffsets[j] = i;
-                                fieldOffsets[j] = k;
-                                continue loop1;
-                            }
-                        }
-                        rowOffsets[j] = -2;
-                        continue loop1;
-                    }
+                if (!fileFieldIndexes.containsKey(targetFieldId)) {
+                    continue;
                 }
+                Integer statsIndex = statsFieldIndexes.get(targetFieldId);
+                if (statsIndex == null) {
+                    // field exists in the file but has no stats
+                    rowOffsets[j] = -2;
+                    unresolvedFields--;
+                    continue;
+                }
+                DataType fileType = statsFields.get(statsIndex).type();
+                if (!fileType.equalsIgnoreFieldId(targetTypes[j])) {
+                    typeMismatchedFieldIds.add(targetFieldId);
+                    continue;
+                }
+                rowOffsets[j] = i;
+                fieldOffsets[j] = statsIndex;
+                unresolvedFields--;
+            }
+            if (unresolvedFields == 0) {
+                break;
             }
         }
 
