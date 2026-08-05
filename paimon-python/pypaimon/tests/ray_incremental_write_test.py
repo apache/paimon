@@ -111,6 +111,27 @@ class RayIncrementalWriteTest(unittest.TestCase):
             writer.close()
             commit.close()
 
+    def _compact(self, identifier):
+        data = self._read(identifier)
+        builder = self.catalog.get_table(
+            identifier).new_batch_write_builder().overwrite({})
+        writer = builder.new_write()
+        commit = builder.new_commit()
+        try:
+            writer.write_arrow(data)
+            file_commit = commit.file_store_commit
+            real_commit = file_commit._try_commit
+
+            def compact_commit(*args, **kwargs):
+                kwargs["commit_kind"] = "COMPACT"
+                return real_commit(*args, **kwargs)
+
+            file_commit._try_commit = compact_commit
+            commit.commit(writer.prepare_commit())
+        finally:
+            writer.close()
+            commit.close()
+
     def _read(self, identifier):
         table = self.catalog.get_table(identifier)
         builder = table.new_read_builder()
@@ -131,7 +152,7 @@ class RayIncrementalWriteTest(unittest.TestCase):
             update_cols=["feature"],
         )
 
-    def test_resumes_after_timed_commit(self):
+    def test_resume_allows_compaction(self):
         target, source = self._create_tables()
         operation_id = "resume-{}".format(uuid.uuid4().hex)
         from pypaimon.write import ray_datasink
@@ -160,6 +181,7 @@ class RayIncrementalWriteTest(unittest.TestCase):
         partial = self._read(target).to_pydict()
         self.assertEqual([101, 20, 30], partial["feature"])
 
+        self._compact(target)
         self._incremental_write(target, source, operation_id)
         self.assertEqual([101, 102, 30], self._read(target)["feature"].to_pylist())
 

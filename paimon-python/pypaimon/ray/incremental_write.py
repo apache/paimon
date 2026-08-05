@@ -115,11 +115,6 @@ def incremental_write_paimon(
         recover_without_tag=retained is not None)
     checkpoint_snapshot, state = loaded if loaded is not None else (None, None)
     latest_snapshot = table.snapshot_manager().get_latest_snapshot()
-    if (state is not None
-            and state["next_offset"] < state["source"]["num_units"]
-            and latest_snapshot is not None
-            and latest_snapshot.id != checkpoint_snapshot.id):
-        raise RuntimeError("Concurrent target commit detected.")
     planned_schema_id = (
         state["schema_id"] if state is not None else table.table_schema.id)
     base_snapshot = (
@@ -269,7 +264,8 @@ def _commit_checkpoint(
     }
     commit = StreamTableCommit(table, commit_user, None)
     commit.with_snapshot_properties(properties)
-    commit.protect_from_external_commits(base_snapshot, schema_id)
+    commit.protect_from_external_commits(
+        base_snapshot, schema_id, allow_maintenance=True)
     base_id = base_snapshot.id if base_snapshot is not None else 0
     try:
         try:
