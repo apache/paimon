@@ -167,8 +167,8 @@ class AbstractVectorSearchReadImpl:
     def _raw_pre_filter(self, splits, snapshot=None):
         if self._filter is None:
             return None
-        raw_rows = _bitmap_of_ranges(_raw_row_ranges(splits))
-        if raw_rows.is_empty():
+        raw_row_ranges = _raw_row_ranges(splits)
+        if not raw_row_ranges:
             return None
 
         seen = set()
@@ -195,16 +195,18 @@ class AbstractVectorSearchReadImpl:
             evaluation = scanner.scan_with_coverage(self._filter)
             if evaluation is None:
                 return None
-            include = evaluation.result.results()
-            include = RoaringBitmap64.or_(
-                include,
-                scanner.unindexed_rows(
+            include_ranges = evaluation.result.results().to_range_list()
+            include_ranges.extend(
+                scanner.unindexed_ranges(
                     self._filter,
                     search_mode=self._table.options.scalar_index_search_mode(),
                     contributing_field_ids=(
                         evaluation.contributing_field_ids),
-                ).results())
-            return RoaringBitmap64.and_(include, raw_rows)
+                ))
+            return Range.and_(
+                raw_row_ranges,
+                Range.sort_and_merge_overlap(include_ranges, True),
+            )
         finally:
             scanner.close()
 
@@ -641,7 +643,7 @@ def _filtered_raw_row_ranges(raw_row_ranges, pre_filter):
         return raw_row_ranges
     return Range.and_(
         raw_row_ranges,
-        Range.sort_and_merge_overlap(pre_filter.to_range_list(), True),
+        Range.sort_and_merge_overlap(pre_filter, True),
     )
 
 
@@ -677,13 +679,6 @@ def _empty_bitmaps(size):
 def _bitmap_of_range(row_range):
     bitmap = RoaringBitmap64()
     bitmap.add_range(row_range.from_, row_range.to)
-    return bitmap
-
-
-def _bitmap_of_ranges(ranges):
-    bitmap = RoaringBitmap64()
-    for row_range in ranges:
-        bitmap.add_range(row_range.from_, row_range.to)
     return bitmap
 
 

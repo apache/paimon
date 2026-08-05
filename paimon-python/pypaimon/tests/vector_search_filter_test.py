@@ -1591,7 +1591,7 @@ class VectorSearchFilterTest(unittest.TestCase):
         scanner = mock.MagicMock()
         scanner.scan_with_coverage.return_value = GlobalIndexEvaluation(
             GlobalIndexResult.create_empty(), frozenset([0]))
-        scanner.unindexed_rows.return_value = GlobalIndexResult.create_empty()
+        scanner.unindexed_ranges.return_value = []
         reader = DataEvolutionVectorRead(
             table,
             limit=3,
@@ -1604,12 +1604,51 @@ class VectorSearchFilterTest(unittest.TestCase):
                 "pypaimon.globalindex.data_evolution_global_index_scanner."
                 "DataEvolutionGlobalIndexScanner.create",
                 return_value=scanner):
-            reader._raw_pre_filter([
+            result = reader._raw_pre_filter([
                 RawVectorSearchSplit([Range(0, 9)], [scalar_file])])
 
-        scanner.unindexed_rows.assert_called_once_with(
+        self.assertEqual([], result)
+        scanner.unindexed_ranges.assert_called_once_with(
             predicate,
             search_mode=GlobalIndexSearchMode.DETAIL,
+            contributing_field_ids=frozenset([0]),
+        )
+
+    def test_raw_vector_pre_filter_keeps_full_fallback_as_ranges(self):
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+        from pypaimon.table.source.vector_search_split import RawVectorSearchSplit
+
+        predicate = Predicate(method="equal", index=0, field="id", literals=[5])
+        scalar_file = self.entries[2].index_file
+        table = _StubTable(fields=[self.id_field, self.embedding_field], entries=[])
+        table.options = CoreOptions(Options({
+            "scalar-index.search-mode": "full",
+        }))
+        scanner = mock.MagicMock()
+        scanner.scan_with_coverage.return_value = GlobalIndexEvaluation(
+            GlobalIndexResult.from_range(Range(5, 5)), frozenset([0]))
+        scanner.unindexed_ranges.return_value = [Range(10, 10 ** 12)]
+        scanner.unindexed_rows.side_effect = AssertionError(
+            "FULL fallback must not enter a bitmap")
+        reader = DataEvolutionVectorRead(
+            table,
+            limit=3,
+            vector_column=self.embedding_field,
+            query_vector=[1.0, 0.0, 0.0, 0.0],
+            filter_=predicate,
+        )
+
+        with mock.patch(
+                "pypaimon.globalindex.data_evolution_global_index_scanner."
+                "DataEvolutionGlobalIndexScanner.create",
+                return_value=scanner):
+            result = reader._raw_pre_filter([
+                RawVectorSearchSplit([Range(0, 20)], [scalar_file])])
+
+        self.assertEqual([Range(5, 5), Range(10, 20)], result)
+        scanner.unindexed_ranges.assert_called_once_with(
+            predicate,
+            search_mode=GlobalIndexSearchMode.FULL,
             contributing_field_ids=frozenset([0]),
         )
 
