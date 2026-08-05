@@ -21,7 +21,6 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.utils.ObjectSerializer;
@@ -53,17 +52,13 @@ public class ManifestEntrySerializer extends ObjectSerializer<ManifestEntry> {
 
     @Override
     public InternalRow toRow(ManifestEntry entry) {
-        return new JoinedRow().replace(GenericRow.of(FORMAT_IDENTIFIER), toDataRow(entry));
-    }
-
-    private InternalRow toDataRow(ManifestEntry entry) {
-        GenericRow row = new GenericRow(5);
-        row.setField(0, entry.kind().toByteValue());
-        row.setField(1, serializeBinaryRow(entry.partition()));
-        row.setField(2, entry.bucket());
-        row.setField(3, entry.totalBuckets());
-        row.setField(4, dataFileMetaSerializer.toRow(entry.file()));
-        return row;
+        return GenericRow.of(
+                FORMAT_IDENTIFIER,
+                entry.kind().toByteValue(),
+                serializeBinaryRow(entry.partition()),
+                entry.bucket(),
+                entry.totalBuckets(),
+                dataFileMetaSerializer.toRow(entry.file()));
     }
 
     @Override

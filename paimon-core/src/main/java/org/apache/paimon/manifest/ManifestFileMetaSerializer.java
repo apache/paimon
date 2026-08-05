@@ -21,7 +21,6 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.OffsetRow;
@@ -44,11 +43,8 @@ public class ManifestFileMetaSerializer extends ObjectSerializer<ManifestFileMet
 
     @Override
     public InternalRow toRow(ManifestFileMeta meta) {
-        return new JoinedRow().replace(GenericRow.of(FORMAT_IDENTIFIER), toDataRow(meta));
-    }
-
-    private InternalRow toDataRow(ManifestFileMeta meta) {
         return GenericRow.of(
+                FORMAT_IDENTIFIER,
                 BinaryString.fromString(meta.fileName()),
                 meta.fileSize(),
                 meta.numAddedFiles(),

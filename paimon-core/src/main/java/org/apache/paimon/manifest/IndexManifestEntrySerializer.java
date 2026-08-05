@@ -22,7 +22,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.ObjectSerializer;
@@ -52,10 +51,6 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
 
     @Override
     public InternalRow toRow(IndexManifestEntry record) {
-        return new JoinedRow().replace(GenericRow.of(FORMAT_IDENTIFIER), toDataRow(record));
-    }
-
-    private InternalRow toDataRow(IndexManifestEntry record) {
         IndexFileMeta indexFile = record.indexFile();
         GlobalIndexMeta globalIndexMeta = indexFile.globalIndexMeta();
         InternalRow globalIndexRow =
@@ -71,6 +66,7 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
                                 globalIndexMeta.indexMeta(),
                                 globalIndexMeta.sourceMeta());
         return GenericRow.of(
+                FORMAT_IDENTIFIER,
                 record.kind().toByteValue(),
                 serializeBinaryRow(record.partition()),
                 record.bucket(),
