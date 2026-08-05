@@ -293,13 +293,23 @@ write_paimon(
 ```
 
 Committed groups survive failure, but retrying recomputes the Dataset lineage.
-Pin the starting snapshot when the Dataset reads from the target table itself.
-Use `PaimonOffsetSource` with an `operation_id` to also resume source progress:
+A plain Dataset does not accept `operation_id`. Pin the starting snapshot when
+it reads from the target table itself.
+
+Use `PaimonOffsetSource` to resume source progress. Put the replayable
+transformation, including inference, in `transform`:
 
 ```python
 from pypaimon.ray import PaimonOffsetSource, write_paimon
 
-source = PaimonOffsetSource("database_name.updates", projection=["id", "feature"])
+def build_updates(window):
+    return window.map_batches(infer, batch_format="pyarrow")
+
+source = PaimonOffsetSource(
+    "database_name.source",
+    projection=["id", "payload"],
+    transform=build_updates,
+)
 write_paimon(
     source,
     "database_name.target",
@@ -310,6 +320,9 @@ write_paimon(
     commit_interval_seconds=600,
 )
 ```
+
+Retry with the same `operation_id` skips completed source windows; only an
+unfinished window may run again.
 
 Use a fixed-bucket, partial-update target. Source rows need unique primary keys
 and all `update_cols`; missing keys are inserted. Source splits run in bounded
