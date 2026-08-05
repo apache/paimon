@@ -52,10 +52,6 @@ def incremental_write_paimon(
     from pypaimon.write.ray_datasink import _write_primary_key_groups
 
     resumable = isinstance(source, PaimonOffsetSource)
-    if not resumable and not hasattr(source, "map_batches"):
-        raise ValueError(
-            "incremental write_paimon requires a ray.data.Dataset or "
-            "PaimonOffsetSource.")
     if resumable:
         _validate_operation_id(operation_id)
     elif operation_id is not None:
