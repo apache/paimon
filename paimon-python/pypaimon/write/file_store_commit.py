@@ -34,7 +34,7 @@ from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
-from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.commit.commit_scanner import CommitScanner
@@ -70,17 +70,76 @@ class SuccessResult(CommitResult):
         return True
 
 
+def _manifest_file_key(manifest: ManifestFileMeta):
+    stats = manifest.partition_stats
+    return (
+        manifest.file_name,
+        manifest.file_size,
+        manifest.num_added_files,
+        manifest.num_deleted_files,
+        GenericRowSerializer.to_bytes(stats.min_values),
+        GenericRowSerializer.to_bytes(stats.max_values),
+        tuple(stats.null_counts) if stats.null_counts is not None else None,
+        manifest.schema_id,
+        manifest.min_row_id,
+        manifest.max_row_id,
+    )
+
+
+def _try_replace_manifest_files(current, replaced, replacement):
+    """Replace the first contiguous occurrence while preserving list order."""
+    current = list(current)
+    replaced = list(replaced)
+    replacement = list(replacement)
+    if not replaced:
+        return replacement if not current else None
+
+    current_keys = [_manifest_file_key(manifest) for manifest in current]
+    replaced_keys = [_manifest_file_key(manifest) for manifest in replaced]
+    for start in range(len(current) - len(replaced) + 1):
+        if current_keys[start:start + len(replaced)] == replaced_keys:
+            return (
+                current[:start]
+                + replacement
+                + current[start + len(replaced):]
+            )
+    return None
+
+
+class ManifestMergeResult:
+    """Manifest merge input and output retained for a deterministic retry."""
+
+    def __init__(self, merge_before_manifests, merge_after_manifests):
+        self.merge_before_manifests = list(merge_before_manifests)
+        self.merge_after_manifests = list(merge_after_manifests)
+
+
+def _try_reuse_manifest_merge_result(retry_result, current_manifests):
+    if (retry_result is None
+            or retry_result.commit_result_may_be_uncertain
+            or retry_result.manifest_merge_result is None):
+        return None
+    previous = retry_result.manifest_merge_result
+    return _try_replace_manifest_files(
+        current_manifests,
+        previous.merge_before_manifests,
+        previous.merge_after_manifests,
+    )
+
+
 class RetryResult(CommitResult):
 
     def __init__(self, latest_snapshot, exception: Optional[Exception] = None,
                  base_data_files: Optional[List[ManifestEntry]] = None,
-                 commit_result_may_be_uncertain: bool = False):
+                 commit_result_may_be_uncertain: bool = False,
+                 manifest_merge_result: Optional[ManifestMergeResult] = None):
         self.latest_snapshot = latest_snapshot
         self.exception = exception
         self.commit_result_may_be_uncertain = commit_result_may_be_uncertain
         # Base entries as of latest_snapshot, carried so the next attempt reuses
         # them and reads only the incremental changes.
         self.base_data_files = base_data_files
+        self.manifest_merge_result = manifest_merge_result
 
     def is_success(self) -> bool:
         return False
@@ -597,7 +656,10 @@ class FileStoreCommit:
         changelog_manifest_list_name = None
         changelog_manifest_list_size = None
         changelog_record_count = None
+        merge_before_manifests = []
+        merge_after_manifests = []
         merge_new_files = []
+        skip_manifest_merge_on_retry = False
         try:
             new_manifest_file_metas = self._write_manifest_files(commit_entries, new_manifest_file)
             self.manifest_list_manager.write(delta_manifest_list, new_manifest_file_metas)
@@ -620,15 +682,33 @@ class FileStoreCommit:
             # process existing_manifest
             total_record_count = 0
             if latest_snapshot:
-                existing_manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
+                merge_before_manifests = self.manifest_list_manager.read_all(
+                    latest_snapshot)
                 previous_record_count = latest_snapshot.total_record_count
                 if previous_record_count:
                     total_record_count += previous_record_count
+
+            reused_manifests = _try_reuse_manifest_merge_result(
+                retry_result, merge_before_manifests)
+            skip_manifest_merge_on_retry = (
+                reused_manifests is None and retry_result is not None)
+            if reused_manifests is not None:
+                merge_after_manifests = reused_manifests
+                old_names = {
+                    manifest.file_name for manifest in merge_before_manifests
+                }
+                merge_new_files = [
+                    manifest for manifest in merge_after_manifests
+                    if manifest.file_name not in old_names
+                ]
+            elif skip_manifest_merge_on_retry:
+                merge_after_manifests = merge_before_manifests
             else:
-                existing_manifest_files = []
-            merged_manifest_files, merge_new_files = self.manifest_file_merger.merge(
-                existing_manifest_files)
-            self.manifest_list_manager.write(base_manifest_list, merged_manifest_files)
+                merge_after_manifests, merge_new_files = (
+                    self.manifest_file_merger.merge(
+                        merge_before_manifests))
+            self.manifest_list_manager.write(
+                base_manifest_list, merge_after_manifests)
 
             delta_record_count = 0
             for entry in commit_entries:
@@ -698,7 +778,20 @@ class FileStoreCommit:
                         commit_kind,
                         commit_time_s,
                     )
-                    return RetryResult(latest_snapshot, None, base_data_files=base_data_files)
+                    manifest_merge_result = (
+                        None
+                        if skip_manifest_merge_on_retry
+                        else ManifestMergeResult(
+                            merge_before_manifests,
+                            merge_after_manifests,
+                        )
+                    )
+                    return RetryResult(
+                        latest_snapshot,
+                        None,
+                        base_data_files=base_data_files,
+                        manifest_merge_result=manifest_merge_result,
+                    )
         except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
             logger.warning("Retry commit for exception.", exc_info=True)
@@ -707,6 +800,7 @@ class FileStoreCommit:
                 e,
                 base_data_files=base_data_files,
                 commit_result_may_be_uncertain=True,
+                manifest_merge_result=None,
             )
 
         logger.info(
