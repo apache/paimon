@@ -69,6 +69,30 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             "The sequence-group '%s' contains primary key field '%s', "
                     + "which is not allowed. Primary key columns cannot be put in sequence-group.";
 
+    public static boolean isSequenceGroupOption(String optionKey) {
+        return optionKey.startsWith(FIELDS_PREFIX + ".")
+                && optionKey.endsWith("." + SEQUENCE_GROUP);
+    }
+
+    public static boolean isSequenceGroupOptionCandidate(String optionKey) {
+        return optionKey.startsWith(FIELDS_PREFIX) && optionKey.endsWith(SEQUENCE_GROUP);
+    }
+
+    public static List<String> sequenceGroupOrderingFields(String optionKey) {
+        checkArgument(
+                isSequenceGroupOption(optionKey), "Invalid sequence-group option: %s", optionKey);
+        return Arrays.asList(
+                optionKey
+                        .substring(
+                                FIELDS_PREFIX.length() + 1,
+                                optionKey.length() - SEQUENCE_GROUP.length() - 1)
+                        .split(FIELDS_SEPARATOR));
+    }
+
+    public static List<String> sequenceGroupProtectedFields(String optionValue) {
+        return Arrays.asList(optionValue.split(FIELDS_SEPARATOR));
+    }
+
     private final InternalRow.FieldGetter[] getters;
     private final boolean ignoreDelete;
     private final List<WrapperWithFieldIndex<FieldsComparator>> fieldSeqComparators;
@@ -413,21 +437,15 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
                 String k = entry.getKey();
                 String v = entry.getValue();
-                if (k.startsWith(FIELDS_PREFIX) && k.endsWith(SEQUENCE_GROUP)) {
+                if (isSequenceGroupOptionCandidate(k)) {
                     int[] sequenceFields =
-                            Arrays.stream(
-                                            k.substring(
-                                                            FIELDS_PREFIX.length() + 1,
-                                                            k.length()
-                                                                    - SEQUENCE_GROUP.length()
-                                                                    - 1)
-                                                    .split(FIELDS_SEPARATOR))
+                            sequenceGroupOrderingFields(k).stream()
                                     .mapToInt(fieldName -> requireField(fieldName, fieldNames))
                                     .toArray();
 
                     Supplier<FieldsComparator> userDefinedSeqComparator =
                             () -> UserDefinedSeqComparator.create(rowType, sequenceFields, true);
-                    Arrays.stream(v.split(FIELDS_SEPARATOR))
+                    sequenceGroupProtectedFields(v).stream()
                             .map(fieldName -> requireField(fieldName, fieldNames))
                             .forEach(
                                     field -> {
