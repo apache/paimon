@@ -298,6 +298,16 @@ class CoreOptions:
         )
     )
 
+    MANIFEST_MERGE_ON_WRITE: ConfigOption[bool] = (
+        ConfigOptions.key("manifest.merge-on-write")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether to merge existing manifest files during APPEND and OVERWRITE commits. "
+            "Disable only when manifest compaction is handled separately."
+        )
+    )
+
     # File format options
     FILE_FORMAT: ConfigOption[str] = (
         ConfigOptions.key("file.format")
@@ -1146,6 +1156,9 @@ class CoreOptions:
 
     def manifest_merge_min_count(self, default=None):
         return self.options.get(CoreOptions.MANIFEST_MERGE_MIN_COUNT, default)
+
+    def manifest_merge_on_write(self, default=None):
+        return self.options.get(CoreOptions.MANIFEST_MERGE_ON_WRITE, default)
 
     def file_format(self, default=None):
         return self.options.get(CoreOptions.FILE_FORMAT, default)

@@ -1143,6 +1143,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         String indexManifest = null;
         List<ManifestFileMeta> mergeBeforeManifests = new ArrayList<>();
         List<ManifestFileMeta> mergeAfterManifests = new ArrayList<>();
+        boolean skipManifestMergeOnWrite =
+                !options.manifestMergeOnWrite()
+                        && (commitKind == CommitKind.APPEND || commitKind == CommitKind.OVERWRITE);
         boolean skipManifestMergeOnRetry = false;
         long nextRowIdStart = firstRowIdStart;
         try {
@@ -1167,6 +1170,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 mergeBeforeManifests = emptyList();
                 mergeAfterManifests = emptyList();
                 oldIndexManifest = null;
+            } else if (skipManifestMergeOnWrite) {
+                mergeAfterManifests = mergeBeforeManifests;
             } else {
                 ManifestMergeReuse manifestMergeReuse =
                         tryReuseManifestMergeResult(retryResult, mergeBeforeManifests);
@@ -1324,7 +1329,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     latestSnapshot,
                     baseDataFiles,
                     null,
-                    skipManifestMergeOnRetry
+                    skipManifestMergeOnWrite || skipManifestMergeOnRetry
                             ? null
                             : new ManifestMergeResult(mergeBeforeManifests, mergeAfterManifests));
         }

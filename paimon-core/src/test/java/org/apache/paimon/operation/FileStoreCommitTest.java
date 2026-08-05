@@ -1283,6 +1283,44 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testSkipManifestMergeOnWrite() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MANIFEST_MERGE_MIN_COUNT.key(), "2");
+        options.put(CoreOptions.MANIFEST_MERGE_ON_WRITE.key(), "false");
+        TestFileStore store = createStore(false, options);
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        store.commitData(keyValues, s -> partition, kv -> 0);
+        store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap());
+        store.commitData(keyValues, s -> partition, kv -> 0);
+
+        Snapshot latest = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(store.manifestListFactory().create().readDataManifests(latest)).hasSize(3);
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.tryCommitOnce(
+                    null,
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    Long.MAX_VALUE,
+                    null,
+                    Collections.emptyMap(),
+                    Snapshot.CommitKind.COMPACT,
+                    false,
+                    latest,
+                    true,
+                    null);
+        }
+
+        latest = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(latest.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(store.manifestListFactory().create().readDataManifests(latest))
+                .hasSizeLessThan(3);
+    }
+
+    @Test
     public void testRtasAppendAfterTruncateResetsInheritedIndexAndStats() throws Exception {
         TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
         BinaryRow partition = gen.getPartition(gen.next());

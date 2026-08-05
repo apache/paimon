@@ -424,6 +424,54 @@ class TableWriteTest(unittest.TestCase):
         actual = table_read.to_arrow(splits).sort_by('user_id')
         self.assertEqual(expected, actual)
 
+    def test_skip_manifest_merge_on_write(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            options={
+                'manifest.merge-min-count': '2',
+                'manifest.merge-on-write': 'false',
+            },
+        )
+        self.catalog.create_table('default.test_skip_manifest_merge_on_write', schema, False)
+        table = self.catalog.get_table('default.test_skip_manifest_merge_on_write')
+
+        def row(i):
+            return pa.Table.from_pydict({
+                'user_id': [i + 1],
+                'item_id': [1000 + i],
+                'behavior': ['click'],
+                'dt': ['p1'],
+            }, schema=self.pa_schema)
+
+        for i in range(3):
+            self._commit_arrow(table, row(i))
+
+        manifest_list_manager = ManifestListManager(table)
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(3, len(manifest_list_manager.read_all(snapshot)))
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        original_try_commit = table_commit.file_store_commit._try_commit
+        table_commit.file_store_commit._try_commit = (
+            lambda commit_kind, *args, **kwargs: original_try_commit(
+                "COMPACT", *args, **kwargs
+            )
+        )
+        table_write.write_arrow(row(3))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        base_manifests = manifest_list_manager.read(snapshot.base_manifest_list)
+        delta_manifests = manifest_list_manager.read(snapshot.delta_manifest_list)
+        self.assertEqual("COMPACT", snapshot.commit_kind)
+        self.assertEqual(1, len(base_manifests))
+        self.assertEqual(1, len(delta_manifests))
+
     def test_multi_prepare_commit_pk(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], primary_keys=['user_id', 'dt'],
                                             options={'bucket': '2'})

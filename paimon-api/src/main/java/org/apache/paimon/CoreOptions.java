@@ -558,6 +558,14 @@ public class CoreOptions implements Serializable {
                                                     + "compaction is not triggered.")
                                     .build());
 
+    public static final ConfigOption<Boolean> MANIFEST_MERGE_ON_WRITE =
+            key("manifest.merge-on-write")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to merge existing manifest files during APPEND and OVERWRITE commits. "
+                                    + "Disable only when manifest compaction is handled separately.");
+
     public static final ConfigOption<Boolean> MANIFEST_SORT_ENABLED =
             key("manifest-sort.enabled")
                     .booleanType()
@@ -3351,6 +3359,10 @@ public class CoreOptions implements Serializable {
 
     public int manifestMergeMinCount() {
         return options.get(MANIFEST_MERGE_MIN_COUNT);
+    }
+
+    public boolean manifestMergeOnWrite() {
+        return options.get(MANIFEST_MERGE_ON_WRITE);
     }
 
     public MergeEngine mergeEngine() {

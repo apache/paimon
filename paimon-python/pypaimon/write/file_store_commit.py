@@ -118,6 +118,7 @@ class FileStoreCommit:
 
         self.manifest_target_size = table.options.manifest_target_size()
         self.manifest_merge_min_count = table.options.manifest_merge_min_count()
+        self.manifest_merge_on_write = table.options.manifest_merge_on_write()
         self.manifest_file_merger = ManifestFileMerger(
             self.manifest_file_manager,
             self.manifest_target_size,
@@ -626,8 +627,11 @@ class FileStoreCommit:
                     total_record_count += previous_record_count
             else:
                 existing_manifest_files = []
-            merged_manifest_files, merge_new_files = self.manifest_file_merger.merge(
-                existing_manifest_files)
+            if not self.manifest_merge_on_write and commit_kind in ("APPEND", "OVERWRITE"):
+                merged_manifest_files = existing_manifest_files
+            else:
+                merged_manifest_files, merge_new_files = self.manifest_file_merger.merge(
+                    existing_manifest_files)
             self.manifest_list_manager.write(base_manifest_list, merged_manifest_files)
 
             delta_record_count = 0
