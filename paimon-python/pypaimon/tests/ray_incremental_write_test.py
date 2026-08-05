@@ -152,6 +152,38 @@ class RayIncrementalWriteTest(unittest.TestCase):
             update_cols=["feature"],
         )
 
+    def test_transform_identity_ignores_runtime_state(self):
+        class RuntimeState:
+
+            def __init__(self, token):
+                self.token = token
+
+        def source(token):
+            state = RuntimeState(token)
+
+            def transform(dataset):
+                if state.token:
+                    return dataset
+                return dataset
+
+            return PaimonOffsetSource(
+                "default.source", transform=transform)
+
+        self.assertEqual(
+            source("expired")._transform_identity(),
+            source("refreshed")._transform_identity(),
+        )
+
+        def changed_transform(dataset):
+            return dataset.limit(1)
+
+        self.assertNotEqual(
+            source("expired")._transform_identity(),
+            PaimonOffsetSource(
+                "default.source",
+                transform=changed_transform)._transform_identity(),
+        )
+
     def test_resume_allows_compaction(self):
         target, source = self._create_tables()
         operation_id = "resume-{}".format(uuid.uuid4().hex)

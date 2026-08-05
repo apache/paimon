@@ -18,7 +18,33 @@
 
 import hashlib
 import pickle
+import types
 from typing import Any, Callable, List, Optional
+
+
+def _code_identity(code):
+    def constant(value):
+        if isinstance(value, types.CodeType):
+            return _code_identity(value)
+        if isinstance(value, tuple):
+            return tuple(constant(item) for item in value)
+        if isinstance(value, frozenset):
+            return tuple(sorted(
+                (constant(item) for item in value), key=repr))
+        return value
+
+    return (
+        code.co_argcount,
+        getattr(code, "co_posonlyargcount", 0),
+        code.co_kwonlyargcount,
+        code.co_flags,
+        code.co_code,
+        tuple(constant(value) for value in code.co_consts),
+        code.co_names,
+        code.co_varnames,
+        code.co_freevars,
+        code.co_cellvars,
+    )
 
 
 class PaimonOffsetSource:
@@ -93,17 +119,10 @@ class PaimonOffsetSource:
         read_type = read_builder.read_type()
         nested_name_paths = read_builder._nested_name_paths()
         units = list(read_builder.new_scan().plan().splits())
-        import ray.cloudpickle as cloudpickle
-
-        try:
-            transform = cloudpickle.dumps(self.transform)
-        except Exception as error:
-            raise ValueError(
-                "PaimonOffsetSource transform must be serializable.") \
-                from error
         fingerprint = hashlib.sha256(pickle.dumps((
             self.table_identifier, snapshot_id, self.projection,
-            self.filter, transform, read_type, units), protocol=4)).hexdigest()
+            self.filter, self._transform_identity(), read_type, units),
+            protocol=4)).hexdigest()
         plan = {
             "table": self.table_identifier,
             "snapshot_id": snapshot_id,
@@ -123,6 +142,26 @@ class PaimonOffsetSource:
         self._nested_name_paths = nested_name_paths
         self.plan = plan
         return self
+
+    def _transform_identity(self):
+        if self.transform is None:
+            return None
+        function = getattr(
+            self.transform, "__func__",
+            getattr(self.transform, "func", self.transform))
+        code = getattr(function, "__code__", None)
+        if code is None:
+            call = getattr(self.transform, "__call__", None)
+            function = getattr(call, "__func__", call)
+            code = getattr(function, "__code__", None)
+        identity = (
+            getattr(function, "__module__", None),
+            getattr(function, "__qualname__", None),
+            _code_identity(code) if code is not None else None,
+            type(self.transform).__module__,
+            type(self.transform).__qualname__,
+        )
+        return hashlib.sha256(pickle.dumps(identity, protocol=4)).hexdigest()
 
     @property
     def num_units(self):

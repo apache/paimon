@@ -296,7 +296,8 @@ Use a fixed-bucket, partial-update target. Source rows need unique primary keys
 and all `update_cols`; missing keys are inserted. Source splits run in bounded
 windows, so the actual
 interval may be longer. Concurrent target writes or schema changes fail. After
-success, `delete_write_paimon_checkpoint` releases retained snapshots.
+success, `delete_write_paimon_checkpoint` releases retained snapshots. An
+`operation_id` must not be reused after changing the source transformation.
 
 ### `TableWrite.write_ray()` (lower-level)
 
