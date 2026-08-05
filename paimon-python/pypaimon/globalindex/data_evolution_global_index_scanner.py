@@ -18,7 +18,7 @@
 """Scanner for shard-based global indexes on data-evolution tables."""
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Collection, Optional
+from typing import Collection, List, Optional
 
 from pypaimon.globalindex.global_index_evaluator import (
     GlobalIndexEvaluation,
@@ -229,15 +229,19 @@ class DataEvolutionGlobalIndexScanner:
     def unindexed_rows(self, predicate: Optional[Predicate],
                        search_mode=None, field_ids=None) -> GlobalIndexResult:
         """Return coarse row ids not covered by global indexes."""
+        return GlobalIndexResult.from_ranges(self.unindexed_ranges(
+            predicate, search_mode=search_mode, field_ids=field_ids))
+
+    def unindexed_ranges(self, predicate: Optional[Predicate],
+                         search_mode=None, field_ids=None) -> List[Range]:
+        """Return row ranges not covered by global indexes."""
         if self._coverage is None:
-            return GlobalIndexResult.create_empty()
+            return []
         if field_ids is not None:
-            return GlobalIndexResult.from_ranges(
-                self._coverage.unindexed_ranges(
-                    field_ids, search_mode=search_mode))
-        return GlobalIndexResult.from_ranges(
-            self._coverage.unindexed_ranges(
-                self._fields, predicate, search_mode=search_mode))
+            return self._coverage.unindexed_ranges(
+                field_ids, search_mode=search_mode)
+        return self._coverage.unindexed_ranges(
+            self._fields, predicate, search_mode=search_mode)
 
     def close(self):
         """Close the scanner and release resources."""

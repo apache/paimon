@@ -18,12 +18,13 @@
 import logging
 import os
 import time
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex import ScoredGlobalIndexResult
+from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -56,11 +57,16 @@ from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.utils.range import Range
+
+
+class _GlobalIndexPlanningResult(NamedTuple):
+    indexed_result: GlobalIndexResult
+    unindexed_ranges: List[Range]
 
 
 def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]:
     from pypaimon.table.special_fields import SpecialFields
-    from pypaimon.utils.range import Range
 
     if predicate is None:
         return None
@@ -119,8 +125,6 @@ def _build_early_row_range_filter(row_ranges):
     if row_ranges is None or not row_ranges:
         return None
 
-    from pypaimon.utils.range import Range
-
     def _filter(record):
         file_dict = record.get('_FILE')
         if file_dict is None:
@@ -156,8 +160,6 @@ def _filter_manifest_files_by_row_ranges(
     Returns:
         Filtered list of manifest files
     """
-    from pypaimon.utils.range import Range
-
     filtered_files = []
     for manifest in manifest_files:
         min_row_id = manifest.min_row_id
@@ -438,10 +440,19 @@ class FileScanner:
         self._scanned_snapshot = snapshot
         self._scanned_snapshot_id = snapshot.id if snapshot else None
 
-        global_index_result = self._global_index_result if self._global_index_result is not None \
+        global_index_plan = self._global_index_result if self._global_index_result is not None \
             else self._eval_global_index(snapshot)
-        if global_index_result is not None:
-            row_ranges = global_index_result.results().to_range_list()
+        if global_index_plan is not None:
+            if isinstance(global_index_plan, _GlobalIndexPlanningResult):
+                global_index_result = global_index_plan.indexed_result
+                row_ranges = Range.sort_and_merge_overlap(
+                    global_index_result.results().to_range_list()
+                    + global_index_plan.unindexed_ranges,
+                    True,
+                )
+            else:
+                global_index_result = global_index_plan
+                row_ranges = global_index_result.results().to_range_list()
             if isinstance(global_index_result, ScoredGlobalIndexResult):
                 score_getter = global_index_result.score_getter()
         if row_ranges is None and self.predicate is not None:
@@ -499,11 +510,14 @@ class FileScanner:
                 if evaluation is None:
                     return None
                 scalar_mode = self.table.options.scalar_index_search_mode()
-                return evaluation.result.or_(scanner.unindexed_rows(
-                    self.predicate,
-                    search_mode=scalar_mode,
-                    field_ids=evaluation.field_ids,
-                ))
+                return _GlobalIndexPlanningResult(
+                    evaluation.result,
+                    scanner.unindexed_ranges(
+                        self.predicate,
+                        search_mode=scalar_mode,
+                        field_ids=evaluation.field_ids,
+                    ),
+                )
         except Exception:
             return None
 
