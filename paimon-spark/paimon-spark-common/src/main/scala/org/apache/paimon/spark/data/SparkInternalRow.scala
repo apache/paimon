@@ -18,13 +18,12 @@
 
 package org.apache.paimon.spark.data
 
-import org.apache.paimon.shade.guava30.com.google.common.cache.{CacheBuilder, CacheLoader, LoadingCache}
-import org.apache.paimon.types.{DataTypeRoot, RowType}
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
-import scala.collection.mutable
+import scala.collection.JavaConverters._
 
 abstract class SparkInternalRow extends InternalRow {
   def replace(row: org.apache.paimon.data.InternalRow): SparkInternalRow
@@ -34,39 +33,20 @@ abstract class SparkInternalRow extends InternalRow {
 
 object SparkInternalRow {
 
-  private val blobFieldsCache: LoadingCache[RowType, Set[Int]] =
-    CacheBuilder
-      .newBuilder()
-      .weakKeys()
-      .build(new CacheLoader[RowType, Set[Int]] {
-        override def load(rowType: RowType): Set[Int] = findBlobFields(rowType)
-      })
-
   def create(rowType: RowType): SparkInternalRow = {
     create(rowType, blobAsDescriptor = false)
   }
 
   def create(rowType: RowType, blobAsDescriptor: Boolean): SparkInternalRow = {
-    val blobs = blobFields(rowType)
-    if (blobs.nonEmpty) {
-      SparkShimLoader.shim.createSparkInternalRowWithBlob(rowType, blobs, blobAsDescriptor)
-    } else {
+    val blobFieldIndices = rowType.getBlobFieldIndices
+    if (blobFieldIndices.isEmpty) {
       SparkShimLoader.shim.createSparkInternalRow(rowType).withBlobAsDescriptor(blobAsDescriptor)
+    } else {
+      SparkShimLoader.shim.createSparkInternalRowWithBlob(
+        rowType,
+        blobFieldIndices.asScala.map(_.intValue()).toSet,
+        blobAsDescriptor)
     }
-  }
-
-  private def blobFields(rowType: RowType): Set[Int] = blobFieldsCache.getUnchecked(rowType)
-
-  private def findBlobFields(rowType: RowType): Set[Int] = {
-    var i: Int = 0
-    val blobFields = new mutable.HashSet[Int]()
-    while (i < rowType.getFieldCount) {
-      if (rowType.getTypeAt(i).getTypeRoot.equals(DataTypeRoot.BLOB)) {
-        blobFields.add(i)
-      }
-      i += 1
-    }
-    blobFields.toSet
   }
 
 }

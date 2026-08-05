@@ -36,20 +36,48 @@ class SparkInternalRowTest extends SparkFunSuite {
     SparkInternalRow.create(rowType)
 
     assert(getTypeRootCount.get() == 10)
+    assert(rowType.getBlobFieldIndices.asScala == Set(3, 7))
+  }
+
+  test("cache blob field lookup per row type instance") {
+    val getTypeRootCount = new AtomicInteger()
+    val first = newRowType(getTypeRootCount)
+    val second = newRowType(getTypeRootCount)
+
+    assert(first == second)
+    SparkInternalRow.create(first)
+    SparkInternalRow.create(second)
+
+    assert(getTypeRootCount.get() == 20)
+  }
+
+  test("blob field indices are immutable") {
+    val rowType = newRowType(new AtomicInteger())
+
+    intercept[UnsupportedOperationException] {
+      rowType.getBlobFieldIndices.add(1)
+    }
   }
 
   private def newRowType(getTypeRootCount: AtomicInteger): RowType = {
-    new RowType(
-      (0 until 10)
-        .map(i => new DataField(i, s"f$i", new CountingBinaryType(getTypeRootCount)))
-        .asJava)
+    new RowType((0 until 10).map {
+      i =>
+        val dataType =
+          if (i == 3 || i == 7) {
+            new CountingBinaryType(getTypeRootCount, DataTypeRoot.BLOB)
+          } else {
+            new CountingBinaryType(getTypeRootCount, DataTypeRoot.BINARY)
+          }
+        new DataField(i, s"f$i", dataType)
+    }.asJava)
   }
 
-  private class CountingBinaryType(getTypeRootCount: AtomicInteger) extends BinaryType {
+  private class CountingBinaryType(getTypeRootCount: AtomicInteger, typeRoot: DataTypeRoot)
+    extends BinaryType {
 
     override def getTypeRoot: DataTypeRoot = {
       getTypeRootCount.incrementAndGet()
-      super.getTypeRoot
+      typeRoot
     }
   }
 }
