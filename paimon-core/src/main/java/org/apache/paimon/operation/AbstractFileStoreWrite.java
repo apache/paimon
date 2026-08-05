@@ -213,7 +213,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         getWriterWrapper(partition, bucket).writer.compact(fullCompaction);
     }
 
-    @Override
+    /** Compact a bucket whose partition-level total bucket count is determined at runtime. */
     public void compact(BinaryRow partition, int bucket, int totalBuckets, boolean fullCompaction)
             throws Exception {
         checkArgument(totalBuckets > 0, "Total number of buckets must be positive.");
