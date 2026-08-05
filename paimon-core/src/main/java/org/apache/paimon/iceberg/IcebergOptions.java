@@ -110,6 +110,21 @@ public class IcebergOptions {
                                     + "metadata files (table-location, hadoop-catalog, "
                                     + "hive-catalog) see the full replayed history; a rest-catalog "
                                     + "only receives the final state.");
+    public static final ConfigOption<Boolean> REST_AUTO_RECREATE =
+            key("metadata.iceberg.rest-auto-recreate")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "When the Iceberg REST catalog state does not match the expected base "
+                                    + "metadata, automatically drop and recreate the catalog table "
+                                    + "(legacy recovery). This requires table-delete permission in "
+                                    + "the catalog (e.g. glue:DeleteTable) and replaces the catalog "
+                                    + "table's identity, breaking consumers that track it. When set "
+                                    + "to false, the committer instead reconciles the catalog table "
+                                    + "in place by replaying the snapshots it is missing from the "
+                                    + "locally generated metadata, and fails with a precise error "
+                                    + "when non-destructive reconciliation is impossible; it never "
+                                    + "drops the catalog table.");
 
     public static final ConfigOption<String> URI =
             key("metadata.iceberg.uri")
@@ -230,6 +245,10 @@ public class IcebergOptions {
 
     public int previousVersionsMax() {
         return options.get(METADATA_PREVIOUS_VERSIONS_MAX);
+    }
+
+    public boolean restAutoRecreate() {
+        return options.get(REST_AUTO_RECREATE);
     }
 
     /** Where to store Iceberg metadata. */
