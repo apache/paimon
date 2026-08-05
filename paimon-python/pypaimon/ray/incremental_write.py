@@ -247,8 +247,7 @@ def _write_offset_source(
                         planned_schema_id, commit_user, checkpoint_tags,
                         checkpoint_id, pending_messages, state)
                 except Exception:
-                    # Commit failures have a known or uncertain outcome; the
-                    # commit layer owns cleanup in the known case.
+                    # Avoid aborting files after an uncertain commit outcome.
                     pending_messages = []
                     raise
                 pending_messages = []
@@ -287,7 +286,7 @@ def _write_dataset_periodically(
                 )
                 committer.commit()
         except Exception:
-            # Preserve completed groups before surfacing a source or worker error.
+            # Commit completed groups before reporting the failure.
             committer.commit()
             raise
     except Exception:

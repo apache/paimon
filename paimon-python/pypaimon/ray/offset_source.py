@@ -58,10 +58,9 @@ def _stable_units(units):
 
 
 class PaimonOffsetSource:
-    """A snapshot-pinned Paimon source processed in stable offset units.
+    """A snapshot-pinned source with stable offsets.
 
-    ``transform`` is rebuilt for each read window. It must be deterministic
-    and must not depend on rows from another window.
+    ``transform`` must be deterministic and window-local.
     """
 
     def __init__(
