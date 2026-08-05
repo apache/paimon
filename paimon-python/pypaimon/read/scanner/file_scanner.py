@@ -665,6 +665,8 @@ class FileScanner:
             raise ValueError("chunk_shuffle cannot combine with limit")
         if self._global_index_result is not None:
             raise ValueError("chunk_shuffle cannot combine with global index")
+        if self._row_ranges is not None:
+            raise ValueError("chunk_shuffle cannot combine with row ranges")
         # Only partition predicates are allowed: row-level / column-level
         # predicates would silently shrink each chunk's effective row count,
         # breaking the chunk_size contract DataLoader callers expect.

@@ -189,7 +189,7 @@ class DataEvolutionGlobalIndexScanner:
             if partition_filter is not None:
                 if not partition_filter.test(entry.partition):
                     return False
-            if not _is_supported_scalar_index(entry.index_file):
+            if not is_supported_scalar_index(entry.index_file):
                 return False
             global_index_meta = entry.index_file.global_index_meta
             if global_index_meta is None:
@@ -367,7 +367,7 @@ def _resolve_snapshot(table, snapshot):
     return snapshot_manager.get_latest_snapshot()
 
 
-def _is_supported_scalar_index(index_file):
+def is_supported_scalar_index(index_file):
     return (
         index_file.global_index_meta is not None
         and index_file.index_type in _SUPPORTED_SCALAR_INDEX_TYPES
@@ -376,7 +376,7 @@ def _is_supported_scalar_index(index_file):
 
 def _supported_scalar_index_files(index_files):
     return [index_file for index_file in index_files
-            if _is_supported_scalar_index(index_file)]
+            if is_supported_scalar_index(index_file)]
 
 
 def _core_options(table):

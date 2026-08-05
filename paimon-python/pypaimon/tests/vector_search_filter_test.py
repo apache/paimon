@@ -992,6 +992,50 @@ class VectorSearchFilterTest(unittest.TestCase):
                          (splits_sorted[1].row_range_start,
                           splits_sorted[1].row_range_end))
 
+    def test_unsupported_scalar_coverage_still_plans_raw_split(self):
+        from pypaimon.table.source.vector_search_split import (
+            IndexVectorSearchSplit,
+            RawVectorSearchSplit,
+        )
+
+        entries = [
+            _entry(None, field_id=1, index_type="lumina-vector-ann",
+                   file_name="vec.index", row_range_start=0, row_range_end=9),
+            _entry(None, field_id=0, index_type="full-text",
+                   file_name="id-ft.index", row_range_start=0, row_range_end=9),
+        ]
+        table = _StubTable(
+            fields=[self.id_field, self.embedding_field], entries=entries)
+        table.options = CoreOptions(Options({
+            "scalar-index.search-mode": "full",
+            "vector-index.search-mode": "full",
+        }))
+        self._scan_patch.stop()
+        self._travel_patch.stop()
+        _patch_snapshot(
+            self, entries, types.SimpleNamespace(id=1, next_row_id=10))
+
+        predicate = Predicate(
+            method="equal", index=0, field="id", literals=[5])
+        splits = (
+            VectorSearchBuilderImpl(table)
+            .with_vector_column("embedding")
+            .with_query_vector([1.0, 0.0, 0.0, 0.0])
+            .with_limit(3)
+            .with_filter(predicate)
+            .new_vector_search_scan()
+            .scan()
+            .splits()
+        )
+
+        index = [s for s in splits if isinstance(s, IndexVectorSearchSplit)]
+        raw = [s for s in splits if isinstance(s, RawVectorSearchSplit)]
+        self.assertEqual(1, len(index))
+        self.assertEqual([], index[0].scalar_index_files)
+        self.assertEqual(1, len(raw))
+        self.assertEqual([Range(0, 9)], raw[0].row_ranges)
+        self.assertEqual([], raw[0].scalar_index_files)
+
     def test_read_threads_prefilter_bitmap_as_include_row_ids(self):
         """preFilter bitmap from scanner.scan(filter) must reach each split's
         VectorSearch, offset-rebased to local coords by OffsetGlobalIndexReader.
