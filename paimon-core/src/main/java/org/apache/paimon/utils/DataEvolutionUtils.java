@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.AllColumns;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.KnownWrittenColumns;
@@ -49,9 +50,7 @@ public class DataEvolutionUtils {
     public static WrittenColumns collectWrittenColumns(
             Collection<DataSplit> splits, Function<Long, TableSchema> schemaLoader) {
         Set<Integer> fieldIds = new TreeSet<>();
-        Map<Long, TableSchema> schemaCache = new HashMap<>();
-        Function<Long, TableSchema> cachedSchemaLoader =
-                schemaId -> schemaCache.computeIfAbsent(schemaId, schemaLoader);
+        Map<Long, Map<String, Integer>> fieldIdByNameCache = new HashMap<>();
         Map<Pair<Long, List<String>>, Set<Integer>> fieldIdsCache = new HashMap<>();
         for (DataSplit split : splits) {
             for (DataFileMeta file : split.dataFiles()) {
@@ -59,10 +58,10 @@ public class DataEvolutionUtils {
                     Pair<Long, List<String>> cacheKey = Pair.of(file.schemaId(), file.writeCols());
                     Set<Integer> fileFieldIds = fieldIdsCache.get(cacheKey);
                     if (fileFieldIds == null) {
-                        fileFieldIds = computeFileFieldIds(cachedSchemaLoader, file);
+                        fileFieldIds = computeFileFieldIds(schemaLoader, fieldIdByNameCache, file);
                         fieldIdsCache.put(cacheKey, fileFieldIds);
+                        fieldIds.addAll(fileFieldIds);
                     }
-                    fieldIds.addAll(fileFieldIds);
                 } catch (RuntimeException e) {
                     return AllColumns.INSTANCE;
                 }
@@ -71,17 +70,44 @@ public class DataEvolutionUtils {
         return new KnownWrittenColumns(fieldIds);
     }
 
-    /** Resolve a data file's physical columns through the schema the file was written with. */
-    public static Set<Integer> computeFileFieldIds(
-            Function<Long, TableSchema> schemaLoader, DataFileMeta file) {
-        TableSchema fileSchema = schemaLoader.apply(file.schemaId());
-        if (fileSchema == null) {
-            throw new IllegalArgumentException("Cannot find schema " + file.schemaId());
+    private static Set<Integer> computeFileFieldIds(
+            Function<Long, TableSchema> schemaLoader,
+            Map<Long, Map<String, Integer>> fieldIdByNameCache,
+            DataFileMeta file) {
+        Map<String, Integer> fieldIdByName =
+                fieldIdByNameCache.computeIfAbsent(
+                        file.schemaId(),
+                        schemaId -> {
+                            TableSchema fileSchema = schemaLoader.apply(schemaId);
+                            if (fileSchema == null) {
+                                throw new IllegalArgumentException(
+                                        "Cannot find schema " + schemaId);
+                            }
+
+                            Map<String, Integer> fieldIds = new HashMap<>();
+                            for (DataField field : fileSchema.fields()) {
+                                fieldIds.put(field.name(), field.id());
+                            }
+                            return fieldIds;
+                        });
+
+        List<String> writeCols = file.writeCols();
+        if (writeCols == null) {
+            return new TreeSet<>(fieldIdByName.values());
         }
 
         Set<Integer> fieldIds = new TreeSet<>();
-        for (DataField field : fileSchema.project(file.writeCols()).fields()) {
-            fieldIds.add(field.id());
+        for (String writeCol : writeCols) {
+            Integer fieldId = fieldIdByName.get(writeCol);
+            if (fieldId == null) {
+                checkArgument(
+                        SpecialFields.isSystemField(writeCol),
+                        "Cannot find write column '%s' in schema %s.",
+                        writeCol,
+                        file.schemaId());
+            } else {
+                fieldIds.add(fieldId);
+            }
         }
         return fieldIds;
     }

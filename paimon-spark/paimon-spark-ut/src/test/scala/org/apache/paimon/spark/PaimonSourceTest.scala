@@ -18,14 +18,19 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.spark.sources.PaimonSourceOffset
+import org.apache.paimon.schema.{SchemaManager, TableSchema}
+import org.apache.paimon.spark.sources.{PaimonMicroBatchStream, PaimonSourceOffset}
+import org.apache.paimon.table.DataTable
 import org.apache.paimon.table.source.{KnownWrittenColumns, WrittenColumns}
 import org.apache.paimon.utils.InstantiationUtil
 
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.streaming.{StreamingQueryException, StreamTest, Trigger}
 import org.junit.jupiter.api.Assertions
+import org.mockito.Mockito.{mock, times, verify, when}
 
+import java.lang.{Long => JLong}
+import java.util.Collections
 import java.util.concurrent.TimeUnit
 
 import scala.collection.JavaConverters._
@@ -66,6 +71,26 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
 
     assert(restored.splits.isEmpty)
     assert(restored.metadata == null)
+  }
+
+  test("Paimon Source: cache schemas for the stream lifetime") {
+    val table = mock(classOf[DataTable])
+    val schemaManager = mock(classOf[SchemaManager])
+    val initialSchema = mock(classOf[TableSchema])
+    val evolvedSchema = mock(classOf[TableSchema])
+    when(table.options()).thenReturn(Collections.emptyMap[String, String]())
+    when(table.schemaManager()).thenReturn(schemaManager)
+    when(schemaManager.schema(1L)).thenReturn(initialSchema)
+    when(schemaManager.schema(2L)).thenReturn(evolvedSchema)
+
+    val stream = new PaimonMicroBatchStream(table, null, "checkpoint")
+
+    assert(stream.schemaLoader.apply(JLong.valueOf(1L)) eq initialSchema)
+    assert(stream.schemaLoader.apply(JLong.valueOf(1L)) eq initialSchema)
+    assert(stream.schemaLoader.apply(JLong.valueOf(2L)) eq evolvedSchema)
+    assert(stream.schemaLoader.apply(JLong.valueOf(2L)) eq evolvedSchema)
+    verify(schemaManager, times(1)).schema(1L)
+    verify(schemaManager, times(1)).schema(2L)
   }
 
   test("Paimon Source: expose written columns to raw foreachBatch") {
@@ -112,6 +137,45 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
           assert(
             writtenColumns.asInstanceOf[KnownWrittenColumns].fieldIds() == expectedFieldIds.asJava)
           assert(metadataLookupStartedNoSparkJob)
+        } finally {
+          query.stop()
+        }
+    }
+  }
+
+  test("Paimon Source: expose written columns for a self-union") {
+    withTempDir {
+      checkpointDir =>
+        val TableSnapshotState(_, location, _, _, _) =
+          prepareTableAndGetLocation(1, hasPk = true)
+        val expectedFieldIds =
+          loadTable("T").schema().fields().asScala.map(field => Integer.valueOf(field.id())).sorted
+        @volatile var writtenColumns: WrittenColumns = null
+
+        val source = spark.readStream
+          .format("paimon")
+          .option(SparkConnectorOptions.BATCH_WRITTEN_COLUMNS_ENABLED.key(), true)
+          .load(location)
+        val query = source
+          .union(source)
+          .writeStream
+          .option("checkpointLocation", checkpointDir.getCanonicalPath)
+          .foreachBatch {
+            (batch: Dataset[Row], _: Long) =>
+              val metadata = PaimonSparkMicroBatchMetadata.writtenColumns(batch)
+              if (metadata.isPresent) {
+                writtenColumns = metadata.get()
+              }
+              batch.count()
+              ()
+          }
+          .start()
+
+        try {
+          query.processAllAvailable()
+          assert(writtenColumns.isInstanceOf[KnownWrittenColumns])
+          assert(
+            writtenColumns.asInstanceOf[KnownWrittenColumns].fieldIds() == expectedFieldIds.asJava)
         } finally {
           query.stop()
         }

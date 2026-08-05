@@ -45,6 +45,8 @@ import java.util.function.Function;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Test for {@link DataEvolutionUtils}. */
@@ -174,6 +176,37 @@ public class DataEvolutionUtilsTest {
     }
 
     @Test
+    public void testCollectWrittenColumnsFallsBackWhenWriteColumnIsMissing() {
+        TableSchema schema = tableSchema(1L, new DataField(1, "a", DataTypes.INT()));
+        DataFileMeta file = dataFile(1L, Collections.singletonList("missing"));
+
+        WrittenColumns result =
+                DataEvolutionUtils.collectWrittenColumns(
+                        Collections.singletonList(dataSplit(file)), ignored -> schema);
+
+        assertThat(result).isSameAs(AllColumns.INSTANCE);
+    }
+
+    @Test
+    public void testCollectWrittenColumnsIgnoresSystemFields() {
+        TableSchema schema = tableSchema(1L, new DataField(1, "a", DataTypes.INT()));
+        DataFileMeta file =
+                dataFile(
+                        1L,
+                        Arrays.asList(
+                                SpecialFields.ROW_ID.name(),
+                                "a",
+                                SpecialFields.SEQUENCE_NUMBER.name()));
+
+        WrittenColumns result =
+                DataEvolutionUtils.collectWrittenColumns(
+                        Collections.singletonList(dataSplit(file)), ignored -> schema);
+
+        assertThat(result).isInstanceOf(KnownWrittenColumns.class);
+        assertThat(((KnownWrittenColumns) result).fieldIds()).containsExactly(1);
+    }
+
+    @Test
     public void testCollectWrittenColumnsCachesFileSchemaProjection() {
         TableSchema schema =
                 tableSchema(
@@ -199,10 +232,11 @@ public class DataEvolutionUtilsTest {
     @Test
     public void testCollectWrittenColumnsCachesSchemaAcrossProjections() {
         TableSchema schema =
-                tableSchema(
-                        1L,
-                        new DataField(1, "a", DataTypes.INT()),
-                        new DataField(2, "b", DataTypes.STRING()));
+                spy(
+                        tableSchema(
+                                1L,
+                                new DataField(1, "a", DataTypes.INT()),
+                                new DataField(2, "b", DataTypes.STRING())));
         DataFileMeta first = dataFile(1L, Collections.singletonList("a"));
         DataFileMeta second = dataFile(1L, Collections.singletonList("b"));
         AtomicInteger schemaLoads = new AtomicInteger();
@@ -217,6 +251,7 @@ public class DataEvolutionUtilsTest {
 
         assertThat(((KnownWrittenColumns) result).fieldIds()).containsExactly(1, 2);
         assertThat(schemaLoads).hasValue(1);
+        verify(schema).fields();
     }
 
     @Test

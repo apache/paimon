@@ -45,6 +45,12 @@ under the License.
             <td>Whether to read row in the form of changelog (add rowkind column in row to represent its change type).</td>
         </tr>
         <tr>
+            <td><h5>read.stream.batch-written-columns.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to expose the written field ids of an admitted micro-batch through PaimonSparkMicroBatchMetadata.</td>
+        </tr>
+        <tr>
             <td><h5>read.stream.maxBytesPerTrigger</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>

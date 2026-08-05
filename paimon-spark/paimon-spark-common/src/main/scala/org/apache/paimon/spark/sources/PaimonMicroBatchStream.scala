@@ -31,6 +31,7 @@ import org.apache.spark.sql.connector.read.{InputPartition, PartitionReaderFacto
 import org.apache.spark.sql.connector.read.streaming.{MicroBatchStream, Offset, ReadLimit, SupportsTriggerAvailableNow}
 
 import java.lang.{Long => JLong}
+import java.util.concurrent.ConcurrentHashMap
 import java.util.function.Function
 
 import scala.collection.JavaConverters._
@@ -107,6 +108,19 @@ class PaimonMicroBatchStream(
   private lazy val batchWrittenColumnsEnabled: Boolean =
     options.get(SparkConnectorOptions.BATCH_WRITTEN_COLUMNS_ENABLED)
 
+  private[spark] lazy val schemaLoader: Function[JLong, TableSchema] = {
+    val schemaManager = table.schemaManager()
+    val schemaCache = new ConcurrentHashMap[JLong, TableSchema]()
+    val uncachedSchemaLoader = new Function[JLong, TableSchema] {
+      override def apply(schemaId: JLong): TableSchema =
+        schemaManager.schema(schemaId.longValue())
+    }
+    new Function[JLong, TableSchema] {
+      override def apply(schemaId: JLong): TableSchema =
+        schemaCache.computeIfAbsent(schemaId, uncachedSchemaLoader)
+    }
+  }
+
   override def getDefaultReadLimit: ReadLimit = defaultReadLimit
 
   override def prepareForTriggerAvailableNow(): Unit = {
@@ -167,13 +181,9 @@ class PaimonMicroBatchStream(
       admittedSplits: Array[IndexedDataSplit]): PlannedMicroBatch = {
     val writtenColumns =
       try {
-        val schemaManager = table.schemaManager()
         DataEvolutionUtils.collectWrittenColumns(
           admittedSplits.map(_.entry).toSeq.asJava,
-          new Function[JLong, TableSchema] {
-            override def apply(schemaId: JLong): TableSchema =
-              schemaManager.schema(schemaId.longValue())
-          }
+          schemaLoader
         )
       } catch {
         case NonFatal(e) =>
