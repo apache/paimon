@@ -124,8 +124,10 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public SplitRead<InternalRow> withReadType(RowType readRowType) {
+        if (!this.readRowType.equals(readRowType)) {
+            formatReaderMappings.clear();
+        }
         this.readRowType = readRowType;
-        formatReaderMappings.clear();
         return this;
     }
 

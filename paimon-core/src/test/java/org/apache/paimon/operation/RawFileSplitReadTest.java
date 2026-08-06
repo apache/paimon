@@ -43,6 +43,9 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.lang.reflect.Field;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link RawFileSplitRead}. */
@@ -51,7 +54,7 @@ class RawFileSplitReadTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    void readerMappingIsRebuiltWhenReadTypeChanges() throws Exception {
+    void readerMappingCacheTracksReadTypeChanges() throws Exception {
         Path tablePath = new Path(tempDir.resolve("mapping-cache").toUri());
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
@@ -78,7 +81,8 @@ class RawFileSplitReadTest {
         DataSplit split = table.newSnapshotReader().read().dataSplits().get(0);
         RawFileSplitRead read = (RawFileSplitRead) table.store().newRead();
 
-        read.withReadType(table.rowType().project("first"));
+        RowType firstProjection = table.rowType().project("first");
+        read.withReadType(firstProjection);
         try (FileRecordReader<InternalRow> fileReader = read.createFileReader(split, null)) {
             FileRecordIterator<InternalRow> batch = fileReader.readBatch();
             assertThat(batch).isNotNull();
@@ -86,8 +90,19 @@ class RawFileSplitReadTest {
             batch.releaseBatch();
         }
 
+        Map<?, ?> formatReaderMappings = formatReaderMappings(read);
+        assertThat(formatReaderMappings).hasSize(1);
+        Object firstMapping = formatReaderMappings.values().iterator().next();
+
+        RowType equalFirstProjection = table.rowType().project("first");
+        assertThat(equalFirstProjection).isEqualTo(firstProjection).isNotSameAs(firstProjection);
+        read.withReadType(equalFirstProjection);
+        assertThat(formatReaderMappings).hasSize(1);
+        assertThat(formatReaderMappings.values().iterator().next()).isSameAs(firstMapping);
+
         RowType secondProjection = table.rowType().project("second");
         read.withReadType(secondProjection);
+        assertThat(formatReaderMappings).isEmpty();
         try (FileRecordReader<InternalRow> fileReader = read.createFileReader(split, null)) {
             FileRecordIterator<InternalRow> batch = fileReader.readBatch();
             assertThat(batch).isNotNull();
@@ -98,5 +113,14 @@ class RawFileSplitReadTest {
             assertThat(batch.next()).isNull();
             batch.releaseBatch();
         }
+        assertThat(formatReaderMappings).hasSize(1);
+        assertThat(formatReaderMappings.values().iterator().next()).isNotSameAs(firstMapping);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<?, ?> formatReaderMappings(RawFileSplitRead read) throws Exception {
+        Field field = RawFileSplitRead.class.getDeclaredField("formatReaderMappings");
+        field.setAccessible(true);
+        return (Map<?, ?>) field.get(read);
     }
 }
