@@ -21,7 +21,7 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.Snapshot
 import org.apache.paimon.spark.{PaimonAppendTable, PaimonPrimaryKeyTable, PaimonSparkTestBase, PaimonTableTest}
 
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{AnalysisException, Row}
 
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -267,6 +267,32 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
       checkAnswer(
         spark.sql("SELECT * FROM target ORDER BY a, b"),
         Row(2, 20, "c2") :: Row(3, 300, "c33") :: Nil)
+    }
+  }
+
+  test("Paimon MergeInto: unresolved target column reports Spark analysis error") {
+    withTable("source", "target") {
+      Seq((1, "new-oneid", "new-customer"))
+        .toDF("id", "oneid", "customer_id")
+        .createOrReplaceTempView("source")
+
+      createTable("target", "id INT, oneid STRING", Seq("id"))
+
+      val error = intercept[AnalysisException] {
+        spark.sql(s"""
+                     |MERGE INTO target
+                     |USING source
+                     |ON target.id = source.id
+                     |WHEN MATCHED AND (
+                     |  NOT equal_null(target.oneid, source.oneid)
+                     |  OR NOT equal_null(target.customer_id, source.customer_id)
+                     |) THEN UPDATE SET oneid = source.oneid
+                     |""".stripMargin)
+      }
+
+      assert(error.getErrorClass === "UNRESOLVED_COLUMN.WITH_SUGGESTION")
+      assert(error.getMessage.contains("`target`.`customer_id`"))
+      assert(error.getMessage.contains("`source`.`customer_id`"))
     }
   }
 
