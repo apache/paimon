@@ -54,10 +54,11 @@ public class PaimonObjectInspectorFactory {
             case FLOAT:
             case DOUBLE:
             case BINARY:
-            case BLOB:
             case VARBINARY:
                 return PrimitiveObjectInspectorFactory.getPrimitiveJavaObjectInspector(
                         (PrimitiveTypeInfo) HiveTypeUtils.toTypeInfo(logicalType));
+            case BLOB:
+                return new PaimonBlobObjectInspector();
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) logicalType;
                 return new PaimonDecimalObjectInspector(
