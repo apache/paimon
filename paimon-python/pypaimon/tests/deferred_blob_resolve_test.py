@@ -26,6 +26,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.table.row.blob import BlobRef
 
@@ -378,6 +379,59 @@ class DeferredBlobResolveTest(unittest.TestCase):
         self.assertEqual(
             [bytes([index]) * 1024 for index in range(_ROW_COUNT) if index != 1],
             payloads,
+        )
+
+    def test_hidden_auth_field_preserves_file_io_for_blob_descriptors(self):
+        table = self._create_table(
+            "hidden_auth_field_blob_descriptor",
+            extra_options={"blob-as-descriptor": "true"},
+        )
+        read_builder = table.new_read_builder().with_projection(
+            ["sample_id", "payload"])
+        auth_result = TableQueryAuthResult(
+            filter=_RejectScoreOneAuthResult.filter,
+            column_masking=None,
+        )
+        splits = [
+            QueryAuthSplit(split, auth_result)
+            for split in read_builder.new_scan().plan().splits()
+        ]
+
+        payloads = [
+            row.get_blob(1).to_data()
+            for row in read_builder.new_read().to_iterator(splits)
+        ]
+
+        self.assertEqual(
+            [bytes([index]) * 1024 for index in range(_ROW_COUNT) if index != 1],
+            payloads,
+        )
+
+    def test_auth_masking_preserves_file_io_for_blob_descriptors(self):
+        table = self._create_table(
+            "auth_masking_blob_descriptor",
+            extra_options={"blob-as-descriptor": "true"},
+        )
+        read_builder = table.new_read_builder().with_projection(
+            ["sample_id", "payload"])
+        auth_result = TableQueryAuthResult(
+            filter=None,
+            column_masking={"sample_id": json.dumps({"name": "NULL"})},
+        )
+        splits = [
+            QueryAuthSplit(split, auth_result)
+            for split in read_builder.new_scan().plan().splits()
+        ]
+
+        rows = [
+            (row.get_field(0), row.get_blob(1).to_data())
+            for row in read_builder.new_read().to_iterator(splits)
+        ]
+
+        self.assertEqual([None] * _ROW_COUNT, [row[0] for row in rows])
+        self.assertEqual(
+            [bytes([index]) * 1024 for index in range(_ROW_COUNT)],
+            [row[1] for row in rows],
         )
 
     def test_preserves_null_payloads_after_filtering(self):
