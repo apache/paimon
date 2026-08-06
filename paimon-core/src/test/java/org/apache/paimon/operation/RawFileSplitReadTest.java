@@ -22,9 +22,13 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FlushingFileFormat;
+import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -43,6 +47,9 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link RawFileSplitRead}. */
@@ -51,31 +58,9 @@ class RawFileSplitReadTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    void readerMappingIsNotSharedBetweenReadTypes() throws Exception {
-        Path tablePath = new Path(tempDir.resolve("mapping-cache").toUri());
-        Options options = new Options();
-        options.set(CoreOptions.PATH, tablePath.toString());
-        options.set(CoreOptions.BUCKET, 1);
-        options.set(CoreOptions.BUCKET_KEY, "first");
-        Schema schema =
-                Schema.newBuilder()
-                        .column("first", DataTypes.STRING())
-                        .column("second", DataTypes.INT())
-                        .options(options.toMap())
-                        .build();
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(new SchemaManager(LocalFileIO.create(), tablePath), schema);
-        FileStoreTable table =
-                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
-
-        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        try (BatchTableWrite write = writeBuilder.newWrite();
-                BatchTableCommit commit = writeBuilder.newCommit()) {
-            write.write(GenericRow.of(BinaryString.fromString("value"), 42));
-            commit.commit(write.prepareCommit());
-        }
-
-        DataSplit split = table.newSnapshotReader().read().dataSplits().get(0);
+    void testReaderMappingIsNotSharedBetweenReadTypes() throws Exception {
+        FileStoreTable table = createTable("mapping-cache");
+        DataSplit split = singleSplit(table);
         InnerTableRead read = table.newRead();
 
         RowType firstProjection = table.rowType().project("first");
@@ -100,5 +85,83 @@ class RawFileSplitReadTest {
             assertThat(batch.next()).isNull();
             batch.releaseBatch();
         }
+    }
+
+    @Test
+    void testEqualReadTypeReusesFormatReaderMapping() throws Exception {
+        FileStoreTable table = createTable("equal-mapping-cache");
+        AtomicInteger readerFactoryCreations = new AtomicInteger();
+        FileFormat countingFormat =
+                new FlushingFileFormat(table.coreOptions().fileFormatString()) {
+                    @Override
+                    public FormatReaderFactory createReaderFactory(
+                            RowType dataSchemaRowType,
+                            RowType projectedRowType,
+                            List<Predicate> filters) {
+                        readerFactoryCreations.incrementAndGet();
+                        return super.createReaderFactory(
+                                dataSchemaRowType, projectedRowType, filters);
+                    }
+                };
+        RawFileSplitRead read =
+                new RawFileSplitRead(
+                        table.fileIO(),
+                        table.schemaManager(),
+                        table.schema(),
+                        table.rowType(),
+                        ignored -> countingFormat,
+                        table.store().pathFactory(),
+                        table.coreOptions());
+        DataSplit split = singleSplit(table);
+
+        RowType firstProjection = table.rowType().project("first");
+        read.withReadType(firstProjection);
+        try (RecordReader<InternalRow> ignored = read.createReader(split)) {
+            assertThat(readerFactoryCreations).hasValue(1);
+        }
+
+        RowType equalFirstProjection = table.rowType().project("first");
+        assertThat(equalFirstProjection).isEqualTo(firstProjection).isNotSameAs(firstProjection);
+        read.withReadType(equalFirstProjection);
+        try (RecordReader<InternalRow> ignored = read.createReader(split)) {
+            assertThat(readerFactoryCreations).hasValue(1);
+        }
+
+        read.withReadType(table.rowType().project("second"));
+        try (RecordReader<InternalRow> ignored = read.createReader(split)) {
+            assertThat(readerFactoryCreations).hasValue(2);
+        }
+    }
+
+    private FileStoreTable createTable(String directory) throws Exception {
+        Path tablePath = new Path(tempDir.resolve(directory).toUri());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.BUCKET_KEY, "first");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("first", DataTypes.STRING())
+                        .column("second", DataTypes.INT())
+                        .options(options.toMap())
+                        .build();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(new SchemaManager(LocalFileIO.create(), tablePath), schema);
+        FileStoreTable table =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(BinaryString.fromString("value"), 42));
+            commit.commit(write.prepareCommit());
+        }
+        return table;
+    }
+
+    private static DataSplit singleSplit(FileStoreTable table) {
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        assertThat(splits).hasSize(1);
+        return splits.get(0);
     }
 }
