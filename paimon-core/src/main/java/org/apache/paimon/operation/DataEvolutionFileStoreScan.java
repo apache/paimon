@@ -76,6 +76,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     // per-file column pruning in postFilterManifestEntries.
     private final ConcurrentMap<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache =
             new ConcurrentHashMap<>();
+    private final EvolutionStatsCache evolutionStatsCache = new EvolutionStatsCache();
 
     public DataEvolutionFileStoreScan(
             ManifestsReader manifestsReader,
@@ -206,7 +207,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     }
 
     private boolean filterByStats(List<ManifestEntry> entries) {
-        EvolutionStats stats = evolutionStats(schema, this::scanTableSchema, entries);
+        EvolutionStats stats =
+                evolutionStats(schema, this::scanTableSchema, entries, evolutionStatsCache);
         return inputFilter.test(
                 stats.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
     }
@@ -258,19 +260,23 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 pair -> fileFieldIds(this::scanTableSchema, entry.file()));
     }
 
-    /** TODO: Optimize implementation of this method. */
     @VisibleForTesting
     static EvolutionStats evolutionStats(
             TableSchema schema,
             Function<Long, TableSchema> scanTableSchema,
-            List<ManifestEntry> metas) {
+            List<ManifestEntry> metas,
+            EvolutionStatsCache evolutionStatsCache) {
         Set<Integer> excludedFileFieldIds =
                 metas.stream()
                         .filter(
                                 entry ->
                                         isBlobFile(entry.file().fileName())
                                                 || isVectorStoreFile(entry.file().fileName()))
-                        .flatMap(entry -> fileFieldIds(scanTableSchema, entry.file()).stream())
+                        .flatMap(
+                                entry ->
+                                        evolutionStatsCache.get(scanTableSchema, entry.file())
+                                                .dataFileSchema().fields().stream()
+                                                .map(DataField::id))
                         .collect(Collectors.toSet());
         // exclude blob and vector-store files, useless for predicate eval
         metas =
@@ -283,6 +289,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         metas.sort(Comparator.comparingLong(maxSeqFunc).reversed());
 
         int[] allFields = schema.fields().stream().mapToInt(DataField::id).toArray();
+        DataType[] targetTypes =
+                schema.fields().stream().map(DataField::type).toArray(DataType[]::new);
         int fieldsCount = schema.fields().size();
         int[] rowOffsets = new int[fieldsCount];
         int[] fieldOffsets = new int[fieldsCount];
@@ -301,49 +309,38 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             nullCounts[i] = stats.nullCounts();
         }
 
+        int unresolvedFields = fieldsCount;
         for (int i = 0; i < metas.size(); i++) {
             DataFileMeta fileMeta = metas.get(i).file();
+            EvolutionStatsCache.ProjectedFileSchema projectedFileSchema =
+                    evolutionStatsCache.get(scanTableSchema, fileMeta);
 
-            TableSchema dataFileSchema =
-                    scanTableSchema.apply(fileMeta.schemaId()).project(fileMeta.writeCols());
-
-            TableSchema dataFileSchemaWithStats = dataFileSchema.project(fileMeta.valueStatsCols());
-
-            int[] fieldIds =
-                    dataFileSchema.logicalRowType().getFields().stream()
-                            .mapToInt(DataField::id)
-                            .toArray();
-
-            int[] fieldIdsWithStats =
-                    dataFileSchemaWithStats.logicalRowType().getFields().stream()
-                            .mapToInt(DataField::id)
-                            .toArray();
-
-            loop1:
             for (int j = 0; j < fieldsCount; j++) {
                 if (rowOffsets[j] != -1) {
                     continue;
                 }
                 int targetFieldId = allFields[j];
-                DataType targetType = schema.fields().get(j).type();
-                for (int fieldId : fieldIds) {
-                    if (targetFieldId == fieldId) {
-                        for (int k = 0; k < fieldIdsWithStats.length; k++) {
-                            if (fieldId == fieldIdsWithStats[k]) {
-                                DataType fileType = dataFileSchemaWithStats.fields().get(k).type();
-                                if (!fileType.equalsIgnoreFieldId(targetType)) {
-                                    typeMismatchedFieldIds.add(targetFieldId);
-                                    continue loop1;
-                                }
-                                rowOffsets[j] = i;
-                                fieldOffsets[j] = k;
-                                continue loop1;
-                            }
-                        }
-                        rowOffsets[j] = -2;
-                        continue loop1;
-                    }
+                EvolutionStatsCache.FileFieldStats fileFieldStats =
+                        projectedFileSchema.fieldStats(targetFieldId);
+                if (fileFieldStats == null) {
+                    continue;
                 }
+                if (!fileFieldStats.hasStats()) {
+                    rowOffsets[j] = -2;
+                    unresolvedFields--;
+                    continue;
+                }
+                DataType fileType = fileFieldStats.type();
+                if (!fileType.equalsIgnoreFieldId(targetTypes[j])) {
+                    typeMismatchedFieldIds.add(targetFieldId);
+                    continue;
+                }
+                rowOffsets[j] = i;
+                fieldOffsets[j] = fileFieldStats.index();
+                unresolvedFields--;
+            }
+            if (unresolvedFields == 0) {
+                break;
             }
         }
 

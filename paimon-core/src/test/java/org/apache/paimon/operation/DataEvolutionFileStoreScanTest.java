@@ -49,6 +49,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -83,7 +84,10 @@ public class DataEvolutionFileStoreScanTest {
 
         EvolutionStats result =
                 DataEvolutionFileStoreScan.evolutionStats(
-                        tableSchema, scanTableSchema, Collections.singletonList(entry));
+                        tableSchema,
+                        scanTableSchema,
+                        Collections.singletonList(entry),
+                        new EvolutionStatsCache());
 
         assertThat(result).isNotNull();
         assertThat(result.minValues()).isInstanceOf(DataEvolutionRow.class);
@@ -108,6 +112,87 @@ public class DataEvolutionFileStoreScanTest {
 
         assertThat(minRow.getFieldCount()).isEqualTo(2);
         assertThat(maxRow.getFieldCount()).isEqualTo(2);
+    }
+
+    @Test
+    public void testEvolutionStatsReusesProjectedSchema() {
+        Schema schema = createSchema("f0", "f1");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+
+        AtomicInteger schemaLoads = new AtomicInteger();
+        Function<Long, TableSchema> countingScanTableSchema =
+                schemaId -> {
+                    schemaLoads.incrementAndGet();
+                    return schemas.get(schemaId);
+                };
+        EvolutionStatsCache cache = new EvolutionStatsCache();
+        ManifestEntry entry =
+                createManifestEntry(
+                        0L,
+                        createSimpleStats(
+                                GenericRow.of(1, BinaryString.fromString("a")),
+                                GenericRow.of(5, BinaryString.fromString("z")),
+                                createBinaryArray(new int[] {0, 1}),
+                                new int[] {0, 1}));
+
+        DataEvolutionFileStoreScan.evolutionStats(
+                tableSchema, countingScanTableSchema, Collections.singletonList(entry), cache);
+        DataEvolutionFileStoreScan.evolutionStats(
+                tableSchema, countingScanTableSchema, Collections.singletonList(entry), cache);
+
+        assertThat(schemaLoads).hasValue(1);
+        assertThat(cache.size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testEvolutionStatsCacheSeparatesStatsProjections() {
+        Schema schema = createSchema("f0", "f1");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+        EvolutionStatsCache cache = new EvolutionStatsCache();
+
+        ManifestEntry f0StatsEntry =
+                createManifestEntryWithDifferentCols(
+                        0L,
+                        new String[] {"f0", "f1"},
+                        new String[] {"f0"},
+                        createSimpleStats(
+                                GenericRow.of(1),
+                                GenericRow.of(5),
+                                createBinaryArray(new int[] {0}),
+                                new int[] {0}));
+        ManifestEntry f1StatsEntry =
+                createManifestEntryWithDifferentCols(
+                        0L,
+                        new String[] {"f0", "f1"},
+                        new String[] {"f1"},
+                        createSimpleStats(
+                                GenericRow.of(BinaryString.fromString("a")),
+                                GenericRow.of(BinaryString.fromString("z")),
+                                createBinaryArray(new int[] {0}),
+                                new int[] {1}));
+
+        EvolutionStats f0Stats =
+                DataEvolutionFileStoreScan.evolutionStats(
+                        tableSchema,
+                        scanTableSchema,
+                        Collections.singletonList(f0StatsEntry),
+                        cache);
+        EvolutionStats f1Stats =
+                DataEvolutionFileStoreScan.evolutionStats(
+                        tableSchema,
+                        scanTableSchema,
+                        Collections.singletonList(f1StatsEntry),
+                        cache);
+
+        DataEvolutionRow f0Min = (DataEvolutionRow) f0Stats.minValues();
+        DataEvolutionRow f1Min = (DataEvolutionRow) f1Stats.minValues();
+        assertThat(f0Min.getInt(0)).isEqualTo(1);
+        assertThat(f0Min.isNullAt(1)).isTrue();
+        assertThat(f1Min.isNullAt(0)).isTrue();
+        assertThat(f1Min.getString(1).toString()).isEqualTo("a");
+        assertThat(cache.size()).isEqualTo(2);
     }
 
     @Test
@@ -138,7 +223,8 @@ public class DataEvolutionFileStoreScanTest {
         List<ManifestEntry> entries = Arrays.asList(entry2, entry1);
 
         EvolutionStats result =
-                DataEvolutionFileStoreScan.evolutionStats(tableSchema, scanTableSchema, entries);
+                DataEvolutionFileStoreScan.evolutionStats(
+                        tableSchema, scanTableSchema, entries, new EvolutionStatsCache());
 
         assertThat(result).isNotNull();
         DataEvolutionRow minRow = (DataEvolutionRow) result.minValues();
@@ -188,7 +274,7 @@ public class DataEvolutionFileStoreScanTest {
 
         EvolutionStats result =
                 DataEvolutionFileStoreScan.evolutionStats(
-                        evolvedTableSchema, scanTableSchema, entries);
+                        evolvedTableSchema, scanTableSchema, entries, new EvolutionStatsCache());
 
         assertThat(result).isNotNull();
         DataEvolutionRow minRow = (DataEvolutionRow) result.minValues();
@@ -241,7 +327,8 @@ public class DataEvolutionFileStoreScanTest {
         List<ManifestEntry> entries = Arrays.asList(entry1, entry2);
 
         EvolutionStats result =
-                DataEvolutionFileStoreScan.evolutionStats(tableSchema, scanTableSchema, entries);
+                DataEvolutionFileStoreScan.evolutionStats(
+                        tableSchema, scanTableSchema, entries, new EvolutionStatsCache());
 
         assertThat(result).isNotNull();
         DataEvolutionRow minRow = (DataEvolutionRow) result.minValues();
@@ -303,7 +390,8 @@ public class DataEvolutionFileStoreScanTest {
                 DataEvolutionFileStoreScan.evolutionStats(
                         evolvedTableSchema,
                         scanTableSchema,
-                        Arrays.asList(oldTypeEntry, newTypeEntry));
+                        Arrays.asList(oldTypeEntry, newTypeEntry),
+                        new EvolutionStatsCache());
 
         DataEvolutionRow minRow = (DataEvolutionRow) result.minValues();
         DataEvolutionRow maxRow = (DataEvolutionRow) result.maxValues();
@@ -338,7 +426,8 @@ public class DataEvolutionFileStoreScanTest {
                 DataEvolutionFileStoreScan.evolutionStats(
                         evolvedTableSchema,
                         scanTableSchema,
-                        Collections.singletonList(preAlterFile));
+                        Collections.singletonList(preAlterFile),
+                        new EvolutionStatsCache());
 
         Predicate onChangedColumn =
                 new PredicateBuilder(evolvedTableSchema.logicalRowType()).equal(0, 50L);
@@ -387,7 +476,10 @@ public class DataEvolutionFileStoreScanTest {
 
         EvolutionStats result =
                 DataEvolutionFileStoreScan.evolutionStats(
-                        tableSchema, scanTableSchema, Arrays.asList(dataEntry, vectorEntry));
+                        tableSchema,
+                        scanTableSchema,
+                        Arrays.asList(dataEntry, vectorEntry),
+                        new EvolutionStatsCache());
 
         DataEvolutionArray nullCounts = (DataEvolutionArray) result.nullCounts();
         assertThat(nullCounts.isNullAt(2)).isTrue();
