@@ -16,7 +16,8 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+import logging
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import pyarrow as pa
 
@@ -30,6 +31,261 @@ from pypaimon.ray.data_evolution_merge_transform import (
     vectorized_insert_transform,
     vectorized_matched_transform,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+class GroupApplyError(RuntimeError):
+    """A distributed update group failed."""
+
+
+def _group_error_text(error: BaseException) -> str:
+    import traceback
+
+    return "distributed update group failed: {}: {}\n{}".format(
+        type(error).__name__,
+        str(error),
+        "".join(traceback.format_exception(
+            type(error), error, error.__traceback__)),
+    )
+
+
+def _group_result(messages, num_updated, row_ids=(), error=None):
+    import pickle
+
+    return pa.table({
+        "msgs_blob": pa.array([pickle.dumps(messages)], type=pa.binary()),
+        "n_updated": pa.array([num_updated], type=pa.int64()),
+        "row_ids_blob": pa.array([pickle.dumps(row_ids)], type=pa.binary()),
+        "error": pa.array([error], type=pa.string()),
+    })
+
+
+def _is_transform_factory(transform):
+    import functools
+
+    return (isinstance(transform, type)
+            or (isinstance(transform, functools.partial)
+                and isinstance(transform.func, type)))
+
+
+def _as_arrow_table(value):
+    if isinstance(value, pa.Table):
+        return value
+    if isinstance(value, pa.RecordBatch):
+        return pa.Table.from_batches([value])
+    if isinstance(value, dict):
+        return pa.table(value)
+    try:
+        import pandas as pd
+    except ImportError:
+        pd = None
+    if pd is not None and isinstance(value, pd.DataFrame):
+        return pa.Table.from_pandas(value, preserve_index=False)
+    raise ValueError(
+        "transform must return a pyarrow.Table, RecordBatch, pandas "
+        "DataFrame, or column mapping.")
+
+
+class _RangeTransformUpdateWorker:
+
+    def __init__(
+            self,
+            table,
+            read_table,
+            files_info_ref,
+            read_projection,
+            update_cols,
+            update_schema,
+            transform,
+            transform_filter,
+            transform_predicate,
+            transform_batch_size,
+            max_application_retries,
+            retry_exceptions):
+        self._table = table
+        self._read_table = read_table
+        self._init_error = None
+        self._max_application_retries = max_application_retries
+        self._retry_exceptions = retry_exceptions
+        attempts = 0
+        while True:
+            try:
+                import ray
+
+                self._files_info = ray.get(files_info_ref)
+                self._read_projection = list(read_projection)
+                self._update_cols = list(update_cols)
+                self._update_schema = update_schema
+                self._transform = (
+                    transform()
+                    if _is_transform_factory(transform) else transform)
+                self._transform_filter = transform_filter
+                self._transform_predicate = transform_predicate
+                self._transform_batch_size = transform_batch_size
+                break
+            except Exception as error:
+                if self._should_retry(error, attempts):
+                    attempts += 1
+                    continue
+                self._init_error = _group_error_text(error)
+                break
+
+    def _should_retry(self, error, attempts):
+        retry = self._retry_exceptions
+        if retry is True:
+            retryable = True
+        elif isinstance(retry, (list, tuple)):
+            try:
+                retryable = isinstance(error, tuple(retry))
+            except TypeError:
+                retryable = False
+        else:
+            retryable = False
+        return retryable and (
+            self._max_application_retries == -1
+            or attempts < self._max_application_retries
+        )
+
+    def _file_groups(self, group):
+        return [
+            (first_row_id, None)
+            for first_row_id in dict.fromkeys(
+                group.column("_FIRST_ROW_ID").to_pylist())
+        ]
+
+    def _read_batches(self, first_row_id, row_ids):
+        from pypaimon.globalindex.indexed_split import IndexedSplit
+        from pypaimon.read.split import DataSplit
+        from pypaimon.table.special_fields import SpecialFields
+        from pypaimon.utils.range import Range
+
+        row_id_col = SpecialFields.ROW_ID.name
+        owning_split, target_files = (
+            self._files_info.first_row_id_index[first_row_id])
+        split = DataSplit(
+            files=target_files,
+            partition=owning_split.partition,
+            bucket=owning_split.bucket,
+            raw_convertible=True,
+        )
+        if row_ids is not None:
+            split = IndexedSplit(split, Range.to_ranges(list(row_ids)))
+
+        projection = list(self._read_projection)
+        if row_id_col not in projection:
+            projection.append(row_id_col)
+        read_builder = self._read_table.new_read_builder()
+        if self._transform_predicate is not None:
+            read_builder = read_builder.with_filter(
+                self._transform_predicate)
+        reader = (
+            read_builder.with_projection(projection)
+            .new_read().to_arrow_batch_reader([split])
+        )
+        try:
+            for record_batch in reader:
+                table = pa.Table.from_batches([record_batch])
+                for batch in table.to_batches(
+                        max_chunksize=self._transform_batch_size):
+                    yield pa.Table.from_batches([batch])
+        finally:
+            reader.close()
+
+    def _build_updates(self, first_row_id, selected_row_ids):
+        from pypaimon.table.special_fields import SpecialFields
+
+        row_id_col = SpecialFields.ROW_ID.name
+        updates = []
+        for batch in self._read_batches(first_row_id, selected_row_ids):
+            if self._transform_filter is not None:
+                mask = self._filter_mask(
+                    self._transform_filter(
+                        batch.select(self._read_projection)),
+                    batch.num_rows,
+                )
+                batch = batch.filter(mask)
+            if batch.num_rows == 0:
+                continue
+            result = _as_arrow_table(
+                self._transform(batch.select(self._read_projection)))
+            missing = [
+                col for col in self._update_cols
+                if col not in result.column_names
+            ]
+            if missing:
+                raise ValueError(
+                    "transform output is missing columns {}.".format(missing))
+            if result.num_rows != batch.num_rows:
+                raise ValueError(
+                    "transform output must preserve input row count.")
+            try:
+                projected = pa.Table.from_arrays(
+                    [batch.column(row_id_col)] + [
+                        result.column(col) for col in self._update_cols
+                    ],
+                    names=[row_id_col] + self._update_cols,
+                ).cast(self._update_schema)
+            except Exception as error:
+                raise ValueError(
+                    "transform output does not match the update schema.") from error
+            if projected.num_rows:
+                updates.append(projected)
+        if not updates:
+            return self._update_schema.empty_table()
+        return pa.concat_tables(updates)
+
+    @staticmethod
+    def _filter_mask(value, expected_rows):
+        try:
+            mask = value if isinstance(
+                value, (pa.Array, pa.ChunkedArray)) else pa.array(value)
+        except Exception as error:
+            raise ValueError(
+                "callable filter must return a boolean mask.") from error
+        if not pa.types.is_boolean(mask.type) or len(mask) != expected_rows:
+            raise ValueError(
+                "callable filter must return one boolean per input row.")
+        if mask.null_count:
+            import pyarrow.compute as pc
+            mask = pc.fill_null(mask, False)
+        return mask
+
+    def __call__(self, group):
+        from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        if self._init_error is not None:
+            return _group_result([], 0, error=self._init_error)
+
+        attempts = 0
+        while True:
+            writer = None
+            try:
+                writer = TableUpdateByRowId(
+                    self._table,
+                    "_ray_update_worker_",
+                    BATCH_COMMIT_IDENTIFIER,
+                    _precomputed_files_info=self._files_info,
+                )
+                num_updated = 0
+                for first_row_id, row_ids in self._file_groups(group):
+                    updates = self._build_updates(first_row_id, row_ids)
+                    if updates.num_rows:
+                        writer.update_columns(updates, self._update_cols)
+                        num_updated += updates.num_rows
+                return _group_result(writer.commit_messages, num_updated)
+            except Exception as error:
+                if self._should_retry(error, attempts):
+                    _abort_failed_writer(self._table, writer)
+                    attempts += 1
+                    continue
+                return _failed_group_result(self._table, writer, error)
+
+
+def _apply_range_transform(group, **worker_options):
+    return _RangeTransformUpdateWorker(**worker_options)(group)
 
 
 def _map_kwargs(
@@ -445,6 +701,14 @@ def distributed_update_apply(
     ray_remote_args: Optional[Dict[str, Any]] = None,
     base_snapshot_id: Optional[int] = None,
     collect_row_ids: bool = False,
+    on_group_result: Optional[Callable[[list, int, list], None]] = None,
+    rows_per_range: Optional[int] = None,
+    read_projection: Optional[Sequence[str]] = None,
+    transform: Optional[Callable] = None,
+    transform_filter: Optional[Callable] = None,
+    transform_predicate=None,
+    transform_update_schema: Optional[pa.Schema] = None,
+    transform_batch_size: int = 1024,
 ) -> Tuple[list, int, list]:
     import numpy as np
     import pickle
@@ -470,9 +734,12 @@ def distributed_update_apply(
     # commit-time conflict check agree even if a concurrent commit lands (mirrors
     # the delete path).
     from pypaimon.common.options.core_options import CoreOptions
+    scan_options = {}
+    if base_snapshot_id is not None:
+        scan_options[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(base_snapshot_id)
     scan_table = (
-        table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
-        if base_snapshot_id is not None else table
+        table.copy_without_time_travel(scan_options)
+        if scan_options else table
     )
     planner = TableUpdateByRowId(
         scan_table,
@@ -503,17 +770,25 @@ def distributed_update_apply(
     precomputed_info_ref = ray.put(files_info)
 
     frid_col = "_FIRST_ROW_ID"
+    range_col = "_ROW_ID_RANGE_START"
     captured_sorted = sorted_first_row_ids
     captured_sorted_arr = np.asarray(captured_sorted, dtype=np.int64)
     valid_ranges = planner.valid_row_id_ranges
     range_starts = np.asarray([r.from_ for r in valid_ranges], dtype=np.int64)
     range_ends = np.asarray([r.to for r in valid_ranges], dtype=np.int64)
+    row_id_range_starts = (
+        _row_id_range_starts(files_info, rows_per_range)
+        if rows_per_range is not None else None
+    )
 
     def _assign_frid(batch: pa.Table) -> pa.Table:
         if batch.num_rows == 0:
-            return batch.append_column(
-                frid_col, pa.array([], type=pa.int64())
-            )
+            result = batch.append_column(
+                frid_col, pa.array([], type=pa.int64()))
+            if row_id_range_starts is None:
+                return result
+            return result.append_column(
+                range_col, pa.array([], type=pa.int64()))
         rid_col = batch.column(row_id_name)
         if rid_col.null_count:
             raise ValueError(
@@ -521,92 +796,221 @@ def distributed_update_apply(
                 "or matched rows come from a different table."
             )
         rids = rid_col.to_numpy(zero_copy_only=False)
-        # Check each row_id belongs to a valid range (vectorized).
         in_range = np.zeros(len(rids), dtype=bool)
-        for s, e in zip(range_starts, range_ends):
-            in_range |= (rids >= s) & (rids <= e)
+        for start, end in zip(range_starts, range_ends):
+            in_range |= (rids >= start) & (rids <= end)
         if not in_range.all():
             bad = rids[~in_range][0]
             raise ValueError(
                 f"_ROW_ID {bad} does not belong to any valid range "
                 f"{[f'[{r.from_}, {r.to}]' for r in valid_ranges]}; "
-                f"planner snapshot is stale or matched rows come "
-                f"from a different table."
+                "planner snapshot is stale or row ids come from another table."
             )
-        idx = np.searchsorted(
-            captured_sorted_arr, rids, side="right"
-        ) - 1
-        frids = captured_sorted_arr[idx]
-        return batch.append_column(
-            frid_col, pa.array(frids, type=pa.int64())
+        indexes = np.searchsorted(
+            captured_sorted_arr, rids, side="right") - 1
+        result = batch.append_column(
+            frid_col,
+            pa.array(captured_sorted_arr[indexes], type=pa.int64()))
+        if row_id_range_starts is None:
+            return result
+        return result.append_column(
+            range_col,
+            pa.array(row_id_range_starts[indexes], type=pa.int64()),
         )
 
-    map_kwargs = _map_kwargs(ray_remote_args)
-    with_frid = update_ds.map_batches(_assign_frid, **map_kwargs)
+    worker_map_kwargs = _map_kwargs(ray_remote_args)
+    if transform is not None:
+        with_frid = ray.data.from_arrow(pa.table({
+            frid_col: pa.array(captured_sorted, type=pa.int64()),
+            range_col: pa.array(row_id_range_starts, type=pa.int64()),
+        }))
+    else:
+        with_frid = update_ds.map_batches(
+            _assign_frid, **worker_map_kwargs)
 
     captured_table = table
     captured_cols = cols
+    capture_group_errors = on_group_result is not None
 
     def _apply_group(group: pa.Table) -> pa.Table:
-        if group.num_rows == 0:
-            return pa.Table.from_pydict({
-                "msgs_blob": pa.array([], type=pa.binary()),
-                "n_updated": pa.array([], type=pa.int64()),
-                "row_ids_blob": pa.array([], type=pa.binary()),
-            })
+        worker = None
+        try:
+            if group.num_rows == 0:
+                return pa.Table.from_pydict({
+                    "msgs_blob": pa.array([], type=pa.binary()),
+                    "n_updated": pa.array([], type=pa.int64()),
+                    "row_ids_blob": pa.array([], type=pa.binary()),
+                    "error": pa.array([], type=pa.string()),
+                })
 
-        if (
-            pc.count_distinct(group.column(row_id_name)).as_py()
-            != group.num_rows
-        ):
-            raise ValueError(
-                "MERGE matched multiple source rows to the same "
-                "target _ROW_ID. Deduplicate the source before "
-                "merging."
+            if (pc.count_distinct(group.column(row_id_name)).as_py()
+                    != group.num_rows):
+                raise ValueError(
+                    "MERGE matched multiple source rows to the same "
+                    "target _ROW_ID. Deduplicate the source before merging.")
+
+            routing_columns = [frid_col]
+            if row_id_range_starts is not None:
+                routing_columns.append(range_col)
+            for_update = group.drop_columns(routing_columns)
+            row_ids = (
+                for_update.column(row_id_name).to_pylist()
+                if collect_row_ids else []
             )
+            worker = TableUpdateByRowId(
+                captured_table,
+                "_merge_into_shard_" + uuid.uuid4().hex[:8],
+                BATCH_COMMIT_IDENTIFIER,
+                _precomputed_files_info=ray.get(precomputed_info_ref),
+            )
+            if capture_group_errors:
+                return _write_group_result(
+                    captured_table, worker, for_update, captured_cols, row_ids)
+            messages = worker.update_columns(for_update, captured_cols)
+            return _group_result(messages, for_update.num_rows, row_ids)
+        except Exception as error:
+            if capture_group_errors:
+                return _failed_group_result(captured_table, worker, error)
+            raise
 
-        for_update = group.drop_columns([frid_col])
-        row_ids = (
-            for_update.column(row_id_name).to_pylist()
-            if collect_row_ids else []
-        )
-        worker = TableUpdateByRowId(
-            captured_table,
-            "_merge_into_shard_" + uuid.uuid4().hex[:8],
-            BATCH_COMMIT_IDENTIFIER,
-            _precomputed_files_info=ray.get(precomputed_info_ref),
-        )
-        msgs = worker.update_columns(for_update, list(captured_cols))
-        return pa.Table.from_pydict({
-            "msgs_blob": [pickle.dumps(msgs)],
-            "n_updated": pa.array(
-                [for_update.num_rows], type=pa.int64()
-            ),
-            "row_ids_blob": pa.array(
-                [pickle.dumps(row_ids)], type=pa.binary()
-            ),
-        })
-
-    # One group per target data file; bounded by file count and num_partitions.
-    group_partitions = max(
-        1, min(len(captured_sorted), num_partitions)
-    )
-    msgs_ds = with_frid.groupby(
-        frid_col, num_partitions=group_partitions
-    ).map_groups(_apply_group, **map_kwargs)
+    group_col = frid_col
+    num_groups = len(captured_sorted)
+    if row_id_range_starts is not None:
+        group_col = range_col
+        num_groups = len(set(row_id_range_starts.tolist()))
+    group_partitions = max(1, min(num_groups, num_partitions))
+    grouped = with_frid.groupby(
+        group_col, num_partitions=group_partitions)
+    if transform is None:
+        msgs_ds = grouped.map_groups(_apply_group, **worker_map_kwargs)
+    else:
+        retry_options = ray_remote_args or {}
+        worker_options = {
+            "table": table,
+            "read_table": scan_table,
+            "files_info_ref": precomputed_info_ref,
+            "read_projection": list(read_projection or []),
+            "update_cols": list(captured_cols),
+            "update_schema": transform_update_schema,
+            "transform": transform,
+            "transform_filter": transform_filter,
+            "transform_predicate": transform_predicate,
+            "transform_batch_size": transform_batch_size,
+            "max_application_retries": retry_options.get("max_retries", 3),
+            "retry_exceptions": retry_options.get(
+                "retry_exceptions", False),
+        }
+        if _is_transform_factory(transform):
+            actor_map_kwargs = dict(worker_map_kwargs)
+            actor_map_kwargs.pop("retry_exceptions", None)
+            actor_map_kwargs.pop("max_retries", None)
+            msgs_ds = grouped.map_groups(
+                _RangeTransformUpdateWorker,
+                fn_constructor_kwargs=worker_options,
+                **actor_map_kwargs,
+            )
+        else:
+            msgs_ds = grouped.map_groups(
+                _apply_range_transform,
+                fn_kwargs=worker_options,
+                **worker_map_kwargs,
+            )
 
     all_msgs: list = []
     num_updated = 0
     action_row_ids = []
+    group_error = None
     for batch in msgs_ds.iter_batches(batch_format="pyarrow"):
-        for blob in batch.column("msgs_blob").to_pylist():
-            all_msgs.extend(pickle.loads(blob))
-        for n in batch.column("n_updated").to_pylist():
+        for result in batch.to_pylist():
+            error = result["error"]
+            if error is not None:
+                if group_error is None:
+                    group_error = error
+                continue
+            group_msgs = pickle.loads(result["msgs_blob"])
+            group_row_ids = (
+                pickle.loads(result["row_ids_blob"])
+                if collect_row_ids else []
+            )
+            n = result["n_updated"]
+            if on_group_result is None:
+                all_msgs.extend(group_msgs)
+            else:
+                on_group_result(group_msgs, n, group_row_ids)
             num_updated += n
-        if collect_row_ids:
-            for blob in batch.column("row_ids_blob").to_pylist():
-                action_row_ids.extend(pickle.loads(blob))
+            action_row_ids.extend(group_row_ids)
+    if group_error is not None:
+        if on_group_result is None:
+            if all_msgs:
+                try:
+                    _abort_group_messages(captured_table, all_msgs)
+                except Exception:
+                    logger.warning(
+                        "Failed to abort completed update groups.",
+                        exc_info=True)
+            raise ValueError(group_error)
+        raise GroupApplyError(group_error)
     return all_msgs, num_updated, action_row_ids
+
+
+def _abort_group_messages(table, messages):
+    commit = table.new_batch_write_builder().new_commit()
+    try:
+        commit.abort(messages)
+    finally:
+        commit.close()
+
+
+def _write_group_result(table, writer, updates, update_cols, row_ids=()):
+    try:
+        messages = writer.update_columns(updates, list(update_cols))
+        return _group_result(messages, updates.num_rows, row_ids)
+    except Exception as error:
+        return _failed_group_result(table, writer, error)
+
+
+def _failed_group_result(table, writer, error):
+    _abort_failed_writer(table, writer)
+    return _group_result([], 0, error=_group_error_text(error))
+
+
+def _abort_failed_writer(table, writer):
+    if writer is not None and writer.commit_messages:
+        try:
+            _abort_group_messages(table, writer.commit_messages)
+        except Exception:
+            logger.warning(
+                "Failed to abort row-id range files.", exc_info=True)
+
+
+def _row_id_range_starts(files_info, target_rows):
+    """Pack adjacent file groups into continuous target-sized ranges."""
+    import numpy as np
+
+    starts = []
+    current_start = None
+    current_rows = 0
+    for first_row_id in files_info.first_row_ids:
+        if current_start is None:
+            current_start = first_row_id
+        starts.append(current_start)
+
+        files = files_info.first_row_id_index[first_row_id][1]
+        group_ends = [
+            data_file.row_id_range().to
+            for data_file in files
+            if (data_file.first_row_id == first_row_id
+                and data_file.row_id_range() is not None)
+        ]
+        if not group_ends:
+            raise RuntimeError(
+                "Cannot determine row count for file group {}.".format(
+                    first_row_id))
+        current_rows += max(group_ends) - first_row_id + 1
+        if current_rows >= target_rows:
+            current_start = None
+            current_rows = 0
+    return np.asarray(starts, dtype=np.int64)
 
 
 def _read_output_schema(table, read_cols: Sequence[str]) -> "pa.Schema":

@@ -15,6 +15,7 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
+import functools
 import os
 import shutil
 import tempfile
@@ -30,7 +31,8 @@ pypaimon = pytest.importorskip("pypaimon")
 ray = pytest.importorskip("ray")
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.ray import update_by_row_id
+from pypaimon.ray import update_by_row_id, update_by_transform
+from pypaimon.ray.data_evolution_merge_join import GroupApplyError
 
 
 class RayUpdateByRowIdTest(unittest.TestCase):
@@ -62,11 +64,14 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             pass
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def _create(self, options=None):
+    def _create(self, options=None, schema=None):
         name = f"default.u_{uuid.uuid4().hex[:8]}"
         opts = self.de_options if options is None else options
         self.catalog.create_table(
-            name, Schema.from_pyarrow_schema(self.pa_schema, options=opts), False)
+            name,
+            Schema.from_pyarrow_schema(schema or self.pa_schema, options=opts),
+            False,
+        )
         return name
 
     def _write(self, target, data):
@@ -87,6 +92,25 @@ class RayUpdateByRowIdTest(unittest.TestCase):
     def _rowid_by_id(self, target):
         tab = self._read(target, ["_ROW_ID", "id"])
         return dict(zip(tab.column("id").to_pylist(), tab.column("_ROW_ID").to_pylist()))
+
+    def _three_file_target(self):
+        target = self._create()
+        for row_id in range(1, 4):
+            self._write(target, pa.Table.from_pydict(
+                {"id": [row_id], "name": ["a"], "age": [0]},
+                schema=self.pa_schema,
+            ))
+        return target, self.catalog.get_table(target), self._rowid_by_id(target)
+
+    @staticmethod
+    def _data_files_under(table):
+        table_path = table.file_io.to_filesystem_path(table.table_path)
+        return {
+            os.path.join(root, file_name)
+            for root, _, files in os.walk(table_path)
+            for file_name in files
+            if file_name.endswith(".parquet")
+        }
 
     def test_update_by_row_id_basic(self):
         target = self._create()
@@ -129,6 +153,709 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         got = dict(zip(back["id"], back["age"]))
         self.assertEqual(got[21], 999)
         self.assertTrue(all(v == 0 for k, v in got.items() if k != 21))
+
+    def test_incrementally_commits_file_group_windows(self):
+        from pypaimon.write.table_commit import StreamTableCommit
+
+        target = self._create()
+        chunks = [
+            [10, 11, 12],
+            [20],
+            [30, 31, 32],
+            [40, 41],
+            [50],
+        ]
+        for chunk in chunks:
+            self._write(target, pa.Table.from_pydict(
+                {
+                    "id": chunk,
+                    "name": ["x"] * len(chunk),
+                    "age": [0] * len(chunk),
+                },
+                schema=self.pa_schema,
+            ))
+
+        table = self.catalog.get_table(target)
+        base_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        row_ids = self._rowid_by_id(target)
+        first_ids = [chunk[0] for chunk in chunks]
+
+        class Infer:
+
+            def __init__(self, catalog_options, table_name):
+                tags = (
+                    CatalogFactory.create(catalog_options)
+                    .get_table(table_name)
+                    .list_tags()
+                )
+                if not any(
+                        tag.startswith("pypaimon-transform-update-")
+                        for tag in tags):
+                    raise RuntimeError("planned snapshot is not retained")
+
+            def __call__(self, batch):
+                if batch.column_names != ["id"]:
+                    raise AssertionError("transform must not receive _ROW_ID")
+                return pa.table({
+                    "age": batch.column("id"),
+                })
+
+        commits = []
+        original_commit = StreamTableCommit.commit
+
+        def record_commit(stream_commit, messages, commit_identifier):
+            commits.append(tuple(sorted({
+                data_file.first_row_id
+                for message in messages
+                for data_file in message.new_files
+            })))
+            return original_commit(
+                stream_commit, messages, commit_identifier)
+
+        with mock.patch.object(StreamTableCommit, "commit", record_commit):
+            stats = update_by_transform(
+                target,
+                self.catalog_options,
+                update_cols=["age"],
+                num_partitions=4,
+                rows_per_commit=4,
+                read_projection=["id"],
+                transform=functools.partial(
+                    Infer, self.catalog_options, target),
+                transform_batch_size=1,
+            )
+
+        self.assertEqual({"num_updated": 10}, stats)
+        expected_ranges = [
+            tuple(row_ids[row_id] for row_id in first_ids[start:start + 2])
+            for start in range(0, len(first_ids), 2)
+        ]
+        self.assertEqual(sorted(expected_ranges), sorted(commits))
+        self.assertEqual(
+            base_snapshot_id + 3,
+            table.snapshot_manager().get_latest_snapshot().id,
+        )
+        result = self._read(target).sort_by("id").to_pydict()
+        self.assertEqual(result["id"], result["age"])
+        self.assertFalse(table.list_tags())
+
+        snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        empty = pa.table({
+            "_ROW_ID": pa.array([], pa.int64()),
+            "age": pa.array([], pa.int32()),
+        })
+        self.assertEqual(
+            {"num_updated": 0},
+            update_by_row_id(
+                target, empty, self.catalog_options,
+                update_cols=["age"]),
+        )
+        self.assertEqual(
+            snapshot_id, table.snapshot_manager().get_latest_snapshot().id)
+        self.assertFalse(table.list_tags())
+
+    def test_transform_filter_updates_only_matching_rows(self):
+        target = self._create()
+        self._write(target, pa.table({
+            "id": [1, 2, 3, 4, 5],
+            "name": ["x"] * 5,
+            "age": pa.array([0] * 5, type=pa.int32()),
+        }, schema=self.pa_schema))
+
+        def transform(batch):
+            return pa.table({"age": batch.column("id")})
+
+        stats = update_by_transform(
+            target,
+            self.catalog_options,
+            filter="id BETWEEN 2 AND 4",
+            read_projection=["id"],
+            transform=transform,
+            update_cols=["age"],
+            rows_per_commit=100,
+        )
+
+        self.assertEqual({"num_updated": 3}, stats)
+        self.assertEqual(
+            [0, 2, 3, 4, 0],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+
+        def keep_edges(batch):
+            return pa.array([
+                value.as_py() in (1, 5) for value in batch.column("id")
+            ])
+
+        self.assertEqual(
+            {"num_updated": 2},
+            update_by_transform(
+                target,
+                self.catalog_options,
+                filter=keep_edges,
+                read_projection=["id"],
+                transform=transform,
+                update_cols=["age"],
+                rows_per_commit=100,
+            ),
+        )
+        self.assertEqual(
+            [1, 2, 3, 4, 5],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+        table = self.catalog.get_table(target)
+        snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        self.assertEqual(
+            {"num_updated": 0},
+            update_by_transform(
+                target,
+                self.catalog_options,
+                filter="id > 100",
+                read_projection=["id"],
+                transform=transform,
+                update_cols=["age"],
+                rows_per_commit=100,
+            ),
+        )
+        self.assertEqual(
+            snapshot_id, table.snapshot_manager().get_latest_snapshot().id)
+
+    def test_transform_backfills_new_column(self):
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+
+        source_schema = pa.schema([
+            ("id", pa.int32()),
+            ("name", pa.string()),
+        ])
+        target = self._create(schema=source_schema)
+        self._write(target, pa.table({
+            "id": [1, 2],
+            "name": ["a", "bb"],
+        }, schema=source_schema))
+        self.catalog.alter_table(
+            target,
+            [SchemaChange.add_column("age", AtomicType("INT"))],
+            False,
+        )
+
+        result = update_by_transform(
+            target,
+            self.catalog_options,
+            read_projection=["name"],
+            transform=lambda batch: pa.table({
+                "age": [len(value.as_py())
+                        for value in batch.column("name")],
+            }),
+            update_cols=["age"],
+            rows_per_commit=100,
+        )
+
+        self.assertEqual({"num_updated": 2}, result)
+        self.assertEqual(
+            [1, 2],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+
+    def test_transform_failure_preserves_completed_range(self):
+        target = self._create()
+        for row_id in range(1, 9):
+            self._write(target, pa.table({
+                "id": [row_id],
+                "name": ["x"],
+                "age": pa.array([0], type=pa.int32()),
+            }, schema=self.pa_schema))
+
+        table = self.catalog.get_table(target)
+        base_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        files_before = self._data_files_under(table)
+
+        def transform(batch):
+            if batch.column("id")[0].as_py() == 4:
+                raise RuntimeError("forced transform failure")
+            return pa.table({
+                "age": batch.column("id"),
+            })
+
+        with self.assertRaisesRegex(
+                GroupApplyError, "forced transform failure"):
+            update_by_transform(
+                target,
+                self.catalog_options,
+                update_cols=["age"],
+                num_partitions=8,
+                rows_per_commit=1,
+                read_projection=["id"],
+                transform=transform,
+            )
+
+        self.assertEqual(
+            base_snapshot_id + 7,
+            table.snapshot_manager().get_latest_snapshot().id,
+        )
+        result = self._read(target).sort_by("id")
+        self.assertEqual(
+            [1, 2, 3, 0, 5, 6, 7, 8], result["age"].to_pylist())
+        live_files = {
+            os.path.basename(data_file.file_name)
+            for split in table.new_read_builder().new_scan().plan().splits()
+            for data_file in split.files
+        }
+        staged_files = {
+            os.path.basename(path)
+            for path in self._data_files_under(table) - files_before
+        }
+        self.assertTrue(staged_files.issubset(live_files))
+        self.assertFalse(table.list_tags())
+
+    def test_transform_retries_application_exception(self):
+        target = self._create()
+        self._write(target, pa.table({
+            "id": [1, 2],
+            "name": ["x", "x"],
+            "age": pa.array([0, 0], type=pa.int32()),
+        }, schema=self.pa_schema))
+
+        class FailOnce:
+
+            def __init__(self):
+                self.calls = 0
+
+            def __call__(self, batch):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("transient transform failure")
+                return pa.table({"age": batch.column("id")})
+
+        result = update_by_transform(
+            target,
+            self.catalog_options,
+            read_projection=["id"],
+            transform=FailOnce,
+            update_cols=["age"],
+            rows_per_commit=100,
+            ray_remote_args={
+                "retry_exceptions": True,
+                "max_retries": 3,
+            },
+        )
+
+        self.assertEqual({"num_updated": 2}, result)
+        self.assertEqual(
+            [1, 2], self._read(target).sort_by("id")["age"].to_pylist())
+
+    def test_transform_must_preserve_row_count(self):
+        target = self._create()
+        self._write(target, pa.table({
+            "id": [1, 2],
+            "name": ["x", "x"],
+            "age": pa.array([0, 0], type=pa.int32()),
+        }, schema=self.pa_schema))
+
+        def transform(batch):
+            return pa.table({
+                "age": batch.column("id").slice(0, 0),
+            })
+
+        with self.assertRaisesRegex(GroupApplyError, "preserve input row count"):
+            update_by_transform(
+                target,
+                self.catalog_options,
+                update_cols=["age"],
+                rows_per_commit=2,
+                read_projection=["id"],
+                transform=transform,
+                transform_batch_size=2,
+            )
+
+        self.assertEqual([0, 0], self._read(target).sort_by("id")["age"].to_pylist())
+
+    def test_callable_filter_validates_mask(self):
+        target = self._create()
+        self._write(target, pa.table({
+            "id": [1, 2],
+            "name": ["x", "x"],
+            "age": pa.array([0, 0], type=pa.int32()),
+        }, schema=self.pa_schema))
+
+        def transform(batch):
+            return pa.table({"age": batch.column("id")})
+
+        for mask in ([True], [1, 0]):
+            with self.subTest(mask=mask):
+                with self.assertRaisesRegex(
+                        GroupApplyError, "one boolean per input row"):
+                    update_by_transform(
+                        target,
+                        self.catalog_options,
+                        filter=lambda _batch, value=mask: value,
+                        read_projection=["id"],
+                        transform=transform,
+                        update_cols=["age"],
+                        rows_per_commit=100,
+                    )
+
+        self.assertEqual(
+            [0, 0], self._read(target).sort_by("id")["age"].to_pylist())
+
+    def test_transform_writes_one_file_group_at_a_time(self):
+        import importlib
+        import pickle
+
+        module = importlib.import_module(
+            "pypaimon.ray.data_evolution_merge_join")
+        worker = object.__new__(module._RangeTransformUpdateWorker)
+        worker._table = object()
+        worker._init_error = None
+        worker._files_info = object()
+        worker._update_cols = ["age"]
+        worker._file_groups = lambda group: [(10, None), (20, None)]
+        worker._build_updates = lambda first_row_id, _: pa.table({
+            "_ROW_ID": [first_row_id, first_row_id + 1],
+            "age": pa.array([1, 2], type=pa.int32()),
+        })
+        write_sizes = []
+
+        class FakeWriter:
+
+            def __init__(self, *args, **kwargs):
+                self.commit_messages = []
+
+            def update_columns(self, updates, update_cols):
+                write_sizes.append(updates.num_rows)
+                self.commit_messages.append(updates.num_rows)
+
+        with mock.patch(
+                "pypaimon.write.table_update_by_row_id.TableUpdateByRowId",
+                FakeWriter):
+            result = worker(pa.table({"unused": []}))
+
+        self.assertEqual([2, 2], write_sizes)
+        self.assertEqual([2, 2], pickle.loads(result["msgs_blob"][0].as_py()))
+        self.assertEqual(4, result["n_updated"][0].as_py())
+
+    def test_incremental_update_rejects_external_overwrite(self):
+        from pypaimon.write.commit.conflict_detection import (
+            CommitConflictError,
+        )
+        from pypaimon.write.table_commit import StreamTableCommit
+
+        target, _, _ = self._three_file_target()
+        external = pa.Table.from_pydict(
+            {
+                "id": [1, 2, 3],
+                "name": ["external"] * 3,
+                "age": [999] * 3,
+            },
+            schema=self.pa_schema,
+        )
+        original_commit = StreamTableCommit.commit
+        overwrite_landed = False
+
+        def transform(batch):
+            return pa.table({
+                "age": [value.as_py() * 100
+                        for value in batch.column("id")],
+            })
+
+        def commit_then_overwrite(
+                stream_commit, messages, commit_identifier):
+            nonlocal overwrite_landed
+            result = original_commit(
+                stream_commit, messages, commit_identifier)
+            if not overwrite_landed:
+                overwrite_landed = True
+                builder = (
+                    self.catalog.get_table(target)
+                    .new_batch_write_builder()
+                    .overwrite()
+                )
+                writer = builder.new_write()
+                writer.write_arrow(external)
+                builder.new_commit().commit(writer.prepare_commit())
+                writer.close()
+            return result
+
+        with mock.patch.object(
+                StreamTableCommit, "commit", commit_then_overwrite):
+            with self.assertRaisesRegex(
+                    CommitConflictError, "Concurrent rewrite"):
+                update_by_transform(
+                    target,
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=1,
+                    rows_per_commit=1,
+                    read_projection=["id"],
+                    transform=transform,
+                )
+
+        result = self._read(target).sort_by("id").to_pydict()
+        self.assertEqual(["external"] * 3, result["name"])
+        self.assertEqual([999] * 3, result["age"])
+
+    def test_incremental_update_rejects_concurrent_schema_changes(self):
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+        from pypaimon.write.commit.conflict_detection import (
+            CommitConflictError,
+        )
+        from pypaimon.write.table_commit import StreamTableCommit
+
+        cases = [
+            (SchemaChange.add_column("extra", AtomicType("INT")), False),
+            (SchemaChange.drop_column("age"), False),
+            (SchemaChange.rename_column("age", "renamed_age"), False),
+            (SchemaChange.rename_column("age", "renamed_age"), True),
+        ]
+        for change, alter_after_commit in cases:
+            with self.subTest(
+                    change=type(change).__name__,
+                    alter_after_commit=alter_after_commit):
+                target, table, _ = self._three_file_target()
+                base_snapshot_id = (
+                    table.snapshot_manager().get_latest_snapshot().id
+                )
+                original_commit = StreamTableCommit.commit
+                altered = False
+
+                def transform(batch):
+                    return pa.table({"age": batch.column("id")})
+
+                def alter_then_commit(
+                        stream_commit, messages, commit_identifier):
+                    nonlocal altered
+                    if not altered and not alter_after_commit:
+                        altered = True
+                        self.catalog.alter_table(target, [change], False)
+                    result = original_commit(
+                        stream_commit, messages, commit_identifier)
+                    if not altered:
+                        altered = True
+                        self.catalog.alter_table(target, [change], False)
+                    return result
+
+                with mock.patch.object(
+                        StreamTableCommit, "commit", alter_then_commit):
+                    with self.assertRaisesRegex(
+                            CommitConflictError, "Target schema changed"):
+                        update_by_transform(
+                            target,
+                            self.catalog_options,
+                            update_cols=["age"],
+                            num_partitions=1,
+                            rows_per_commit=1,
+                            read_projection=["id"],
+                            transform=transform,
+                        )
+
+                self.assertEqual(
+                    base_snapshot_id + int(alter_after_commit),
+                    table.snapshot_manager().get_latest_snapshot().id,
+                )
+                self.assertFalse(table.list_tags())
+
+    def test_transform_rejects_concurrent_input_changes(self):
+        from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+        from pypaimon.write.commit.conflict_detection import (
+            CommitConflictError,
+        )
+        from pypaimon.write.table_commit import StreamTableCommit
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        cases = [
+            ("read", ["name"], None),
+            ("filter", ["id"], "name = 'a'"),
+        ]
+        for _, read_projection, transform_filter in cases:
+            with self.subTest(read_projection=read_projection,
+                              filter=transform_filter):
+                target, _, row_ids = self._three_file_target()
+                original_commit = StreamTableCommit.commit
+                external_landed = False
+
+                def transform(batch):
+                    if "name" in batch.column_names:
+                        values = [
+                            len(value.as_py())
+                            for value in batch.column("name")
+                        ]
+                    else:
+                        values = [
+                            value.as_py() * 10
+                            for value in batch.column("id")
+                        ]
+                    return pa.table({"age": values})
+
+                def commit_after_input_change(
+                        stream_commit, messages, commit_identifier):
+                    nonlocal external_landed
+                    if not external_landed:
+                        external_landed = True
+                        external_table = self.catalog.get_table(target)
+                        updater = TableUpdateByRowId(
+                            external_table,
+                            "_external_input_update_",
+                            BATCH_COMMIT_IDENTIFIER,
+                        )
+                        external_messages = updater.update_columns(
+                            pa.table({
+                                "_ROW_ID": pa.array(
+                                    [row_ids[1]], type=pa.int64()),
+                                "name": ["long"],
+                            }),
+                            ["name"],
+                        )
+                        external_commit = (
+                            external_table.new_stream_write_builder()
+                            .new_commit()
+                        )
+                        try:
+                            original_commit(
+                                external_commit,
+                                external_messages,
+                                BATCH_COMMIT_IDENTIFIER,
+                            )
+                        finally:
+                            external_commit.close()
+                    return original_commit(
+                        stream_commit, messages, commit_identifier)
+
+                with mock.patch.object(
+                        StreamTableCommit,
+                        "commit",
+                        commit_after_input_change):
+                    with self.assertRaisesRegex(
+                            CommitConflictError, "multiple 'MERGE INTO'"):
+                        update_by_transform(
+                            target,
+                            self.catalog_options,
+                            read_projection=read_projection,
+                            transform=transform,
+                            filter=transform_filter,
+                            update_cols=["age"],
+                            rows_per_commit=100,
+                            num_partitions=1,
+                        )
+
+                result = self._read(target).sort_by("id").to_pydict()
+                self.assertEqual(["long", "a", "a"], result["name"])
+                self.assertEqual([0, 0, 0], result["age"])
+
+    def test_range_failure_aborts_files_from_earlier_group(self):
+        target = self._create()
+        for row_id in [1, 2]:
+            self._write(target, pa.Table.from_pydict(
+                {"id": [row_id], "name": ["a"], "age": [0]},
+                schema=self.pa_schema,
+            ))
+        table = self.catalog.get_table(target)
+        files_before = self._data_files_under(table)
+
+        def transform(batch):
+            if batch.column("id")[0].as_py() == 2:
+                raise RuntimeError("forced range failure")
+            return pa.table({
+                "age": [value.as_py() * 100
+                        for value in batch.column("id")],
+            })
+
+        with self.assertRaisesRegex(GroupApplyError, "forced range failure"):
+            update_by_transform(
+                target,
+                self.catalog_options,
+                update_cols=["age"],
+                num_partitions=1,
+                rows_per_commit=100,
+                read_projection=["id"],
+                transform=transform,
+            )
+
+        self.assertEqual(files_before, self._data_files_under(table))
+        self.assertEqual(
+            [0, 0],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
+
+    def test_incremental_commit_failure_aborts_later_groups(self):
+        import importlib
+
+        module = importlib.import_module("pypaimon.ray.update_by_transform")
+        aborted = []
+        commit_calls = []
+        retry_error = ValueError("retry failed")
+        commit_error = RuntimeError("commit failed")
+        commit_error.__cause__ = retry_error
+
+        class FakeCommit:
+            def add_commit_callback(self, callback):
+                pass
+
+            def commit(self, messages, commit_identifier):
+                commit_calls.append((list(messages), commit_identifier))
+                raise commit_error
+
+            def close(self):
+                pass
+
+        class FakeBuilder:
+            def new_commit(self):
+                return FakeCommit()
+
+        class FakeTable:
+            def new_stream_write_builder(self):
+                return FakeBuilder()
+
+        committer = module._IncrementalUpdateCommitter(FakeTable())
+        with mock.patch.object(
+                module,
+                "_abort_pending_update_messages",
+                side_effect=lambda table, messages: aborted.append(list(messages))):
+            committer.add_range(["group-1"], 1, [])
+            committer.add_range(["group-2"], 1, [])
+            with self.assertRaisesRegex(RuntimeError, "commit failed") as raised:
+                committer.finish()
+            committer.close()
+
+        self.assertIs(commit_error, raised.exception)
+        self.assertIs(retry_error, raised.exception.__cause__)
+        self.assertEqual([(["group-1"], 1)], commit_calls)
+        self.assertEqual([["group-2"]], aborted)
+
+    def test_incremental_commit_conflict_aborts_buffered_group_files(self):
+        from pypaimon.write.commit.conflict_detection import CommitConflictError
+        from pypaimon.write.file_store_commit import FileStoreCommit
+
+        target, table, _ = self._three_file_target()
+        base_snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        files_before = self._data_files_under(table)
+
+        def transform(batch):
+            return pa.table({"age": batch.column("id")})
+
+        with mock.patch.object(
+                FileStoreCommit,
+                "commit",
+                side_effect=CommitConflictError("forced conflict")):
+            with self.assertRaisesRegex(CommitConflictError, "forced conflict"):
+                update_by_transform(
+                    target,
+                    self.catalog_options,
+                    update_cols=["age"],
+                    num_partitions=1,
+                    rows_per_commit=1,
+                    read_projection=["id"],
+                    transform=transform,
+                )
+
+        self.assertEqual(files_before, self._data_files_under(table))
+        self.assertEqual(
+            base_snapshot_id,
+            table.snapshot_manager().get_latest_snapshot().id,
+        )
+        self.assertEqual(
+            [0, 0, 0],
+            self._read(target).sort_by("id")["age"].to_pylist(),
+        )
 
     def test_pins_base_snapshot_for_conflict_detection(self):
         # The update pins its base snapshot and threads it to distributed_update_apply,
@@ -240,6 +967,29 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             update_by_row_id(target, src, self.catalog_options, update_cols=["age"])
 
+    def test_transform_rejects_primary_key_table(self):
+        target = "default.u_{}".format(uuid.uuid4().hex[:8])
+        self.catalog.create_table(
+            target,
+            Schema.from_pyarrow_schema(
+                self.pa_schema,
+                primary_keys=["id"],
+                options=dict(self.de_options, bucket="1"),
+            ),
+            False,
+        )
+        with self.assertRaisesRegex(ValueError, "non-primary-key"):
+            update_by_transform(
+                target,
+                self.catalog_options,
+                read_projection=["id"],
+                transform=lambda batch: pa.table({
+                    "age": batch.column("id"),
+                }),
+                update_cols=["age"],
+                rows_per_commit=100,
+            )
+
     def test_rejects_missing_row_id_column(self):
         target = self._create()
         self._write(target, pa.Table.from_pydict(
@@ -313,7 +1063,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             update_by_row_id(target2, src, self.catalog_options, update_cols=["age"])
 
-    def test_rejects_unknown_and_empty_update_cols(self):
+    def test_rejects_invalid_options(self):
         target = self._create()
         self._write(target, pa.Table.from_pydict(
             {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
@@ -323,6 +1073,48 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             update_by_row_id(target, src, self.catalog_options, update_cols=["nope"])
         with self.assertRaises(ValueError):
             update_by_row_id(target, src, self.catalog_options, update_cols=[])
+
+        for value in [0, -1, True, 1.5, "2"]:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                        ValueError, "must be a positive integer"):
+                    update_by_transform(
+                        target,
+                        self.catalog_options,
+                        update_cols=["age"],
+                        rows_per_commit=value,
+                        read_projection=["id"],
+                        transform=lambda batch: batch,
+                    )
+
+        with self.assertRaisesRegex(ValueError, "read_projection"):
+            update_by_transform(
+                target,
+                self.catalog_options,
+                update_cols=["age"],
+                rows_per_commit=1,
+                read_projection=[],
+                transform=lambda batch: batch,
+            )
+        with self.assertRaisesRegex(ValueError, "keeps _ROW_ID internal"):
+            update_by_transform(
+                target,
+                self.catalog_options,
+                update_cols=["age"],
+                rows_per_commit=1,
+                read_projection=["_ROW_ID", "id"],
+                transform=lambda batch: batch,
+            )
+        with self.assertRaisesRegex(ValueError, "filter must be"):
+            update_by_transform(
+                target,
+                self.catalog_options,
+                update_cols=["age"],
+                rows_per_commit=1,
+                filter=object(),
+                read_projection=["id"],
+                transform=lambda batch: batch,
+            )
 
     def _run_with_fake_commit(self, *, recorder=None, new_commit_errors=None,
                               commit_error=None, close_error=None):
@@ -410,6 +1202,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         parser_path = (
             "pypaimon.schema.data_types.PyarrowFieldParser.from_paimon_schema"
         )
+
         with mock.patch(
                 "pypaimon.catalog.catalog_factory.CatalogFactory.create",
                 return_value=FakeCatalog()), \

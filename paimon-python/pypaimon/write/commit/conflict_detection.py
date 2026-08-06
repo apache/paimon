@@ -45,13 +45,25 @@ class RowIdColumnConflictChecker:
         self._field_id_cache = {}
 
     @classmethod
-    def from_data_files(cls, schema_manager, delta_files):
+    def from_data_files(
+            cls, schema_manager, delta_files, protected_columns=None):
         files_with_row_id = [f for f in delta_files if f.first_row_id is not None]
         if not files_with_row_id:
             return None
 
         range_helper = RangeHelper(lambda f: f.row_id_range())
         groups = range_helper.merge_overlapping_ranges(files_with_row_id)
+        protected_field_ids = set()
+        if protected_columns:
+            schema = schema_manager.latest()
+            name_to_id = {
+                field.name: field.id for field in schema.fields
+            } if schema is not None else {}
+            protected_field_ids.update(
+                name_to_id[col_name]
+                for col_name in protected_columns
+                if col_name in name_to_id
+            )
 
         write_ranges = []
         for group in groups:
@@ -62,6 +74,7 @@ class RowIdColumnConflictChecker:
             field_ids = set()
             for f in group:
                 cls._add_write_field_ids(field_ids, f, schema_manager)
+            field_ids.update(protected_field_ids)
 
             write_ranges.append(_WriteRange(merged_range, field_ids))
 
@@ -180,7 +193,63 @@ class ConflictDetection:
         self.manifest_list_manager = manifest_list_manager
         self.table = table
         self._row_id_check_from_snapshot = None
+        self._rewrite_checkpoint = None
+        self._rewrite_commit_user = None
+        self._rewrite_schema_id = None
+        self._rewrite_protected_columns = None
         self.commit_scanner = commit_scanner
+
+    def protect_from_external_rewrites(
+            self, checkpoint_snapshot, commit_user, schema_id,
+            protected_columns=None):
+        self._rewrite_checkpoint = checkpoint_snapshot
+        self._rewrite_commit_user = commit_user
+        self._rewrite_schema_id = schema_id
+        self._rewrite_protected_columns = tuple(protected_columns or ())
+
+    def check_external_rewrites(self, latest_snapshot):
+        checkpoint = self._rewrite_checkpoint
+        if checkpoint is None:
+            return None
+        latest_schema = self.table.schema_manager.latest()
+        if (latest_schema is None
+                or latest_schema.id != self._rewrite_schema_id):
+            return RuntimeError(
+                "Target schema changed during the incremental update.")
+        if latest_snapshot is None or latest_snapshot.id < checkpoint.id:
+            return RuntimeError(
+                "Rewrite checkpoint is no longer in the snapshot lineage.")
+        if latest_snapshot.id == checkpoint.id:
+            if self._same_snapshot(checkpoint, latest_snapshot):
+                return None
+            return RuntimeError("Rewrite checkpoint snapshot was replaced.")
+
+        for snapshot_id in range(checkpoint.id + 1, latest_snapshot.id + 1):
+            snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                return RuntimeError(
+                    "Cannot validate external rewrites because snapshot "
+                    "{} expired.".format(snapshot_id))
+            if snapshot.schema_id != self._rewrite_schema_id:
+                return RuntimeError(
+                    "Target schema changed during the incremental update.")
+            if snapshot.commit_user == self._rewrite_commit_user:
+                continue
+            if snapshot.commit_kind == "COMPACT":
+                continue
+            if (snapshot.commit_kind == "OVERWRITE"
+                    or self.commit_scanner.snapshot_deletes_files(snapshot)):
+                return RuntimeError(
+                    "Concurrent rewrite landed during the incremental update.")
+        return None
+
+    @staticmethod
+    def _same_snapshot(left, right):
+        if left is None or right is None:
+            return left is right
+        if left.uuid is not None or right.uuid is not None:
+            return left.id == right.id and left.uuid == right.uuid
+        return left.id == right.id
 
     def should_be_overwrite_commit(self, append_file_entries=None, append_index_files=None):
         for entry in append_file_entries or []:
@@ -673,8 +742,13 @@ class ConflictDetection:
             return None
 
         delta_files = [entry.file for entry in commit_entries]
-        column_checker = RowIdColumnConflictChecker.from_data_files(
+        write_checker = RowIdColumnConflictChecker.from_data_files(
             self.table.schema_manager, delta_files)
+        column_checker = RowIdColumnConflictChecker.from_data_files(
+            self.table.schema_manager,
+            delta_files,
+            self._rewrite_protected_columns,
+        )
         if column_checker is None or column_checker.is_empty():
             return None
 
@@ -705,7 +779,7 @@ class ConflictDetection:
             if snapshot.commit_kind == "COMPACT":
                 if check_compaction:
                     err = self._compact_conflicts_with_delta(
-                        snapshot, delta_signatures, column_checker, commit_entries)
+                        snapshot, delta_signatures, write_checker, commit_entries)
                     if err is not None:
                         return err
                 continue

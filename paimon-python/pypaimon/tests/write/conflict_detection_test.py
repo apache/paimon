@@ -85,6 +85,11 @@ class _FakeSchemaManager:
     def get_schema(self, schema_id):
         return self._schemas.get(schema_id)
 
+    def latest(self):
+        if not self._schemas:
+            return None
+        return self._schemas[max(self._schemas)]
+
 
 _DEFAULT_SCHEMA = _FakeSchema(
     id=0,
@@ -330,10 +335,14 @@ class TestOverwriteConflictDetection(unittest.TestCase):
 
 class _FakeSnapshot:
 
-    def __init__(self, snapshot_id, commit_kind, next_row_id=None):
+    def __init__(self, snapshot_id, commit_kind, next_row_id=None,
+                 commit_user="external", schema_id=0, uuid=None):
         self.id = snapshot_id
         self.commit_kind = commit_kind
         self.next_row_id = next_row_id
+        self.commit_user = commit_user
+        self.schema_id = schema_id
+        self.uuid = uuid
 
 
 class _FakeSnapshotManager:
@@ -347,9 +356,11 @@ class _FakeSnapshotManager:
 
 class _FakeCommitScanner:
 
-    def __init__(self, entries_by_snapshot_id, raw_entries_by_snapshot_id=None):
+    def __init__(self, entries_by_snapshot_id, raw_entries_by_snapshot_id=None,
+                 deleting_snapshot_ids=None):
         self._by_id = entries_by_snapshot_id
         self._raw_by_id = raw_entries_by_snapshot_id or {}
+        self._deleting_snapshot_ids = set(deleting_snapshot_ids or [])
 
     def read_incremental_entries_from_changed_partitions(self, snapshot, _):
         return self._by_id.get(snapshot.id, [])
@@ -357,11 +368,18 @@ class _FakeCommitScanner:
     def read_incremental_raw_entries_from_changed_partitions(self, snapshot, _):
         return self._raw_by_id.get(snapshot.id, self._by_id.get(snapshot.id, []))
 
+    def snapshot_deletes_files(self, snapshot):
+        return snapshot.id in self._deleting_snapshot_ids
+
 
 class _FakeTable:
 
-    def __init__(self, schema_manager):
+    def __init__(self, schema_manager, snapshot_manager=None):
         self.schema_manager = schema_manager
+        self._snapshot_manager = snapshot_manager
+
+    def snapshot_manager(self):
+        return self._snapshot_manager
 
 
 class TestCheckRowIdFromSnapshot(unittest.TestCase):
@@ -434,11 +452,78 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
                     detection.check_row_id_from_snapshot(compact_snap, delta))
 
 
+class TestIncrementalRowIdCommitGuards(unittest.TestCase):
+
+    @staticmethod
+    def _detection(snapshots, scanner, schemas=None):
+        snapshot_manager = _FakeSnapshotManager(snapshots)
+        return ConflictDetection(
+            data_evolution_enabled=True,
+            snapshot_manager=snapshot_manager,
+            manifest_list_manager=None,
+            table=_FakeTable(
+                _FakeSchemaManager(schemas or [_DEFAULT_SCHEMA]),
+                snapshot_manager),
+            commit_scanner=scanner,
+        )
+
+    def test_rejects_external_rewrites(self):
+        for commit_kind, deleting_ids in [("OVERWRITE", set()), ("APPEND", {2})]:
+            with self.subTest(commit_kind=commit_kind):
+                checkpoint = _FakeSnapshot(
+                    1, "APPEND", commit_user="operation")
+                rewrite = _FakeSnapshot(2, commit_kind)
+                detection = self._detection(
+                    [checkpoint, rewrite],
+                    _FakeCommitScanner(
+                        {}, deleting_snapshot_ids=deleting_ids),
+                )
+                detection.protect_from_external_rewrites(
+                    checkpoint, "operation", 0)
+
+                result = detection.check_external_rewrites(rewrite)
+
+                self.assertIsNotNone(result)
+                self.assertIn("Concurrent rewrite", str(result))
+
+    def test_allows_own_snapshots_and_external_appends(self):
+        checkpoint = _FakeSnapshot(
+            1, "APPEND", commit_user="operation")
+        own = _FakeSnapshot(
+            2, "APPEND", commit_user="operation")
+        append = _FakeSnapshot(3, "APPEND")
+        detection = self._detection(
+            [checkpoint, own, append], _FakeCommitScanner({}))
+        detection.protect_from_external_rewrites(
+            checkpoint, "operation", 0)
+
+        self.assertIsNone(detection.check_external_rewrites(append))
+        self.assertIsNone(detection.check_external_rewrites(
+            _FakeSnapshot(1, "APPEND", commit_user="operation")))
+
+    def test_checks_planned_schema(self):
+        schema1 = _FakeSchema(1, _DEFAULT_SCHEMA.fields)
+        checkpoint = _FakeSnapshot(
+            1, "APPEND", commit_user="operation", schema_id=0)
+        detection = self._detection(
+            [checkpoint], _FakeCommitScanner({}), [schema1])
+
+        detection.protect_from_external_rewrites(
+            checkpoint, "operation", 1)
+        self.assertIsNone(detection.check_external_rewrites(checkpoint))
+
+        detection.protect_from_external_rewrites(
+            checkpoint, "operation", 0)
+        result = detection.check_external_rewrites(checkpoint)
+        self.assertIn("Target schema changed", str(result))
+
+
 class TestRowIdColumnConflictChecker(unittest.TestCase):
 
-    def _make_checker(self, delta_files, schema=None):
+    def _make_checker(self, delta_files, schema=None, protected_columns=None):
         schema_mgr = _FakeSchemaManager([schema or _DEFAULT_SCHEMA])
-        return RowIdColumnConflictChecker.from_data_files(schema_mgr, delta_files)
+        return RowIdColumnConflictChecker.from_data_files(
+            schema_mgr, delta_files, protected_columns)
 
     def test_no_conflict_disjoint_rows(self):
         delta_files = [
@@ -457,6 +542,19 @@ class TestRowIdColumnConflictChecker(unittest.TestCase):
         committed = _make_file("c1", row_count=100, first_row_id=0,
                                write_cols=["col_b"])
         self.assertFalse(checker.conflicts_with(committed))
+
+    def test_conflict_with_protected_input_column(self):
+        delta_files = [
+            _make_file("d1", row_count=100, first_row_id=0,
+                       write_cols=["col_b"]),
+        ]
+        checker = self._make_checker(
+            delta_files, protected_columns=["col_a"])
+        committed = _make_file(
+            "c1", row_count=100, first_row_id=0,
+            write_cols=["col_a"],
+        )
+        self.assertTrue(checker.conflicts_with(committed))
 
     def test_conflict_same_rows_same_columns(self):
         delta_files = [

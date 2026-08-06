@@ -29,6 +29,7 @@ from pypaimon.ray.data_evolution_merge_transform import (
     lit,
 )
 from pypaimon.ray.update_by_row_id import update_by_row_id
+from pypaimon.ray.update_by_transform import update_by_transform
 from pypaimon.ray.read_by_row_id import read_by_row_id
 
 __all__ = [
@@ -39,6 +40,7 @@ __all__ = [
     "range_join",
     "merge_into",
     "update_by_row_id",
+    "update_by_transform",
     "read_by_row_id",
     "WhenMatched",
     "WhenNotMatched",

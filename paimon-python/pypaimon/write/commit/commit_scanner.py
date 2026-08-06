@@ -74,6 +74,12 @@ class CommitScanner:
             self.table, lambda: ([], None), partition_predicate=partition_filter
         ).read_manifest_entries(all_manifests)
 
+    def snapshot_deletes_files(self, snapshot: Snapshot) -> bool:
+        return any(
+            manifest.num_deleted_files > 0
+            for manifest in self.manifest_list_manager.read_delta(snapshot)
+        )
+
     def read_incremental_entries_from_changed_partitions(self,
                                                          snapshot: Snapshot,
                                                          commit_entries: List[ManifestEntry],

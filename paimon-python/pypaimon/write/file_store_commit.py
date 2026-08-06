@@ -132,7 +132,8 @@ class RetryResult(CommitResult):
     def __init__(self, latest_snapshot, exception: Optional[Exception] = None,
                  base_data_files: Optional[List[ManifestEntry]] = None,
                  commit_result_may_be_uncertain: bool = False,
-                 manifest_merge_result: Optional[ManifestMergeResult] = None):
+                 manifest_merge_result: Optional[ManifestMergeResult] = None,
+                 commit_entries: Optional[List[ManifestEntry]] = None):
         self.latest_snapshot = latest_snapshot
         self.exception = exception
         self.commit_result_may_be_uncertain = commit_result_may_be_uncertain
@@ -140,6 +141,10 @@ class RetryResult(CommitResult):
         # them and reads only the incremental changes.
         self.base_data_files = base_data_files
         self.manifest_merge_result = manifest_merge_result
+        # Keep the entries prepared for this attempt. Row tracking metadata is
+        # assigned after planning and must be preserved if retry later finds
+        # that this attempt committed successfully.
+        self.commit_entries = commit_entries
 
     def is_success(self) -> bool:
         return False
@@ -203,6 +208,12 @@ class FileStoreCommit:
 
         table_rollback = table.catalog_environment.catalog_table_rollback()
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
+
+    def protect_from_external_rewrites(
+            self, checkpoint_snapshot, commit_user, schema_id,
+            protected_columns=None):
+        self.conflict_detection.protect_from_external_rewrites(
+            checkpoint_snapshot, commit_user, schema_id, protected_columns)
 
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in normal append mode."""
@@ -554,8 +565,27 @@ class FileStoreCommit:
                          hash_index_base_snapshot=None,
                          commit_result_may_be_uncertain: bool = False) -> CommitResult:
         start_millis = int(time.time() * 1000)
-        if self._is_duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
+        duplicate = self._find_duplicate_commit(
+            retry_result, latest_snapshot, commit_identifier, commit_kind)
+        if duplicate is not None:
+            if commit_kind == "APPEND":
+                callback_entries = (
+                    retry_result.commit_entries
+                    if retry_result is not None
+                    and retry_result.commit_entries is not None
+                    else commit_entries
+                )
+                self._notify_commit_callbacks(
+                    duplicate, callback_entries, commit_identifier)
             return SuccessResult()
+
+        rewrite_conflict = (
+            self.conflict_detection.check_external_rewrites(latest_snapshot))
+        if rewrite_conflict is not None:
+            if retry_result is None or retry_result.exception is None:
+                raise CommitConflictError(
+                    str(rewrite_conflict)) from rewrite_conflict
+            raise rewrite_conflict
 
         latest_snapshot_id = latest_snapshot.id if latest_snapshot else 0
         if (
@@ -791,6 +821,7 @@ class FileStoreCommit:
                         None,
                         base_data_files=base_data_files,
                         manifest_merge_result=manifest_merge_result,
+                        commit_entries=commit_entries,
                     )
         except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
@@ -801,6 +832,7 @@ class FileStoreCommit:
                 base_data_files=base_data_files,
                 commit_result_may_be_uncertain=True,
                 manifest_merge_result=None,
+                commit_entries=commit_entries,
             )
 
         logger.info(
@@ -813,14 +845,8 @@ class FileStoreCommit:
             commit_kind,
         )
 
-        if self.commit_callbacks:
-            context = CommitCallbackContext(
-                snapshot=snapshot_data,
-                commit_entries=commit_entries,
-                identifier=commit_identifier,
-            )
-            for callback in self.commit_callbacks:
-                callback.call(context)
+        self._notify_commit_callbacks(
+            snapshot_data, commit_entries, commit_identifier)
 
         return SuccessResult()
 
@@ -871,7 +897,9 @@ class FileStoreCommit:
         return self.manifest_file_manager.rolling_write(
             commit_entries, self.manifest_target_size, base_name)
 
-    def _is_duplicate_commit(self, retry_result, latest_snapshot, commit_identifier, commit_kind) -> bool:
+    def _find_duplicate_commit(
+            self, retry_result, latest_snapshot, commit_identifier,
+            commit_kind):
         if retry_result is not None and latest_snapshot is not None:
             start_check_snapshot_id = 1  # Snapshot.FIRST_SNAPSHOT_ID
             if retry_result.latest_snapshot is not None:
@@ -886,8 +914,20 @@ class FileStoreCommit:
                         f"Commit already completed (snapshot {snapshot_id}), "
                         f"user: {self.commit_user}, identifier: {commit_identifier}"
                     )
-                    return True
-        return False
+                    return snapshot
+        return None
+
+    def _notify_commit_callbacks(
+            self, snapshot, commit_entries, commit_identifier):
+        if not self.commit_callbacks:
+            return
+        context = CommitCallbackContext(
+            snapshot=snapshot,
+            commit_entries=commit_entries,
+            identifier=commit_identifier,
+        )
+        for callback in self.commit_callbacks:
+            callback.call(context)
 
     def _create_dynamic_partition_filter(self, commit_messages: List[CommitMessage]):
         """Build a partition filter from the unique partitions present in commit_messages."""

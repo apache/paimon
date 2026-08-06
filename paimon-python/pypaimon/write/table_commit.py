@@ -61,6 +61,13 @@ class TableCommit:
         """Register a callback to be invoked after each successful commit."""
         self._commit_callbacks.append(callback)
 
+    def protect_from_external_rewrites(
+            self, checkpoint_snapshot, commit_user, schema_id,
+            protected_columns=None):
+        self.file_store_commit.protect_from_external_rewrites(
+            checkpoint_snapshot, commit_user, schema_id, protected_columns)
+        return self
+
     def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
 

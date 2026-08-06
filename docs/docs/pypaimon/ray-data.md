@@ -541,6 +541,61 @@ For an end-to-end feature update workflow on Blob tables, see
   or `insert="*"`, the source must include the corresponding blob columns.
   If an insert mapping omits a blob column, that column is written as `NULL`.
 
+## Update By Transform
+
+`update_by_transform` runs a column backfill on a non-primary-key
+**data-evolution** table. It automatically processes the table in batches of
+approximately `rows_per_commit` rows. Each completed batch is committed and
+becomes visible independently, even if a later batch fails.
+
+```python
+import pyarrow as pa
+
+class GenerateTextEmbedding:
+    def __init__(self):
+        self.model = load_model()
+
+    def __call__(self, rows):
+        return pa.table({
+            "text_embedding": self.model(rows["text"]),
+        })
+
+from pypaimon.ray import update_by_transform
+
+metrics = update_by_transform(
+    target="database_name.documents",
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    filter="language = 'en'",      # optional; omit to process the full table
+    read_projection=["text"],
+    transform=GenerateTextEmbedding,
+    update_cols=["text_embedding"],
+    rows_per_commit=1_000_000,
+    ray_remote_args={"num_gpus": 1},
+)
+```
+
+The transform receives `read_projection` for matching rows and returns
+`update_cols` with the same row count and order. A string `filter` is pushed
+down to Paimon; a callable `filter` receives each Arrow batch and returns one
+boolean per row. `transform_batch_size` controls rows per call. Callable classes
+run as Ray actors; use `functools.partial` for constructor arguments.
+
+`rows_per_commit` is approximate because boundaries align with complete file
+groups. With a sparse filter, commits may contain fewer rows. Completed
+ranges remain visible after a later failure.
+
+Requires `ray >= 2.50` and a target with `data-evolution.enabled` and
+`row-tracking.enabled`.
+
+**Notes:**
+- Concurrent append, compaction, and non-conflicting column updates are
+  allowed. Updates to a read, filter, or output column on overlapping rows,
+  schema changes, and other external rewrites fail.
+- Source progress is not checkpointed. Retry may replay completed batches, so
+  transforms must be idempotent.
+- A temporary `pypaimon-transform-update-*` tag protects the planned snapshot and is
+  removed on normal exit. A hard driver failure may retain it for up to 30 days.
+
 ## Update By Row Id
 
 `update_by_row_id` updates columns of a **data-evolution** table straight from a
