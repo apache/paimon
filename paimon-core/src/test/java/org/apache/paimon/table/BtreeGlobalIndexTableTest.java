@@ -27,8 +27,10 @@ import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
-import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -793,18 +795,19 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     private void createIndexIncremental(String fieldName) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree").withIndexField(fieldName);
-        List<DataSplit> dataSplits =
+        SortedGlobalIndexScanner builder =
+                new SortedGlobalIndexScanner(table, "btree").withIndexField(fieldName);
+        ScanResult<DataSplit> scanResult =
                 builder.incrementalScan()
-                        .map(org.apache.paimon.utils.Pair::getRight)
                         .orElseThrow(
                                 () ->
                                         new IllegalStateException(
                                                 "Expected incremental scan result when building index."));
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (DataSplit dataSplit : dataSplits) {
-            commitMessages.addAll(builder.build(dataSplit, ioManager));
+        for (DataSplit dataSplit : scanResult.entries()) {
+            commitMessages.addAll(
+                    SortedGlobalIndexTestUtils.buildIndex(
+                            table, "btree", fieldName, dataSplit, scanResult.scanSnapshotId()));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);
@@ -817,18 +820,19 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     private void createIndex(String fieldName, List<Range> rowRanges) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree").withIndexField(fieldName);
-        List<DataSplit> dataSplits =
+        SortedGlobalIndexScanner builder =
+                new SortedGlobalIndexScanner(table, "btree").withIndexField(fieldName);
+        ScanResult<DataSplit> scanResult =
                 builder.scan()
-                        .map(org.apache.paimon.utils.Pair::getRight)
                         .orElseThrow(
                                 () ->
                                         new IllegalStateException(
                                                 "Expected scan result when building index."));
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (DataSplit dataSplit : indexSplits(table, rowRanges, dataSplits)) {
-            commitMessages.addAll(builder.build(dataSplit, ioManager));
+        for (DataSplit dataSplit : indexSplits(table, rowRanges, scanResult.entries())) {
+            commitMessages.addAll(
+                    SortedGlobalIndexTestUtils.buildIndex(
+                            table, "btree", fieldName, dataSplit, scanResult.scanSnapshotId()));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);

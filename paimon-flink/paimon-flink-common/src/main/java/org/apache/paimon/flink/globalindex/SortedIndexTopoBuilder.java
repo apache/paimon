@@ -38,8 +38,11 @@ import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
-import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
@@ -47,6 +50,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -55,9 +59,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
-import org.apache.paimon.utils.RowRangeIndex;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -78,8 +80,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder.groupSplitsByRange;
-import static org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder.splitByContiguousRowRange;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.groupSplitsByRange;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.splitByContiguousRowRange;
+import static org.apache.paimon.io.CompactIncrement.emptyIncrement;
+import static org.apache.paimon.io.DataIncrement.deleteIndexIncrement;
 
 /** The topology builder for sorted indexes in Flink. */
 public class SortedIndexTopoBuilder {
@@ -95,18 +99,20 @@ public class SortedIndexTopoBuilder {
 
     public static boolean buildIndex(
             StreamExecutionEnvironment env,
-            Supplier<SortedGlobalIndexBuilder> indexBuilderSupplier,
+            Supplier<SortedGlobalIndexScanner> indexScannerSupplier,
             FileStoreTable table,
             List<String> indexColumns,
+            String indexType,
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
         Optional<DataStream<Committable>> written =
                 buildIndexStream(
                         env,
-                        indexBuilderSupplier,
+                        indexScannerSupplier,
                         table,
                         indexColumns,
+                        indexType,
                         partitionPredicate,
                         userOptions);
         if (!written.isPresent()) {
@@ -125,33 +131,33 @@ public class SortedIndexTopoBuilder {
      */
     public static Optional<DataStream<Committable>> buildIndexStream(
             StreamExecutionEnvironment env,
-            Supplier<SortedGlobalIndexBuilder> indexBuilderSupplier,
+            Supplier<SortedGlobalIndexScanner> indexScannerSupplier,
             FileStoreTable table,
             List<String> indexColumns,
+            String indexType,
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
         List<DataStream<Committable>> allStreams = new ArrayList<>();
         for (String indexColumn : indexColumns) {
-            SortedGlobalIndexBuilder indexBuilder =
-                    indexBuilderSupplier.get().withIndexField(indexColumn);
+            SortedGlobalIndexScanner indexScanner =
+                    indexScannerSupplier.get().withIndexField(indexColumn);
             if (partitionPredicate != null) {
-                indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
+                indexScanner = indexScanner.withPartitionPredicate(partitionPredicate);
             }
 
-            Optional<Pair<RowRangeIndex, List<DataSplit>>> indexRangeAndSplits =
-                    indexBuilder.incrementalScan();
-            if (!indexRangeAndSplits.isPresent()) {
+            Optional<ScanResult<DataSplit>> optionalScanResult = indexScanner.incrementalScan();
+            if (!optionalScanResult.isPresent()) {
                 continue;
             }
 
-            Pair<RowRangeIndex, List<DataSplit>> scanResult = indexRangeAndSplits.get();
-            List<DataSplit> splits = splitByContiguousRowRange(scanResult.getRight());
+            ScanResult<DataSplit> scanResult = optionalScanResult.get();
+            List<DataSplit> splits = splitByContiguousRowRange(scanResult.entries());
             if (splits.isEmpty()) {
                 continue;
             }
             Map<BinaryRow, Map<Range, List<Split>>> partitionRangeSplits =
-                    groupSplitsByRange(scanResult.getLeft(), splits);
+                    groupSplitsByRange(scanResult.rowRangeIndex(), splits);
             if (partitionRangeSplits.isEmpty()) {
                 continue;
             }
@@ -214,7 +220,9 @@ public class SortedIndexTopoBuilder {
                             buildTasks,
                             splitTasks,
                             readBuilder,
-                            indexBuilder,
+                            new SortedGlobalIndexWriter(table, indexType, userOptions)
+                                    .withIndexField(indexColumn),
+                            scanResult.scanSnapshotId(),
                             partitionFieldSize,
                             taskIdPos,
                             indexFieldPos,
@@ -225,6 +233,19 @@ public class SortedIndexTopoBuilder {
                             sortReadType,
                             recordsPerRange,
                             maxParallelism);
+
+            List<IndexManifestEntry> deletedIndexEntries = scanResult.deletedIndexEntries();
+            if (!deletedIndexEntries.isEmpty()) {
+                DataStream<Committable> deletes =
+                        StreamExecutionEnvironmentUtils.fromData(
+                                        env,
+                                        new CommittableTypeInfo(),
+                                        createDeleteCommittables(deletedIndexEntries)
+                                                .toArray(new Committable[0]))
+                                .name("Index Delete Source")
+                                .setParallelism(1);
+                commitMessages = commitMessages.union(deletes);
+            }
 
             allStreams.add(commitMessages);
         }
@@ -237,6 +258,22 @@ public class SortedIndexTopoBuilder {
         return Optional.of(allStreams.get(0).union(rest));
     }
 
+    private static List<Committable> createDeleteCommittables(
+            List<IndexManifestEntry> deletedEntries) {
+        List<Committable> committables = new ArrayList<>();
+        for (IndexManifestEntry entry : deletedEntries) {
+            CommitMessage message =
+                    new CommitMessageImpl(
+                            entry.partition(),
+                            entry.bucket(),
+                            null,
+                            deleteIndexIncrement(Collections.singletonList(entry.indexFile())),
+                            emptyIncrement());
+            committables.add(new Committable(BatchWriteBuilder.COMMIT_IDENTIFIER, message));
+        }
+        return committables;
+    }
+
     public static void buildIndexAndExecute(
             StreamExecutionEnvironment env,
             FileStoreTable table,
@@ -247,9 +284,10 @@ public class SortedIndexTopoBuilder {
             throws Exception {
         if (buildIndex(
                 env,
-                () -> new SortedGlobalIndexBuilder(table, indexType, userOptions),
+                () -> new SortedGlobalIndexScanner(table, indexType, userOptions),
                 table,
                 Collections.singletonList(indexColumn),
+                indexType,
                 partitionPredicate,
                 userOptions)) {
             env.execute("Create " + indexType + " global index for table: " + table.name());
@@ -261,7 +299,8 @@ public class SortedIndexTopoBuilder {
             List<SortedBuildTask> buildTasks,
             List<SortedSplitTask> splitTasks,
             ReadBuilder readBuilder,
-            SortedGlobalIndexBuilder indexBuilder,
+            SortedGlobalIndexWriter indexWriter,
+            long scanSnapshotId,
             int partitionFieldSize,
             int taskIdPos,
             int indexFieldPos,
@@ -309,7 +348,8 @@ public class SortedIndexTopoBuilder {
                         new WriteIndexOperator(
                                 buildTasks,
                                 partitionFieldSize,
-                                indexBuilder,
+                                indexWriter,
+                                scanSnapshotId,
                                 taskIdPos,
                                 indexFieldPos,
                                 rowIdPos,
@@ -406,7 +446,8 @@ public class SortedIndexTopoBuilder {
 
         private final List<SortedBuildTask> buildTasks;
         private final int partitionFieldSize;
-        private final SortedGlobalIndexBuilder builder;
+        private final SortedGlobalIndexWriter writer;
+        private final long scanSnapshotId;
         private final int taskIdPos;
         private final int indexFieldPos;
         private final int rowIdPos;
@@ -424,14 +465,16 @@ public class SortedIndexTopoBuilder {
         public WriteIndexOperator(
                 List<SortedBuildTask> buildTasks,
                 int partitionFieldSize,
-                SortedGlobalIndexBuilder builder,
+                SortedGlobalIndexWriter writer,
+                long scanSnapshotId,
                 int taskIdPos,
                 int indexFieldPos,
                 int rowIdPos,
                 DataType indexFieldType) {
             this.buildTasks = buildTasks;
             this.partitionFieldSize = partitionFieldSize;
-            this.builder = builder;
+            this.writer = writer;
+            this.scanSnapshotId = scanSnapshotId;
             this.taskIdPos = taskIdPos;
             this.indexFieldPos = indexFieldPos;
             this.rowIdPos = rowIdPos;
@@ -465,14 +508,14 @@ public class SortedIndexTopoBuilder {
                 currentPartition = binaryRowSerializer.deserializeFromBytes(task.partition);
             }
 
-            if (currentWriter != null && counter >= builder.recordsPerRange()) {
+            if (currentWriter != null && counter >= writer.recordsPerRange()) {
                 flushCurrentWriter();
             }
 
             counter++;
 
             if (currentWriter == null) {
-                currentWriter = builder.createWriter();
+                currentWriter = writer.createWriter();
             }
 
             long localRowId = row.getLong(rowIdPos) - currentTask.rowRange.from;
@@ -507,8 +550,11 @@ public class SortedIndexTopoBuilder {
         private void flushCurrentWriter() throws IOException {
             if (counter > 0 && currentWriter != null) {
                 commitMessages.add(
-                        builder.flushIndex(
-                                currentTask.rowRange, currentWriter.finish(), currentPartition));
+                        writer.flushIndex(
+                                currentTask.rowRange,
+                                currentWriter.finish(),
+                                currentPartition,
+                                scanSnapshotId));
             }
             currentWriter = null;
             counter = 0;

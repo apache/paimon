@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.globalindex;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.Committable;
@@ -35,6 +34,9 @@ import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.globalindex.generic.GenericGlobalIndexScanner;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -68,17 +70,14 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createShardIndexedSplits;
-import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.filterEntriesBefore;
-import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.findMinNonIndexableRowId;
-import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.rowRangesAfter;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
-import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.unindexedRowRanges;
 import static org.apache.paimon.io.CompactIncrement.emptyIncrement;
 import static org.apache.paimon.io.DataIncrement.deleteIndexIncrement;
 import static org.apache.paimon.io.DataIncrement.indexIncrement;
@@ -94,48 +93,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class GenericIndexTopoBuilder {
 
     private static final Logger LOG = LoggerFactory.getLogger(GenericIndexTopoBuilder.class);
-    public static final long NO_MAX_INDEXED_ROW_ID = -1L;
-
-    public static void buildIndexAndExecute(
-            StreamExecutionEnvironment env,
-            FileStoreTable table,
-            String indexColumn,
-            String indexType,
-            PartitionPredicate partitionPredicate,
-            Options userOptions)
-            throws Exception {
-        buildIndexAndExecuteInternal(
-                env,
-                table,
-                indexColumn,
-                Collections.emptyList(),
-                indexType,
-                partitionPredicate,
-                userOptions,
-                NO_MAX_INDEXED_ROW_ID,
-                true);
-    }
-
-    public static void buildIndexAndExecute(
-            StreamExecutionEnvironment env,
-            FileStoreTable table,
-            String indexColumn,
-            String indexType,
-            PartitionPredicate partitionPredicate,
-            Options userOptions,
-            long maxIndexedRowId)
-            throws Exception {
-        buildIndexAndExecuteInternal(
-                env,
-                table,
-                indexColumn,
-                Collections.emptyList(),
-                indexType,
-                partitionPredicate,
-                userOptions,
-                maxIndexedRowId,
-                false);
-    }
 
     public static void buildIndexAndExecute(
             StreamExecutionEnvironment env,
@@ -147,37 +104,7 @@ public class GenericIndexTopoBuilder {
             Options userOptions)
             throws Exception {
         buildIndexAndExecuteInternal(
-                env,
-                table,
-                indexColumn,
-                extraColumns,
-                indexType,
-                partitionPredicate,
-                userOptions,
-                NO_MAX_INDEXED_ROW_ID,
-                true);
-    }
-
-    public static void buildIndexAndExecute(
-            StreamExecutionEnvironment env,
-            FileStoreTable table,
-            String indexColumn,
-            List<String> extraColumns,
-            String indexType,
-            PartitionPredicate partitionPredicate,
-            Options userOptions,
-            long maxIndexedRowId)
-            throws Exception {
-        buildIndexAndExecuteInternal(
-                env,
-                table,
-                indexColumn,
-                extraColumns,
-                indexType,
-                partitionPredicate,
-                userOptions,
-                maxIndexedRowId,
-                false);
+                env, table, indexColumn, extraColumns, indexType, partitionPredicate, userOptions);
     }
 
     private static void buildIndexAndExecuteInternal(
@@ -187,22 +114,18 @@ public class GenericIndexTopoBuilder {
             List<String> extraColumns,
             String indexType,
             PartitionPredicate partitionPredicate,
-            Options userOptions,
-            long maxIndexedRowId,
-            boolean autoIncremental)
+            Options userOptions)
             throws Exception {
         boolean hasIndexToBuild =
                 buildIndexInternal(
                         env,
-                        () -> new GenericGlobalIndexBuilder(table),
+                        () -> new GenericGlobalIndexScanner(table),
                         table,
                         indexColumn,
                         extraColumns,
                         indexType,
                         partitionPredicate,
-                        userOptions,
-                        maxIndexedRowId,
-                        autoIncremental);
+                        userOptions);
         if (hasIndexToBuild) {
             env.execute("Create " + indexType + " global index for table: " + table.name());
         } else {
@@ -212,7 +135,7 @@ public class GenericIndexTopoBuilder {
 
     public static boolean buildIndex(
             StreamExecutionEnvironment env,
-            Supplier<GenericGlobalIndexBuilder> indexBuilderSupplier,
+            Supplier<GenericGlobalIndexScanner> indexBuilderSupplier,
             FileStoreTable table,
             String indexColumn,
             String indexType,
@@ -227,83 +150,33 @@ public class GenericIndexTopoBuilder {
                 Collections.emptyList(),
                 indexType,
                 partitionPredicate,
-                userOptions,
-                NO_MAX_INDEXED_ROW_ID,
-                true);
-    }
-
-    public static boolean buildIndex(
-            StreamExecutionEnvironment env,
-            Supplier<GenericGlobalIndexBuilder> indexBuilderSupplier,
-            FileStoreTable table,
-            String indexColumn,
-            String indexType,
-            PartitionPredicate partitionPredicate,
-            Options userOptions,
-            long maxIndexedRowId)
-            throws Exception {
-        return buildIndexInternal(
-                env,
-                indexBuilderSupplier,
-                table,
-                indexColumn,
-                Collections.emptyList(),
-                indexType,
-                partitionPredicate,
-                userOptions,
-                maxIndexedRowId,
-                false);
-    }
-
-    /**
-     * Builds a generic global index topology using a {@link GenericGlobalIndexBuilder} supplier.
-     *
-     * @return {@code true} if a Flink topology was built and is ready to execute, {@code false} if
-     *     there was nothing to index
-     */
-    public static boolean buildIndex(
-            StreamExecutionEnvironment env,
-            Supplier<GenericGlobalIndexBuilder> indexBuilderSupplier,
-            FileStoreTable table,
-            String indexColumn,
-            List<String> extraColumns,
-            String indexType,
-            PartitionPredicate partitionPredicate,
-            Options userOptions,
-            long maxIndexedRowId)
-            throws Exception {
-        return buildIndexInternal(
-                env,
-                indexBuilderSupplier,
-                table,
-                indexColumn,
-                extraColumns,
-                indexType,
-                partitionPredicate,
-                userOptions,
-                maxIndexedRowId,
-                false);
+                userOptions);
     }
 
     private static boolean buildIndexInternal(
             StreamExecutionEnvironment env,
-            Supplier<GenericGlobalIndexBuilder> indexBuilderSupplier,
+            Supplier<GenericGlobalIndexScanner> indexBuilderSupplier,
             FileStoreTable table,
             String indexColumn,
             List<String> extraColumns,
             String indexType,
             PartitionPredicate partitionPredicate,
-            Options userOptions,
-            long maxIndexedRowId,
-            boolean autoIncremental)
+            Options userOptions)
             throws Exception {
-        GenericGlobalIndexBuilder indexBuilder = indexBuilderSupplier.get();
+        List<String> indexColumns = new ArrayList<>(1 + extraColumns.size());
+        indexColumns.add(indexColumn);
+        indexColumns.addAll(extraColumns);
+
+        GenericGlobalIndexScanner indexBuilder =
+                indexBuilderSupplier.get().withIndex(indexType, indexColumns, userOptions);
         if (partitionPredicate != null) {
             indexBuilder.withPartitionPredicate(partitionPredicate);
         }
 
-        List<ManifestEntry> entries = indexBuilder.scan();
-        List<IndexManifestEntry> deletedIndexEntries = indexBuilder.deletedIndexEntries();
+        Optional<ScanResult<ManifestEntry>> optionalScanResult = indexBuilder.incrementalScan();
+        if (!optionalScanResult.isPresent()) {
+            return false;
+        }
 
         return buildTopology(
                 env,
@@ -312,12 +185,7 @@ public class GenericIndexTopoBuilder {
                 extraColumns,
                 indexType,
                 userOptions,
-                entries,
-                deletedIndexEntries,
-                partitionPredicate,
-                indexBuilder.scanSnapshot(),
-                maxIndexedRowId,
-                autoIncremental);
+                optionalScanResult.get());
     }
 
     /**
@@ -333,13 +201,9 @@ public class GenericIndexTopoBuilder {
             List<String> extraColumns,
             String indexType,
             Options userOptions,
-            List<ManifestEntry> entries,
-            List<IndexManifestEntry> deletedIndexEntries,
-            PartitionPredicate partitionPredicate,
-            @Nullable Snapshot scanSnapshot,
-            long maxIndexedRowId,
-            boolean autoIncremental)
+            ScanResult<ManifestEntry> scanResult)
             throws Exception {
+        List<ManifestEntry> entries = scanResult.entries();
         // The primary column followed by the extra columns, in index order.
         List<String> indexColumns = new ArrayList<>(1 + extraColumns.size());
         indexColumns.add(indexColumn);
@@ -354,51 +218,30 @@ public class GenericIndexTopoBuilder {
                 indexType,
                 indexColumns);
 
-        long minNonIndexableRowId =
-                findMinNonIndexableRowId(table.schemaManager(), entries, indexColumns);
-        entries = filterEntriesBefore(entries, minNonIndexableRowId);
-
         RowType rowType = table.rowType();
         DataField indexField = rowType.getField(indexColumn);
         List<DataField> extraFields =
                 extraColumns.stream().map(rowType::getField).collect(Collectors.toList());
-        List<DataField> indexedFields = new ArrayList<>(1 + extraFields.size());
-        indexedFields.add(indexField);
-        indexedFields.addAll(extraFields);
         // Project indexColumns + _ROW_ID so we can read the actual row ID from data
         List<String> readColumns = new ArrayList<>(indexColumns);
         readColumns.add(SpecialFields.ROW_ID.name());
         RowType projectedRowType = SpecialFields.rowTypeWithRowId(rowType).project(readColumns);
 
         Options mergedOptions = new Options(table.options(), userOptions.toMap());
+        byte[] sourceMeta =
+                new DataEvolutionIndexSourceMeta(scanResult.scanSnapshotId()).serialize();
 
         long rowsPerShard = mergedOptions.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
         checkArgument(
                 rowsPerShard > 0,
                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
 
-        List<Range> rowRangesToBuild = null;
-        if (deletedIndexEntries.isEmpty()) {
-            if (autoIncremental) {
-                Snapshot snapshot =
-                        scanSnapshot == null
-                                ? table.snapshotManager().latestSnapshot()
-                                : scanSnapshot;
-                rowRangesToBuild =
-                        unindexedRowRanges(
-                                table, snapshot, indexType, indexedFields, partitionPredicate);
-                LOG.info("Automatically selected unindexed row ranges: {}.", rowRangesToBuild);
-            } else if (maxIndexedRowId != NO_MAX_INDEXED_ROW_ID) {
-                rowRangesToBuild = rowRangesAfter(maxIndexedRowId);
-                LOG.info(
-                        "Selected row ranges after maxIndexedRowId={}: {}.",
-                        maxIndexedRowId,
-                        rowRangesToBuild);
-            }
-            if (rowRangesToBuild != null && rowRangesToBuild.isEmpty()) {
-                LOG.info("No unindexed row ranges found, nothing to index.");
-                return false;
-            }
+        List<IndexManifestEntry> deletedIndexEntries = scanResult.deletedIndexEntries();
+        List<Range> rowRangesToBuild = scanResult.rowRangeIndex().ranges();
+        LOG.info("Selected row ranges to build: {}.", rowRangesToBuild);
+        if (rowRangesToBuild.isEmpty()) {
+            LOG.info("No row ranges found, nothing to index.");
+            return false;
         }
 
         // Compute shard tasks at file level from the provided entries
@@ -441,7 +284,8 @@ public class GenericIndexTopoBuilder {
                                         indexField,
                                         extraFields,
                                         projectedRowType,
-                                        mergedOptions))
+                                        mergedOptions,
+                                        sourceMeta))
                         .setParallelism(parallelism);
 
         if (!deletedIndexEntries.isEmpty()) {
@@ -463,14 +307,6 @@ public class GenericIndexTopoBuilder {
     static List<IndexedSplit> computeShardTasks(
             FileStoreTable table, List<ManifestEntry> entries, long rowsPerShard) {
         return createShardIndexedSplits(table, entries, rowsPerShard);
-    }
-
-    static List<IndexedSplit> computeShardTasks(
-            FileStoreTable table,
-            List<ManifestEntry> entries,
-            long rowsPerShard,
-            long maxIndexedRowId) {
-        return computeShardTasks(table, entries, rowsPerShard, rowRangesAfter(maxIndexedRowId));
     }
 
     static List<IndexedSplit> computeShardTasks(
@@ -531,6 +367,7 @@ public class GenericIndexTopoBuilder {
         private final List<DataField> extraFields;
         private final RowType projectedRowType;
         private final Options mergedOptions;
+        private final byte[] sourceMeta;
 
         private transient TableRead tableRead;
         private transient List<DataField> indexedFields;
@@ -546,7 +383,8 @@ public class GenericIndexTopoBuilder {
                 DataField indexField,
                 List<DataField> extraFields,
                 RowType projectedRowType,
-                Options mergedOptions) {
+                Options mergedOptions,
+                byte[] sourceMeta) {
             this.readBuilder = readBuilder;
             this.table = table;
             this.indexType = indexType;
@@ -554,6 +392,7 @@ public class GenericIndexTopoBuilder {
             this.extraFields = extraFields;
             this.projectedRowType = projectedRowType;
             this.mergedOptions = mergedOptions;
+            this.sourceMeta = sourceMeta;
         }
 
         @Override
@@ -678,7 +517,8 @@ public class GenericIndexTopoBuilder {
                                 shardRange,
                                 indexedFields,
                                 indexType,
-                                resultEntries);
+                                resultEntries,
+                                sourceMeta);
                 output.collect(
                         new StreamRecord<>(
                                 new Committable(
@@ -702,7 +542,8 @@ public class GenericIndexTopoBuilder {
             Range rowRange,
             List<DataField> indexFields,
             String indexType,
-            List<ResultEntry> resultEntries)
+            List<ResultEntry> resultEntries,
+            byte[] sourceMeta)
             throws IOException {
         List<IndexFileMeta> indexFileMetas =
                 toIndexFileMetas(
@@ -712,7 +553,8 @@ public class GenericIndexTopoBuilder {
                         rowRange,
                         indexFields,
                         indexType,
-                        resultEntries);
+                        resultEntries,
+                        sourceMeta);
         return new CommitMessageImpl(
                 partition, 0, null, indexIncrement(indexFileMetas), emptyIncrement());
     }

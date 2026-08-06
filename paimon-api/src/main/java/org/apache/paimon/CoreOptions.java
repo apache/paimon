@@ -2607,7 +2607,7 @@ public class CoreOptions implements Serializable {
                             .defaultValue(GlobalIndexColumnUpdateAction.THROW_ERROR)
                             .withDescription(
                                     "Defines the action to take when an update modifies columns that are covered by a global index. "
-                                            + "IGNORE leaves existing index files unchanged and may make the index stale.");
+                                            + "IGNORE leaves existing index files unchanged during the update and enables a later incremental index build to refresh affected row ranges.");
 
     public static final ConfigOption<MemorySize> LOOKUP_MERGE_BUFFER_SIZE =
             key("lookup.merge-buffer-size")

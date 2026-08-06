@@ -45,7 +45,9 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
 import org.apache.paimon.index.HashBucketAssigner;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -75,6 +77,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -658,19 +661,8 @@ public class JavaPyE2ETest {
             commit.commit(write.prepareCommit());
         }
 
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(
-                    builder.build(
-                            builder.scan()
-                                    .map(org.apache.paimon.utils.Pair::getValue)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+            commit.commit(buildSortedIndex(table, "btree", "k"));
         }
 
         try (BatchTableWrite write = writeBuilder.newWrite();
@@ -735,19 +727,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "bitmap").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(
-                    builder.build(
-                            builder.scan()
-                                    .map(org.apache.paimon.utils.Pair::getValue)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+            commit.commit(buildSortedIndex(table, "bitmap", "k"));
         }
 
         // assert index
@@ -838,19 +819,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(
-                    builder.build(
-                            builder.scan()
-                                    .map(org.apache.paimon.utils.Pair::getValue)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+            commit.commit(buildSortedIndex(table, "btree", "k"));
         }
 
         // assert index
@@ -919,19 +889,8 @@ public class JavaPyE2ETest {
             commit.commit(write.prepareCommit());
         }
 
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, indexType).withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(
-                    builder.build(
-                            builder.scan()
-                                    .map(org.apache.paimon.utils.Pair::getValue)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+            commit.commit(buildSortedIndex(table, indexType, "k"));
         }
 
         List<IndexManifestEntry> indexEntries =
@@ -999,19 +958,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(
-                    builder.build(
-                            builder.scan()
-                                    .map(org.apache.paimon.utils.Pair::getValue)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+            commit.commit(buildSortedIndex(table, "btree", "k"));
         }
 
         // assert index
@@ -1078,19 +1026,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(
-                    builder.build(
-                            builder.scan()
-                                    .map(org.apache.paimon.utils.Pair::getValue)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+            commit.commit(buildSortedIndex(table, "btree", "k"));
         }
 
         // assert index
@@ -2145,6 +2082,29 @@ public class JavaPyE2ETest {
             result.put(anchor.nonNullRowIdRange(), anchor.fileName());
         }
         return result;
+    }
+
+    private List<CommitMessage> buildSortedIndex(
+            FileStoreTable table, String indexType, String indexFieldName) throws Exception {
+        SortedGlobalIndexScanner scanner =
+                new SortedGlobalIndexScanner(table, indexType).withIndexField(indexFieldName);
+        ScanResult<DataSplit> scanResult =
+                scanner.scan()
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected scan result when building index."));
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        for (DataSplit dataSplit : scanResult.entries()) {
+            commitMessages.addAll(
+                    SortedGlobalIndexTestUtils.buildIndex(
+                            table,
+                            indexType,
+                            indexFieldName,
+                            dataSplit,
+                            scanResult.scanSnapshotId()));
+        }
+        return commitMessages;
     }
 
     private static class E2eDvSpec {

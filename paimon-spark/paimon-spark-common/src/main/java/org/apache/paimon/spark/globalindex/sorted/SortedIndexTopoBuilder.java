@@ -21,8 +21,13 @@ package org.apache.paimon.spark.globalindex.sorted;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
-import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.SparkRow;
@@ -30,15 +35,14 @@ import org.apache.paimon.spark.globalindex.GlobalIndexTopologyBuilder;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
-import org.apache.paimon.utils.RowRangeIndex;
 
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.function.FlatMapFunction;
@@ -60,8 +64,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder.groupSplitsByRange;
-import static org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder.splitByContiguousRowRange;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.groupSplitsByRange;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.splitByContiguousRowRange;
 
 /** The {@link GlobalIndexTopologyBuilder} for sorted indexes. */
 public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
@@ -84,27 +88,27 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             DataField indexField,
             Options options)
             throws IOException {
-        SortedGlobalIndexBuilder indexBuilder =
-                new SortedGlobalIndexBuilder(table, indexType, options)
+        SortedGlobalIndexScanner indexScanner =
+                new SortedGlobalIndexScanner(table, indexType, options)
                         .withIndexField(indexField.name());
         if (partitionPredicate != null) {
-            indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
+            indexScanner = indexScanner.withPartitionPredicate(partitionPredicate);
         }
 
-        Optional<Pair<RowRangeIndex, List<DataSplit>>> indexRangeAndSplits =
-                indexBuilder.incrementalScan();
-        if (!indexRangeAndSplits.isPresent()) {
+        Optional<ScanResult<DataSplit>> optionalScanResult = indexScanner.incrementalScan();
+        if (!optionalScanResult.isPresent()) {
             return Collections.emptyList();
         }
 
-        Pair<RowRangeIndex, List<DataSplit>> scanResult = indexRangeAndSplits.get();
-        List<DataSplit> splits = splitByContiguousRowRange(scanResult.getRight());
+        ScanResult<DataSplit> scanResult = optionalScanResult.get();
+        long scanSnapshotId = scanResult.scanSnapshotId();
+        List<DataSplit> splits = splitByContiguousRowRange(scanResult.entries());
         if (splits.isEmpty()) {
             return Collections.emptyList();
         }
 
         Map<BinaryRow, Map<Range, List<Split>>> partitionRangeSplits =
-                groupSplitsByRange(scanResult.getKey(), splits);
+                groupSplitsByRange(scanResult.rowRangeIndex(), splits);
         if (partitionRangeSplits.isEmpty()) {
             return Collections.emptyList();
         }
@@ -120,6 +124,9 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         sortColumns.add(indexField.name());
         final int partitionKeyNum = table.partitionKeys().size();
         BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
+        SortedGlobalIndexWriter indexWriter =
+                new SortedGlobalIndexWriter(table, indexType, options)
+                        .withIndexField(indexField.name());
         for (Map.Entry<BinaryRow, Map<Range, List<Split>>> partitionEntry :
                 partitionRangeSplits.entrySet()) {
             for (Map.Entry<Range, List<Split>> entry : partitionEntry.getValue().entrySet()) {
@@ -150,7 +157,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                         selected.repartitionByRange(partitionNum, sortFields)
                                 .sortWithinPartitions(sortFields);
 
-                final byte[] serializedBuilder = InstantiationUtil.serializeObject(indexBuilder);
+                final byte[] serializedWriter = InstantiationUtil.serializeObject(indexWriter);
                 final byte[] partitionBytes =
                         binaryRowSerializer.serializeToBytes(partitionEntry.getKey());
                 JavaRDD<byte[]> written =
@@ -162,31 +169,43 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                                                 iter ->
                                                         buildSortedIndex(
                                                                 iter,
-                                                                serializedBuilder,
+                                                                serializedWriter,
                                                                 range,
                                                                 partitionKeyNum,
-                                                                partitionBytes));
+                                                                partitionBytes,
+                                                                scanSnapshotId));
                 List<byte[]> commitBytes = written.collect();
                 allMessages.addAll(CommitMessageSerializer.deserializeAll(commitBytes));
             }
+        }
+        for (IndexManifestEntry entry : scanResult.deletedIndexEntries()) {
+            allMessages.add(
+                    new CommitMessageImpl(
+                            entry.partition(),
+                            entry.bucket(),
+                            null,
+                            DataIncrement.deleteIndexIncrement(
+                                    Collections.singletonList(entry.indexFile())),
+                            CompactIncrement.emptyIncrement()));
         }
         return allMessages;
     }
 
     private static Iterator<byte[]> buildSortedIndex(
             Iterator<InternalRow> input,
-            byte[] serializedBuilder,
+            byte[] serializedWriter,
             Range range,
             int partitionKeyNum,
-            byte[] partitionBytes)
+            byte[] partitionBytes,
+            long scanSnapshotId)
             throws IOException, ClassNotFoundException {
         final BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
         BinaryRow partition = binaryRowSerializer.deserializeFromBytes(partitionBytes);
-        SortedGlobalIndexBuilder builder =
+        SortedGlobalIndexWriter writer =
                 InstantiationUtil.deserializeObject(
-                        serializedBuilder, SortedGlobalIndexBuilder.class.getClassLoader());
+                        serializedWriter, SortedGlobalIndexWriter.class.getClassLoader());
         return CommitMessageSerializer.serializeAll(
-                        builder.buildForSinglePartition(range, partition, input))
+                        writer.buildForSinglePartition(range, partition, input, scanSnapshotId))
                 .iterator();
     }
 }

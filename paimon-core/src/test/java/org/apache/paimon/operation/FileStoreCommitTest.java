@@ -1458,6 +1458,27 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testMissingGlobalIndexDeleteRejected() throws Exception {
+        TestFileStore store = createStore(false);
+        KeyValue record = gen.next();
+        BinaryRow partition = gen.getPartition(record);
+        store.commitData(Collections.singletonList(record), s -> partition, kv -> 0);
+
+        assertThatThrownBy(
+                        () -> {
+                            try (FileStoreCommitImpl commit = store.newCommit()) {
+                                commit.commit(
+                                        deleteIndexCommittable(partition, "missing-index", 0, 0),
+                                        false);
+                            }
+                        })
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalStateException.class,
+                                "Trying to delete global index file missing-index which does not exist."));
+    }
+
+    @Test
     public void testCommitTwiceWithDifferentKind() throws Exception {
         TestFileStore store = createStore(false);
         try (FileStoreCommitImpl commit = store.newCommit()) {
@@ -2002,6 +2023,28 @@ public class FileStoreCommitTest {
                         0,
                         null,
                         DataIncrement.indexIncrement(
+                                Collections.singletonList(
+                                        new IndexFileMeta(
+                                                "btree",
+                                                fileName,
+                                                1,
+                                                1,
+                                                new GlobalIndexMeta(
+                                                        rowRangeStart, rowRangeEnd, 0, null, null),
+                                                null))),
+                        CompactIncrement.emptyIncrement()));
+        return committable;
+    }
+
+    private ManifestCommittable deleteIndexCommittable(
+            BinaryRow partition, String fileName, long rowRangeStart, long rowRangeEnd) {
+        ManifestCommittable committable = new ManifestCommittable(0);
+        committable.addFileCommittable(
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        null,
+                        DataIncrement.deleteIndexIncrement(
                                 Collections.singletonList(
                                         new IndexFileMeta(
                                                 "btree",

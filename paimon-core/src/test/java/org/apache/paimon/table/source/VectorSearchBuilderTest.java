@@ -2071,7 +2071,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         rowRange,
                         indexFields,
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        null);
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
