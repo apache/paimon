@@ -585,6 +585,38 @@ public class IncrementalTableTest extends TableTestBase {
     }
 
     @Test
+    public void testPostponeSameBucketNumberWithDifferentActiveBuckets() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .primaryKey("pk")
+                        .option("bucket", String.valueOf(BucketMode.POSTPONE_BUCKET))
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        PostponeFixedBucketWriteBuilder builder = table.newPostponeFixedBucketWriteBuilder();
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(GenericRow.of(1, 1), 0, 2);
+            commit.commit(write.prepareCommit());
+        }
+        table.createTag("TAG1", 1);
+
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(GenericRow.of(2, 2), 1, 2);
+            commit.commit(write.prepareCommit());
+        }
+        table.createTag("TAG2", 2);
+
+        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
+                .containsExactly(GenericRow.of(2, 2));
+    }
+
+    @Test
     public void testPostponeBucketNumberChangedInIncrementalDiff() throws Exception {
         Identifier identifier = identifier("T");
         Schema schema =
@@ -609,7 +641,6 @@ public class IncrementalTableTest extends TableTestBase {
         try (TableWriteImpl<?> write = builder.newWrite();
                 BatchTableCommit commit = builder.newCommit()) {
             write.writeAndReturn(GenericRow.of(1, 2), 0, 2);
-            write.writeAndReturn(GenericRow.of(2, 1), 1, 2);
             commit.commit(write.prepareCommit());
         }
         table.createTag("TAG2", 2);
