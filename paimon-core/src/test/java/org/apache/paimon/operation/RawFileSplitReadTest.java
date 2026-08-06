@@ -25,8 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.FileRecordIterator;
-import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -37,14 +36,12 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-
-import java.lang.reflect.Field;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -54,7 +51,7 @@ class RawFileSplitReadTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    void readerMappingCacheTracksReadTypeChanges() throws Exception {
+    void readerMappingIsNotSharedBetweenReadTypes() throws Exception {
         Path tablePath = new Path(tempDir.resolve("mapping-cache").toUri());
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
@@ -79,32 +76,22 @@ class RawFileSplitReadTest {
         }
 
         DataSplit split = table.newSnapshotReader().read().dataSplits().get(0);
-        RawFileSplitRead read = (RawFileSplitRead) table.store().newRead();
+        InnerTableRead read = table.newRead();
 
         RowType firstProjection = table.rowType().project("first");
         read.withReadType(firstProjection);
-        try (FileRecordReader<InternalRow> fileReader = read.createFileReader(split, null)) {
-            FileRecordIterator<InternalRow> batch = fileReader.readBatch();
+        try (RecordReader<InternalRow> reader = read.createReader(split)) {
+            RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
             assertThat(batch).isNotNull();
             assertThat(batch.next().getString(0).toString()).isEqualTo("value");
+            assertThat(batch.next()).isNull();
             batch.releaseBatch();
         }
 
-        Map<?, ?> formatReaderMappings = formatReaderMappings(read);
-        assertThat(formatReaderMappings).hasSize(1);
-        Object firstMapping = formatReaderMappings.values().iterator().next();
-
-        RowType equalFirstProjection = table.rowType().project("first");
-        assertThat(equalFirstProjection).isEqualTo(firstProjection).isNotSameAs(firstProjection);
-        read.withReadType(equalFirstProjection);
-        assertThat(formatReaderMappings).hasSize(1);
-        assertThat(formatReaderMappings.values().iterator().next()).isSameAs(firstMapping);
-
         RowType secondProjection = table.rowType().project("second");
         read.withReadType(secondProjection);
-        assertThat(formatReaderMappings).isEmpty();
-        try (FileRecordReader<InternalRow> fileReader = read.createFileReader(split, null)) {
-            FileRecordIterator<InternalRow> batch = fileReader.readBatch();
+        try (RecordReader<InternalRow> reader = read.createReader(split)) {
+            RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
             assertThat(batch).isNotNull();
             InternalRow row = batch.next();
             assertThat(row).isNotNull();
@@ -113,14 +100,5 @@ class RawFileSplitReadTest {
             assertThat(batch.next()).isNull();
             batch.releaseBatch();
         }
-        assertThat(formatReaderMappings).hasSize(1);
-        assertThat(formatReaderMappings.values().iterator().next()).isNotSameAs(firstMapping);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<?, ?> formatReaderMappings(RawFileSplitRead read) throws Exception {
-        Field field = RawFileSplitRead.class.getDeclaredField("formatReaderMappings");
-        field.setAccessible(true);
-        return (Map<?, ?>) field.get(read);
     }
 }
