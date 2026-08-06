@@ -127,51 +127,59 @@ public class PostponeUtils {
         return result;
     }
 
-    public static PostponeBucketAssigner createPostponeBucketAssigner(
-            FileStoreTable table, long snapshotId, int defaultParallelism) {
-        return loadPostponeBucketAssigner(table, snapshotId, defaultParallelism, null);
+    public static PostponeBucketNumResolver createPostponeBucketNumResolver(
+            FileStoreTable table, long snapshotId) {
+        return loadPostponeBucketNumResolver(table, snapshotId, null);
     }
 
-    private static PostponeBucketAssigner loadPostponeBucketAssigner(
-            FileStoreTable table,
-            long snapshotId,
-            int defaultParallelism,
-            @Nullable PartitionPredicate partitionFilter) {
-        Map<BinaryRow, Integer> knownNumBuckets =
-                getKnownNumBuckets(table, snapshotId, partitionFilter);
-        Map<BinaryRow, Long> postponeRowCounts =
-                !table.coreOptions().postponeTargetRowNumPerBucket().isPresent()
-                        ? Collections.emptyMap()
-                        : getPostponeRowCounts(table, snapshotId, partitionFilter);
-        Long targetRowNumPerBucket =
-                table.coreOptions().postponeTargetRowNumPerBucket().orElse(null);
-        int defaultBucketNum =
-                table.coreOptions()
-                                .toConfiguration()
-                                .contains(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM)
-                        ? table.coreOptions().postponeDefaultBucketNum()
-                        : defaultParallelism;
-        return new PostponeBucketAssigner(
-                knownNumBuckets, targetRowNumPerBucket, postponeRowCounts, defaultBucketNum);
+    private static PostponeBucketNumResolver loadPostponeBucketNumResolver(
+            FileStoreTable table, long snapshotId, @Nullable List<BinaryRow> postponePartitions) {
+        CoreOptions options = table.coreOptions();
+        Map<BinaryRow, Integer> numBucketsByPartition =
+                postponePartitions == null
+                        ? getKnownNumBuckets(table, snapshotId)
+                        : getKnownNumBuckets(table, snapshotId, postponePartitions);
+        Integer configuredDefaultBucketNum = options.postponeDefaultBucketNum().orElse(null);
+        if (configuredDefaultBucketNum == null) {
+            Optional<Long> targetRowNumPerBucket = options.postponeTargetRowNumPerBucket();
+            if (targetRowNumPerBucket.isPresent()) {
+                checkArgument(
+                        targetRowNumPerBucket.get() > 0,
+                        "Option '%s' must be greater than 0.",
+                        CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET.key());
+                addEstimatedBucketNums(
+                        numBucketsByPartition,
+                        getPostponeRowCounts(
+                                postponeFileIterator(table, snapshotId, postponePartitions)),
+                        targetRowNumPerBucket.get(),
+                        CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET.key());
+            } else {
+                long targetSizePerBucket = options.postponeTargetSizePerBucket();
+                checkArgument(
+                        targetSizePerBucket > 0,
+                        "Option '%s' must be greater than 0.",
+                        CoreOptions.POSTPONE_TARGET_SIZE_PER_BUCKET.key());
+                addEstimatedBucketNums(
+                        numBucketsByPartition,
+                        getPostponeFileSizes(
+                                postponeFileIterator(table, snapshotId, postponePartitions)),
+                        targetSizePerBucket,
+                        CoreOptions.POSTPONE_TARGET_SIZE_PER_BUCKET.key());
+            }
+        }
+        return new PostponeBucketNumResolver(numBucketsByPartition, configuredDefaultBucketNum);
     }
 
-    /** Creates snapshot-bound routing metadata. */
+    /** Creates snapshot-bound routing metadata for partitions containing postpone files. */
     public static PostponeBucketRouter createPostponeBucketRouter(
-            FileStoreTable table,
-            long snapshotId,
-            int defaultParallelism,
-            @Nullable PartitionPredicate partitionFilter) {
+            FileStoreTable table, long snapshotId, List<BinaryRow> postponePartitions) {
         return newPostponeBucketRouter(
-                table,
-                loadPostponeBucketAssigner(table, snapshotId, defaultParallelism, partitionFilter));
+                table, loadPostponeBucketNumResolver(table, snapshotId, postponePartitions));
     }
 
     /** Creates routing metadata from bucket numbers decided by an execution engine. */
     public static PostponeBucketRouter createPostponeBucketRouter(
-            FileStoreTable table,
-            Map<BinaryRow, Integer> numBucketsByPartition,
-            int defaultBucketNum) {
-        checkArgument(defaultBucketNum > 0, "Default postpone bucket number must be positive.");
+            FileStoreTable table, Map<BinaryRow, Integer> numBucketsByPartition) {
         Map<BinaryRow, Integer> copied = new HashMap<>();
         for (Map.Entry<BinaryRow, Integer> entry : numBucketsByPartition.entrySet()) {
             checkArgument(
@@ -179,13 +187,11 @@ public class PostponeUtils {
                     "Postpone bucket number must be positive.");
             copied.put(entry.getKey().copy(), entry.getValue());
         }
-        return newPostponeBucketRouter(
-                table,
-                new PostponeBucketAssigner(copied, null, Collections.emptyMap(), defaultBucketNum));
+        return newPostponeBucketRouter(table, new PostponeBucketNumResolver(copied, null));
     }
 
     private static PostponeBucketRouter newPostponeBucketRouter(
-            FileStoreTable table, PostponeBucketAssigner bucketAssigner) {
+            FileStoreTable table, PostponeBucketNumResolver bucketNumResolver) {
         List<String> trimmedPrimaryKeys = table.schema().trimmedPrimaryKeys();
         int[] bucketKeyMapping =
                 table.schema().bucketKeys().stream()
@@ -202,7 +208,7 @@ public class PostponeUtils {
                         PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR.keyFields(
                                 table.schema()));
         return new PostponeBucketRouter(
-                bucketAssigner,
+                bucketNumResolver,
                 keyType,
                 table.schema().logicalBucketKeyType(),
                 bucketKeyMapping,
@@ -210,52 +216,57 @@ public class PostponeUtils {
     }
 
     public static int computeBucketNumByRowCount(long rowCount, long targetRowNumPerBucket) {
-        if (targetRowNumPerBucket <= 0) {
-            throw new IllegalArgumentException(
-                    "Option 'postpone.target-row-num-per-bucket' must be greater than 0.");
-        }
+        return computeBucketNum(
+                rowCount,
+                targetRowNumPerBucket,
+                CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET.key());
+    }
 
-        long bucketNum = rowCount <= 0 ? 1 : (rowCount - 1) / targetRowNumPerBucket + 1;
+    private static int computeBucketNum(
+            long value, long targetValuePerBucket, String targetOptionKey) {
+        checkArgument(
+                targetValuePerBucket > 0, "Option '%s' must be greater than 0.", targetOptionKey);
+        long bucketNum = value <= 0 ? 1 : (value - 1) / targetValuePerBucket + 1;
         if (bucketNum > Integer.MAX_VALUE) {
             throw new IllegalArgumentException(
                     "Computed postpone bucket number "
                             + bucketNum
                             + " exceeds the maximum integer value (Integer.MAX_VALUE = "
                             + Integer.MAX_VALUE
-                            + "). Consider increasing 'postpone.target-row-num-per-bucket' "
+                            + "). Consider increasing '"
+                            + targetOptionKey
+                            + "' "
                             + "to reduce the bucket count.");
         }
         return (int) bucketNum;
     }
 
-    public static int determineBucketNum(
-            BinaryRow partition,
-            Map<BinaryRow, Integer> knownNumBuckets,
-            Optional<Long> targetRowNumPerBucket,
-            Map<BinaryRow, Long> postponeRowCounts,
-            int defaultBucketNum) {
-        return determineBucketNum(
-                partition,
-                knownNumBuckets,
-                targetRowNumPerBucket.orElse(null),
-                postponeRowCounts,
-                defaultBucketNum);
+    private static void addEstimatedBucketNums(
+            Map<BinaryRow, Integer> numBucketsByPartition,
+            Map<BinaryRow, Long> valuesByPartition,
+            long targetValuePerBucket,
+            String targetOptionKey) {
+        for (Map.Entry<BinaryRow, Long> entry : valuesByPartition.entrySet()) {
+            if (!numBucketsByPartition.containsKey(entry.getKey())) {
+                numBucketsByPartition.put(
+                        entry.getKey(),
+                        computeBucketNum(entry.getValue(), targetValuePerBucket, targetOptionKey));
+            }
+        }
     }
 
-    public static int determineBucketNum(
+    static int determineBucketNum(
             BinaryRow partition,
-            Map<BinaryRow, Integer> knownNumBuckets,
-            @Nullable Long targetRowNumPerBucket,
-            Map<BinaryRow, Long> postponeRowCounts,
-            int defaultBucketNum) {
-        Integer knownBucketNum = knownNumBuckets.get(partition);
-        if (knownBucketNum != null) {
-            return knownBucketNum;
-        } else if (targetRowNumPerBucket != null) {
-            return computeBucketNumByRowCount(
-                    postponeRowCounts.getOrDefault(partition, 0L), targetRowNumPerBucket);
+            Map<BinaryRow, Integer> numBucketsByPartition,
+            @Nullable Integer configuredDefaultBucketNum) {
+        Integer numBuckets = numBucketsByPartition.get(partition);
+        if (numBuckets != null) {
+            return numBuckets;
+        } else if (configuredDefaultBucketNum != null) {
+            return configuredDefaultBucketNum;
         } else {
-            return defaultBucketNum;
+            throw new IllegalArgumentException(
+                    "Missing postpone bucket number for partition " + partition + ".");
         }
     }
 
@@ -277,6 +288,11 @@ public class PostponeUtils {
         checkArgument(
                 existingBucketNum == null || existingBucketNum > 0,
                 "Existing bucket number must be positive.");
+
+        Optional<Integer> configuredDefaultBucketNum = options.postponeDefaultBucketNum();
+        if (existingBucketNum == null && configuredDefaultBucketNum.isPresent()) {
+            return new FixedBucketDecision(configuredDefaultBucketNum.get(), false);
+        }
 
         int maxBucketNum = options.postponeBatchWriteFixedBucketMaxParallelism();
         checkArgument(
@@ -453,48 +469,69 @@ public class PostponeUtils {
         return rowCounts;
     }
 
-    public static FileStoreTable tableForPostponeCompact(
-            FileStoreTable table, int numBuckets, long snapshotId) {
-        Map<String, String> compactOptions = new HashMap<>();
-        compactOptions.put(BUCKET.key(), String.valueOf(numBuckets));
-        compactOptions.put(WRITE_ONLY.key(), "false");
-        compactOptions.put(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), String.valueOf(snapshotId));
-        return table.copy(compactOptions);
+    private static Iterator<ManifestEntry> postponeFileIterator(
+            FileStoreTable table, long snapshotId, @Nullable List<BinaryRow> postponePartitions) {
+        SnapshotReader reader =
+                table.newSnapshotReader()
+                        .withSnapshot(snapshotId)
+                        .withBucket(BucketMode.POSTPONE_BUCKET);
+        if (postponePartitions != null) {
+            reader.withPartitionFilter(postponePartitions);
+        }
+        return reader.readFileIterator();
     }
 
-    /** Snapshot-bound bucket-count assignment. */
-    public static final class PostponeBucketAssigner implements Serializable {
+    static Map<BinaryRow, Long> getPostponeFileSizes(
+            FileStoreTable table, long snapshotId, @Nullable PartitionPredicate partitionFilter) {
+        SnapshotReader reader =
+                table.newSnapshotReader()
+                        .withSnapshot(snapshotId)
+                        .withBucket(BucketMode.POSTPONE_BUCKET);
+        if (partitionFilter != null) {
+            reader.withPartitionFilter(partitionFilter);
+        }
+
+        return getPostponeFileSizes(reader.readFileIterator());
+    }
+
+    private static Map<BinaryRow, Long> getPostponeFileSizes(Iterator<ManifestEntry> iterator) {
+        Map<BinaryRow, Long> fileSizes = new HashMap<>();
+        while (iterator.hasNext()) {
+            ManifestEntry entry = iterator.next();
+            fileSizes.merge(
+                    entry.partition(),
+                    entry.file().fileSize(),
+                    (left, right) -> Math.addExact(left, right));
+        }
+        return fileSizes;
+    }
+
+    public static FileStoreTable tableForPostponeRewrite(
+            FileStoreTable table, int numBuckets, long snapshotId) {
+        Map<String, String> rewriteOptions = new HashMap<>();
+        rewriteOptions.put(BUCKET.key(), String.valueOf(numBuckets));
+        rewriteOptions.put(WRITE_ONLY.key(), "false");
+        rewriteOptions.put(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), String.valueOf(snapshotId));
+        return table.copy(rewriteOptions);
+    }
+
+    /** Resolves the snapshot-bound bucket count of a partition. */
+    public static final class PostponeBucketNumResolver implements Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final Map<BinaryRow, Integer> knownNumBuckets;
-        @Nullable private final Long targetRowNumPerBucket;
-        private final Map<BinaryRow, Long> postponeRowCounts;
-        private final int defaultBucketNum;
+        private final Map<BinaryRow, Integer> numBucketsByPartition;
+        @Nullable private final Integer configuredDefaultBucketNum;
 
-        private PostponeBucketAssigner(
-                Map<BinaryRow, Integer> knownNumBuckets,
-                @Nullable Long targetRowNumPerBucket,
-                Map<BinaryRow, Long> postponeRowCounts,
-                int defaultBucketNum) {
-            this.knownNumBuckets = knownNumBuckets;
-            this.targetRowNumPerBucket = targetRowNumPerBucket;
-            this.postponeRowCounts = postponeRowCounts;
-            this.defaultBucketNum = defaultBucketNum;
+        private PostponeBucketNumResolver(
+                Map<BinaryRow, Integer> numBucketsByPartition,
+                @Nullable Integer configuredDefaultBucketNum) {
+            this.numBucketsByPartition = numBucketsByPartition;
+            this.configuredDefaultBucketNum = configuredDefaultBucketNum;
         }
 
-        public int assign(BinaryRow partition) {
-            return determineBucketNum(
-                    partition,
-                    knownNumBuckets,
-                    targetRowNumPerBucket,
-                    postponeRowCounts,
-                    defaultBucketNum);
-        }
-
-        private PostponeBucketAssigner withDefaultBucketNum(int newDefaultBucketNum) {
-            return new PostponeBucketAssigner(
-                    knownNumBuckets, targetRowNumPerBucket, postponeRowCounts, newDefaultBucketNum);
+        public int numBuckets(BinaryRow partition) {
+            return determineBucketNum(partition, numBucketsByPartition, configuredDefaultBucketNum);
         }
     }
 
@@ -523,7 +560,7 @@ public class PostponeUtils {
 
         private static final long serialVersionUID = 1L;
 
-        private final PostponeBucketAssigner bucketAssigner;
+        private final PostponeBucketNumResolver bucketNumResolver;
         private final RowType keyType;
         private final RowType bucketKeyType;
         private final int[] bucketKeyMapping;
@@ -532,12 +569,12 @@ public class PostponeUtils {
         @Nullable private transient BucketFunction bucketFunction;
 
         private PostponeBucketRouter(
-                PostponeBucketAssigner bucketAssigner,
+                PostponeBucketNumResolver bucketNumResolver,
                 RowType keyType,
                 RowType bucketKeyType,
                 int[] bucketKeyMapping,
                 CoreOptions.BucketFunctionType bucketFunctionType) {
-            this.bucketAssigner = bucketAssigner;
+            this.bucketNumResolver = bucketNumResolver;
             this.keyType = keyType;
             this.bucketKeyType = bucketKeyType;
             this.bucketKeyMapping = bucketKeyMapping;
@@ -556,18 +593,7 @@ public class PostponeUtils {
         }
 
         public int numBuckets(BinaryRow partition) {
-            return bucketAssigner.assign(partition);
-        }
-
-        public PostponeBucketRouter withDefaultBucketNum(int newDefaultBucketNum) {
-            checkArgument(
-                    newDefaultBucketNum > 0, "Default postpone bucket number must be positive.");
-            return new PostponeBucketRouter(
-                    bucketAssigner.withDefaultBucketNum(newDefaultBucketNum),
-                    keyType,
-                    bucketKeyType,
-                    bucketKeyMapping,
-                    bucketFunctionType);
+            return bucketNumResolver.numBuckets(partition);
         }
     }
 

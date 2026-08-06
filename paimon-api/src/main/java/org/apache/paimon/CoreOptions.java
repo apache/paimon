@@ -2766,23 +2766,23 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> POSTPONE_DEFAULT_BUCKET_NUM =
             key("postpone.default-bucket-num")
                     .intType()
-                    .defaultValue(1)
+                    .noDefaultValue()
                     .withDescription(
-                            "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
+                            "Optional bucket number for partitions receiving real buckets for the first time and for fixed-bucket overwrite writes. The configured value is used exactly and takes precedence over automatic bucket estimation. When unset, Paimon estimates the bucket number from the target row count or target file size.");
 
     public static final ConfigOption<Long> POSTPONE_TARGET_ROW_NUM_PER_BUCKET =
             key("postpone.target-row-num-per-bucket")
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "Target row number per bucket when estimating the required bucket number from the current staged batch or compacting postpone bucket files.");
+                            "Target postpone row count per bucket when estimating the required bucket number from staged or committed postpone files. When configured, this option takes precedence over 'postpone.target-size-per-bucket'.");
 
     public static final ConfigOption<MemorySize> POSTPONE_TARGET_SIZE_PER_BUCKET =
             key("postpone.target-size-per-bucket")
                     .memoryType()
                     .defaultValue(MemorySize.parse("1 gb"))
                     .withDescription(
-                            "Target staged file size per bucket when Spark estimates the required bucket number from the current staged batch. "
+                            "Target postpone file size per bucket when estimating the required bucket number from staged or committed postpone files. "
                                     + "This option is ignored when 'postpone.target-row-num-per-bucket' is configured.");
 
     public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
@@ -4465,8 +4465,15 @@ public class CoreOptions implements Serializable {
         return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET_RESCALE_LOAD_FACTOR);
     }
 
-    public int postponeDefaultBucketNum() {
-        return options.get(POSTPONE_DEFAULT_BUCKET_NUM);
+    public Optional<Integer> postponeDefaultBucketNum() {
+        Optional<Integer> bucketNum = options.getOptional(POSTPONE_DEFAULT_BUCKET_NUM);
+        bucketNum.ifPresent(
+                value ->
+                        checkArgument(
+                                value > 0,
+                                "Option '%s' must be greater than 0.",
+                                POSTPONE_DEFAULT_BUCKET_NUM.key()));
+        return bucketNum;
     }
 
     public Optional<Long> postponeTargetRowNumPerBucket() {
