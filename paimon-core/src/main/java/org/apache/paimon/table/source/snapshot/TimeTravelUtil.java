@@ -279,7 +279,7 @@ public class TimeTravelUtil {
             if (startPartitionBucketNumber != null
                     && endPartitionBucketNumber != null
                     && startPartitionBucketNumber.equals(endPartitionBucketNumber)) {
-                return;
+                continue;
             }
 
             throw new InconsistentTagBucketException(
