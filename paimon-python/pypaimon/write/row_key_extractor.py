@@ -34,10 +34,35 @@ from pypaimon.table.row.internal_row import RowKind
 
 logger = logging.getLogger(__name__)
 
-# pyarrow's group_by/aggregate (Acero) API was introduced in 7.0.0. Older
-# pyarrow (e.g. 6.0.1 on the Python 3.6 lane) has no ``Table.group_by``, so the
-# write path must use the per-row grouping fallback there instead of raising.
-_ARROW_GROUP_BY_SUPPORTED = hasattr(pa.Table, "group_by")
+
+def _probe_arrow_group_by() -> bool:
+    """Return True only if this pyarrow can run the write path's group-by.
+
+    Two versions matter, and a plain ``hasattr(pa.Table, "group_by")`` conflates
+    them: ``Table.group_by`` (Acero) landed in pyarrow 7.0.0, but the
+    ``hash_list`` aggregate kernel this path relies on only landed in 8.0.0.
+    pyarrow 7 therefore *has* ``group_by`` yet raises ``ArrowKeyError`` for
+    ``hash_list`` -- and the Python 3.7 dependency range still permits
+    ``pyarrow>=7,<13``. Probe the actual aggregate once at import so both
+    pyarrow<7 (no ``group_by``) and pyarrow 7 (no ``hash_list``) fall through to
+    the per-row grouping instead of failing every ``write_arrow_batch``.
+    """
+    if not hasattr(pa.Table, "group_by"):
+        return False
+    try:
+        probe = pa.table({
+            "__k": pa.array([0], type=pa.int32()),
+            "__idx": pa.array([0], type=pa.int64()),
+        })
+        probe.group_by(["__k"]).aggregate([("__idx", "list")])
+    except Exception:  # any failure here means "use the fallback"
+        return False
+    return True
+
+
+# pyarrow < 7.0.0 has no ``Table.group_by`` and pyarrow 7 has no ``hash_list``
+# aggregate kernel; on either the write path must use per-row grouping.
+_ARROW_GROUP_BY_SUPPORTED = _probe_arrow_group_by()
 
 _MURMUR_C1 = 0xCC9E2D51
 _MURMUR_C2 = 0x1B873593
@@ -168,7 +193,18 @@ class RowKeyExtractor(ABC):
         groups = []
         for gi in range(num_groups):
             partition = tuple(part_values[k][gi] for k in range(num_part))
-            row_indices = None if num_groups == 1 else idx_lists[gi].values
+            if num_groups == 1:
+                row_indices = None
+            else:
+                # Arrow's threaded ``hash_list`` may return a group's indices out
+                # of input order. The writer assigns sequence numbers in the
+                # order it receives rows, so unordered indices let an earlier
+                # input row (with a repeated primary key) win latest-wins
+                # deduplication / partial update. Sort back to ascending input
+                # order; np.sort runs in C (releases the GIL) so multi-threaded
+                # scaling is preserved.
+                row_indices = pa.array(
+                    np.sort(idx_lists[gi].values.to_numpy(zero_copy_only=False)))
             groups.append((partition, bucket_values[gi], row_indices))
         return groups
 

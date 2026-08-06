@@ -69,13 +69,12 @@ class TableWrite:
                 # Arrow take before the dedicated BLOB writer consumes them.
                 sub_table = data
             else:
-                # row_indices is an int64 array of this group's rows. Arrow's
-                # grouped list aggregation runs multi-threaded and does NOT
-                # guarantee ascending order within a group, so the span must be
-                # derived from min/max, not the first/last positions.
-                bounds = pa.compute.min_max(row_indices)
-                lo = bounds["min"].as_py()
-                hi = bounds["max"].as_py()
+                # row_indices is an int64 array of this group's rows in
+                # ascending input order (the extractor sorts grouped indices so
+                # sequence-number assignment stays latest-wins correct), so the
+                # span is just first..last.
+                lo = row_indices[0].as_py()
+                hi = row_indices[-1].as_py()
                 count = len(row_indices)
                 if hi - lo + 1 == count:
                     # Distinct row indices spanning exactly `count` values are

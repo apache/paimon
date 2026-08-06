@@ -223,13 +223,11 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual({'id': [1, 3], 'payload': [b'b', b'd']},
                          calls[1][0][2].to_pydict())
 
-    def test_write_arrow_batch_handles_unsorted_row_indices(self):
-        # Arrow's grouped list aggregation runs multi-threaded and does NOT
-        # guarantee ascending order within a group. A non-contiguous group whose
-        # scrambled endpoints happen to span exactly len(group) must not be
-        # mistaken for a contiguous slice. Here ('p1',) = rows {0, 2, 3} arrives
-        # out of order as [0, 3, 2]: endpoints 0 and 2 span 3 == len, so a
-        # first/last positional check would wrongly slice rows 0,1,2.
+    def test_write_arrow_batch_noncontiguous_group_uses_take(self):
+        # The extractor delivers each group's indices in ascending input order.
+        # A non-contiguous group (endpoints span more than len(group)) must be
+        # gathered via take and keep input order. Here ('p1',) = rows [0, 2, 3]:
+        # endpoints 0..3 span 4 != 3 == len -> take, not a contiguous slice.
         data = pa.RecordBatch.from_pydict({
             'id': [0, 1, 2, 3],
             'payload': [b'a', b'b', b'c', b'd'],
@@ -239,7 +237,7 @@ class TableWriteTest(unittest.TestCase):
         table_write.file_store_write = Mock()
         table_write.row_key_extractor = Mock()
         table_write.row_key_extractor.extract_partition_bucket_groups.return_value = [
-            (('p1',), 0, pa.array([0, 3, 2], type=pa.int64())),
+            (('p1',), 0, pa.array([0, 2, 3], type=pa.int64())),
             (('p2',), 0, pa.array([1], type=pa.int64())),
         ]
 
@@ -247,13 +245,13 @@ class TableWriteTest(unittest.TestCase):
 
         calls = table_write.file_store_write.write.call_args_list
         self.assertEqual(2, len(calls))
-        # Membership is what matters, not row order within the group.
-        self.assertEqual({0, 2, 3}, set(calls[0][0][2].column('id').to_pylist()))
-        self.assertEqual({1}, set(calls[1][0][2].column('id').to_pylist()))
+        # Order-sensitive: sequence numbers are assigned in the delivered order.
+        self.assertEqual([0, 2, 3], calls[0][0][2].column('id').to_pylist())
+        self.assertEqual([1], calls[1][0][2].column('id').to_pylist())
 
-    def test_write_arrow_batch_contiguous_group_detected_despite_unsorted(self):
-        # A contiguous group delivered shuffled ([3, 1, 2]) must still be
-        # recognized via min/max and take the zero-copy slice path.
+    def test_write_arrow_batch_contiguous_group_uses_zero_copy_slice(self):
+        # A contiguous group (ascending endpoints span exactly len(group)) takes
+        # the zero-copy slice path instead of allocating a copy via take.
         data = pa.RecordBatch.from_pydict({
             'id': [0, 1, 2, 3],
             'payload': [b'a', b'b', b'c', b'd'],
@@ -264,7 +262,7 @@ class TableWriteTest(unittest.TestCase):
         table_write.row_key_extractor = Mock()
         table_write.row_key_extractor.extract_partition_bucket_groups.return_value = [
             (('p0',), 0, pa.array([0], type=pa.int64())),
-            (('p1',), 0, pa.array([3, 1, 2], type=pa.int64())),
+            (('p1',), 0, pa.array([1, 2, 3], type=pa.int64())),
         ]
 
         with patch.object(pa.compute, 'take', wraps=pa.compute.take) as take:
@@ -272,7 +270,7 @@ class TableWriteTest(unittest.TestCase):
 
         take.assert_not_called()
         calls = table_write.file_store_write.write.call_args_list
-        self.assertEqual({1, 2, 3}, set(calls[1][0][2].column('id').to_pylist()))
+        self.assertEqual([1, 2, 3], calls[1][0][2].column('id').to_pylist())
 
     def _unaware_partitioned_extractor(self, name, partition_keys):
         schema = Schema.from_pyarrow_schema(
@@ -292,11 +290,12 @@ class TableWriteTest(unittest.TestCase):
         }, schema=self.pa_schema)
 
         groups = ex.extract_partition_bucket_groups(data)
-        # Membership, not within-group order (Arrow's threaded aggregation does
-        # not guarantee an order); sort so the assertion stays deterministic.
+        # Within-group indices must be in ascending input order (the extractor
+        # sorts Arrow's threaded aggregation output) so the writer's
+        # sequence-number assignment stays latest-wins correct.
         self.assertEqual(
             {(('p1',), 0): [0, 2], (('p2',), 0): [1, 3]},
-            {(p, b): sorted(idx.to_pylist()) for p, b, idx in groups})
+            {(p, b): idx.to_pylist() for p, b, idx in groups})
 
     def test_extract_partition_bucket_groups_single_group_is_none(self):
         ex = self._unaware_partitioned_extractor(
@@ -328,10 +327,11 @@ class TableWriteTest(unittest.TestCase):
         buckets = ex._extract_buckets_batch(data)
 
         def norm(groups):
-            # Compare group membership, not within-group order: Arrow's threaded
-            # list aggregation does not guarantee an order for the arrow path.
+            # Both paths must return within-group indices in ascending input
+            # order (arrow sorts its threaded aggregation; python appends in
+            # row order), so compare order-sensitively.
             return {
-                (p, b): (None if idx is None else sorted(idx.to_pylist()))
+                (p, b): (None if idx is None else idx.to_pylist())
                 for p, b, idx in groups
             }
 
@@ -359,6 +359,50 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(
             {(('p1',), 0): [0, 2], (('p2',), 0): [1, 3]},
             {(p, b): sorted(idx.to_pylist()) for p, b, idx in groups})
+
+    def test_group_indices_arrow_sorts_unordered_aggregation(self):
+        # Arrow's threaded hash_list can return a group's row indices out of
+        # input order (reproduced upstream: a group whose last input index was
+        # 2,999,988 ended at 1,048,575). Out-of-order indices would make the
+        # writer assign sequence numbers in the wrong order, letting an earlier
+        # input row with a repeated primary key wrongly win latest-wins dedup.
+        # _group_indices_arrow must sort each group back to ascending input order.
+        ex = self._unaware_partitioned_extractor(
+            'default.t_groups_sorted', ['dt'])
+        data = pa.RecordBatch.from_pydict({
+            'user_id': [1, 2, 3, 4, 5],
+            'item_id': [1, 2, 3, 4, 5],
+            'behavior': ['a', 'b', 'c', 'd', 'e'],
+            'dt': ['p1', 'p2', 'p1', 'p2', 'p1'],
+        }, schema=self.pa_schema)
+        buckets = ex._extract_buckets_batch(data)
+        # Force Arrow's aggregation to report each group's indices out of order.
+        unordered = pa.table({
+            '__p0': pa.array(['p1', 'p2']),
+            '__bucket': pa.array([0, 0], type=pa.int32()),
+            '__idx_list': pa.array([[4, 0, 2], [3, 1]],
+                                   type=pa.list_(pa.int64())),
+        })
+        with patch.object(pa.TableGroupBy, 'aggregate', return_value=unordered):
+            groups = ex._group_indices_arrow(data, buckets)
+
+        by_part = {p: idx.to_pylist() for p, b, idx in groups}
+        self.assertEqual([0, 2, 4], by_part[('p1',)])
+        self.assertEqual([1, 3], by_part[('p2',)])
+
+    def test_probe_arrow_group_by_false_when_hash_list_missing(self):
+        # pyarrow 7 has Table.group_by but not the hash_list aggregate kernel
+        # (added in Arrow 8); it raises ArrowKeyError, and pyarrow>=7,<13 is
+        # still allowed on the Python 3.7 lane. The capability probe must treat
+        # that as unsupported so writes fall back instead of failing every
+        # write_arrow_batch.
+        from pypaimon.write import row_key_extractor as rk
+
+        def raise_missing_kernel(self, *args, **kwargs):
+            raise pa.ArrowKeyError("No function registered with name: hash_list")
+
+        with patch.object(pa.TableGroupBy, 'aggregate', raise_missing_kernel):
+            self.assertFalse(rk._probe_arrow_group_by())
 
     def test_write_snapshot(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
