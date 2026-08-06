@@ -170,9 +170,7 @@ class FileStoreCommit:
         self.table: FileStoreTable = table
         self.commit_user = commit_user
         self.commit_callbacks: List[CommitCallback] = commit_callbacks if commit_callbacks is not None else []
-        self.expected_base_snapshot_id = None
         self.expected_schema_id = None
-        self.allow_concurrent_maintenance = False
 
         self.snapshot_manager = table.snapshot_manager()
         self.manifest_file_manager = ManifestFileManager(table)
@@ -207,17 +205,11 @@ class FileStoreCommit:
         table_rollback = table.catalog_environment.catalog_table_rollback()
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
-    def protect_from_external_commits(
-            self, base_snapshot, schema_id, allow_maintenance=False):
-        self.expected_base_snapshot_id = (
-            base_snapshot.id if base_snapshot is not None else 0)
+    def protect_from_schema_changes(self, schema_id):
         self.expected_schema_id = schema_id
-        self.allow_concurrent_maintenance = allow_maintenance
 
     def clear_commit_context(self):
-        self.expected_base_snapshot_id = None
         self.expected_schema_id = None
-        self.allow_concurrent_maintenance = False
 
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in normal append mode."""
@@ -560,20 +552,6 @@ class FileStoreCommit:
             self._commit_retry_wait(retry_count)
             retry_count += 1
 
-    def _is_allowed_protected_base(self, latest_snapshot_id):
-        expected = self.expected_base_snapshot_id
-        if latest_snapshot_id == expected:
-            return True
-        if (not self.allow_concurrent_maintenance
-                or latest_snapshot_id < expected):
-            return False
-        for snapshot_id in range(expected + 1, latest_snapshot_id + 1):
-            snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
-            if (snapshot is None
-                    or snapshot.commit_kind not in ("COMPACT", "ANALYZE")):
-                return False
-        return True
-
     def _try_commit_once(self, retry_result: Optional[RetryResult], commit_kind: str,
                          commit_entries: List[ManifestEntry],
                          changelog_entries: List[ManifestEntry],
@@ -590,13 +568,11 @@ class FileStoreCommit:
             return SuccessResult()
 
         latest_snapshot_id = latest_snapshot.id if latest_snapshot else 0
-        if self.expected_base_snapshot_id is not None:
+        if self.expected_schema_id is not None:
             latest_schema = self.table.schema_manager.latest()
             latest_schema_id = latest_schema.id if latest_schema else None
-            if (not self._is_allowed_protected_base(latest_snapshot_id)
-                    or latest_schema_id != self.expected_schema_id):
-                conflict = RuntimeError(
-                    "Concurrent target commit or schema change detected.")
+            if latest_schema_id != self.expected_schema_id:
+                conflict = RuntimeError("Target schema changed during write.")
                 if retry_result is None or retry_result.exception is None:
                     raise CommitConflictError(str(conflict)) from conflict
                 raise conflict

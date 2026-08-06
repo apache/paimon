@@ -307,39 +307,82 @@ class RayIncrementalWriteTest(unittest.TestCase):
                 "id": [1], "feature": [101],
             }, schema=self.source_schema))
 
-    def test_rejects_concurrent_target_changes(self):
+    def test_merges_concurrent_partial_updates(self):
         from pypaimon.write import ray_datasink
 
+        schema = pa.schema([
+            pa.field("id", pa.int64(), nullable=False),
+            ("payload", pa.string()),
+            ("feature_a", pa.int32()),
+            ("feature_b", pa.int32()),
+        ])
+        target = self._create_table(
+            "concurrent_target",
+            schema,
+            primary_keys=["id"],
+            options={"bucket": "2", "merge-engine": "partial-update"},
+        )
+        self._write(target, pa.table({
+            "id": [1],
+            "payload": ["keep"],
+            "feature_a": [1],
+            "feature_b": [2],
+        }, schema=schema))
         real_write = ray_datasink._write_primary_key_groups
-        for change, error in (("data", "Concurrent target commit"),
-                              ("schema", "schema change")):
-            with self.subTest(change=change):
-                target = self._create_target()
 
-                def mutate_target(*args, **kwargs):
-                    if change == "data":
-                        self._write(target, pa.table({
-                            "id": [4],
-                            "payload": ["external"],
-                            "feature": [40],
-                        }, schema=self.target_schema))
-                    else:
-                        self.catalog.alter_table(target, [
-                            SchemaChange.add_column(
-                                "extra", AtomicType("STRING"))], False)
-                    return real_write(*args, **kwargs)
+        def concurrent_update(*args, **kwargs):
+            self._write(target, pa.table({
+                "id": [1],
+                "payload": [None],
+                "feature_a": [None],
+                "feature_b": [202],
+            }, schema=schema))
+            return real_write(*args, **kwargs)
 
-                with mock.patch.object(
-                        ray_datasink,
-                        "_write_primary_key_groups",
-                        side_effect=mutate_target):
-                    with self.assertRaisesRegex(RuntimeError, error):
-                        self._write_incrementally(target, pa.table({
-                            "id": [1], "feature": [101],
-                        }, schema=self.source_schema))
+        with mock.patch.object(
+                ray_datasink,
+                "_write_primary_key_groups",
+                side_effect=concurrent_update):
+            write_paimon(
+                ray.data.from_arrow(pa.table({
+                    "id": [1], "feature_a": [101],
+                })),
+                target,
+                self.catalog_options,
+                commit_mode="incremental",
+                commit_interval_seconds=10,
+                update_cols=["feature_a"],
+            )
 
-                expected = [10, 20, 30, 40] if change == "data" else [10, 20, 30]
-                self._assert_features(target, expected)
+        self.assertEqual({
+            "id": [1],
+            "payload": ["keep"],
+            "feature_a": [101],
+            "feature_b": [202],
+        }, self._read(target).to_pydict())
+
+    def test_rejects_schema_change(self):
+        from pypaimon.write import ray_datasink
+
+        target = self._create_target()
+        real_write = ray_datasink._write_primary_key_groups
+
+        def alter_schema(*args, **kwargs):
+            self.catalog.alter_table(target, [
+                SchemaChange.add_column(
+                    "extra", AtomicType("STRING"))], False)
+            return real_write(*args, **kwargs)
+
+        with mock.patch.object(
+                ray_datasink,
+                "_write_primary_key_groups",
+                side_effect=alter_schema):
+            with self.assertRaisesRegex(RuntimeError, "schema changed"):
+                self._write_incrementally(target, pa.table({
+                    "id": [1], "feature": [101],
+                }, schema=self.source_schema))
+
+        self._assert_features(target, [10, 20, 30])
 
 
 if __name__ == "__main__":

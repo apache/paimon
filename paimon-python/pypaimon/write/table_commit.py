@@ -61,10 +61,8 @@ class TableCommit:
         """Register a callback to be invoked after each successful commit."""
         self._commit_callbacks.append(callback)
 
-    def protect_from_external_commits(
-            self, base_snapshot, schema_id, allow_maintenance=False):
-        self.file_store_commit.protect_from_external_commits(
-            base_snapshot, schema_id, allow_maintenance)
+    def protect_from_schema_changes(self, schema_id):
+        self.file_store_commit.protect_from_schema_changes(schema_id)
         return self
 
     def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):

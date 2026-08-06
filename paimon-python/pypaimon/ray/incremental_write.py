@@ -147,8 +147,7 @@ class _PeriodicDatasetCommitter:
         self._pending = []
         commit_id = self._next_commit_id
         base_id = self._base_snapshot.id if self._base_snapshot else 0
-        self._commit.protect_from_external_commits(
-            self._base_snapshot, self._schema_id, allow_maintenance=True)
+        self._commit.protect_from_schema_changes(self._schema_id)
         self._commit.commit(messages, commit_id)
         committed = _find_committed_snapshot(
             self._table, self._commit_user, commit_id, base_id)
