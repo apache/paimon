@@ -1292,7 +1292,9 @@ public class FileStoreCommitTest {
 
         CoreOptions compactOptions =
                 FileStoreCommitImpl.manifestCompactionOptions(
-                        new CoreOptions(options), options.get(CoreOptions.MANIFEST_SORT_ENABLED));
+                        new CoreOptions(options),
+                        Collections.emptyList(),
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE);
 
         assertThat(compactOptions.manifestMergeMinCount()).isEqualTo(100);
         assertThat(compactOptions.manifestFullCompactionThresholdSize().getBytes())

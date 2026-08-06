@@ -791,7 +791,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Override
-    ManifestFile getManifestFile() {
+    protected ManifestFile getManifestFile() {
         return manifestFile;
     }
 
