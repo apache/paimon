@@ -32,6 +32,8 @@ import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VectorType;
 
+import org.apache.hadoop.hive.common.type.HiveChar;
+import org.apache.hadoop.hive.common.type.HiveVarchar;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
 import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
@@ -64,10 +66,14 @@ public class PaimonObjectInspectorFactory {
                         decimalType.getPrecision(), decimalType.getScale());
             case CHAR:
                 CharType charType = (CharType) logicalType;
-                return new PaimonCharObjectInspector(charType.getLength());
+                if (charType.getLength() > HiveChar.MAX_CHAR_LENGTH) {
+                    return new PaimonStringObjectInspector();
+                } else {
+                    return new PaimonCharObjectInspector(charType.getLength());
+                }
             case VARCHAR:
                 VarCharType varCharType = (VarCharType) logicalType;
-                if (varCharType.getLength() == VarCharType.MAX_LENGTH) {
+                if (varCharType.getLength() > HiveVarchar.MAX_VARCHAR_LENGTH) {
                     return new PaimonStringObjectInspector();
                 } else {
                     return new PaimonVarcharObjectInspector(varCharType.getLength());
