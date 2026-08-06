@@ -126,6 +126,47 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testManifestSortRespectsCompactionThresholds() throws Exception {
+        sql(
+                "CREATE TABLE T_SORT_THRESHOLDS ("
+                        + " k INT,"
+                        + " v STRING,"
+                        + " dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'manifest.target-file-size' = '1 B',"
+                        + " 'manifest.merge-min-count' = '100',"
+                        + " 'manifest.full-compaction-threshold-size' = '10000 T',"
+                        + " 'bucket' = '-1'"
+                        + ")");
+
+        sql("INSERT INTO T_SORT_THRESHOLDS VALUES (1, '10', '20221208')");
+        sql("INSERT OVERWRITE T_SORT_THRESHOLDS VALUES (1, '11', '20221208')");
+
+        Assertions.assertThat(
+                        sql("SELECT sum(num_deleted_files) FROM T_SORT_THRESHOLDS$manifests")
+                                .get(0)
+                                .getField(0))
+                .isEqualTo(1L);
+
+        FileStoreTable table = paimonTable("T_SORT_THRESHOLDS");
+        long snapshotId = table.snapshotManager().latestSnapshot().id();
+
+        sql(
+                "CALL sys.compact_manifest("
+                        + "`table` => 'default.T_SORT_THRESHOLDS', "
+                        + "`manifest_sort_enabled` => true, "
+                        + "`manifest_sort_partition_field` => 'dt')");
+
+        Assertions.assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(snapshotId);
+        Assertions.assertThat(
+                        sql("SELECT sum(num_deleted_files) FROM T_SORT_THRESHOLDS$manifests")
+                                .get(0)
+                                .getField(0))
+                .isEqualTo(1L);
+    }
+
+    @Test
     public void testManifestSortParametersValidation() {
         sql(
                 "CREATE TABLE T_INVALID (k INT, dt STRING) PARTITIONED BY (dt) WITH ("

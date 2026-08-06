@@ -1629,10 +1629,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 manifestList.readDataManifests(latestSnapshot);
         List<ManifestFileMeta> mergeAfterManifests;
 
-        // the fist trial: use a copied options with forced full compaction settings
+        // Use a copied options with forced full compaction settings for the legacy merge path.
+        // Manifest sort has its own full/minor picking strategy and should respect its configured
+        // thresholds.
         Options compactOptions = Options.fromMap(options.toMap());
-        compactOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 1);
-        compactOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
+        if (!options.manifestSortEnabled()) {
+            compactOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 1);
+            compactOptions.set(
+                    CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
+        }
         mergeAfterManifests =
                 ManifestFileMerger.merge(
                         mergeBeforeManifests,
