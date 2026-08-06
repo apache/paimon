@@ -40,9 +40,18 @@ public class ChangelogModeUtils {
     }
 
     private static boolean isFlink21OrAbove() {
-        String version = EnvironmentInformation.getVersion();
+        return isVersionAtLeast21(EnvironmentInformation.getVersion());
+    }
+
+    /**
+     * Flink version strings are not always {@code major.minor.patch}: builds from a release branch
+     * or master are published as {@code 2.2-SNAPSHOT}. Split on both {@code .} and {@code -} so
+     * that the major/minor prefix is read in all of those shapes.
+     */
+    // visible for testing
+    static boolean isVersionAtLeast21(String version) {
         try {
-            String[] parts = version.split("\\.");
+            String[] parts = version.split("[.-]");
             int major = Integer.parseInt(parts[0]);
             int minor = Integer.parseInt(parts[1]);
             return major > 2 || (major == 2 && minor >= 1);
