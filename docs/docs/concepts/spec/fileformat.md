@@ -234,16 +234,16 @@ The following table lists the type mapping from Paimon type to Avro type.
       <td></td>
     </tr>
     <tr>
-      <td><code>MAP</code><br>
-      (key must be string/char/varchar type)</td>
-      <td><code>map</code></td>
-      <td></td>
+      <td><code>MAP</code></td>
+      <td>string/char/varchar key: <code>map</code><br>
+      other key: <code>array</code> of key-value <code>record</code></td>
+      <td>other key: <code>map</code></td>
     </tr>
     <tr>
-      <td><code>MULTISET</code><br>
-      (element must be string/char/varchar type)</td>
-      <td><code>map</code></td>
-      <td></td>
+      <td><code>MULTISET</code></td>
+      <td>string/char/varchar element: <code>map</code><br>
+      other element: <code>array</code> of element-count <code>record</code></td>
+      <td>other element: <code>map</code></td>
     </tr>
     <tr>
       <td><code>ROW</code></td>
