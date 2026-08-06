@@ -24,8 +24,6 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
@@ -45,28 +43,12 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /** Tests for {@link RawFileSplitRead}. */
 class RawFileSplitReadTest {
 
     @TempDir java.nio.file.Path tempDir;
-
-    @Test
-    void parquetKeepsLogicalReaderOutputType() throws Exception {
-        assertLegacyReaderOutputType("parquet");
-    }
-
-    @Test
-    void mosaicUsesProjectedReaderOutputTypeOnlyForPartitionedTables() throws Exception {
-        assertMosaicReaderOutputType("unpartitioned-mosaic", false);
-        assertMosaicReaderOutputType("partitioned-mosaic", true);
-    }
 
     @Test
     void readerMappingIsRebuiltWhenReadTypeChanges() throws Exception {
@@ -107,8 +89,6 @@ class RawFileSplitReadTest {
         RowType secondProjection = table.rowType().project("second");
         read.withReadType(secondProjection);
         try (FileRecordReader<InternalRow> fileReader = read.createFileReader(split, null)) {
-            assertOutputType(fileReader, table.rowType());
-
             FileRecordIterator<InternalRow> batch = fileReader.readBatch();
             assertThat(batch).isNotNull();
             InternalRow row = batch.next();
@@ -118,92 +98,5 @@ class RawFileSplitReadTest {
             assertThat(batch.next()).isNull();
             batch.releaseBatch();
         }
-    }
-
-    private void assertLegacyReaderOutputType(String fileFormat) throws Exception {
-        Path tablePath = new Path(tempDir.resolve(fileFormat).toUri());
-        Options options = new Options();
-        options.set(CoreOptions.PATH, tablePath.toString());
-        options.set(CoreOptions.BUCKET, 1);
-        options.set(CoreOptions.BUCKET_KEY, "first");
-        options.set(CoreOptions.FILE_FORMAT, fileFormat);
-        Schema schema =
-                Schema.newBuilder()
-                        .column("first", DataTypes.STRING())
-                        .column("second", DataTypes.INT())
-                        .options(options.toMap())
-                        .build();
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(new SchemaManager(LocalFileIO.create(), tablePath), schema);
-        FileStoreTable table =
-                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
-
-        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        try (BatchTableWrite write = writeBuilder.newWrite();
-                BatchTableCommit commit = writeBuilder.newCommit()) {
-            write.write(GenericRow.of(BinaryString.fromString("value"), 42));
-            commit.commit(write.prepareCommit());
-        }
-
-        DataSplit split = table.newSnapshotReader().read().dataSplits().get(0);
-        RawFileSplitRead read = (RawFileSplitRead) table.store().newRead();
-        RowType projectedType = table.rowType().project("first");
-        read.withReadType(projectedType);
-
-        try (FileRecordReader<InternalRow> fileReader = read.createFileReader(split, null)) {
-            assertOutputType(fileReader, table.rowType());
-
-            FileRecordIterator<InternalRow> batch = fileReader.readBatch();
-            assertThat(batch).isNotNull();
-            InternalRow row = batch.next();
-            assertThat(row).isNotNull();
-            assertThat(row.getFieldCount()).isEqualTo(1);
-            assertThat(row.getString(0).toString()).isEqualTo("value");
-            assertThat(batch.next()).isNull();
-            batch.releaseBatch();
-        }
-    }
-
-    private void assertMosaicReaderOutputType(String tableName, boolean partitioned)
-            throws Exception {
-        Path tablePath = new Path(tempDir.resolve(tableName).toUri());
-        Options options = new Options();
-        options.set(CoreOptions.PATH, tablePath.toString());
-
-        Schema.Builder schemaBuilder =
-                Schema.newBuilder()
-                        .column("value", DataTypes.STRING())
-                        .column("dt", DataTypes.STRING())
-                        .options(options.toMap());
-        if (partitioned) {
-            schemaBuilder.partitionKeys("dt");
-        }
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath), schemaBuilder.build());
-        FileStoreTable table =
-                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
-
-        RowType logicalType = table.rowType();
-        RowType projectedType = logicalType.project("value");
-        RawFileSplitRead read = (RawFileSplitRead) table.store().newRead();
-        read.withReadType(projectedType);
-
-        DataFileMeta file = mock(DataFileMeta.class);
-        when(file.fileName()).thenReturn("data-file.mosaic");
-        Method outputTypeMethod =
-                RawFileSplitRead.class.getDeclaredMethod(
-                        "dataFileReaderOutputType", DataFileMeta.class);
-        outputTypeMethod.setAccessible(true);
-        assertThat(outputTypeMethod.invoke(read, file))
-                .isEqualTo(partitioned ? projectedType : logicalType);
-    }
-
-    private static void assertOutputType(
-            FileRecordReader<InternalRow> fileReader, RowType expectedType) throws Exception {
-        assertThat(fileReader).isInstanceOf(DataFileRecordReader.class);
-        Field outputType = DataFileRecordReader.class.getDeclaredField("tableRowType");
-        outputType.setAccessible(true);
-        assertThat(outputType.get(fileReader)).isEqualTo(expectedType);
     }
 }

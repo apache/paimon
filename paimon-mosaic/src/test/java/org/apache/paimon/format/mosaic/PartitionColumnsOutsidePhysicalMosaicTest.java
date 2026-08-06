@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.mosaic;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
@@ -36,11 +37,13 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
@@ -54,6 +57,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -85,24 +89,8 @@ class PartitionColumnsOutsidePhysicalMosaicTest {
                         LocalFileIO.create(), new Path(tempDir.resolve("warehouse").toString()));
         catalog.createDatabase("db", true);
 
-        Identifier identifier = Identifier.create("db", "target");
-        catalog.createTable(
-                identifier,
-                Schema.newBuilder()
-                        .column("payload", DataTypes.STRING())
-                        .column("vin", DataTypes.STRING())
-                        .column("dt", DataTypes.STRING())
-                        .column("hh", DataTypes.STRING())
-                        .column("rpt_dt", DataTypes.STRING())
-                        .partitionKeys("dt", "hh", "rpt_dt")
-                        .option("file.format", "mosaic")
-                        .option("bucket", "1")
-                        .option("bucket-key", "vin")
-                        .build(),
-                false);
-
-        table = (FileStoreTable) catalog.getTable(identifier);
-        writePhysicalBusinessColumns();
+        table = createTable("target", false);
+        writePhysicalBusinessColumns(table, 1);
     }
 
     @AfterEach
@@ -165,6 +153,33 @@ class PartitionColumnsOutsidePhysicalMosaicTest {
         }
     }
 
+    @Test
+    void testExistingLazyReaderKeepsOriginalReadType() throws Exception {
+        FileStoreTable trackingTable = createTable("row_tracking", true);
+        writePhysicalBusinessColumns(trackingTable, 2);
+
+        List<DataSplit> splits = trackingTable.newSnapshotReader().read().dataSplits();
+        assertThat(splits).hasSize(1);
+        DataSplit split = splits.get(0);
+        assertThat(split.dataFiles()).hasSize(2);
+
+        RawFileSplitRead read = (RawFileSplitRead) trackingTable.store().newRead();
+        RowType trackingType = SpecialFields.rowTypeWithRowTracking(trackingTable.rowType());
+        read.withReadType(trackingType.project("payload", SpecialFields.ROW_ID.name()));
+
+        try (RecordReader<InternalRow> existingReader = read.createReader(split)) {
+            read.withReadType(trackingTable.rowType().project("vin"));
+
+            assertThat(readFirstStrings(existingReader, 2))
+                    .containsExactlyInAnyOrder("payload-1", "payload-2");
+        }
+
+        try (RecordReader<InternalRow> updatedReader = read.createReader(split)) {
+            assertThat(readFirstStrings(updatedReader, 1))
+                    .containsExactlyInAnyOrder("VIN-0001", "VIN-0002");
+        }
+    }
+
     private void assertBusinessOnlyRead(ReadBuilder readBuilder) throws Exception {
         assertThat(readBuilder.readType().getFieldNames())
                 .containsExactlyElementsOf(BUSINESS_COLUMNS);
@@ -196,9 +211,51 @@ class PartitionColumnsOutsidePhysicalMosaicTest {
         return dataSplit;
     }
 
-    private void writePhysicalBusinessColumns() throws Exception {
-        FileIO fileIO = table.fileIO();
-        RowType partitionType = table.rowType().project(table.partitionKeys());
+    private FileStoreTable createTable(String tableName, boolean rowTrackingEnabled)
+            throws Exception {
+        Identifier identifier = Identifier.create("db", tableName);
+        Schema.Builder schemaBuilder =
+                Schema.newBuilder()
+                        .column("payload", DataTypes.STRING())
+                        .column("vin", DataTypes.STRING())
+                        .column("dt", DataTypes.STRING())
+                        .column("hh", DataTypes.STRING())
+                        .column("rpt_dt", DataTypes.STRING())
+                        .partitionKeys("dt", "hh", "rpt_dt")
+                        .option(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_MOSAIC);
+        if (rowTrackingEnabled) {
+            schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        } else {
+            schemaBuilder
+                    .option(CoreOptions.BUCKET.key(), "1")
+                    .option(CoreOptions.BUCKET_KEY.key(), "vin");
+        }
+        catalog.createTable(identifier, schemaBuilder.build(), false);
+        return (FileStoreTable) catalog.getTable(identifier);
+    }
+
+    private List<String> readFirstStrings(RecordReader<InternalRow> reader, int expectedFieldCount)
+            throws Exception {
+        List<String> values = new ArrayList<>();
+        RecordReader.RecordIterator<InternalRow> batch;
+        while ((batch = reader.readBatch()) != null) {
+            try {
+                InternalRow row;
+                while ((row = batch.next()) != null) {
+                    assertThat(row.getFieldCount()).isEqualTo(expectedFieldCount);
+                    values.add(row.getString(0).toString());
+                }
+            } finally {
+                batch.releaseBatch();
+            }
+        }
+        return values;
+    }
+
+    private void writePhysicalBusinessColumns(FileStoreTable targetTable, int fileCount)
+            throws Exception {
+        FileIO fileIO = targetTable.fileIO();
+        RowType partitionType = targetTable.rowType().project(targetTable.partitionKeys());
         BinaryRow partition =
                 new InternalRowSerializer(partitionType)
                         .toBinaryRow(
@@ -209,9 +266,7 @@ class PartitionColumnsOutsidePhysicalMosaicTest {
                         .copy();
 
         DataFilePathFactory pathFactory =
-                table.store().pathFactory().createDataFilePathFactory(partition, 0);
-        Path dataFile = pathFactory.newPath("data-copy-");
-        fileIO.mkdirs(dataFile.getParent());
+                targetTable.store().pathFactory().createDataFilePathFactory(partition, 0);
 
         RowType physicalType =
                 RowType.builder()
@@ -221,42 +276,48 @@ class PartitionColumnsOutsidePhysicalMosaicTest {
         MosaicFileFormat format =
                 new MosaicFileFormat(
                         new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
-        try (FormatWriter writer =
-                format.createWriterFactory(physicalType)
-                        .create(fileIO.newOutputStream(dataFile, false), "zstd")) {
-            writer.addElement(
-                    GenericRow.of(BinaryString.fromString(PAYLOAD), BinaryString.fromString(VIN)));
-        }
+        List<DataFileMeta> files = new ArrayList<>();
+        for (int i = 0; i < fileCount; i++) {
+            Path dataFile = pathFactory.newPath("data-copy-");
+            fileIO.mkdirs(dataFile.getParent());
+            try (FormatWriter writer =
+                    format.createWriterFactory(physicalType)
+                            .create(fileIO.newOutputStream(dataFile, false), "zstd")) {
+                writer.addElement(
+                        GenericRow.of(
+                                BinaryString.fromString("payload-" + (i + 1)),
+                                BinaryString.fromString(
+                                        i == 0 ? VIN : String.format("VIN-%04d", i + 1))));
+            }
 
-        DataFileMeta meta =
-                DataFileMeta.forAppend(
-                        dataFile.getName(),
-                        fileIO.getFileSize(dataFile),
-                        1,
-                        SimpleStats.EMPTY_STATS,
-                        0,
-                        0,
-                        table.schema().id(),
-                        Collections.emptyList(),
-                        null,
-                        FileSource.APPEND,
-                        null,
-                        null,
-                        null,
-                        BUSINESS_COLUMNS);
-        assertThat(meta.writeCols()).containsExactlyElementsOf(BUSINESS_COLUMNS);
+            DataFileMeta meta =
+                    DataFileMeta.forAppend(
+                            dataFile.getName(),
+                            fileIO.getFileSize(dataFile),
+                            1,
+                            SimpleStats.EMPTY_STATS,
+                            0,
+                            0,
+                            targetTable.schema().id(),
+                            Collections.emptyList(),
+                            null,
+                            FileSource.APPEND,
+                            null,
+                            null,
+                            null,
+                            BUSINESS_COLUMNS);
+            assertThat(meta.writeCols()).containsExactlyElementsOf(BUSINESS_COLUMNS);
+            files.add(meta);
+        }
 
         CommitMessageImpl message =
                 new CommitMessageImpl(
                         partition,
                         0,
                         null,
-                        new DataIncrement(
-                                Collections.singletonList(meta),
-                                Collections.emptyList(),
-                                Collections.emptyList()),
+                        new DataIncrement(files, Collections.emptyList(), Collections.emptyList()),
                         CompactIncrement.emptyIncrement());
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+        try (BatchTableCommit commit = targetTable.newBatchWriteBuilder().newCommit()) {
             commit.commit(Collections.singletonList(message));
         }
     }
