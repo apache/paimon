@@ -27,6 +27,12 @@ under the License.
     </thead>
     <tbody>
         <tr>
+            <td><h5>delete.point-delete.max-rows</h5></td>
+            <td style="word-wrap: break-word;">10000</td>
+            <td>Long</td>
+            <td>Max number of -D rows the primary-key point-delete fast path may write for a condition made of literals; beyond this, DELETE falls back to the scan-based path. Deleting a large set of keys should use 'pk IN (subquery)', which builds the -D rows from the subquery and never goes through the driver.</td>
+        </tr>
+        <tr>
             <td><h5>legacy-timestamp-mapping.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

@@ -47,6 +47,13 @@ public class SparkConnectorOptions {
                             "Parallelism used to repartition a single-partition LIMIT input before "
                                     + "executing a lateral vector search.");
 
+    public static final ConfigOption<Long> DELETE_POINT_DELETE_MAX_ROWS =
+            key("delete.point-delete.max-rows")
+                    .longType()
+                    .defaultValue(10000L)
+                    .withDescription(
+                            "Max number of -D rows the primary-key point-delete fast path may write for a condition made of literals; beyond this, DELETE falls back to the scan-based path. Deleting a large set of keys should use 'pk IN (subquery)', which builds the -D rows from the subquery and never goes through the driver.");
+
     public static final ConfigOption<Boolean> MERGE_SCHEMA =
             key("write.merge-schema")
                     .booleanType()

@@ -716,7 +716,11 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase with AdaptiveSparkPlan
       sql("INSERT INTO t VALUES (3, 33)")
       table.createTag("2024-01-03", 3)
 
-      sql("DELETE FROM t WHERE a = 1")
+      // this test asserts that the audit_log of a delete carries the old field values, which is
+      // exactly what the point-delete fast path skips reading, so ask for a faithful changelog
+      withSparkSQLConf("spark.paimon.delete.force-produce-changelog" -> "true") {
+        sql("DELETE FROM t WHERE a = 1")
+      }
       table.createTag("2024-01-04", 4)
 
       sql("UPDATE t SET b = 222 WHERE a = 2")
@@ -751,6 +755,29 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase with AdaptiveSparkPlan
           "SELECT * FROM paimon_incremental_query('`t$audit_log`', '2024-01-01', '2024-01-05') ORDER BY a, b"),
         Seq(Row("-D", 1, 11), Row("+U", 2, 222), Row("+I", 3, 33))
       )
+    }
+  }
+
+  test("Table Valued Functions: incremental audit_log of a point delete has NULL non-key columns") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (a INT, b INT) USING paimon
+            |TBLPROPERTIES ('primary-key'='a', 'bucket' = '1')
+            |""".stripMargin)
+
+      val table = loadTable("t")
+      sql("INSERT INTO t VALUES (1, 11), (2, 22)")
+      table.createTag("before", 1)
+
+      // point-delete fast path (on by default): the old row is never read, so the -D record only
+      // carries the primary key. Set 'delete.force-produce-changelog' to get the old values back.
+      sql("DELETE FROM t WHERE a = 1")
+      table.createTag("after", 2)
+
+      checkAnswer(
+        sql(
+          "SELECT * FROM paimon_incremental_query('`t$audit_log`', 'before', 'after') ORDER BY a"),
+        Seq(Row("-D", 1, null)))
     }
   }
 
