@@ -50,6 +50,7 @@ import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -1280,6 +1281,22 @@ public class FileStoreCommitTest {
                                 .mapToLong(ManifestFileMeta::numDeletedFiles)
                                 .sum())
                 .isEqualTo(0);
+    }
+
+    @Test
+    public void testManifestSortCompactManifestRespectsCompactionThresholds() {
+        Options options = new Options();
+        options.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
+        options.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 100);
+        options.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
+
+        CoreOptions compactOptions =
+                FileStoreCommitImpl.manifestCompactionOptions(
+                        new CoreOptions(options), options.get(CoreOptions.MANIFEST_SORT_ENABLED));
+
+        assertThat(compactOptions.manifestMergeMinCount()).isEqualTo(100);
+        assertThat(compactOptions.manifestFullCompactionThresholdSize().getBytes())
+                .isEqualTo(Long.MAX_VALUE);
     }
 
     @Test

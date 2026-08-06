@@ -962,6 +962,62 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
+    public void testManifestSortMinorCompactionRespectsMergeMinCount() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            input.add(makeManifest(makeEntry(true, "file-" + i, 0)));
+        }
+
+        Options testOptions = new Options();
+        testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
+        testOptions.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "1G");
+        testOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 100);
+        testOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
+        testOptions.set(CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), "1B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        Set<String> inputManifestNames =
+                input.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+        Set<String> retainedInputManifestNames =
+                merged.stream()
+                        .map(ManifestFileMeta::fileName)
+                        .filter(inputManifestNames::contains)
+                        .collect(Collectors.toSet());
+        assertThat(retainedInputManifestNames).hasSize(2);
+        assertEquivalentEntries(input, merged);
+    }
+
+    @Test
+    public void testManifestSortRespectsFullCompactionThreshold() {
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(makeEntry(true, "base", 0)),
+                        makeManifest(
+                                makeEntry(false, "base", 0), makeEntry(true, "replacement", 0)));
+
+        Options testOptions = new Options();
+        testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
+        testOptions.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "1B");
+        testOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertThat(merged).containsExactlyElementsOf(input);
+        assertThat(readEntries(merged)).anyMatch(entry -> entry.kind() == FileKind.DELETE);
+    }
+
+    @Test
     public void testManifestSortMaxRewriteSizeSmallerThanTargetFileSizeStillRewrites() {
         List<ManifestFileMeta> input = new ArrayList<>();
         for (int manifest = 0; manifest < 5; manifest++) {

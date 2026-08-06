@@ -1629,21 +1629,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 manifestList.readDataManifests(latestSnapshot);
         List<ManifestFileMeta> mergeAfterManifests;
 
-        // Use a copied options with forced full compaction settings for the legacy merge path.
-        // Manifest sort has its own full/minor picking strategy and should respect its configured
-        // thresholds.
-        Options compactOptions = Options.fromMap(options.toMap());
-        if (!options.manifestSortEnabled()) {
-            compactOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 1);
-            compactOptions.set(
-                    CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
-        }
         mergeAfterManifests =
                 ManifestFileMerger.merge(
                         mergeBeforeManifests,
                         manifestFile,
                         partitionType,
-                        new CoreOptions(compactOptions),
+                        manifestCompactionOptions(options, options.manifestSortEnabled()),
                         ioManager);
 
         if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
@@ -1680,6 +1671,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null);
 
         return commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList());
+    }
+
+    static CoreOptions manifestCompactionOptions(CoreOptions options, boolean useManifestSort) {
+        // Use a copied options with forced full compaction settings for the legacy merge path.
+        // Manifest sort has its own full/minor picking strategy and should respect its configured
+        // thresholds.
+        Options compactOptions = Options.fromMap(options.toMap());
+        if (!useManifestSort) {
+            compactOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 1);
+            compactOptions.set(
+                    CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
+        }
+        return new CoreOptions(compactOptions);
     }
 
     private boolean commitSnapshotImpl(
