@@ -279,7 +279,13 @@ overlapping buckets or sequence numbers for those modes.
 
 ### Incremental write
 
-Use time-based commits for long-running partial updates:
+By default, `write_paimon` publishes one snapshot after the entire Ray Dataset
+finishes. A late failure therefore leaves none of that write visible. Incremental
+mode periodically commits completed primary-key groups, so long-running jobs do
+not need to split the Dataset into batches and keep their completed commits if a
+later group fails.
+
+Use time-based commits for partial updates:
 
 ```python
 write_paimon(
@@ -294,10 +300,12 @@ write_paimon(
 
 The target must be a fixed-bucket primary-key table using
 `merge-engine=partial-update`; source rows must contain the primary key and
-updated columns. Completed commits remain visible after failure; retrying
-reruns the Ray Dataset. The interval is a target and may be exceeded while a
-group is still writing. This mode requires Ray 2.33 or later. Concurrent partial
-updates are allowed, but updates to the same field have no deterministic winner.
+updated columns. Existing keys are updated and new keys are inserted. This mode
+does not checkpoint source progress, so retrying reruns the Ray Dataset and
+upserts previously committed keys again. The interval is a target and may be
+exceeded while a group is still writing. This mode requires Ray 2.33 or later.
+Concurrent partial updates are allowed, but updates to the same field have no
+deterministic winner.
 
 ### `TableWrite.write_ray()` (lower-level)
 
