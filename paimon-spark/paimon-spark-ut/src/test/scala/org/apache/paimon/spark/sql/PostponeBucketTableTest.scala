@@ -102,6 +102,139 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Postpone bucket table: configured default directly writes overwrite") {
+    Seq(
+      (
+        "static",
+        """
+          |INSERT OVERWRITE t SELECT
+          |CAST(id AS INT) AS k,
+          |CAST(id AS STRING) AS v,
+          |0 AS pt
+          |FROM range(100, 200)
+          |""".stripMargin,
+        false),
+      (
+        "static",
+        """
+          |INSERT OVERWRITE t PARTITION (pt = 0) SELECT
+          |CAST(id AS INT) AS k,
+          |CAST(id AS STRING) AS v
+          |FROM range(100, 200)
+          |""".stripMargin,
+        true),
+      (
+        "dynamic",
+        """
+          |INSERT OVERWRITE t SELECT
+          |CAST(id AS INT) AS k,
+          |CAST(id AS STRING) AS v,
+          |0 AS pt
+          |FROM range(100, 200)
+          |""".stripMargin,
+        true)
+    ).foreach {
+      case (partitionOverwriteMode, overwriteSql, preservesPartitionOne) =>
+        withTable("t") {
+          sql("""
+                |CREATE TABLE t (
+                |  k INT,
+                |  v STRING,
+                |  pt INT
+                |) PARTITIONED BY (pt)
+                |TBLPROPERTIES (
+                |  'primary-key' = 'k, pt',
+                |  'bucket' = '-2',
+                |  'postpone.batch-write-fixed-bucket' = 'true',
+                |  'postpone.target-row-num-per-bucket' = '1'
+                |)
+                |""".stripMargin)
+
+          sql("""
+                |INSERT INTO t
+                |SELECT CAST(id AS INT), CAST(id AS STRING), 0 AS pt FROM range(0, 16)
+                |UNION ALL SELECT 1000, 'untouched-real', 1
+                |""".stripMargin)
+          val initialBuckets = PostponeUtils.getKnownNumBuckets(loadTable("t"))
+          assert(initialBuckets.get(BinaryRow.singleColumn(0)) == 16)
+          assert(initialBuckets.get(BinaryRow.singleColumn(1)) == 1)
+
+          withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+            sql("INSERT INTO t VALUES (2000, 'overwritten-postpone', 0), (2001, 'untouched-postpone', 1)")
+          }
+          sql("ALTER TABLE t SET TBLPROPERTIES ('postpone.default-bucket-num' = '3')")
+
+          withSparkSQLConf(
+            "spark.sql.adaptive.enabled" -> "false",
+            "spark.sql.sources.partitionOverwriteMode" -> partitionOverwriteMode) {
+            val jobs = countSparkJobs("postpone-default-overwrite") {
+              sql(overwriteSql)
+            }
+            assert(jobs == 1, s"Direct overwrite should use one Spark job, but found $jobs.")
+          }
+
+          val resultBuckets = PostponeUtils.getKnownNumBuckets(loadTable("t"))
+          assert(resultBuckets.get(BinaryRow.singleColumn(0)) == 3)
+          assert(resultBuckets.containsKey(BinaryRow.singleColumn(1)) == preservesPartitionOne)
+          val retainedPartitionCount = if (preservesPartitionOne) 1L else 0L
+          checkAnswer(sql("SELECT count(*) FROM t WHERE pt = 1"), Seq(Row(retainedPartitionCount)))
+          checkAnswer(
+            sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"),
+            Seq(Row(retainedPartitionCount)))
+        }
+    }
+  }
+
+  test("Postpone bucket table: configured default directly writes without real buckets") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  pt INT
+            |) PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'k, pt',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'true',
+            |  'postpone.default-bucket-num' = '3',
+            |  'postpone.target-row-num-per-bucket' = '1'
+            |)
+            |""".stripMargin)
+
+      withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+        sql("INSERT INTO t VALUES (0, 'historical-postpone', 0)")
+      }
+      assert(PostponeUtils.getKnownNumBuckets(loadTable("t")).isEmpty)
+
+      withSparkSQLConf("spark.sql.adaptive.enabled" -> "false") {
+        val jobs = countSparkJobs("postpone-default-new-layout") {
+          sql("INSERT INTO t VALUES (1, 'p0-real', 0), (2, 'p1-real', 1)")
+        }
+        assert(jobs == 1, s"Direct new-layout write should use one Spark job, but found $jobs.")
+      }
+
+      val initialBuckets = PostponeUtils.getKnownNumBuckets(loadTable("t"))
+      assert(initialBuckets.get(BinaryRow.singleColumn(0)) == 3)
+      assert(initialBuckets.get(BinaryRow.singleColumn(1)) == 3)
+      checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(1L)))
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('postpone.default-bucket-num' = '5')")
+      withSparkSQLConf("spark.sql.adaptive.enabled" -> "false") {
+        val jobs = countSparkJobs("postpone-default-mixed-layout") {
+          sql("INSERT INTO t VALUES (3, 'p0-append', 0), (4, 'p2-new', 2)")
+        }
+        assert(jobs == 2, s"Mixed existing/new write should stay staged, but found $jobs jobs.")
+      }
+
+      val resultBuckets = PostponeUtils.getKnownNumBuckets(loadTable("t"))
+      assert(resultBuckets.get(BinaryRow.singleColumn(0)) == 3)
+      assert(resultBuckets.get(BinaryRow.singleColumn(1)) == 3)
+      assert(resultBuckets.get(BinaryRow.singleColumn(2)) == 5)
+      checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(1L)))
+    }
+  }
+
   test("Postpone bucket table: staged rescale supports per-partition layouts") {
     withTable("t") {
       sql("""
@@ -899,7 +1032,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
           case relation: DataSourceV2ScanRelation if relation.scan.isInstanceOf[PaimonScan] =>
             relation.scan.asInstanceOf[PaimonScan]
         }.get
-        assert(postponeScan.planPostponeMerge(spark.sparkContext.defaultParallelism).isDefined)
+        assert(postponeScan.planPostponeMerge().isDefined)
         assert(postponeScan.filterAttributes().isEmpty)
         assert(
           intercept[UnsupportedOperationException](postponeScan.toBatch).getMessage
@@ -925,7 +1058,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             relation.scan.asInstanceOf[PaimonScan]
         }.get
         val realSplits = mergeScan
-          .planPostponeMerge(spark.sparkContext.defaultParallelism)
+          .planPostponeMerge()
           .get
           .corePlan
           .realSplits()
@@ -1294,7 +1427,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         }.get
         assert(
           pinnedRealScan
-            .planPostponeMerge(spark.sparkContext.defaultParallelism)
+            .planPostponeMerge()
             .isDefined)
 
         withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
@@ -1310,7 +1443,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
         }.get
         assert(
           pinnedEmptyScan
-            .planPostponeMerge(spark.sparkContext.defaultParallelism)
+            .planPostponeMerge()
             .isEmpty)
 
         sql("INSERT INTO empty_t VALUES (1, 'committed-later')")
@@ -1468,14 +1601,15 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
       )
 
       sql("SET spark.default.parallelism = 2")
-      // compact
+      // Compact estimates one logical bucket from the default target size; Spark parallelism is
+      // only an execution setting.
       sql("CALL sys.compact(table => 't')")
 
       checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1000)))
       checkAnswer(sql("SELECT sum(k) FROM t"), Seq(Row((0 until 1000).sum)))
       checkAnswer(
         sql("SELECT distinct(bucket) FROM `t$buckets` ORDER BY bucket"),
-        Seq(Row(0), Row(1))
+        Seq(Row(0))
       )
     }
   }
@@ -1687,6 +1821,16 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
       .sum
   }
 
+  private def countSparkJobs(groupPrefix: String)(action: => Unit): Int = {
+    val jobGroup = s"$groupPrefix-${System.nanoTime()}"
+    spark.sparkContext.setJobGroup(jobGroup, jobGroup)
+    try {
+      action
+    } finally {
+      spark.sparkContext.clearJobGroup()
+    }
+    spark.sparkContext.statusTracker.getJobIdsForGroup(jobGroup).length
+  }
 }
 
 object PostponeBucketTableTest {

@@ -118,6 +118,28 @@ public class PostponeUtilsTest {
     }
 
     @Test
+    public void testGetPostponeFileSizesFromSnapshot() {
+        BinaryRow partition = partition(1);
+        PartitionPredicate partitionFilter = mock(PartitionPredicate.class);
+        DataFileMeta file = mock(DataFileMeta.class);
+        when(file.fileSize()).thenReturn(1024L);
+        ManifestEntry entry = mock(ManifestEntry.class);
+        when(entry.partition()).thenReturn(partition);
+        when(entry.file()).thenReturn(file);
+
+        SnapshotReader reader = mock(SnapshotReader.class, RETURNS_SELF);
+        when(reader.readFileIterator()).thenReturn(Collections.singletonList(entry).iterator());
+        FileStoreTable table = mock(FileStoreTable.class);
+        when(table.newSnapshotReader()).thenReturn(reader);
+
+        assertThat(PostponeUtils.getPostponeFileSizes(table, 5L, partitionFilter))
+                .containsEntry(partition, 1024L);
+        verify(reader).withSnapshot(5L);
+        verify(reader).withBucket(BucketMode.POSTPONE_BUCKET);
+        verify(reader).withPartitionFilter(partitionFilter);
+    }
+
+    @Test
     public void testGetLevel0BucketsFromSnapshot() {
         BinaryRow partition = partition(1);
         SimpleFileEntry level0 = fileEntry(partition, 0, 2, 0);
@@ -223,7 +245,7 @@ public class PostponeUtilsTest {
         FileStoreTable copied = mock(FileStoreTable.class);
         when(table.copy(anyMap())).thenReturn(copied);
 
-        assertThat(PostponeUtils.tableForPostponeCompact(table, 4, 5L)).isSameAs(copied);
+        assertThat(PostponeUtils.tableForPostponeRewrite(table, 4, 5L)).isSameAs(copied);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, String>> options = ArgumentCaptor.forClass(Map.class);
@@ -262,33 +284,24 @@ public class PostponeUtilsTest {
 
     @Test
     public void testDetermineBucketNum() {
-        Map<BinaryRow, Integer> knownNumBuckets = new HashMap<>();
-        Map<BinaryRow, Long> postponeRowCounts = new HashMap<>();
+        Map<BinaryRow, Integer> numBucketsByPartition = new HashMap<>();
 
         BinaryRow knownPartition = partition(1);
-        BinaryRow targetPartition = partition(2);
-        BinaryRow defaultPartition = partition(3);
+        BinaryRow configuredPartition = partition(2);
+        BinaryRow missingPartition = partition(3);
 
-        knownNumBuckets.put(knownPartition, 4);
-        postponeRowCounts.put(knownPartition, 1000L);
-        postponeRowCounts.put(targetPartition, 450L);
+        numBucketsByPartition.put(knownPartition, 4);
 
-        assertThat(
-                        PostponeUtils.determineBucketNum(
-                                knownPartition, knownNumBuckets, 200L, postponeRowCounts, 1))
+        assertThat(PostponeUtils.determineBucketNum(knownPartition, numBucketsByPartition, 7))
                 .isEqualTo(4);
-        assertThat(
-                        PostponeUtils.determineBucketNum(
-                                targetPartition, knownNumBuckets, 200L, postponeRowCounts, 1))
-                .isEqualTo(3);
-        assertThat(
-                        PostponeUtils.determineBucketNum(
-                                defaultPartition,
-                                knownNumBuckets,
-                                (Long) null,
-                                postponeRowCounts,
-                                7))
+        assertThat(PostponeUtils.determineBucketNum(configuredPartition, numBucketsByPartition, 7))
                 .isEqualTo(7);
+        assertThatThrownBy(
+                        () ->
+                                PostponeUtils.determineBucketNum(
+                                        missingPartition, numBucketsByPartition, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Missing postpone bucket number");
     }
 
     @Test
@@ -341,6 +354,32 @@ public class PostponeUtilsTest {
                         29, 0, 7, CoreOptions.fromMap(lowerLoadFactorOptions));
         assertThat(lowerLoadFactor.targetBucketNum()).isEqualTo(16);
         assertThat(lowerLoadFactor.requiresRescale()).isTrue();
+
+        Map<String, String> configuredDefaultOptions = new HashMap<>(optionMap);
+        configuredDefaultOptions.put(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM.key(), "3");
+        CoreOptions optionsWithDefault = CoreOptions.fromMap(configuredDefaultOptions);
+        PostponeUtils.FixedBucketDecision configuredDefault =
+                PostponeUtils.decideFixedBucketNum(100, 0, null, optionsWithDefault);
+        assertThat(configuredDefault.targetBucketNum()).isEqualTo(3);
+        assertThat(configuredDefault.requiresRescale()).isFalse();
+
+        PostponeUtils.FixedBucketDecision existingIgnoresDefault =
+                PostponeUtils.decideFixedBucketNum(225, 0, 7, optionsWithDefault);
+        assertThat(existingIgnoresDefault.targetBucketNum()).isEqualTo(16);
+        assertThat(existingIgnoresDefault.requiresRescale()).isTrue();
+    }
+
+    @Test
+    public void testDecideFixedBucketNumRejectsInvalidConfiguredDefault() {
+        Map<String, String> optionMap = new HashMap<>();
+        optionMap.put(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM.key(), "0");
+
+        assertThatThrownBy(
+                        () ->
+                                PostponeUtils.decideFixedBucketNum(
+                                        1, 0, null, CoreOptions.fromMap(optionMap)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM.key());
     }
 
     @Test

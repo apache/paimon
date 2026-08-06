@@ -50,6 +50,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.PostponeUtils.CompactBucket;
+import org.apache.paimon.table.PostponeUtils.PostponeBucketNumResolver;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -317,20 +318,13 @@ public class CompactAction extends TableActionBase {
                 "Postpone bucket compaction currently does not support predicates");
 
         Options options = new Options(table.options());
-        int defaultBucketNum = options.get(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM);
-        Optional<Long> targetRowNumPerBucket =
-                options.getOptional(CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET);
         Optional<Snapshot> optionalSnapshot = table.latestSnapshot();
         if (!optionalSnapshot.isPresent()) {
             return buildNothingToCompact(env);
         }
         long snapshotId = optionalSnapshot.get().id();
-        Map<BinaryRow, Integer> knownNumBuckets =
-                PostponeUtils.getKnownNumBuckets(table, snapshotId);
-        Map<BinaryRow, Long> postponeRowCounts =
-                targetRowNumPerBucket.isPresent()
-                        ? PostponeUtils.getPostponeRowCounts(table, snapshotId)
-                        : Collections.emptyMap();
+        PostponeBucketNumResolver bucketNumResolver =
+                PostponeUtils.createPostponeBucketNumResolver(table, snapshotId);
 
         List<BinaryRow> postponePartitions =
                 table.newSnapshotReader()
@@ -359,15 +353,9 @@ public class CompactAction extends TableActionBase {
         String commitUser = CoreOptions.createCommitUser(options);
         List<DataStream<Committable>> dataStreams = new ArrayList<>();
         for (BinaryRow partition : affectedPartitions) {
-            int bucketNum =
-                    PostponeUtils.determineBucketNum(
-                            partition,
-                            knownNumBuckets,
-                            targetRowNumPerBucket,
-                            postponeRowCounts,
-                            defaultBucketNum);
+            int bucketNum = bucketNumResolver.numBuckets(partition);
             FileStoreTable realTable =
-                    PostponeUtils.tableForPostponeCompact(table, bucketNum, snapshotId);
+                    PostponeUtils.tableForPostponeRewrite(table, bucketNum, snapshotId);
 
             LinkedHashMap<String, String> partitionSpec =
                     partitionComputer.generatePartValues(partition);
@@ -419,8 +407,9 @@ public class CompactAction extends TableActionBase {
             dataStreams.add(sourcePair.getRight());
         }
 
+        int commitBucketNum = bucketNumResolver.numBuckets(affectedPartitions.iterator().next());
         FileStoreTable fileStoreTable =
-                PostponeUtils.tableForPostponeCompact(table, defaultBucketNum, snapshotId);
+                PostponeUtils.tableForPostponeRewrite(table, commitBucketNum, snapshotId);
         FixedBucketSink sink = new FixedBucketSink(fileStoreTable, null);
         DataStream<Committable> dataStream = dataStreams.get(0);
         for (int i = 1; i < dataStreams.size(); i++) {
