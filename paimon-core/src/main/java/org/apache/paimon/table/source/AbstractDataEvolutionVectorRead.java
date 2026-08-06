@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -221,12 +222,14 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
 
         RoaringNavigableMap64 include = new RoaringNavigableMap64();
         try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
-            Optional<GlobalIndexResult> result = scanner.scan(filter);
+            Optional<GlobalIndexEvaluator.Evaluation> result = scanner.scanWithCoverage(filter);
             if (!result.isPresent()) {
                 return null;
             }
-            include.or(result.get().results());
-            include.or(scanner.unindexedRows(filter).results());
+            include.or(result.get().result().results());
+            include.or(
+                    scanner.unindexedRowsForContributingFields(result.get().contributingFieldIds())
+                            .results());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

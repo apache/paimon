@@ -226,6 +226,57 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testAndTracksOnlyEvaluatedFields() {
+        executor = Executors.newFixedThreadPool(2);
+        RowType rowType = rowType();
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                fieldId == 0
+                                        ? Collections.singletonList(readerReturning(resultOf(42)))
+                                        : Collections.emptyList());
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate = PredicateBuilder.and(builder.equal(0, 42), builder.equal(1, 99));
+
+        Optional<GlobalIndexEvaluator.Evaluation> evaluation =
+                evaluator.evaluateWithContributingFields(predicate);
+
+        assertThat(evaluation).isPresent();
+        assertThat(evaluation.get().contributingFieldIds()).containsExactly(0);
+        assertBitmapContainsExactly(evaluation.get().result().results(), 42L);
+        evaluator.close();
+    }
+
+    @Test
+    void testDiscardedOrBranchDoesNotContributeFields() {
+        executor = Executors.newFixedThreadPool(2);
+        RowType rowType = rowType();
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                fieldId == 0 || fieldId == 2
+                                        ? Collections.singletonList(readerReturning(resultOf(42)))
+                                        : Collections.emptyList());
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        PredicateBuilder.or(builder.equal(0, 42), builder.equal(1, 99)),
+                        builder.equal(2, 42));
+
+        Optional<GlobalIndexEvaluator.Evaluation> evaluation =
+                evaluator.evaluateWithContributingFields(predicate);
+
+        assertThat(evaluation).isPresent();
+        assertThat(evaluation.get().contributingFieldIds()).containsExactly(2);
+        assertBitmapContainsExactly(evaluation.get().result().results(), 42L);
+        evaluator.close();
+    }
+
+    @Test
     void testAndWithEmptyResultShortCircuits() {
         executor = Executors.newFixedThreadPool(2);
         RowType rowType = rowType();

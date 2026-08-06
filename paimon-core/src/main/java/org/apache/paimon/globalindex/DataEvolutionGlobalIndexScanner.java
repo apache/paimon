@@ -372,6 +372,10 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return globalIndexEvaluator.evaluate(predicate);
     }
 
+    public Optional<GlobalIndexEvaluator.Evaluation> scanWithCoverage(Predicate predicate) {
+        return globalIndexEvaluator.evaluateWithContributingFields(predicate);
+    }
+
     public Optional<GlobalIndexResult> scan(TopN topN) {
         if (!isSupportedTopN(topN)) {
             return Optional.empty();
@@ -389,6 +393,15 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     public GlobalIndexResult unindexedRows(Predicate predicate) {
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
         for (Range range : coverage.unindexedRanges(rowType, predicate)) {
+            rows.addRange(range);
+        }
+        return GlobalIndexResult.create(rows);
+    }
+
+    public GlobalIndexResult unindexedRowsForContributingFields(
+            Collection<Integer> contributingFieldIds) {
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        for (Range range : coverage.unindexedRanges(contributingFieldIds)) {
             rows.addRange(range);
         }
         return GlobalIndexResult.create(rows);

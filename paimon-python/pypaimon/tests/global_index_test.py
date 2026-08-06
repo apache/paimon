@@ -26,6 +26,7 @@ from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluation
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
@@ -35,6 +36,7 @@ from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
 )
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.utils.range import Range
 
 
@@ -217,8 +219,11 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
 
 class GlobalIndexScalarFallbackTest(unittest.TestCase):
 
-    def test_eval_global_index_merges_unindexed_rows_when_index_scan_succeeds(self):
-        from pypaimon.read.scanner.file_scanner import FileScanner
+    def test_eval_global_index_keeps_unindexed_ranges_out_of_bitmap(self):
+        from pypaimon.read.scanner.file_scanner import (
+            FileScanner,
+            _GlobalIndexPlanningResult,
+        )
 
         class _Options:
             def global_index_enabled(self):
@@ -237,24 +242,63 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         scanner.table = _Table()
 
         index_result = GlobalIndexResult.from_range(Range(1, 1))
-        unindexed = GlobalIndexResult.from_range(Range(5, 6))
+        unindexed = [Range(5, 6)]
         fake_scanner = unittest.mock.MagicMock()
-        fake_scanner.scan.return_value = index_result
-        fake_scanner.unindexed_rows.return_value = unindexed
+        fake_scanner.scan_with_coverage.return_value = GlobalIndexEvaluation(
+            index_result, frozenset([0]))
+        fake_scanner.unindexed_ranges.return_value = unindexed
         fake_scanner.__enter__.return_value = fake_scanner
         fake_scanner.__exit__.return_value = None
 
         with unittest.mock.patch(
                 "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
-                return_value=fake_scanner):
+                return_value=fake_scanner), unittest.mock.patch.object(
+                    GlobalIndexResult,
+                    "from_ranges",
+                    side_effect=AssertionError("fallback ranges entered bitmap")):
             result = scanner._eval_global_index(snapshot=object())
 
-        self.assertEqual(
-            [Range(1, 1), Range(5, 6)],
-            result.results().to_range_list(),
+        self.assertIsInstance(result, _GlobalIndexPlanningResult)
+        self.assertIs(index_result, result.indexed_result)
+        self.assertEqual(unindexed, result.unindexed_ranges)
+        fake_scanner.unindexed_ranges.assert_called_once_with(
+            predicate,
+            search_mode=GlobalIndexSearchMode.FULL,
+            contributing_field_ids=frozenset([0]),
         )
-        fake_scanner.unindexed_rows.assert_called_once_with(
-            predicate, search_mode=GlobalIndexSearchMode.FULL)
+
+    def test_split_planning_merges_indexed_and_unindexed_ranges(self):
+        from pypaimon.read.scanner.file_scanner import (
+            FileScanner,
+            _GlobalIndexPlanningResult,
+        )
+
+        scanner = FileScanner.__new__(FileScanner)
+        scanner.manifest_scanner = unittest.mock.MagicMock(
+            return_value=([], unittest.mock.Mock(id=3)))
+        scanner._global_index_result = None
+        scanner._eval_global_index = unittest.mock.MagicMock(
+            return_value=_GlobalIndexPlanningResult(
+                GlobalIndexResult.from_range(Range(1, 1)),
+                [Range(10, 10 ** 12)],
+            ))
+        scanner.predicate = Predicate(
+            method="equal", index=0, field="id", literals=[1])
+        scanner.read_manifest_entries = unittest.mock.MagicMock(return_value=[])
+        scanner.table = unittest.mock.Mock()
+        scanner.target_split_size = 1
+        scanner.open_file_cost = 1
+        scanner._deletion_files_map = unittest.mock.MagicMock(return_value={})
+
+        with unittest.mock.patch(
+                "pypaimon.read.scanner.file_scanner.DataEvolutionSplitGenerator"
+        ) as split_generator:
+            scanner._create_data_evolution_split_generator()
+
+        self.assertEqual(
+            [Range(1, 1), Range(10, 10 ** 12)],
+            split_generator.call_args[0][4],
+        )
 
     def test_eval_global_index_keeps_none_as_full_scan(self):
         from pypaimon.read.scanner.file_scanner import FileScanner
@@ -273,7 +317,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         scanner.table = _Table()
 
         fake_scanner = unittest.mock.MagicMock()
-        fake_scanner.scan.return_value = None
+        fake_scanner.scan_with_coverage.return_value = None
         fake_scanner.__enter__.return_value = fake_scanner
         fake_scanner.__exit__.return_value = None
 
@@ -294,6 +338,27 @@ class PlanSnapshotFetchRegressionTest(
         'global-index.enabled': 'true',
         'bucket': '-1',
     }
+
+    @pytest.mark.python_plan
+    def test_plan_accepts_row_ranges_without_bitmap(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {'id': [1, 2, 3], 'name': ['a', 'b', 'c'],
+             'age': [10, 20, 30], 'city': ['x', 'y', 'z']},
+            schema=self.pa_schema))
+
+        read_builder = table.new_read_builder()
+        ranges = [Range(0, 10 ** 12)]
+        with patch.object(
+                RoaringBitmap64,
+                'to_range_list',
+                side_effect=AssertionError('row ranges entered a bitmap')):
+            plan = read_builder.new_scan().with_row_ranges(ranges).plan()
+
+        result = read_builder.new_read().to_arrow(plan.splits())
+        self.assertEqual([1, 2, 3], sorted(result.column('id').to_pylist()))
+        self.assertEqual(
+            [], read_builder.new_scan().with_row_ranges([]).plan().splits())
 
     @pytest.mark.python_plan
     def test_plan_fetches_latest_snapshot_only_once(self):

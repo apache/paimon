@@ -318,12 +318,17 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
             long lookupStart = System.nanoTime();
-            Optional<GlobalIndexResult> result = scanner.scan(globalIndexFilter);
+            Optional<GlobalIndexEvaluator.Evaluation> result =
+                    scanner.scanWithCoverage(globalIndexFilter);
             long lookupDuration = System.nanoTime() - lookupStart;
             if (result.isPresent()) {
                 long coverageStart = System.nanoTime();
                 GlobalIndexResult finalResult =
-                        result.get().or(scanner.unindexedRows(globalIndexFilter));
+                        result.get()
+                                .result()
+                                .or(
+                                        scanner.unindexedRowsForContributingFields(
+                                                result.get().contributingFieldIds()));
                 long coverageDuration = System.nanoTime() - coverageStart;
                 long totalDuration = System.nanoTime() - totalStart;
                 LOG.info(

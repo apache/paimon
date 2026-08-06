@@ -18,12 +18,13 @@
 import logging
 import os
 import time
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex import ScoredGlobalIndexResult
+from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -56,11 +57,16 @@ from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.utils.range import Range
+
+
+class _GlobalIndexPlanningResult(NamedTuple):
+    indexed_result: GlobalIndexResult
+    unindexed_ranges: List[Range]
 
 
 def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]:
     from pypaimon.table.special_fields import SpecialFields
-    from pypaimon.utils.range import Range
 
     if predicate is None:
         return None
@@ -119,8 +125,6 @@ def _build_early_row_range_filter(row_ranges):
     if row_ranges is None or not row_ranges:
         return None
 
-    from pypaimon.utils.range import Range
-
     def _filter(record):
         file_dict = record.get('_FILE')
         if file_dict is None:
@@ -156,8 +160,6 @@ def _filter_manifest_files_by_row_ranges(
     Returns:
         Filtered list of manifest files
     """
-    from pypaimon.utils.range import Range
-
     filtered_files = []
     for manifest in manifest_files:
         min_row_id = manifest.min_row_id
@@ -270,6 +272,7 @@ class FileScanner:
         self.data_evolution = options.data_evolution_enabled()
         self.deletion_vectors_enabled = options.deletion_vectors_enabled()
         self._global_index_result = None
+        self._row_ranges = None
         self._scanned_snapshot = None
         self._scanned_snapshot_id = None
         # Opt-in scan-plan tracking. Stays ``None`` for the read hot path;
@@ -430,7 +433,7 @@ class FileScanner:
         return list(PrimaryKeySortedIndexResult(evaluated).splits)
 
     def _create_data_evolution_split_generator(self):
-        row_ranges = None
+        row_ranges = getattr(self, '_row_ranges', None)
         score_getter = None
         # Fetch snapshot once and share with global index evaluation to avoid
         # a duplicate /snapshot REST round-trip (#7513).
@@ -438,14 +441,35 @@ class FileScanner:
         self._scanned_snapshot = snapshot
         self._scanned_snapshot_id = snapshot.id if snapshot else None
 
-        global_index_result = self._global_index_result if self._global_index_result is not None \
-            else self._eval_global_index(snapshot)
-        if global_index_result is not None:
-            row_ranges = global_index_result.results().to_range_list()
-            if isinstance(global_index_result, ScoredGlobalIndexResult):
-                score_getter = global_index_result.score_getter()
+        if row_ranges is None:
+            global_index_plan = self._global_index_result \
+                if self._global_index_result is not None \
+                else self._eval_global_index(snapshot)
+            if global_index_plan is not None:
+                if isinstance(global_index_plan, _GlobalIndexPlanningResult):
+                    global_index_result = global_index_plan.indexed_result
+                    row_ranges = Range.sort_and_merge_overlap(
+                        global_index_result.results().to_range_list()
+                        + global_index_plan.unindexed_ranges,
+                        True,
+                    )
+                else:
+                    global_index_result = global_index_plan
+                    row_ranges = global_index_result.results().to_range_list()
+                if isinstance(global_index_result, ScoredGlobalIndexResult):
+                    score_getter = global_index_result.score_getter()
         if row_ranges is None and self.predicate is not None:
             row_ranges = _row_ranges_from_predicate(self.predicate)
+
+        if row_ranges is not None and not row_ranges:
+            return [], DataEvolutionSplitGenerator(
+                self.table,
+                self.target_split_size,
+                self.open_file_cost,
+                {},
+                row_ranges,
+                score_getter,
+            )
 
         # Filter manifest files by row ranges if available
         if row_ranges is not None:
@@ -463,7 +487,7 @@ class FileScanner:
             self.open_file_cost,
             self._deletion_files_map(entries),
             row_ranges,
-            score_getter
+            score_getter,
         )
 
     def plan_files(self) -> List[ManifestEntry]:
@@ -495,12 +519,19 @@ class FileScanner:
             if scanner is None:
                 return None
             with scanner:
-                result = scanner.scan(self.predicate)
-                if result is None:
+                evaluation = scanner.scan_with_coverage(self.predicate)
+                if evaluation is None:
                     return None
                 scalar_mode = self.table.options.scalar_index_search_mode()
-                return result.or_(
-                    scanner.unindexed_rows(self.predicate, search_mode=scalar_mode))
+                return _GlobalIndexPlanningResult(
+                    evaluation.result,
+                    scanner.unindexed_ranges(
+                        self.predicate,
+                        search_mode=scalar_mode,
+                        contributing_field_ids=(
+                            evaluation.contributing_field_ids),
+                    ),
+                )
         except Exception:
             return None
 
@@ -587,7 +618,21 @@ class FileScanner:
         return self
 
     def with_global_index_result(self, result) -> 'FileScanner':
+        if self._row_ranges is not None:
+            raise ValueError(
+                "with_global_index_result and with_row_ranges are mutually exclusive")
         self._global_index_result = result
+        return self
+
+    def with_row_ranges(self, row_ranges) -> 'FileScanner':
+        if not self.data_evolution:
+            raise ValueError("Row ranges are only supported for data evolution tables")
+        if row_ranges is None:
+            raise ValueError("row_ranges cannot be None")
+        if self._global_index_result is not None:
+            raise ValueError(
+                "with_row_ranges and with_global_index_result are mutually exclusive")
+        self._row_ranges = Range.sort_and_merge_overlap(list(row_ranges), True)
         return self
 
     def scan_with_stats(self) -> Tuple[Plan, ScanStats]:
@@ -620,6 +665,8 @@ class FileScanner:
             raise ValueError("chunk_shuffle cannot combine with limit")
         if self._global_index_result is not None:
             raise ValueError("chunk_shuffle cannot combine with global index")
+        if self._row_ranges is not None:
+            raise ValueError("chunk_shuffle cannot combine with row ranges")
         # Only partition predicates are allowed: row-level / column-level
         # predicates would silently shrink each chunk's effective row count,
         # breaking the chunk_size contract DataLoader callers expect.

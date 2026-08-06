@@ -95,8 +95,9 @@ class TableScan:
 
     def _native_plan_supported_impl(self) -> bool:
         """Fall back to the Python scanner for scans native can't carry:
-        shard/slice, chunk-shuffle, global-index, first-row merge-engine (Rust
-        drops L0), deletion vectors, postpone bucket (drops synthetic buckets),
+        shard/slice, chunk-shuffle, global-index/row-ranges, first-row
+        merge-engine (Rust drops L0), deletion vectors, postpone bucket
+        (drops synthetic buckets),
         a primary-key table whose trimmed PK is empty (PK equals the partition
         key; native may mark splits raw-convertible and skip merge), dynamic
         bucket / cross-partition PK tables (unconfirmed Rust parity), a stale
@@ -113,6 +114,7 @@ class TableScan:
                 or getattr(fs, 'start_pos_of_this_subtask', None) is not None
                 or getattr(fs, 'chunk_shuffle', None) is not None
                 or getattr(fs, '_global_index_result', None) is not None
+                or getattr(fs, '_row_ranges', None) is not None
                 or getattr(fs, 'deletion_vectors_enabled', False)
                 or getattr(fs, 'only_read_real_buckets', False)):
             return False
@@ -361,6 +363,10 @@ class TableScan:
 
     def with_global_index_result(self, result) -> 'TableScan':
         self.file_scanner.with_global_index_result(result)
+        return self
+
+    def with_row_ranges(self, row_ranges) -> 'TableScan':
+        self.file_scanner.with_row_ranges(row_ranges)
         return self
 
     def with_chunk_shuffle(self, seed: int, chunk_size: int) -> 'TableScan':

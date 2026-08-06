@@ -26,6 +26,7 @@ from pypaimon.globalindex.data_evolution_global_index_coverage import (
 from pypaimon.globalindex.data_evolution_global_index_scanner import (
     DataEvolutionGlobalIndexScanner,
 )
+from pypaimon.utils.range import Range
 
 
 def _ranges(result):
@@ -45,6 +46,14 @@ def _coverage(options):
     table = SimpleNamespace(options=options)
     return DataEvolutionGlobalIndexCoverage(
         table, snapshot, None, [SimpleNamespace(global_index_meta=meta)])
+
+
+def _scanner(coverage):
+    scanner = DataEvolutionGlobalIndexScanner.__new__(
+        DataEvolutionGlobalIndexScanner)
+    scanner._coverage = coverage
+    scanner._fields = [1]
+    return scanner
 
 
 class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
@@ -93,15 +102,13 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
 
     def test_scanner_applies_passed_scalar_mode(self):
         coverage = _coverage(CoreOptions(Options.from_none()))
-        scanner = SimpleNamespace(_coverage=coverage, _fields=[1])
-        result = DataEvolutionGlobalIndexScanner.unindexed_rows(
-            scanner, None, search_mode=GlobalIndexSearchMode.FULL)
-        self.assertEqual([(100, 199)], _ranges(result))
+        result = _scanner(coverage).unindexed_ranges(
+            None, search_mode=GlobalIndexSearchMode.FULL)
+        self.assertEqual([Range(100, 199)], result)
 
     def test_scanner_default_is_scalar_mode(self):
         coverage = _coverage(CoreOptions(Options.from_none()))
-        scanner = SimpleNamespace(_coverage=coverage, _fields=[1])
-        result = DataEvolutionGlobalIndexScanner.unindexed_rows(scanner, None)
+        result = _scanner(coverage).unindexed_rows(None)
         self.assertEqual([], _ranges(result))
 
 
