@@ -651,6 +651,17 @@ public class IncrementalTableTest extends TableTestBase {
         }
         table.createTag("TAG2", 2);
 
+        // test snapshot expiration won't affect tag diff query
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(GenericRow.of(3, 1, 1), 0, 1);
+            commit.commit(write.prepareCommit());
+        }
+        table.newExpireSnapshots()
+                .config(ExpireConfig.builder().snapshotRetainMax(1).snapshotRetainMin(1).build())
+                .expire();
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+
         assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
                 .containsExactly(GenericRow.of(2, 1, 1));
     }

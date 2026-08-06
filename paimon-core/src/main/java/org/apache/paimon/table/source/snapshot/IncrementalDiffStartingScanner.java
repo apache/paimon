@@ -21,7 +21,6 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.tag.TagPeriodHandler;
 import org.apache.paimon.utils.Pair;
@@ -57,14 +56,6 @@ public class IncrementalDiffStartingScanner extends AbstractStartingScanner {
 
     @Override
     public Result scan(SnapshotReader reader) {
-        TimeTravelUtil.checkRescaleBucketForIncrementalDiffQuery(
-                new SchemaManager(
-                        snapshotManager.fileIO(),
-                        snapshotManager.tablePath(),
-                        snapshotManager.branch()),
-                reader,
-                start,
-                end);
         return StartingScanner.fromPlan(reader.withSnapshot(end).readIncrementalDiff(start));
     }
 

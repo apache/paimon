@@ -21,12 +21,9 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.SnapshotManager;
@@ -255,43 +252,26 @@ public class TimeTravelUtil {
     }
 
     public static void checkRescaleBucketForIncrementalDiffQuery(
-            SchemaManager schemaManager, SnapshotReader reader, Snapshot start, Snapshot end) {
-        TableSchema schema = schemaManager.latest().get();
-        if (!schema.primaryKeys().isEmpty() && schema.numBuckets() == BucketMode.POSTPONE_BUCKET) {
-            Map<BinaryRow, Integer> startBucketNumbers =
-                    PostponeUtils.getKnownNumBuckets(reader, start.id());
-            Map<BinaryRow, Integer> endBucketNumbers =
-                    PostponeUtils.getKnownNumBuckets(reader, end.id());
-            for (Map.Entry<BinaryRow, Integer> entry : startBucketNumbers.entrySet()) {
-                Integer endPartitionBucketNumber = endBucketNumbers.get(entry.getKey());
-                if (endPartitionBucketNumber != null
-                        && !entry.getValue().equals(endPartitionBucketNumber)) {
-                    throw new InconsistentTagBucketException(
-                            start.id(),
-                            end.id(),
-                            "The real bucket number of two snapshots in postpone-bucket mode are different, "
-                                    + "which is not supported in incremental diff query.");
-                }
-            }
-        } else {
-            if (start.schemaId() != end.schemaId()) {
-                int startBucketNumber = bucketNumber(schemaManager, start.schemaId());
-                int endBucketNumber = bucketNumber(schemaManager, end.schemaId());
-                if (startBucketNumber != endBucketNumber) {
-                    throw new InconsistentTagBucketException(
-                            start.id(),
-                            end.id(),
-                            String.format(
-                                    "The bucket number of two snapshots are different (%s, %s), which is not supported in incremental diff query.",
-                                    startBucketNumber, endBucketNumber));
-                }
+            Snapshot start,
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> startFiles,
+            Snapshot end,
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> endFiles) {
+        for (Map.Entry<BinaryRow, Map<Integer, List<ManifestEntry>>> entry :
+                startFiles.entrySet()) {
+            Map<Integer, List<ManifestEntry>> endPartitionFiles = endFiles.get(entry.getKey());
+            Integer endPartitionBucketNumber =
+                    endPartitionFiles == null ? null : endPartitionFiles.size();
+            int startPartitionBucketNumber = entry.getValue().size();
+            if (endPartitionBucketNumber != null
+                    && startPartitionBucketNumber != endPartitionBucketNumber) {
+                throw new InconsistentTagBucketException(
+                        start.id(),
+                        end.id(),
+                        String.format(
+                                "Found different real bucket number (%s, %s), which is not supported in incremental diff query.",
+                                startPartitionBucketNumber, endPartitionBucketNumber));
             }
         }
-    }
-
-    private static int bucketNumber(SchemaManager schemaManager, long schemaId) {
-        TableSchema schema = schemaManager.schema(schemaId);
-        return CoreOptions.fromMap(schema.options()).bucket();
     }
 
     /**
