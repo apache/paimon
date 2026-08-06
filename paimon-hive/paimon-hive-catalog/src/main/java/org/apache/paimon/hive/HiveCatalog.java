@@ -951,7 +951,7 @@ public class HiveCatalog extends AbstractCatalog {
         StorageDescriptor sd = hiveTable.getSd();
         List<FieldSchema> columns =
                 view.rowType().getFields().stream()
-                        .map(this::convertToFieldSchema)
+                        .map(this::convertToColumnFieldSchema)
                         .collect(Collectors.toList());
         sd.setCols(columns);
 
@@ -1797,7 +1797,7 @@ public class HiveCatalog extends AbstractCatalog {
             List<FieldSchema> normalFields = new ArrayList<>();
             for (DataField field : schema.fields()) {
                 if (!partitionKeys.contains(field.name())) {
-                    normalFields.add(convertToFieldSchema(field));
+                    normalFields.add(convertToColumnFieldSchema(field));
                 }
             }
             sd.setCols(normalFields);
@@ -1819,7 +1819,7 @@ public class HiveCatalog extends AbstractCatalog {
 
             sd.setCols(
                     schema.fields().stream()
-                            .map(this::convertToFieldSchema)
+                            .map(this::convertToColumnFieldSchema)
                             .collect(Collectors.toList()));
         }
         table.setSd(sd);
@@ -1869,6 +1869,18 @@ public class HiveCatalog extends AbstractCatalog {
         } catch (Exception e) {
             throw new RuntimeException("Failed to close hms client:", e);
         }
+    }
+
+    /**
+     * Converts a {@link DataField} to a Hive column, whose comment is stored in {@code
+     * COLUMNS_V2.COMMENT} and thus has to be normalized. Use {@link #convertToFieldSchema} for
+     * partition keys, which are stored in {@code PARTITION_KEYS.PKEY_COMMENT} instead.
+     */
+    private FieldSchema convertToColumnFieldSchema(DataField dataField) {
+        return new FieldSchema(
+                dataField.name(),
+                HiveTypeUtils.toTypeInfo(dataField.type()).getTypeName(),
+                HiveTableUtils.normalizeColumnComment(dataField.description()));
     }
 
     private FieldSchema convertToFieldSchema(DataField dataField) {
