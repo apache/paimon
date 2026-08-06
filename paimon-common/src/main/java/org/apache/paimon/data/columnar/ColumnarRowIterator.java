@@ -23,6 +23,7 @@ import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongIterator;
 import org.apache.paimon.utils.RecyclableIterator;
 import org.apache.paimon.utils.VectorMappingUtils;
@@ -127,6 +128,19 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
             return copy(vectors);
         }
         return this;
+    }
+
+    /**
+     * Maps this batch to the final output row type.
+     *
+     * <p>Subclasses may override this method when preserving their native batch representation
+     * requires the final field names and types.
+     */
+    public ColumnarRowIterator mapping(
+            RowType outputRowType,
+            @Nullable PartitionInfo partitionInfo,
+            @Nullable int[] indexMapping) {
+        return mapping(partitionInfo, indexMapping);
     }
 
     public ColumnarRowIterator assignRowTracking(
