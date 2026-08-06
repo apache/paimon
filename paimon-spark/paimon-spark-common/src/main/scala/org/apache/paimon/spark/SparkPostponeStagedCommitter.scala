@@ -105,16 +105,23 @@ private[spark] class SparkPostponeStagedCommitter(
         return passThroughMessages
       }
 
-      val existingBuckets: Map[BinaryRow, Int] = baseSnapshotId
-        .map(
-          id =>
-            PostponeUtils
-              .getKnownNumBuckets(table, id, touchedPartitions.asJava)
-              .asScala
-              .iterator
-              .map { case (partition, buckets) => partition -> buckets.intValue() }
-              .toMap)
-        .getOrElse(Map.empty[BinaryRow, Int])
+      // Overwrite removes the previous partition contents, so its bucket layout must not
+      // constrain the replacement data. It is also unnecessary to scan the old layout here.
+      val existingBuckets: Map[BinaryRow, Int] =
+        if (overwritePartitionSpec.isDefined) {
+          Map.empty
+        } else {
+          baseSnapshotId
+            .map(
+              id =>
+                PostponeUtils
+                  .getKnownNumBuckets(table, id, touchedPartitions.asJava)
+                  .asScala
+                  .iterator
+                  .map { case (partition, buckets) => partition -> buckets.intValue() }
+                  .toMap)
+            .getOrElse(Map.empty[BinaryRow, Int])
+        }
       val decisions = touchedPartitions.map {
         partition =>
           val stage = stats(partition)

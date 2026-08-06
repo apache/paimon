@@ -643,7 +643,7 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
     }
   }
 
-  test("Postpone bucket table: overwrite excludes existing postpone rows from inference") {
+  test("Postpone bucket table: overwrite recomputes bucket number from staged batch") {
     Seq(
       (
         "static",
@@ -690,13 +690,23 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
                   |""".stripMargin)
             assert(SparkTable(loadTable("t")).useV2Write)
 
-            sql("""
-                  |INSERT INTO t SELECT
-                  |id AS k,
-                  |CAST(id AS STRING) AS v,
-                  |0 AS pt
-                  |FROM range (0, 1000)
-                  |""".stripMargin)
+            withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "true") {
+              sql("""
+                    |INSERT INTO t SELECT
+                    |id AS k,
+                    |CAST(id AS STRING) AS v,
+                    |0 AS pt
+                    |FROM range (0, 1000)
+                    |""".stripMargin)
+            }
+            assert(
+              PostponeUtils
+                .getKnownNumBuckets(loadTable("t"))
+                .get(BinaryRow.singleColumn(0)) == 16)
+
+            withSparkSQLConf("spark.paimon.postpone.batch-write-fixed-bucket" -> "false") {
+              sql("INSERT INTO t VALUES (2000, 'historical-postpone', 0)")
+            }
 
             withSparkSQLConf(
               "spark.paimon.postpone.batch-write-fixed-bucket" -> "true",
@@ -705,9 +715,10 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
             }
 
             checkAnswer(sql("SELECT count(*), sum(k) FROM t"), Seq(Row(100L, 104950L)))
-            checkAnswer(
-              sql("SELECT distinct(bucket) FROM `t$buckets` WHERE partition = '{0}'"),
-              Seq(Row(0)))
+            assert(
+              PostponeUtils
+                .getKnownNumBuckets(loadTable("t"))
+                .get(BinaryRow.singleColumn(0)) == 1)
             checkAnswer(sql("SELECT count(*) FROM `t$buckets` WHERE bucket = -2"), Seq(Row(0L)))
           }
         }
