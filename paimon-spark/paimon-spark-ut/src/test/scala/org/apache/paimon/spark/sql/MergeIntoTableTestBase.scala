@@ -284,15 +284,20 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
                      |USING source
                      |ON target.id = source.id
                      |WHEN MATCHED AND (
-                     |  NOT equal_null(target.oneid, source.oneid)
-                     |  OR NOT equal_null(target.customer_id, source.customer_id)
+                     |  NOT (target.oneid <=> source.oneid)
+                     |  OR NOT (target.customer_id <=> source.customer_id)
                      |) THEN UPDATE SET oneid = source.oneid
                      |""".stripMargin)
       }
 
-      assert(error.getErrorClass === "UNRESOLVED_COLUMN.WITH_SUGGESTION")
-      assert(error.getMessage.contains("`target`.`customer_id`"))
-      assert(error.getMessage.contains("`source`.`customer_id`"))
+      // Spark versions use different error classes for an unresolved column.
+      Option(error.getErrorClass).foreach {
+        errorClass =>
+          assert(Set("MISSING_COLUMN", "UNRESOLVED_COLUMN.WITH_SUGGESTION").contains(errorClass))
+      }
+      val normalizedMessage = error.getMessage.replace("`", "")
+      assert(normalizedMessage.contains("target.customer_id"))
+      assert(normalizedMessage.contains("source.customer_id"))
     }
   }
 
