@@ -37,7 +37,7 @@ import org.apache.paimon.utils.SetUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -137,32 +137,24 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
 
     private long[] compactedColumnMaxSequenceNumbers(
             FileStoreTable table, DataFileMeta outputFile) {
-        Map<DataFileMeta, List<DataField>> inputFields = new LinkedHashMap<>();
+        Map<Integer, Long> fieldMaxSequences = new HashMap<>();
         for (DataFileMeta input : compactBefore) {
-            inputFields.put(input, fileFields(table.schemaManager()::schema, input));
+            List<DataField> inputFields = fileFields(table.schemaManager()::schema, input);
+            for (int inputPosition = 0; inputPosition < inputFields.size(); inputPosition++) {
+                fieldMaxSequences.merge(
+                        inputFields.get(inputPosition).id(),
+                        fieldMaxSequenceNumber(input, inputPosition, inputFields.size()),
+                        (left, right) -> Math.max(left, right));
+            }
         }
 
         long fallbackSequence = maxSequenceId(compactBefore);
         List<DataField> outputFields = fileFields(table.schemaManager()::schema, outputFile);
         long[] result = new long[outputFields.size()];
         for (int outputPosition = 0; outputPosition < outputFields.size(); outputPosition++) {
-            DataField outputField = outputFields.get(outputPosition);
-            long fieldSequence = Long.MIN_VALUE;
-            for (DataFileMeta input : compactBefore) {
-                List<DataField> fields = inputFields.get(input);
-                for (int inputPosition = 0; inputPosition < fields.size(); inputPosition++) {
-                    if (fields.get(inputPosition).id() == outputField.id()) {
-                        fieldSequence =
-                                Math.max(
-                                        fieldSequence,
-                                        fieldMaxSequenceNumber(
-                                                input, inputPosition, fields.size()));
-                        break;
-                    }
-                }
-            }
             result[outputPosition] =
-                    fieldSequence == Long.MIN_VALUE ? fallbackSequence : fieldSequence;
+                    fieldMaxSequences.getOrDefault(
+                            outputFields.get(outputPosition).id(), fallbackSequence);
         }
         return result;
     }
