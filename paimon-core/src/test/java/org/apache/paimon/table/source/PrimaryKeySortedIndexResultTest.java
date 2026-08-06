@@ -95,7 +95,7 @@ class PrimaryKeySortedIndexResultTest {
                         rowType,
                         predicate,
                         Collections.singletonList(definition),
-                        (file, ignoredDefinition, ignoredPayloads) -> {
+                        (file, ignoredDefinition, ignoredPayloads, ignoredTotalRowCount) -> {
                             if (file.dataFile().fileName().equals("indexed")) {
                                 return reader(1, 2, 4);
                             } else if (file.dataFile().fileName().equals("empty")) {
@@ -152,7 +152,7 @@ class PrimaryKeySortedIndexResultTest {
                         rowType,
                         predicate,
                         Collections.singletonList(definition),
-                        (file, ignoredDefinition, ignoredPayloads) ->
+                        (file, ignoredDefinition, ignoredPayloads, ignoredTotalRowCount) ->
                                 file.dataFile().fileName().equals("first") ? reader(1) : reader(2));
 
         PrimaryKeySortedIndexResult result = new PrimaryKeySortedIndexResult(evaluated);
@@ -195,7 +195,8 @@ class PrimaryKeySortedIndexResultTest {
                         rowType,
                         predicate,
                         Collections.singletonList(definition),
-                        (ignoredFile, ignoredDefinition, ignoredPayloads) -> reader(positions));
+                        (ignoredFile, ignoredDefinition, ignoredPayloads, ignoredTotalRowCount) ->
+                                reader(positions));
 
         PrimaryKeySortedIndexResult result = new PrimaryKeySortedIndexResult(evaluated);
 

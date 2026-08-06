@@ -51,7 +51,10 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
     protected GlobalIndexReader prepareDataAndCreateReader() throws Exception {
         GlobalIndexIOMeta written = writeData(data);
         return globalIndexer.createReader(
-                fileReader, Collections.singletonList(written), newDirectExecutorService());
+                fileReader,
+                Collections.singletonList(written),
+                dataNum,
+                newDirectExecutorService());
     }
 
     @TestTemplate

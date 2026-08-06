@@ -26,10 +26,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
@@ -54,27 +51,12 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             GlobalIndexFileReader fileReader,
             CacheManager cacheManager,
             long fallbackScanMaxSize,
+            long totalRowCount,
             ExecutorService executor) {
-        this(files, keySerializer, fileReader, cacheManager, fallbackScanMaxSize, null, executor);
-    }
-
-    public LazyFilteredBTreeReader(
-            List<GlobalIndexIOMeta> files,
-            KeySerializer keySerializer,
-            GlobalIndexFileReader fileReader,
-            CacheManager cacheManager,
-            long fallbackScanMaxSize,
-            @Nullable Range rowIdRange,
-            ExecutorService executor) {
-        super(files, keySerializer, fallbackScanMaxSize, rowIdRange, executor);
+        super(files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
-    }
-
-    @Override
-    protected Optional<GlobalIndexResult> visitIsNotNull(BTreeIndexReader reader) {
-        return reader.visitIsNotNull();
     }
 
     @Override
@@ -115,11 +97,6 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitNotEqual(BTreeIndexReader reader, Object literal) {
-        return reader.visitNotEqual(literal);
-    }
-
-    @Override
     protected Optional<GlobalIndexResult> visitLessOrEqual(
             BTreeIndexReader reader, Object literal) {
         return reader.visitLessOrEqual(literal);
@@ -139,12 +116,6 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     @Override
     protected Optional<GlobalIndexResult> visitIn(BTreeIndexReader reader, List<Object> literals) {
         return reader.visitIn(literals);
-    }
-
-    @Override
-    protected Optional<GlobalIndexResult> visitNotIn(
-            BTreeIndexReader reader, List<Object> literals) {
-        return reader.visitNotIn(literals);
     }
 
     @Override

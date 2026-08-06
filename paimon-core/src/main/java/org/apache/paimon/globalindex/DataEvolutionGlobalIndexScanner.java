@@ -444,7 +444,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                                 globalIndexer.createReader(
                                                         indexFileReadWrite,
                                                         globalMetas,
-                                                        new Range(0L, range.to - range.from),
+                                                        range.count(),
                                                         executor),
                                                 range.from,
                                                 range.to),

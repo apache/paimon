@@ -508,7 +508,8 @@ public class NativeVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         try (NativeVectorGlobalIndexReader reader =
-                (NativeVectorGlobalIndexReader) indexer.createReader(fileReader, metas, executor)) {
+                (NativeVectorGlobalIndexReader)
+                        indexer.createReader(fileReader, metas, vectors.length, executor)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 2, fieldName);
             ScoredGlobalIndexResult result = reader.visitVectorSearch(vectorSearch).join().get();
             assertThat(result.results().getLongCardinality()).isEqualTo(2);

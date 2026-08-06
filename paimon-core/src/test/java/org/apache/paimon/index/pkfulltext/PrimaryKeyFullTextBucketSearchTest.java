@@ -71,7 +71,7 @@ class PrimaryKeyFullTextBucketSearchTest {
 
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
-                        payload -> {
+                        (payload, ignoredTotalRowCount) -> {
                             String source =
                                     PrimaryKeyIndexSourceMeta.fromIndexFile(payload)
                                             .sourceFile()
@@ -101,7 +101,7 @@ class PrimaryKeyFullTextBucketSearchTest {
         AtomicInteger closes = new AtomicInteger();
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
-                        payload -> reader(scores(0, 1F, 2, 10F), closes));
+                        (payload, ignoredTotalRowCount) -> reader(scores(0, 1F, 2, 10F), closes));
         PrimaryKeyFullTextSearchSplit split =
                 new PrimaryKeyFullTextSearchSplit(
                         dataSplit(Collections.singletonList(dataFile("a"))),
@@ -125,7 +125,10 @@ class PrimaryKeyFullTextBucketSearchTest {
         AtomicInteger closes = new AtomicInteger();
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
-                        ignored -> reader(scores(0, 10F, 3, 9F, 4, 8F, 5, 7F), closes));
+                        (ignored, totalRowCount) -> {
+                            assertThat(totalRowCount).isEqualTo(6);
+                            return reader(scores(0, 10F, 3, 9F, 4, 8F, 5, 7F), closes);
+                        });
         PrimaryKeyFullTextSearchSplit split =
                 new PrimaryKeyFullTextSearchSplit(
                         dataSplit(Arrays.asList(dataFile("a"), dataFile("b"))),
@@ -158,7 +161,7 @@ class PrimaryKeyFullTextBucketSearchTest {
         AtomicInteger closes = new AtomicInteger();
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
-                        ignored -> reader(Collections.emptyMap(), closes));
+                        (ignored, ignoredTotalRowCount) -> reader(Collections.emptyMap(), closes));
         PrimaryKeyFullTextSearchSplit split =
                 new PrimaryKeyFullTextSearchSplit(
                         dataSplit(Collections.singletonList(dataFile("large", rowCount))),
@@ -182,7 +185,7 @@ class PrimaryKeyFullTextBucketSearchTest {
         AtomicInteger closes = new AtomicInteger();
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
-                        payload ->
+                        (payload, ignoredTotalRowCount) ->
                                 new FullTextOnlyReader() {
                                     @Override
                                     public CompletableFuture<Optional<ScoredGlobalIndexResult>>

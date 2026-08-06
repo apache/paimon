@@ -23,10 +23,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedFileGlobalIndexReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
@@ -45,25 +42,11 @@ public class LazyFilteredBitmapReader extends SortedFileGlobalIndexReader<Bitmap
             List<GlobalIndexIOMeta> files,
             KeySerializer keySerializer,
             long fallbackScanMaxSize,
+            long totalRowCount,
             ExecutorService executor) {
-        this(fileReader, files, keySerializer, fallbackScanMaxSize, null, executor);
-    }
-
-    LazyFilteredBitmapReader(
-            GlobalIndexFileReader fileReader,
-            List<GlobalIndexIOMeta> files,
-            KeySerializer keySerializer,
-            long fallbackScanMaxSize,
-            @Nullable Range rowIdRange,
-            ExecutorService executor) {
-        super(files, keySerializer, fallbackScanMaxSize, rowIdRange, executor);
+        super(files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
-    }
-
-    @Override
-    protected Optional<GlobalIndexResult> visitIsNotNull(BitmapIndexReader reader) {
-        return reader.visitIsNotNull();
     }
 
     @Override
@@ -99,11 +82,6 @@ public class LazyFilteredBitmapReader extends SortedFileGlobalIndexReader<Bitmap
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitNotEqual(BitmapIndexReader reader, Object literal) {
-        return reader.visitNotEqual(literal);
-    }
-
-    @Override
     protected Optional<GlobalIndexResult> visitLessOrEqual(
             BitmapIndexReader reader, Object literal) {
         return reader.visitLessOrEqual(literal);
@@ -123,12 +101,6 @@ public class LazyFilteredBitmapReader extends SortedFileGlobalIndexReader<Bitmap
     @Override
     protected Optional<GlobalIndexResult> visitIn(BitmapIndexReader reader, List<Object> literals) {
         return reader.visitIn(literals);
-    }
-
-    @Override
-    protected Optional<GlobalIndexResult> visitNotIn(
-            BitmapIndexReader reader, List<Object> literals) {
-        return reader.visitNotIn(literals);
     }
 
     @Override

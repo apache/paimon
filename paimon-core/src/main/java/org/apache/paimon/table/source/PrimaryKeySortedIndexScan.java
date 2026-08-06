@@ -83,7 +83,10 @@ public final class PrimaryKeySortedIndexScan {
     public interface ReaderFactory {
 
         GlobalIndexReader create(
-                FilePlan file, PrimaryKeyIndexDefinition definition, List<IndexFileMeta> payloads);
+                FilePlan file,
+                PrimaryKeyIndexDefinition definition,
+                List<IndexFileMeta> payloads,
+                long totalRowCount);
     }
 
     static ReaderFactory readerFactory(
@@ -92,7 +95,7 @@ public final class PrimaryKeySortedIndexScan {
         ExecutorService executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         GlobalIndexFileReader fileReader = meta -> fileIO.newInputStream(meta.filePath());
-        return (file, definition, payloads) -> {
+        return (file, definition, payloads, totalRowCount) -> {
             IndexPathFactory indexPathFactory =
                     pathFactories.get(file.sourceSplit().partition(), file.sourceSplit().bucket());
             List<GlobalIndexIOMeta> ioMetas = new ArrayList<>(payloads.size());
@@ -109,7 +112,7 @@ public final class PrimaryKeySortedIndexScan {
                             definition.indexType(),
                             rowType.getField(definition.fieldId()),
                             definition.options());
-            return indexer.createReader(fileReader, ioMetas, executor);
+            return indexer.createReader(fileReader, ioMetas, totalRowCount, executor);
         };
     }
 
@@ -257,15 +260,19 @@ public final class PrimaryKeySortedIndexScan {
                                     }
                                     SharedGlobalIndexReader reader = sharedReaders.get(group.get());
                                     if (reader == null) {
+                                        PkSortedIndexGroup indexGroup = group.get();
+                                        long totalRowCount =
+                                                totalRowCount(indexGroup.sourceFiles());
                                         reader =
                                                 new SharedGlobalIndexReader(
-                                                        group.get().sourceFiles(),
+                                                        indexGroup.sourceFiles(),
                                                         () ->
                                                                 readerFactory.create(
                                                                         file,
                                                                         definition,
-                                                                        group.get().payloads()));
-                                        sharedReaders.put(group.get(), reader);
+                                                                        indexGroup.payloads(),
+                                                                        totalRowCount));
+                                        sharedReaders.put(indexGroup, reader);
                                     }
                                     return Collections.singletonList(
                                             fileLocalReader(file, group.get(), reader));
@@ -310,6 +317,14 @@ public final class PrimaryKeySortedIndexScan {
                 "Data file %s is not covered by its sorted-index source group.",
                 file.dataFile().fileName());
         return new FileLocalGlobalIndexReader(reader, sourceIndex);
+    }
+
+    private static long totalRowCount(List<PrimaryKeyIndexSourceFile> sourceFiles) {
+        long totalRowCount = 0;
+        for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
+            totalRowCount = Math.addExact(totalRowCount, sourceFile.rowCount());
+        }
+        return totalRowCount;
     }
 
     private static void rethrowIfInterrupted(RuntimeException exception) {

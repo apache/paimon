@@ -30,7 +30,6 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.LazyField;
-import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.util.List;
@@ -99,6 +98,7 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
+            long totalRowCount,
             ExecutorService executor) {
         return new LazyFilteredBTreeReader(
                 files,
@@ -106,22 +106,7 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
                 fileReader,
                 cacheManager.get(),
                 fallbackScanMaxSize,
-                executor);
-    }
-
-    @Override
-    public GlobalIndexReader createReader(
-            GlobalIndexFileReader fileReader,
-            List<GlobalIndexIOMeta> files,
-            Range rowIdRange,
-            ExecutorService executor) {
-        return new LazyFilteredBTreeReader(
-                files,
-                keySerializer,
-                fileReader,
-                cacheManager.get(),
-                fallbackScanMaxSize,
-                rowIdRange,
+                totalRowCount,
                 executor);
     }
 }

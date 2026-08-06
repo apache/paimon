@@ -36,7 +36,6 @@ import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtensio
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
 
 import org.junit.jupiter.api.Assertions;
@@ -77,7 +76,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
     @Override
     protected GlobalIndexReader prepareDataAndCreateReader() throws Exception {
         List<GlobalIndexIOMeta> written = writeData();
-        return globalIndexer.createReader(fileReader, written, newDirectExecutorService());
+        return globalIndexer.createReader(fileReader, written, dataNum, newDirectExecutorService());
     }
 
     private List<GlobalIndexIOMeta> writeData() throws Exception {
@@ -111,7 +110,8 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         FieldRef ref = new FieldRef(1, "testField", dataType);
 
         try (GlobalIndexReader reader =
-                globalIndexer.createReader(fileReader, written, newDirectExecutorService())) {
+                globalIndexer.createReader(
+                        fileReader, written, dataNum, newDirectExecutorService())) {
             GlobalIndexResult result =
                     reader.visitTopN(new TopN(ref, DESCENDING, NULLS_LAST, limit)).join().get();
             assertThat(result.results().getLongCardinality()).isEqualTo(limit);
@@ -147,7 +147,8 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         Object max = data.get(dataNum - 1).getKey();
 
         try (GlobalIndexReader reader =
-                globalIndexer.createReader(fileReader, written, newDirectExecutorService())) {
+                globalIndexer.createReader(
+                        fileReader, written, dataNum, newDirectExecutorService())) {
             assertThat(reader.visitBetween(ref, min, max).join()).isEmpty();
 
             GlobalIndexResult result = reader.visitEqual(ref, literal).join().get();
@@ -177,7 +178,8 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         Object secondFileMin = data.get(split).getKey();
 
         try (GlobalIndexReader reader =
-                globalIndexer.createReader(fileReader, written, newDirectExecutorService())) {
+                globalIndexer.createReader(
+                        fileReader, written, dataNum, newDirectExecutorService())) {
             assertThat(reader.visitBetween(ref, min, max).join()).isEmpty();
 
             GlobalIndexResult result = reader.visitGreaterOrEqual(ref, secondFileMin).join().get();
@@ -203,10 +205,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         try (GlobalIndexReader reader =
                 new OffsetGlobalIndexReader(
                         globalIndexer.createReader(
-                                countingReader,
-                                written,
-                                new Range(0L, 3L),
-                                newDirectExecutorService()),
+                                countingReader, written, 4, newDirectExecutorService()),
                         1000L,
                         1003L)) {
             GlobalIndexResult result = reader.visitNotEqual(ref, 100).join().get();
@@ -328,7 +327,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         // Real multi-threaded executor for the reader's internal file-level parallelism
         ExecutorService readerExecutor = Executors.newFixedThreadPool(8);
         try (GlobalIndexReader reader =
-                stressIndexer.createReader(fileReader, written, readerExecutor)) {
+                stressIndexer.createReader(fileReader, written, dataNum, readerExecutor)) {
             FieldRef ref = new FieldRef(1, "testField", dataType);
 
             int concurrency = 16;
@@ -411,7 +410,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
                 new SemaphoredDelegatingExecutor(baseExecutor, 2, false);
 
         try (GlobalIndexReader reader =
-                globalIndexer.createReader(fileReader, written, semaphoredExecutor)) {
+                globalIndexer.createReader(fileReader, written, dataNum, semaphoredExecutor)) {
             FieldRef ref = new FieldRef(1, "testField", dataType);
 
             Random random = new Random(42);

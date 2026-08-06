@@ -113,7 +113,7 @@ public class PrimaryKeyFullTextBucketSearch {
             if (include != null && include.isEmpty()) {
                 continue;
             }
-            GlobalIndexReader reader = readerFactory.create(payload);
+            GlobalIndexReader reader = readerFactory.create(payload, totalRowCount);
             CompletableFuture<Optional<ScoredGlobalIndexResult>> future;
             try {
                 FullTextSearch predicate = new FullTextSearch(column, query, limit);
@@ -213,7 +213,7 @@ public class PrimaryKeyFullTextBucketSearch {
     /** Creates one independently closeable reader for an immutable payload archive. */
     @FunctionalInterface
     public interface ReaderFactory {
-        GlobalIndexReader create(IndexFileMeta payload);
+        GlobalIndexReader create(IndexFileMeta payload, long totalRowCount);
     }
 
     private static class PayloadRequest {
