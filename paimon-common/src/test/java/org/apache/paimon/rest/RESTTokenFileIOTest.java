@@ -23,7 +23,9 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOLoader;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 
@@ -111,5 +113,55 @@ class RESTTokenFileIOTest {
         verify(delegate).tryToWriteAtomic(target, "content");
         // the interface default would have written a temp file and renamed it instead
         verify(delegate, never()).rename(any(), any());
+    }
+
+    @Test
+    void testListFilesIterativeReachesInnerOverride() throws IOException {
+        Path tableRoot = new Path("oss://bucket/table");
+        FileIO delegate = mock(FileIO.class);
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.load(any())).thenReturn(delegate);
+        when(loader.getScheme()).thenReturn("oss");
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        // a unique token, so the static token-keyed FileIO cache cannot serve another test's
+        // delegate
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap("token", UUID.randomUUID().toString()),
+                                Long.MAX_VALUE));
+        RESTTokenFileIO fileIO =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options(), loader, null),
+                        api,
+                        identifier,
+                        tableRoot);
+        FileStatus status = mock(FileStatus.class);
+        RemoteIterator<FileStatus> iterator =
+                new RemoteIterator<FileStatus>() {
+                    private boolean emitted;
+
+                    @Override
+                    public boolean hasNext() {
+                        return !emitted;
+                    }
+
+                    @Override
+                    public FileStatus next() {
+                        emitted = true;
+                        return status;
+                    }
+                };
+        when(delegate.listFilesIterative(tableRoot, false)).thenReturn(iterator);
+
+        RemoteIterator<FileStatus> actual = fileIO.listFilesIterative(tableRoot, false);
+
+        assertThat(actual.hasNext()).isTrue();
+        assertThat(actual.next()).isSameAs(status);
+        assertThat(actual.hasNext()).isFalse();
+        verify(delegate).listFilesIterative(tableRoot, false);
+        // the interface default would construct its own iterator backed by listStatus
+        verify(delegate, never()).listStatus(any());
     }
 }
