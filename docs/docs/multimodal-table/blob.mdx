@@ -87,8 +87,9 @@ Paimon supports three storage modes for BLOB fields, selected via **comment dire
 This allows one table to mix different storage modes for different BLOB columns.
 `ARRAY<BLOB>` and `MAP<K, BLOB>` are supported only by `__BLOB_FIELD`;
 descriptor-only and blob-view comment directives accept scalar BLOB fields only.
-Map keys support the integer family, `BOOLEAN`, `DECIMAL`, `DATE`, `TIME`, `CHAR`, and
-`VARCHAR`. Use non-null keys for compatibility across Flink, Spark, and Python.
+Map keys support the integer family, `BOOLEAN`, `DECIMAL`, `DATE`, `TIME`, `BINARY`,
+`VARBINARY` (`BYTES`), `CHAR`, and `VARCHAR`. Use non-null keys for compatibility across
+Flink, Spark, and Python.
 
 ## Table Options
 

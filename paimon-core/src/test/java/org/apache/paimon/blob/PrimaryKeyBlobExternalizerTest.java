@@ -459,26 +459,12 @@ class PrimaryKeyBlobExternalizerTest {
                         1L);
         byte[] expected = "last".getBytes(StandardCharsets.UTF_8);
         InternalMap duplicateKeys =
-                new InternalMap() {
-                    @Override
-                    public int size() {
-                        return 2;
-                    }
-
-                    @Override
-                    public InternalArray keyArray() {
-                        return new GenericArray(new Object[] {1, 1});
-                    }
-
-                    @Override
-                    public InternalArray valueArray() {
-                        return new GenericArray(
-                                new Object[] {
-                                    Blob.fromData("overridden".getBytes(StandardCharsets.UTF_8)),
-                                    Blob.fromData(expected)
-                                });
-                    }
-                };
+                duplicateMap(
+                        new Object[] {1, 1},
+                        new Object[] {
+                            Blob.fromData("overridden".getBytes(StandardCharsets.UTF_8)),
+                            Blob.fromData(expected)
+                        });
 
         InternalMap result =
                 externalizer.externalize(RowKind.INSERT, GenericRow.of(duplicateKeys)).getMap(0);
@@ -509,32 +495,85 @@ class PrimaryKeyBlobExternalizerTest {
                         pathFactory,
                         1024L);
         InternalMap duplicateKeys =
-                new InternalMap() {
-                    @Override
-                    public int size() {
-                        return 2;
-                    }
-
-                    @Override
-                    public InternalArray keyArray() {
-                        return new GenericArray(new Object[] {1, 1});
-                    }
-
-                    @Override
-                    public InternalArray valueArray() {
-                        return new GenericArray(
-                                new Object[] {
-                                    Blob.fromData("overridden".getBytes(StandardCharsets.UTF_8)),
-                                    null
-                                });
-                    }
-                };
+                duplicateMap(
+                        new Object[] {1, 1},
+                        new Object[] {
+                            Blob.fromData("overridden".getBytes(StandardCharsets.UTF_8)), null
+                        });
 
         InternalMap result =
                 externalizer.externalize(RowKind.INSERT, GenericRow.of(duplicateKeys)).getMap(0);
 
         assertThat(result.size()).isEqualTo(1);
         assertThat(result.keyArray().getInt(0)).isEqualTo(1);
+        assertThat(result.valueArray().isNullAt(0)).isTrue();
+        assertThat(fileIO.listStatus(bucketPath)).isEmpty();
+    }
+
+    @Test
+    void testDuplicateBinaryMapKeyUsesLastValueWithoutWritingOverriddenBlob() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        fileIO.mkdirs(bucketPath);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        bucketPath, "avro", "data-", "changelog-", false, null, null);
+        PrimaryKeyBlobExternalizer externalizer =
+                newExternalizer(
+                        fileIO,
+                        RowType.of(DataTypes.MAP(DataTypes.BYTES(), DataTypes.BLOB())),
+                        Collections.singleton("f0"),
+                        pathFactory,
+                        1L);
+        byte[] expected = "last".getBytes(StandardCharsets.UTF_8);
+        InternalMap duplicateKeys =
+                duplicateMap(
+                        new Object[] {new byte[] {1}, new byte[] {1}},
+                        new Object[] {
+                            Blob.fromData("overridden".getBytes(StandardCharsets.UTF_8)),
+                            Blob.fromData(expected)
+                        });
+
+        InternalMap result =
+                externalizer.externalize(RowKind.INSERT, GenericRow.of(duplicateKeys)).getMap(0);
+
+        assertThat(result.size()).isEqualTo(1);
+        assertThat(result.keyArray().getBinary(0)).isEqualTo(new byte[] {1});
+        assertThat(result.valueArray().getBlob(0).toData()).isEqualTo(expected);
+        assertThat(fileIO.listStatus(bucketPath))
+                .singleElement()
+                .extracting(status -> status.getPath().getName())
+                .asString()
+                .endsWith(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
+    }
+
+    @Test
+    void testDuplicateBinaryMapKeyUsesLastNullWithoutWritingBlob() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path bucketPath = new Path(tempDir.resolve("bucket-0").toUri());
+        fileIO.mkdirs(bucketPath);
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        bucketPath, "avro", "data-", "changelog-", false, null, null);
+        PrimaryKeyBlobExternalizer externalizer =
+                newExternalizer(
+                        fileIO,
+                        RowType.of(DataTypes.MAP(DataTypes.VARBINARY(8), DataTypes.BLOB())),
+                        Collections.singleton("f0"),
+                        pathFactory,
+                        1024L);
+        InternalMap duplicateKeys =
+                duplicateMap(
+                        new Object[] {new byte[] {1}, new byte[] {1}},
+                        new Object[] {
+                            Blob.fromData("overridden".getBytes(StandardCharsets.UTF_8)), null
+                        });
+
+        InternalMap result =
+                externalizer.externalize(RowKind.INSERT, GenericRow.of(duplicateKeys)).getMap(0);
+
+        assertThat(result.size()).isEqualTo(1);
+        assertThat(result.keyArray().getBinary(0)).isEqualTo(new byte[] {1});
         assertThat(result.valueArray().isNullAt(0)).isTrue();
         assertThat(fileIO.listStatus(bucketPath)).isEmpty();
     }
@@ -631,5 +670,24 @@ class PrimaryKeyBlobExternalizerTest {
                 pathFactory,
                 targetFileSize,
                 BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+    }
+
+    private static InternalMap duplicateMap(Object[] keys, Object[] values) {
+        return new InternalMap() {
+            @Override
+            public int size() {
+                return keys.length;
+            }
+
+            @Override
+            public InternalArray keyArray() {
+                return new GenericArray(keys);
+            }
+
+            @Override
+            public InternalArray valueArray() {
+                return new GenericArray(values);
+            }
+        };
     }
 }

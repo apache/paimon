@@ -304,6 +304,56 @@ class PrimaryKeyManagedBlobStoreTest {
     }
 
     @Test
+    void testExternalizeAndReadDuplicateBinaryKeyBlobMap() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        TestFileStore store =
+                createStore(fileIO, "payloads", DataTypes.MAP(DataTypes.BYTES(), DataTypes.BLOB()));
+        byte[] expected = "last-map-payload".getBytes(StandardCharsets.UTF_8);
+        InternalMap input =
+                new InternalMap() {
+                    @Override
+                    public int size() {
+                        return 2;
+                    }
+
+                    @Override
+                    public InternalArray keyArray() {
+                        return new GenericArray(new Object[] {new byte[] {1}, new byte[] {1}});
+                    }
+
+                    @Override
+                    public InternalArray valueArray() {
+                        return new GenericArray(
+                                new Object[] {
+                                    Blob.fromData(
+                                            "overridden-map-payload"
+                                                    .getBytes(StandardCharsets.UTF_8)),
+                                    Blob.fromData(expected)
+                                });
+                    }
+                };
+
+        store.commitData(
+                Collections.singletonList(
+                        new KeyValue()
+                                .replace(
+                                        GenericRow.of(1), RowKind.INSERT, GenericRow.of(1, input))),
+                ignored -> BinaryRow.EMPTY_ROW,
+                ignored -> 0);
+
+        ManifestEntry entry = store.newScan().plan().files().get(0);
+        assertThat(references(fileIO, store, entry)).hasSize(1);
+        InternalMap result =
+                store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId())
+                        .get(0)
+                        .value()
+                        .getMap(1);
+        assertThat(result.size()).isOne();
+        assertThat(result.keyArray().getBinary(0)).isEqualTo(new byte[] {1});
+        assertThat(result.valueArray().getBlob(0).toData()).isEqualTo(expected);
+    }
+
+    @Test
     void testCompactionRebuildsExactBlobReferences() throws Exception {
         FileIO fileIO = LocalFileIO.create();
         TestFileStore store = createStore(fileIO);
