@@ -17,10 +17,13 @@
 
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.utils.range import Range
 
 
 def _has_native_planner():
@@ -29,6 +32,14 @@ def _has_native_planner():
     except Exception:
         return False
     return hasattr(PaimonCatalog, 'get_table') and hasattr(Split, 'serialize')
+
+
+def _has_native_row_ranges():
+    try:
+        from pypaimon_rust.datafusion import ReadBuilder
+    except ImportError:
+        return False
+    return hasattr(ReadBuilder, 'with_row_ranges')
 
 
 @unittest.skipUnless(_has_native_planner(),
@@ -178,6 +189,46 @@ class NativePlanIntegrationTest(unittest.TestCase):
             for split in blob_plan.splits()
             for data_file in split.files
         ))
+
+    @unittest.skipUnless(_has_native_row_ranges(),
+                         "pypaimon_rust row-range API not installed")
+    def test_data_evolution_global_index_row_ranges(self):
+        self.cat.create_table('default.de_range_t', Schema.from_pyarrow_schema(
+            self.schema, options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }), False)
+        self._write('de_range_t', [
+            {'k': 1, 'v': 'a'},
+            {'k': 2, 'v': 'b'},
+            {'k': 3, 'v': 'c'},
+        ])
+        table = self.cat.get_table('default.de_range_t').copy(
+            {'scan.native-plan.enabled': 'true'})
+        builder = table.new_read_builder()
+        scan = builder.new_scan().with_global_index_result(
+            GlobalIndexResult.from_range(Range(1, 1)))
+
+        self.assertTrue(scan._native_plan_supported())
+        with patch.object(
+                scan.file_scanner, 'scan', side_effect=AssertionError("fallback")):
+            plan = scan.plan()
+        rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+
+        self.assertEqual(rows, [{'k': 2, 'v': 'b'}])
+        self.assertEqual(
+            [(range_.from_, range_.to)
+             for range_ in plan.splits()[0].row_ranges()],
+            [(1, 1)],
+        )
+
+        empty_scan = builder.new_scan().with_global_index_result(
+            GlobalIndexResult.create_empty())
+        with patch.object(
+                empty_scan.file_scanner, 'scan',
+                side_effect=AssertionError("fallback")):
+            empty_plan = empty_scan.plan()
+        self.assertEqual(empty_plan.splits(), [])
 
     def test_filter_is_pushed_to_native_plan(self):
         options = {

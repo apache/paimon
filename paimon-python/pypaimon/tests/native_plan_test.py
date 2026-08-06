@@ -28,6 +28,8 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.read.native_plan import (
     _catalog_options,
     _predicate_to_native,
@@ -38,6 +40,7 @@ from pypaimon.read.native_plan import (
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.table_scan import TableScan
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.utils.range import Range
 
 
 def _scan(native_enabled, file_scanner):
@@ -121,7 +124,8 @@ class NativePlanTest(unittest.TestCase):
             plan = scan.plan()
 
         np.assert_called_once_with(
-            scan.table, predicate=None, limit=None, projection=None)
+            scan.table, predicate=None, limit=None, projection=None,
+            row_ranges=None)
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [keep])
 
@@ -172,11 +176,87 @@ class NativePlanTest(unittest.TestCase):
             predicate=scan.predicate,
             limit=5,
             projection=['k', 'dt'],
+            row_ranges=None,
         )
 
+    def test_plan_forwards_global_index_row_ranges(self):
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        fs.data_evolution = True
+        fs._global_index_result = GlobalIndexResult.from_ranges([
+            Range(1, 2), Range(5, 5)])
+        split = Mock(partition=Mock(values=[]), snapshot_id=3)
+
+        with patch('pypaimon.read.native_plan.native_plan', return_value=[split]) as np:
+            plan = scan.plan()
+
+        np.assert_called_once_with(
+            scan.table,
+            predicate=None,
+            limit=None,
+            projection=None,
+            row_ranges=[(1, 2), (5, 5)],
+        )
+        fs.scan.assert_not_called()
+        self.assertEqual(plan.splits(), [split])
+
+    def test_empty_global_index_result_does_not_fall_back(self):
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        fs.data_evolution = True
+        fs._global_index_result = GlobalIndexResult.create_empty()
+
+        with patch('pypaimon.read.native_plan.native_plan', return_value=[]) as np:
+            plan = scan.plan()
+
+        np.assert_called_once_with(
+            scan.table,
+            predicate=None,
+            limit=None,
+            projection=None,
+            row_ranges=[],
+        )
+        fs.scan.assert_not_called()
+        self.assertEqual(plan.splits(), [])
+
+    def test_scored_global_index_result_falls_back(self):
+        fs = Mock(partition_key_predicate=None)
+        sentinel = object()
+        fs.scan.return_value = sentinel
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        fs.data_evolution = True
+        bitmap = GlobalIndexResult.from_range(Range(1, 1)).results()
+        fs._global_index_result = ScoredGlobalIndexResult.create(
+            bitmap, lambda _: 1.0)
+
+        with patch('pypaimon.read.native_plan.native_plan') as np:
+            self.assertIs(scan.plan(), sentinel)
+
+        np.assert_not_called()
+        fs.scan.assert_called_once_with()
+
+    def test_global_index_row_ranges_require_data_evolution_append_table(self):
+        result = GlobalIndexResult.from_range(Range(1, 1))
+
+        for data_evolution, primary_key in ((False, False), (True, True)):
+            with self.subTest(
+                    data_evolution=data_evolution, primary_key=primary_key):
+                fs = Mock(partition_key_predicate=None)
+                fs.scan.return_value = fallback = object()
+                scan = _scan(native_enabled=True, file_scanner=fs)
+                fs.data_evolution = data_evolution
+                fs._global_index_result = result
+                scan.table.is_primary_key_table = primary_key
+
+                with patch('pypaimon.read.native_plan.native_plan') as np:
+                    self.assertIs(scan.plan(), fallback)
+
+                np.assert_not_called()
+                fs.scan.assert_called_once_with()
+
     def test_plan_falls_back_when_scan_is_not_plain(self):
-        # Native planning does not carry shard/slice, global-index, row ranges,
-        # or incremental scans -> must fall back to the file scanner.
+        # Native planning does not carry shard/slice, explicit row ranges,
+        # arbitrary global-index results, or incremental scans.
         def check(setup):
             fs = Mock(partition_key_predicate=None)
             sentinel = object()
@@ -310,7 +390,8 @@ class NativePlanTest(unittest.TestCase):
         self.assertIs(plan, fallback_plan)
         self.assertIs(stats, fallback_stats)
         np.assert_called_once_with(
-            scan.table, predicate=None, limit=None, projection=None)
+            scan.table, predicate=None, limit=None, projection=None,
+            row_ranges=None)
         fs.scan_with_stats.assert_called_once_with()
         fs.scan.assert_not_called()
 
@@ -472,8 +553,9 @@ class NativePlanTest(unittest.TestCase):
         split = Mock()
         split.serialize.return_value = b'bytes'
         rt = Mock()
-        rt.new_read_builder.return_value.new_scan.return_value.plan.return_value \
-            .splits.return_value = [split]
+        builder = rt.new_read_builder.return_value
+        builder.with_row_ranges.return_value = builder
+        builder.new_scan.return_value.plan.return_value.splits.return_value = [split]
         catalog = Mock()
         catalog.get_table.return_value = rt
 
@@ -488,13 +570,14 @@ class NativePlanTest(unittest.TestCase):
                 patch('pypaimon.read.native_plan._catalog_options', return_value={}), \
                 patch('pypaimon.read.native_plan.deserialize_split_v1',
                       return_value='decoded') as des:
-            result = native_plan(table)
+            result = native_plan(table, row_ranges=[(1, 2)])
 
         self.assertEqual(result, ['decoded'])
         rt.new_read_builder.assert_called_once_with({
             CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): '1024',
             CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): '128',
         })
+        builder.with_row_ranges.assert_called_once_with([(1, 2)])
         des.assert_called_once_with(b'bytes', [], kfields)
 
     def test_native_plan_requires_split_api(self):
@@ -518,7 +601,6 @@ class NativePlanTest(unittest.TestCase):
                         {'pypaimon_rust': fake_mod, 'pypaimon_rust.datafusion': fake_df}):
                     with self.assertRaisesRegex(RuntimeError, '0.3.0'):
                         native_plan(Mock())
-
 
 if __name__ == '__main__':
     unittest.main()
