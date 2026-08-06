@@ -259,7 +259,7 @@ public class TimeTravelUtil {
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> startFiles,
             Snapshot end,
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> endFiles) {
-        if (schema.primaryKeys().isEmpty() && schema.numBuckets() == -1) {
+        if (schema.numBuckets() == -1) {
             return;
         }
 
