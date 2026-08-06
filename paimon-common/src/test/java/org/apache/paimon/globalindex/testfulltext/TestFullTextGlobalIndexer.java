@@ -58,6 +58,7 @@ public class TestFullTextGlobalIndexer implements GlobalIndexer {
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
+            long totalRowCount,
             ExecutorService executor) {
         checkArgument(files.size() == 1, "Expected exactly one index file per shard");
         return new TestFullTextGlobalIndexReader(fileReader, files.get(0));

@@ -68,6 +68,7 @@ class ESIndexVectorMetricTest {
                 indexer.createReader(
                         meta -> null,
                         List.of(vectorFile(tempDir, "persisted-l2", "euclidean")),
+                        1,
                         null);
         try {
             assertThat(((ESIndexGlobalIndexReader) reader).primaryVectorMetric()).isEqualTo("l2");
@@ -82,13 +83,14 @@ class ESIndexVectorMetricTest {
         ESIndexGlobalIndexer indexer = indexer("cosine");
         GlobalIndexReader first =
                 indexer.createReader(
-                        meta -> null, List.of(vectorFile(tempDir, "first", "euclidean")), null);
+                        meta -> null, List.of(vectorFile(tempDir, "first", "euclidean")), 1, null);
         try {
             assertThatThrownBy(
                             () ->
                                     indexer.createReader(
                                             meta -> null,
                                             List.of(vectorFile(tempDir, "second", "cosine")),
+                                            1,
                                             null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("different vector metrics")

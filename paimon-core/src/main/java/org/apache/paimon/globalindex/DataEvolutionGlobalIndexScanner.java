@@ -442,7 +442,10 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                 () ->
                                         new OffsetGlobalIndexReader(
                                                 globalIndexer.createReader(
-                                                        indexFileReadWrite, globalMetas, executor),
+                                                        indexFileReadWrite,
+                                                        globalMetas,
+                                                        range.count(),
+                                                        executor),
                                                 range.from,
                                                 range.to),
                                 executor));

@@ -254,7 +254,11 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                             meta.indexMeta()));
         }
         GlobalIndexReader reader =
-                globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
+                globalIndexer.createReader(
+                        indexFileReader,
+                        indexIOMetaList,
+                        rowRangeEnd - rowRangeStart + 1,
+                        executor);
         FullTextSearch fullTextSearch =
                 new FullTextSearch(
                                 textColumn.name(),

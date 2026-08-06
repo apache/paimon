@@ -81,6 +81,7 @@ class TestMultiFieldVectorGlobalIndexer implements VectorGlobalIndexer {
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
+            long totalRowCount,
             ExecutorService executor) {
         List<GlobalIndexIOMeta> vectorFiles = new ArrayList<>();
         List<GlobalIndexIOMeta> scalarFiles = new ArrayList<>();
@@ -92,8 +93,8 @@ class TestMultiFieldVectorGlobalIndexer implements VectorGlobalIndexer {
         checkArgument(
                 scalarFiles.size() == 1, "Expected one scalar companion file, got: %s", files);
         return new MultiColumnReader(
-                vectorIndexer.createReader(fileReader, vectorFiles, executor),
-                scalarIndexer.createReader(fileReader, scalarFiles, executor));
+                vectorIndexer.createReader(fileReader, vectorFiles, totalRowCount, executor),
+                scalarIndexer.createReader(fileReader, scalarFiles, totalRowCount, executor));
     }
 
     @Override

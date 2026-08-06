@@ -189,7 +189,7 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
                     indexFileHandler.pkFullTextIndex(
                             split.dataSplit().partition(), split.dataSplit().bucket());
             return new PrimaryKeyFullTextBucketSearch(
-                    payload -> {
+                    (payload, totalRowCount) -> {
                         GlobalIndexMeta meta = checkNotNull(payload.globalIndexMeta());
                         GlobalIndexIOMeta ioMeta =
                                 new GlobalIndexIOMeta(
@@ -198,7 +198,10 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
                                         meta.indexMeta());
                         GlobalIndexReader reader =
                                 indexer.createReader(
-                                        archiveReader, Collections.singletonList(ioMeta), executor);
+                                        archiveReader,
+                                        Collections.singletonList(ioMeta),
+                                        totalRowCount,
+                                        executor);
                         return reader;
                     });
         }

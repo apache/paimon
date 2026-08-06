@@ -51,21 +51,12 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             GlobalIndexFileReader fileReader,
             CacheManager cacheManager,
             long fallbackScanMaxSize,
+            long totalRowCount,
             ExecutorService executor) {
-        super(files, keySerializer, fallbackScanMaxSize, executor);
+        super(files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
-    }
-
-    @Override
-    public boolean supportsRangeComplement() {
-        return true;
-    }
-
-    @Override
-    protected Optional<GlobalIndexResult> visitIsNotNull(BTreeIndexReader reader) {
-        return reader.visitIsNotNull();
     }
 
     @Override
@@ -106,11 +97,6 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitNotEqual(BTreeIndexReader reader, Object literal) {
-        return reader.visitNotEqual(literal);
-    }
-
-    @Override
     protected Optional<GlobalIndexResult> visitLessOrEqual(
             BTreeIndexReader reader, Object literal) {
         return reader.visitLessOrEqual(literal);
@@ -130,12 +116,6 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     @Override
     protected Optional<GlobalIndexResult> visitIn(BTreeIndexReader reader, List<Object> literals) {
         return reader.visitIn(literals);
-    }
-
-    @Override
-    protected Optional<GlobalIndexResult> visitNotIn(
-            BTreeIndexReader reader, List<Object> literals) {
-        return reader.visitNotIn(literals);
     }
 
     @Override

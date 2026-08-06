@@ -130,7 +130,8 @@ public class BTreeThreadSafetyTest {
         executor = Executors.newFixedThreadPool(2);
         List<GlobalIndexIOMeta> metas = writeMultipleFiles();
 
-        try (GlobalIndexReader reader = globalIndexer.createReader(fileReader, metas, executor)) {
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(fileReader, metas, DATA_NUM, executor)) {
             FieldRef ref = new FieldRef(1, "id", new IntType());
             Optional<GlobalIndexResult> result =
                     reader.visitIsNotNull(ref).get(10, TimeUnit.SECONDS);
@@ -144,7 +145,8 @@ public class BTreeThreadSafetyTest {
         executor = Executors.newFixedThreadPool(8);
         List<GlobalIndexIOMeta> metas = writeMultipleFiles();
 
-        try (GlobalIndexReader reader = globalIndexer.createReader(fileReader, metas, executor)) {
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(fileReader, metas, DATA_NUM, executor)) {
             FieldRef ref = new FieldRef(1, "id", new IntType());
             int numThreads = 32;
             CountDownLatch latch = new CountDownLatch(numThreads);
@@ -187,7 +189,8 @@ public class BTreeThreadSafetyTest {
         executor = Executors.newFixedThreadPool(4);
         List<GlobalIndexIOMeta> metas = writeMultipleFiles();
 
-        try (GlobalIndexReader reader = globalIndexer.createReader(fileReader, metas, executor)) {
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(fileReader, metas, DATA_NUM, executor)) {
             FieldRef ref = new FieldRef(1, "id", new IntType());
             int numThreads = 24;
             CountDownLatch latch = new CountDownLatch(numThreads);
@@ -274,7 +277,7 @@ public class BTreeThreadSafetyTest {
                 };
 
         try (GlobalIndexReader reader =
-                globalIndexer.createReader(countingFileReader, metas, executor)) {
+                globalIndexer.createReader(countingFileReader, metas, DATA_NUM, executor)) {
             FieldRef ref = new FieldRef(1, "id", new IntType());
             int numThreads = 32;
             CountDownLatch latch = new CountDownLatch(numThreads);
@@ -326,7 +329,7 @@ public class BTreeThreadSafetyTest {
                 };
 
         try (GlobalIndexReader reader =
-                globalIndexer.createReader(trackingFileReader, metas, executor)) {
+                globalIndexer.createReader(trackingFileReader, metas, DATA_NUM, executor)) {
             FieldRef ref = new FieldRef(1, "id", new IntType());
 
             // Query for value 5 — should only need to open the first file (keys 0-999)

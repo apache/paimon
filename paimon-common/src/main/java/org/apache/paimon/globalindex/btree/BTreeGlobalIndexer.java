@@ -98,6 +98,7 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
+            long totalRowCount,
             ExecutorService executor) {
         return new LazyFilteredBTreeReader(
                 files,
@@ -105,6 +106,7 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
                 fileReader,
                 cacheManager.get(),
                 fallbackScanMaxSize,
+                totalRowCount,
                 executor);
     }
 }

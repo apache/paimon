@@ -223,7 +223,8 @@ class PrimaryKeySortedIndexBatchScanTest {
                         table,
                         snapshotReader,
                         mock(TableQueryAuth.class),
-                        (ignoredFile, ignoredDefinition, ignoredPayloads) -> reader);
+                        (ignoredFile, ignoredDefinition, ignoredPayloads, ignoredTotalRowCount) ->
+                                reader);
         scan.withFilter(predicate);
         return new ScanFixture(dataFile, scan);
     }

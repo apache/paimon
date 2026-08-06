@@ -258,7 +258,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         FileIO fileIO = table.fileIO();
         GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
         GlobalIndexReader reader =
-                globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
+                globalIndexer.createReader(
+                        indexFileReader,
+                        indexIOMetaList,
+                        rowRangeEnd - rowRangeStart + 1,
+                        executor);
         VectorSearch vectorSearch =
                 new VectorSearch(vector, searchLimit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
@@ -287,7 +291,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         FileIO fileIO = table.fileIO();
         GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
         GlobalIndexReader reader =
-                globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
+                globalIndexer.createReader(
+                        indexFileReader,
+                        indexIOMetaList,
+                        rowRangeEnd - rowRangeStart + 1,
+                        executor);
         BatchVectorSearch batchVectorSearch =
                 new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
