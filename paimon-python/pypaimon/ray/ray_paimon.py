@@ -329,7 +329,8 @@ def write_paimon(
                 "commit_interval_seconds is required for incremental writes.")
         if hash_fixed_precluster not in ("auto", "map_groups"):
             raise ValueError(
-                "incremental write_paimon requires HASH_FIXED grouping.")
+                "incremental write_paimon always groups HASH_FIXED updates; "
+                "hash_fixed_precluster must be 'auto' or 'map_groups'.")
         from pypaimon.ray.incremental_write import incremental_write_paimon
 
         return incremental_write_paimon(

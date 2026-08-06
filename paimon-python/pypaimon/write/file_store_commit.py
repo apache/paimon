@@ -564,7 +564,13 @@ class FileStoreCommit:
                          hash_index_base_snapshot=None,
                          commit_result_may_be_uncertain: bool = False) -> CommitResult:
         start_millis = int(time.time() * 1000)
-        if self._is_duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
+        duplicate = self._find_duplicate_commit(
+            retry_result, latest_snapshot, commit_identifier, commit_kind)
+        if duplicate is not None:
+            # Overwrite entries may be replanned during retry.
+            if commit_kind == "APPEND":
+                self._notify_commit_callbacks(
+                    duplicate, commit_entries, commit_identifier)
             return SuccessResult()
 
         latest_snapshot_id = latest_snapshot.id if latest_snapshot else 0
@@ -832,14 +838,8 @@ class FileStoreCommit:
             commit_kind,
         )
 
-        if self.commit_callbacks:
-            context = CommitCallbackContext(
-                snapshot=snapshot_data,
-                commit_entries=commit_entries,
-                identifier=commit_identifier,
-            )
-            for callback in self.commit_callbacks:
-                callback.call(context)
+        self._notify_commit_callbacks(
+            snapshot_data, commit_entries, commit_identifier)
 
         return SuccessResult()
 
@@ -890,7 +890,9 @@ class FileStoreCommit:
         return self.manifest_file_manager.rolling_write(
             commit_entries, self.manifest_target_size, base_name)
 
-    def _is_duplicate_commit(self, retry_result, latest_snapshot, commit_identifier, commit_kind) -> bool:
+    def _find_duplicate_commit(
+            self, retry_result, latest_snapshot, commit_identifier,
+            commit_kind):
         if retry_result is not None and latest_snapshot is not None:
             start_check_snapshot_id = 1  # Snapshot.FIRST_SNAPSHOT_ID
             if retry_result.latest_snapshot is not None:
@@ -905,8 +907,20 @@ class FileStoreCommit:
                         f"Commit already completed (snapshot {snapshot_id}), "
                         f"user: {self.commit_user}, identifier: {commit_identifier}"
                     )
-                    return True
-        return False
+                    return snapshot
+        return None
+
+    def _notify_commit_callbacks(
+            self, snapshot, commit_entries, commit_identifier):
+        if not self.commit_callbacks:
+            return
+        context = CommitCallbackContext(
+            snapshot=snapshot,
+            commit_entries=commit_entries,
+            identifier=commit_identifier,
+        )
+        for callback in self.commit_callbacks:
+            callback.call(context)
 
     def _create_dynamic_partition_filter(self, commit_messages: List[CommitMessage]):
         """Build a partition filter from the unique partitions present in commit_messages."""

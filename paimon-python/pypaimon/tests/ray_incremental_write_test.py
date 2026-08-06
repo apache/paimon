@@ -288,12 +288,22 @@ class RayIncrementalWriteTest(unittest.TestCase):
               "commit_interval_seconds": 10,
               "update_cols": ["feature"],
               "overwrite": True}, "cannot overwrite"),
+            ({"commit_mode": "incremental",
+              "commit_interval_seconds": 10,
+              "update_cols": ["feature"],
+              "hash_fixed_precluster": "off"}, "always groups HASH_FIXED"),
         ]
         for options, error in cases:
             with self.subTest(options=options):
                 with self.assertRaisesRegex(ValueError, error):
                     write_paimon(
                         updates, target, self.catalog_options, **options)
+
+    def test_requires_ray_windowing_api(self):
+        from pypaimon.ray.incremental_write import _dataset_windows
+
+        with self.assertRaisesRegex(RuntimeError, "Ray 2.33"):
+            next(_dataset_windows(object(), 1))
 
     def test_requires_partial_update_target(self):
         target = self._create_table(

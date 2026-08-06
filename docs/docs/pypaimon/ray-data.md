@@ -296,8 +296,9 @@ The target must be a fixed-bucket primary-key table using
 `merge-engine=partial-update`; source rows must contain the primary key and
 updated columns. Completed commits remain visible after failure; retrying
 reruns the Ray Dataset. The interval is a target and may be exceeded while a
-Ray block is still running. Concurrent partial updates are allowed, but updates
-to the same field have no deterministic winner. Schema changes fail the write.
+window is still running. This mode requires Ray 2.33 or later. Concurrent
+partial updates are allowed, but updates to the same field have no deterministic
+winner. Schema changes fail the write.
 
 ### `TableWrite.write_ray()` (lower-level)
 

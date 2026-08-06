@@ -674,7 +674,8 @@ def _write_primary_key_groups(
         overwrite=overwrite,
         static_partition=static_partition,
     )
-    coordinator.on_write_start()
+    if on_group_result is None:
+        coordinator.on_write_start()
     _consume_write_results(
         messages, coordinator, message_col, error_col, on_group_result
     )

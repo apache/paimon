@@ -59,7 +59,6 @@ def _write_dataset_periodically(
 
     committer = _PeriodicDatasetCommitter(
         table,
-        table.snapshot_manager().get_latest_snapshot(),
         table.table_schema.id,
     )
     windows = _dataset_windows(dataset, commit_interval_seconds)
@@ -92,8 +91,14 @@ def _dataset_windows(dataset, interval):
     """Yield time windows without copying Ray blocks through the driver."""
     import ray.data
 
+    iter_bundles = getattr(dataset, "iter_internal_ref_bundles", None)
+    from_refs = getattr(ray.data, "from_arrow_refs", None)
+    if iter_bundles is None or from_refs is None:
+        raise RuntimeError(
+            "incremental write_paimon requires Ray 2.33 or later.")
+
     bundles = []
-    source = dataset.iter_internal_ref_bundles()
+    source = iter_bundles()
     last_window = time.monotonic()
     try:
         for bundle in source:
@@ -102,7 +107,7 @@ def _dataset_windows(dataset, interval):
                 continue
             current, bundles = bundles, []
             try:
-                yield ray.data.from_arrow_refs([
+                yield from_refs([
                     ref for item in current for ref in item.block_refs])
             finally:
                 for item in current:
@@ -111,7 +116,7 @@ def _dataset_windows(dataset, interval):
         if bundles:
             current, bundles = bundles, []
             try:
-                yield ray.data.from_arrow_refs([
+                yield from_refs([
                     ref for item in current for ref in item.block_refs])
             finally:
                 for item in current:
@@ -126,13 +131,13 @@ def _dataset_windows(dataset, interval):
 
 class _PeriodicDatasetCommitter:
 
-    def __init__(self, table, base_snapshot, schema_id):
+    def __init__(self, table, schema_id):
         self._table = table
-        self._base_snapshot = base_snapshot
         self._schema_id = schema_id
         builder = table.new_stream_write_builder()
-        self._commit_user = builder.commit_user
         self._commit = builder.new_commit()
+        self._callback = _SnapshotCallback()
+        self._commit.add_commit_callback(self._callback)
         self._pending = []
         self._next_commit_id = 1
 
@@ -146,14 +151,11 @@ class _PeriodicDatasetCommitter:
         messages = self._pending
         self._pending = []
         commit_id = self._next_commit_id
-        base_id = self._base_snapshot.id if self._base_snapshot else 0
         self._commit.protect_from_schema_changes(self._schema_id)
         self._commit.commit(messages, commit_id)
-        committed = _find_committed_snapshot(
-            self._table, self._commit_user, commit_id, base_id)
+        committed = self._callback.pop(commit_id)
         if committed is None:
             raise RuntimeError("Committed periodic write snapshot is missing.")
-        self._base_snapshot = committed
         _validate_schema(self._table, self._schema_id)
         self._next_commit_id += 1
 
@@ -171,18 +173,19 @@ class _PeriodicDatasetCommitter:
             logger.warning("Failed to close periodic write commit.", exc_info=True)
 
 
-def _find_committed_snapshot(table, commit_user, commit_id, after_id):
-    manager = table.snapshot_manager()
-    latest = manager.get_latest_snapshot()
-    if latest is None:
-        return None
-    for snapshot_id in range(latest.id, after_id, -1):
-        snapshot = manager.get_snapshot_by_id(snapshot_id)
-        if (snapshot is not None
-                and snapshot.commit_user == commit_user
-                and snapshot.commit_identifier == commit_id):
-            return snapshot
-    return None
+class _SnapshotCallback:
+
+    def __init__(self):
+        self._snapshots = {}
+
+    def call(self, context):
+        self._snapshots[context.identifier] = context.snapshot
+
+    def pop(self, commit_id):
+        return self._snapshots.pop(commit_id, None)
+
+    def close(self):
+        pass
 
 
 def _abort_messages(table, messages):
