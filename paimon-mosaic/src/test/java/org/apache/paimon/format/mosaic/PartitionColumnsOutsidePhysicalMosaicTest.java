@@ -37,7 +37,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -47,12 +46,14 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -63,6 +64,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Integration tests for reading manifest partition columns when the physical Mosaic file contains
@@ -81,6 +83,11 @@ class PartitionColumnsOutsidePhysicalMosaicTest {
 
     private Catalog catalog;
     private FileStoreTable table;
+
+    @BeforeAll
+    static void checkNativeLibrary() {
+        assumeTrue(isNativeAvailable(), "Mosaic native library not available");
+    }
 
     @BeforeEach
     void setUp() throws Exception {
@@ -101,113 +108,71 @@ class PartitionColumnsOutsidePhysicalMosaicTest {
     }
 
     @Test
-    void testDefaultReadRestoresAllManifestPartitionColumns() throws Exception {
-        ReadBuilder readBuilder = table.newReadBuilder();
-        Split split = planSingleSplit(readBuilder);
+    void testReadPhysicalAndManifestColumns() throws Exception {
+        assertRows(
+                table.newReadBuilder(),
+                Arrays.asList("payload", "vin", "dt", "hh", "rpt_dt"),
+                Collections.singletonList(row(PAYLOAD, VIN, DT, HH, RPT_DT)));
 
-        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split)) {
-            RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
-            assertThat(batch).isNotNull();
+        assertRows(
+                table.newReadBuilder().withReadType(table.rowType().project(BUSINESS_COLUMNS)),
+                BUSINESS_COLUMNS,
+                Collections.singletonList(row(PAYLOAD, VIN)));
 
-            InternalRow row = batch.next();
-            assertThat(row).isNotNull();
-            assertThat(row.getFieldCount()).isEqualTo(5);
-            assertThat(row.getString(0).toString()).isEqualTo(PAYLOAD);
-            assertThat(row.getString(1).toString()).isEqualTo(VIN);
-            assertThat(row.getString(2).toString()).isEqualTo(DT);
-            assertThat(row.getString(3).toString()).isEqualTo(HH);
-            assertThat(row.getString(4).toString()).isEqualTo(RPT_DT);
-            assertThat(batch.next()).isNull();
-            batch.releaseBatch();
-        }
+        assertRows(
+                table.newReadBuilder().withProjection(new int[] {4, 2}),
+                Arrays.asList("rpt_dt", "dt"),
+                Collections.singletonList(row(RPT_DT, DT)));
     }
 
     @Test
-    void testBusinessProjectionReadsPhysicalColumns() throws Exception {
-        assertBusinessOnlyRead(table.newReadBuilder().withProjection(new int[] {0, 1}));
-    }
-
-    @Test
-    void testBusinessReadTypeReadsPhysicalColumns() throws Exception {
-        RowType businessType = table.rowType().project(BUSINESS_COLUMNS);
-        assertBusinessOnlyRead(table.newReadBuilder().withReadType(businessType));
-    }
-
-    @Test
-    void testPartitionOnlyProjectionKeepsRequestedOrder() throws Exception {
-        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {4, 2});
-        assertThat(readBuilder.readType().getFieldNames()).containsExactly("rpt_dt", "dt");
-        Split split = planSingleSplit(readBuilder);
-
-        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split)) {
-            RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
-            assertThat(batch).isNotNull();
-
-            InternalRow row = batch.next();
-            assertThat(row).isNotNull();
-            assertThat(row.getFieldCount()).isEqualTo(2);
-            assertThat(row.getString(0).toString()).isEqualTo(RPT_DT);
-            assertThat(row.getString(1).toString()).isEqualTo(DT);
-            assertThat(batch.next()).isNull();
-            batch.releaseBatch();
-        }
-    }
-
-    @Test
-    void testExistingLazyReaderKeepsOriginalReadType() throws Exception {
+    void testReadTypeChangeAffectsOnlyFutureReaders() throws Exception {
         FileStoreTable trackingTable = createTable("row_tracking", true);
         writePhysicalBusinessColumns(trackingTable, 2);
 
-        List<DataSplit> splits = trackingTable.newSnapshotReader().read().dataSplits();
-        assertThat(splits).hasSize(1);
-        DataSplit split = splits.get(0);
-        assertThat(split.dataFiles()).hasSize(2);
-
-        RawFileSplitRead read = (RawFileSplitRead) trackingTable.store().newRead();
+        DataSplit split = planSingleSplit(trackingTable.newReadBuilder(), 2);
+        InnerTableRead read = trackingTable.newRead();
         RowType trackingType = SpecialFields.rowTypeWithRowTracking(trackingTable.rowType());
-        read.withReadType(trackingType.project("payload", SpecialFields.ROW_ID.name()));
+        read.withReadType(trackingType.project("payload", "dt", SpecialFields.ROW_ID.name()));
 
         try (RecordReader<InternalRow> existingReader = read.createReader(split)) {
             read.withReadType(trackingTable.rowType().project("vin"));
 
-            assertThat(readFirstStrings(existingReader, 2))
-                    .containsExactlyInAnyOrder("payload-1", "payload-2");
+            assertThat(readRows(existingReader, 3, 2))
+                    .containsExactlyInAnyOrder(row(PAYLOAD, DT), row("payload-2", DT));
         }
 
         try (RecordReader<InternalRow> updatedReader = read.createReader(split)) {
-            assertThat(readFirstStrings(updatedReader, 1))
-                    .containsExactlyInAnyOrder("VIN-0001", "VIN-0002");
+            assertThat(readRows(updatedReader, 1, 1))
+                    .containsExactlyInAnyOrder(row(VIN), row("VIN-0002"));
         }
     }
 
-    private void assertBusinessOnlyRead(ReadBuilder readBuilder) throws Exception {
+    private void assertRows(
+            ReadBuilder readBuilder, List<String> expectedFields, List<List<String>> expectedRows)
+            throws Exception {
         assertThat(readBuilder.readType().getFieldNames())
-                .containsExactlyElementsOf(BUSINESS_COLUMNS);
-        Split split = planSingleSplit(readBuilder);
+                .containsExactlyElementsOf(expectedFields);
+        DataSplit split = planSingleSplit(readBuilder, 1);
 
         try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split)) {
-            RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
-            assertThat(batch).isNotNull();
-
-            InternalRow row = batch.next();
-            assertThat(row).isNotNull();
-            assertThat(row.getFieldCount()).isEqualTo(2);
-            assertThat(row.getString(0).toString()).isEqualTo(PAYLOAD);
-            assertThat(row.getString(1).toString()).isEqualTo(VIN);
-            assertThat(batch.next()).isNull();
-            batch.releaseBatch();
+            assertThat(readRows(reader, expectedFields.size(), expectedFields.size()))
+                    .containsExactlyInAnyOrderElementsOf(expectedRows);
         }
     }
 
-    private Split planSingleSplit(ReadBuilder readBuilder) {
+    private DataSplit planSingleSplit(ReadBuilder readBuilder, int expectedFiles) {
         List<Split> splits = readBuilder.newScan().plan().splits();
         assertThat(splits).hasSize(1);
         assertThat(splits.get(0)).isInstanceOf(DataSplit.class);
 
         DataSplit dataSplit = (DataSplit) splits.get(0);
-        assertThat(dataSplit.dataFiles()).hasSize(1);
-        assertThat(dataSplit.dataFiles().get(0).writeCols())
-                .containsExactlyElementsOf(BUSINESS_COLUMNS);
+        assertThat(dataSplit.dataFiles())
+                .hasSize(expectedFiles)
+                .allSatisfy(
+                        file ->
+                                assertThat(file.writeCols())
+                                        .containsExactlyElementsOf(BUSINESS_COLUMNS));
         return dataSplit;
     }
 
@@ -234,22 +199,31 @@ class PartitionColumnsOutsidePhysicalMosaicTest {
         return (FileStoreTable) catalog.getTable(identifier);
     }
 
-    private List<String> readFirstStrings(RecordReader<InternalRow> reader, int expectedFieldCount)
+    private List<List<String>> readRows(
+            RecordReader<InternalRow> reader, int expectedFieldCount, int stringFieldCount)
             throws Exception {
-        List<String> values = new ArrayList<>();
+        List<List<String>> rows = new ArrayList<>();
         RecordReader.RecordIterator<InternalRow> batch;
         while ((batch = reader.readBatch()) != null) {
             try {
                 InternalRow row;
                 while ((row = batch.next()) != null) {
                     assertThat(row.getFieldCount()).isEqualTo(expectedFieldCount);
-                    values.add(row.getString(0).toString());
+                    List<String> values = new ArrayList<>();
+                    for (int i = 0; i < stringFieldCount; i++) {
+                        values.add(row.getString(i).toString());
+                    }
+                    rows.add(values);
                 }
             } finally {
                 batch.releaseBatch();
             }
         }
-        return values;
+        return rows;
+    }
+
+    private static List<String> row(String... values) {
+        return Arrays.asList(values);
     }
 
     private void writePhysicalBusinessColumns(FileStoreTable targetTable, int fileCount)
@@ -277,7 +251,7 @@ class PartitionColumnsOutsidePhysicalMosaicTest {
                 new MosaicFileFormat(
                         new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
         List<DataFileMeta> files = new ArrayList<>();
-        for (int i = 0; i < fileCount; i++) {
+        for (int i = 1; i <= fileCount; i++) {
             Path dataFile = pathFactory.newPath("data-copy-");
             fileIO.mkdirs(dataFile.getParent());
             try (FormatWriter writer =
@@ -285,9 +259,8 @@ class PartitionColumnsOutsidePhysicalMosaicTest {
                             .create(fileIO.newOutputStream(dataFile, false), "zstd")) {
                 writer.addElement(
                         GenericRow.of(
-                                BinaryString.fromString("payload-" + (i + 1)),
-                                BinaryString.fromString(
-                                        i == 0 ? VIN : String.format("VIN-%04d", i + 1))));
+                                BinaryString.fromString("payload-" + i),
+                                BinaryString.fromString(String.format("VIN-%04d", i))));
             }
 
             DataFileMeta meta =
@@ -306,7 +279,6 @@ class PartitionColumnsOutsidePhysicalMosaicTest {
                             null,
                             null,
                             BUSINESS_COLUMNS);
-            assertThat(meta.writeCols()).containsExactlyElementsOf(BUSINESS_COLUMNS);
             files.add(meta);
         }
 
@@ -319,6 +291,15 @@ class PartitionColumnsOutsidePhysicalMosaicTest {
                         CompactIncrement.emptyIncrement());
         try (BatchTableCommit commit = targetTable.newBatchWriteBuilder().newCommit()) {
             commit.commit(Collections.singletonList(message));
+        }
+    }
+
+    private static boolean isNativeAvailable() {
+        try {
+            Class.forName("org.apache.paimon.mosaic.NativeLib");
+            return true;
+        } catch (Throwable t) {
+            return false;
         }
     }
 }
