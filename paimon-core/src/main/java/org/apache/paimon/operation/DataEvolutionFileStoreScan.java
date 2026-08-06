@@ -40,7 +40,6 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.Triple;
 
 import javax.annotation.Nullable;
 
@@ -49,11 +48,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -70,8 +67,6 @@ import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
-
-    private static final int NO_STATS_FIELD_INDEX = -1;
 
     private boolean dropStats = false;
     @Nullable private RowType readType;
@@ -317,32 +312,31 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         int unresolvedFields = fieldsCount;
         for (int i = 0; i < metas.size(); i++) {
             DataFileMeta fileMeta = metas.get(i).file();
-            ProjectedFileSchema projectedFileSchema =
+            EvolutionStatsCache.ProjectedFileSchema projectedFileSchema =
                     evolutionStatsCache.get(scanTableSchema, fileMeta);
-            DataType[] statsFieldTypes = projectedFileSchema.statsFieldTypes();
-            Map<Integer, Integer> fieldIdToStatsIndex = projectedFileSchema.fieldIdToStatsIndex();
 
             for (int j = 0; j < fieldsCount; j++) {
                 if (rowOffsets[j] != -1) {
                     continue;
                 }
                 int targetFieldId = allFields[j];
-                Integer statsIndex = fieldIdToStatsIndex.get(targetFieldId);
-                if (statsIndex == null) {
+                EvolutionStatsCache.FileFieldStats fileFieldStats =
+                        projectedFileSchema.fieldStats(targetFieldId);
+                if (fileFieldStats == null) {
                     continue;
                 }
-                if (statsIndex == NO_STATS_FIELD_INDEX) {
+                if (!fileFieldStats.hasStats()) {
                     rowOffsets[j] = -2;
                     unresolvedFields--;
                     continue;
                 }
-                DataType fileType = statsFieldTypes[statsIndex];
+                DataType fileType = fileFieldStats.type();
                 if (!fileType.equalsIgnoreFieldId(targetTypes[j])) {
                     typeMismatchedFieldIds.add(targetFieldId);
                     continue;
                 }
                 rowOffsets[j] = i;
-                fieldOffsets[j] = statsIndex;
+                fieldOffsets[j] = fileFieldStats.index();
                 unresolvedFields--;
             }
             if (unresolvedFields == 0) {
@@ -371,73 +365,6 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         finalMax.setRows(max);
         finalNullCounts.setRows(nullCounts);
         return new EvolutionStats(groupRowCount, finalMin, finalMax, finalNullCounts);
-    }
-
-    @VisibleForTesting
-    static class EvolutionStatsCache {
-
-        private final Map<Triple<Long, List<String>, List<String>>, ProjectedFileSchema> cache =
-                new HashMap<>();
-
-        private ProjectedFileSchema get(
-                Function<Long, TableSchema> scanTableSchema, DataFileMeta fileMeta) {
-            Triple<Long, List<String>, List<String>> key =
-                    Triple.of(fileMeta.schemaId(), fileMeta.writeCols(), fileMeta.valueStatsCols());
-            return cache.computeIfAbsent(key, ignored -> projectFileSchema(scanTableSchema, key));
-        }
-
-        @VisibleForTesting
-        int size() {
-            return cache.size();
-        }
-
-        private static ProjectedFileSchema projectFileSchema(
-                Function<Long, TableSchema> scanTableSchema,
-                Triple<Long, List<String>, List<String>> key) {
-            TableSchema dataFileSchema = scanTableSchema.apply(key.f0).project(key.f1);
-            TableSchema dataFileSchemaWithStats = dataFileSchema.project(key.f2);
-            List<DataField> fields = dataFileSchema.fields();
-            Map<Integer, Integer> fieldIdToStatsIndex = new HashMap<>(fields.size() * 2);
-            for (DataField field : fields) {
-                fieldIdToStatsIndex.put(field.id(), NO_STATS_FIELD_INDEX);
-            }
-            List<DataField> statsFields = dataFileSchemaWithStats.fields();
-            DataType[] statsFieldTypes = new DataType[statsFields.size()];
-            for (int i = 0; i < statsFields.size(); i++) {
-                DataField statsField = statsFields.get(i);
-                fieldIdToStatsIndex.put(statsField.id(), i);
-                statsFieldTypes[i] = statsField.type();
-            }
-            return new ProjectedFileSchema(dataFileSchema, statsFieldTypes, fieldIdToStatsIndex);
-        }
-    }
-
-    private static class ProjectedFileSchema {
-
-        private final TableSchema dataFileSchema;
-        private final DataType[] statsFieldTypes;
-        private final Map<Integer, Integer> fieldIdToStatsIndex;
-
-        private ProjectedFileSchema(
-                TableSchema dataFileSchema,
-                DataType[] statsFieldTypes,
-                Map<Integer, Integer> fieldIdToStatsIndex) {
-            this.dataFileSchema = dataFileSchema;
-            this.statsFieldTypes = statsFieldTypes;
-            this.fieldIdToStatsIndex = fieldIdToStatsIndex;
-        }
-
-        private TableSchema dataFileSchema() {
-            return dataFileSchema;
-        }
-
-        private DataType[] statsFieldTypes() {
-            return statsFieldTypes;
-        }
-
-        private Map<Integer, Integer> fieldIdToStatsIndex() {
-            return fieldIdToStatsIndex;
-        }
     }
 
     /** Note: Keep this thread-safe. */

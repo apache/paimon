@@ -30,7 +30,6 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.DataEvolutionFileStoreScan.EvolutionStats;
-import org.apache.paimon.operation.DataEvolutionFileStoreScan.EvolutionStatsCache;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.DataEvolutionArray;
