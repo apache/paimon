@@ -277,6 +277,28 @@ overlapping buckets or sequence numbers for those modes.
   HASH_FIXED grouping. This option does not enable HASH_DYNAMIC or
   CROSS_PARTITION primary-key writes.
 
+### Incremental write
+
+Use time-based commits for long-running partial updates:
+
+```python
+write_paimon(
+    updates,
+    "database_name.target",
+    {"warehouse": "/path/to/warehouse"},
+    commit_mode="incremental",
+    update_cols=["feature"],
+    commit_interval_seconds=600,
+)
+```
+
+The target must be a fixed-bucket primary-key table using
+`merge-engine=partial-update`; source rows must contain the primary key and
+updated columns. Completed commits remain visible after failure; retrying
+reruns the Ray Dataset. The interval is a target and may be exceeded while a
+Ray block is still running. Do not modify the target concurrently; compaction
+is allowed.
+
 ### `TableWrite.write_ray()` (lower-level)
 
 If you have already constructed a `table_write` from a write builder, you can

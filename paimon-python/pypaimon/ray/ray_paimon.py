@@ -288,6 +288,9 @@ def write_paimon(
     concurrency: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     hash_fixed_precluster: str = "auto",
+    commit_mode: str = "atomic",
+    commit_interval_seconds: Optional[float] = None,
+    update_cols: Optional[List[str]] = None,
 ) -> None:
     """Write a Ray Dataset to a Paimon table.
 
@@ -310,8 +313,38 @@ def write_paimon(
         hash_fixed_precluster: Pre-clustering mode. ``"auto"`` follows
             table options, ``"off"`` disables it, and ``"map_groups"``
             explicitly enables HASH_FIXED grouping.
+        commit_mode: ``"atomic"`` or time-based ``"incremental"``.
+        commit_interval_seconds: Target interval between incremental commits.
+        update_cols: Columns updated by an incremental primary-key write.
     """
     _require_ray_data()
+
+    if commit_mode not in ("atomic", "incremental"):
+        raise ValueError("commit_mode must be 'atomic' or 'incremental'.")
+    if commit_mode == "incremental":
+        if overwrite:
+            raise ValueError("incremental write_paimon cannot overwrite.")
+        if commit_interval_seconds is None:
+            raise ValueError(
+                "commit_interval_seconds is required for incremental writes.")
+        if hash_fixed_precluster not in ("auto", "map_groups"):
+            raise ValueError(
+                "incremental write_paimon requires HASH_FIXED grouping.")
+        from pypaimon.ray.incremental_write import incremental_write_paimon
+
+        return incremental_write_paimon(
+            dataset,
+            table_identifier,
+            catalog_options,
+            commit_interval_seconds=commit_interval_seconds,
+            update_cols=update_cols,
+            concurrency=concurrency,
+            ray_remote_args=ray_remote_args,
+        )
+    if commit_interval_seconds is not None or update_cols is not None:
+        raise ValueError(
+            "commit_interval_seconds and update_cols require "
+            "commit_mode='incremental'.")
 
     from pypaimon.catalog.catalog_factory import CatalogFactory
     from pypaimon.write.ray_datasink import write_paimon_dataset
