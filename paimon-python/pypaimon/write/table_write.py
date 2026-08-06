@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import pyarrow as pa
@@ -61,25 +60,29 @@ class TableWrite:
 
     def write_arrow_batch(self, data: pa.RecordBatch):
         self._validate_pyarrow_schema(data.schema)
-        partitions, buckets = self.row_key_extractor.extract_partition_bucket_batch(data)
 
-        partition_bucket_groups = defaultdict(list)
-        for i in range(data.num_rows):
-            partition_bucket_groups[(tuple(partitions[i]), buckets[i])].append(i)
-
-        for (partition, bucket), row_indices in partition_bucket_groups.items():
-            if len(row_indices) == data.num_rows:
+        for partition, bucket, row_indices in \
+                self.row_key_extractor.extract_partition_bucket_groups(data):
+            if row_indices is None:
                 # Every input row belongs to the same partition/bucket. Passing the
                 # original batch through avoids copying large BLOB values through
                 # Arrow take before the dedicated BLOB writer consumes them.
                 sub_table = data
-            elif row_indices[-1] - row_indices[0] + 1 == len(row_indices):
-                # Contiguous groups can share the original Arrow buffers instead of
-                # gathering their rows into newly allocated buffers with take.
-                sub_table = data.slice(row_indices[0], len(row_indices))
             else:
-                indices_array = pa.array(row_indices, type=pa.int64())
-                sub_table = pa.compute.take(data, indices_array)
+                # row_indices is an int64 array of this group's rows in
+                # ascending input order (the extractor sorts grouped indices so
+                # sequence-number assignment stays latest-wins correct), so the
+                # span is just first..last.
+                lo = row_indices[0].as_py()
+                hi = row_indices[-1].as_py()
+                count = len(row_indices)
+                if hi - lo + 1 == count:
+                    # Distinct row indices spanning exactly `count` values are
+                    # contiguous, so share the original Arrow buffers instead of
+                    # gathering their rows into newly allocated buffers with take.
+                    sub_table = data.slice(lo, count)
+                else:
+                    sub_table = pa.compute.take(data, row_indices)
             self._write_partition_bucket_batch(partition, bucket, sub_table)
 
     def _write_partition_bucket_batch(self, partition, bucket, data):
