@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
@@ -87,22 +88,23 @@ public class ChangelogCompactTaskSerializerTest {
 
     private DataFileMeta newFile() {
         return DataFileMeta.create(
-                UUID.randomUUID().toString(),
-                0,
-                1,
-                row(0),
-                row(0),
-                newSimpleStats(0, 1),
-                newSimpleStats(0, 1),
-                0,
-                1,
-                0,
-                0,
-                0L,
-                null,
-                FileSource.APPEND,
-                null,
-                null,
-                null);
+                        UUID.randomUUID().toString(),
+                        0,
+                        1,
+                        row(0),
+                        row(0),
+                        newSimpleStats(0, 1),
+                        newSimpleStats(0, 1),
+                        0,
+                        1,
+                        0,
+                        0,
+                        0L,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        null)
+                .withColumnMaxSequenceNumbers(Collections.singletonMap(1, 1L));
     }
 }

@@ -153,6 +153,38 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
     }
 
     @Test
+    void testUsesColumnSequenceNumbersForCompactedFullFile() {
+        IndexManifestEntry index = index("index", 0, 99, 5L, BinaryRow.EMPTY_ROW, 0);
+
+        assertThat(
+                        plan(
+                                Collections.singletonList(
+                                        dataWithColumnSequences(
+                                                "unrelated-compact",
+                                                0,
+                                                100,
+                                                10,
+                                                Collections.singletonMap(VECTOR_FIELD.id(), 5L))),
+                                index))
+                .isEmpty();
+        assertThat(
+                        plan(
+                                Collections.singletonList(
+                                        dataWithColumnSequences(
+                                                "index-compact",
+                                                0,
+                                                100,
+                                                10,
+                                                Collections.singletonMap(VECTOR_FIELD.id(), 6L))),
+                                index))
+                .containsExactly(index);
+
+        // Legacy compacted files have no column metadata and remain conservative.
+        assertThat(plan(Collections.singletonList(data("legacy", 0, 100, 10, 1)), index))
+                .containsExactly(index);
+    }
+
+    @Test
     void testRefreshesFromUpdateLayerOverBaseSchemaWithoutIndexColumn() {
         IndexManifestEntry index = index("index", 0, 99, 5L, BinaryRow.EMPTY_ROW, 0);
         ManifestEntry baseWithoutVector = data("base", 0, 100, 1, 0);
@@ -489,6 +521,19 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
                         null,
                         firstRowId,
                         writeCols);
+        return ManifestEntry.create(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, 1, file);
+    }
+
+    private ManifestEntry dataWithColumnSequences(
+            String fileName,
+            long firstRowId,
+            long rowCount,
+            long maxSequenceNumber,
+            java.util.Map<Integer, Long> columnSequences) {
+        DataFileMeta file =
+                data(fileName, firstRowId, rowCount, maxSequenceNumber, 1)
+                        .file()
+                        .withColumnMaxSequenceNumbers(columnSequences);
         return ManifestEntry.create(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, 1, file);
     }
 }

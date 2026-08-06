@@ -19,11 +19,17 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.utils.ObjectSerializer;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
 import static org.apache.paimon.utils.InternalRowUtils.toStringArrayData;
@@ -61,7 +67,10 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 toStringArrayData(meta.valueStatsCols()),
                 meta.externalPath().map(BinaryString::fromString).orElse(null),
                 meta.firstRowId(),
-                meta.writeCols() == null ? null : toStringArrayData(meta.writeCols()));
+                meta.writeCols() == null ? null : toStringArrayData(meta.writeCols()),
+                meta.columnMaxSequenceNumbers() == null
+                        ? null
+                        : new GenericMap(meta.columnMaxSequenceNumbers()));
     }
 
     @Override
@@ -86,6 +95,17 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
                 row.isNullAt(17) ? null : row.getString(17).toString(),
                 row.isNullAt(18) ? null : row.getLong(18),
-                row.isNullAt(19) ? null : fromStringArrayData(row.getArray(19)));
+                row.isNullAt(19) ? null : fromStringArrayData(row.getArray(19)),
+                row.isNullAt(20) ? null : fromIntLongMap(row.getMap(20)));
+    }
+
+    private static Map<Integer, Long> fromIntLongMap(InternalMap map) {
+        InternalArray keys = map.keyArray();
+        InternalArray values = map.valueArray();
+        Map<Integer, Long> result = new LinkedHashMap<>();
+        for (int i = 0; i < map.size(); i++) {
+            result.put(keys.getInt(i), values.getLong(i));
+        }
+        return result;
     }
 }

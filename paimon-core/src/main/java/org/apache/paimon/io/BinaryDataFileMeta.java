@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
@@ -33,7 +34,9 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
@@ -244,6 +247,24 @@ public final class BinaryDataFileMeta implements DataFileMeta {
         return nullableStringArray(Fields.WRITE_COLS);
     }
 
+    @Nullable
+    @Override
+    public Map<Integer, Long> columnMaxSequenceNumbers() {
+        int position = requiredPosition(Fields.COLUMN_MAX_SEQUENCE_NUMBERS);
+        InternalRow row = currentRow();
+        if (row.isNullAt(position)) {
+            return null;
+        }
+        InternalMap map = row.getMap(position);
+        InternalArray keys = map.keyArray();
+        InternalArray values = map.valueArray();
+        Map<Integer, Long> result = new LinkedHashMap<>();
+        for (int i = 0; i < map.size(); i++) {
+            result.put(keys.getInt(i), values.getLong(i));
+        }
+        return Collections.unmodifiableMap(result);
+    }
+
     public boolean containsWriteColumn(BinaryString fieldName) {
         int position = requiredPosition(Fields.WRITE_COLS);
         InternalRow row = currentRow();
@@ -279,6 +300,11 @@ public final class BinaryDataFileMeta implements DataFileMeta {
     @Override
     public DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber) {
         throw unsupportedOperation("assignSequenceNumber(long, long)");
+    }
+
+    @Override
+    public DataFileMeta withColumnMaxSequenceNumbers(Map<Integer, Long> columnMaxSequenceNumbers) {
+        throw unsupportedOperation("withColumnMaxSequenceNumbers(Map)");
     }
 
     @Override
@@ -378,6 +404,8 @@ public final class BinaryDataFileMeta implements DataFileMeta {
         private static final int EXTERNAL_PATH = fieldIndex(DataFileMeta.EXTERNAL_PATH);
         private static final int FIRST_ROW_ID = fieldIndex(DataFileMeta.FIRST_ROW_ID);
         private static final int WRITE_COLS = fieldIndex(DataFileMeta.WRITE_COLS);
+        private static final int COLUMN_MAX_SEQUENCE_NUMBERS =
+                fieldIndex(DataFileMeta.COLUMN_MAX_SEQUENCE_NUMBERS);
     }
 
     /** Projected data-file schema together with its bound binary field layout. */

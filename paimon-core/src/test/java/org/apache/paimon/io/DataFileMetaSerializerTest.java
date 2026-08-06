@@ -20,7 +20,12 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.utils.ObjectSerializerTestBase;
 
+import org.junit.jupiter.api.Test;
+
 import java.util.Arrays;
+import java.util.Collections;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link DataFileMetaSerializer}. */
 public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFileMeta> {
@@ -34,6 +39,34 @@ public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFil
 
     @Override
     protected DataFileMeta object() {
-        return gen.next().meta.copy(Arrays.asList("extra1", "extra2"));
+        return gen.next()
+                .meta
+                .copy(Arrays.asList("extra1", "extra2"))
+                .withColumnMaxSequenceNumbers(Collections.singletonMap(3, 42L));
+    }
+
+    @Test
+    void testCopyOperationsPreserveColumnSequences() {
+        DataFileMeta file = object();
+        assertColumnSequences(file.upgrade(file.level() + 1));
+        assertColumnSequences(file.rename("renamed.parquet"));
+        assertColumnSequences(file.copyWithoutStats());
+        assertColumnSequences(file.assignSequenceNumber(1L, 2L));
+        assertColumnSequences(file.assignFirstRowId(1L));
+        assertColumnSequences(file.newFirstRowId(null));
+        assertColumnSequences(file.copy(Collections.emptyList()));
+        assertColumnSequences(file.newExternalPath("external/renamed.parquet"));
+        assertColumnSequences(file.copy(new byte[] {1}));
+    }
+
+    @Test
+    void testLegacySerializerDropsColumnSequences() {
+        DataFileMetaWriteColsLegacySerializer legacy = new DataFileMetaWriteColsLegacySerializer();
+        DataFileMeta file = legacy.fromRow(legacy.toRow(object()));
+        assertThat(file.columnMaxSequenceNumbers()).isNull();
+    }
+
+    private void assertColumnSequences(DataFileMeta file) {
+        assertThat(file.columnMaxSequenceNumbers()).containsEntry(3, 42L);
     }
 }

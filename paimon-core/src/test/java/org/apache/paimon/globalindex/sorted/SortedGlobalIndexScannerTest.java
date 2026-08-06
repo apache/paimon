@@ -20,6 +20,9 @@ package org.apache.paimon.globalindex.sorted;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
@@ -35,6 +38,8 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.MemorySlice;
+import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.Schema;
@@ -44,6 +49,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -52,6 +58,7 @@ import org.apache.paimon.utils.Pair;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -59,6 +66,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -275,6 +283,123 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
         }
         Assertions.assertEquals(
                 500, totalRowCount, "incrementalScan should only return the newly written rows");
+    }
+
+    @Test
+    public void testIncrementalScanIgnoresNonIndexColumnCompactionAfterSnapshotExpiration()
+            throws Exception {
+        write();
+        createIndex(null);
+
+        DataFileMeta firstCompact = updateColumnAndCompact("f1", 1);
+        int f0Id = getTableDefault().rowType().getField("f0").id();
+        long f0Sequence = firstCompact.columnMaxSequenceNumbers().get(f0Id);
+        assertThat(f0Sequence).isLessThan(firstCompact.maxSequenceNumber());
+
+        DataFileMeta secondCompact = updateColumnAndCompact("f1", 2);
+        assertThat(secondCompact.columnMaxSequenceNumbers()).containsEntry(f0Id, f0Sequence);
+
+        FileStoreTable table = getTableDefault();
+        table.newExpireSnapshots()
+                .config(
+                        ExpireConfig.builder()
+                                .snapshotRetainMax(1)
+                                .snapshotRetainMin(1)
+                                .snapshotTimeRetain(Duration.ZERO)
+                                .build())
+                .expire();
+        assertThat(table.snapshotManager().earliestSnapshotId())
+                .isEqualTo(table.snapshotManager().latestSnapshotId());
+
+        assertThat(dataEvolutionScanner(table).withIndexField("f0").incrementalScan()).isEmpty();
+    }
+
+    @Test
+    public void testIncrementalScanRefreshesIndexColumnCompaction() throws Exception {
+        write();
+        createIndex(null);
+        DataFileMeta compacted = updateColumnAndCompact("f0", 1);
+
+        int f0Id = getTableDefault().rowType().getField("f0").id();
+        assertThat(compacted.columnMaxSequenceNumbers().get(f0Id))
+                .isEqualTo(compacted.maxSequenceNumber());
+
+        Optional<ScanResult<DataSplit>> scanResult =
+                dataEvolutionScanner(getTableDefault()).withIndexField("f0").incrementalScan();
+        assertThat(scanResult).isPresent();
+        assertThat(scanResult.get().deletedIndexEntries()).isNotEmpty();
+    }
+
+    private SortedGlobalIndexScanner dataEvolutionScanner(FileStoreTable table) {
+        Options options = new Options();
+        options.set(
+                CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION,
+                CoreOptions.GlobalIndexColumnUpdateAction.IGNORE);
+        return new SortedGlobalIndexScanner(table, "btree", options);
+    }
+
+    private DataFileMeta updateColumnAndCompact(String column, int updateRound) throws Exception {
+        Map<String, String> writeOptions = new HashMap<>();
+        writeOptions.put(
+                CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(),
+                CoreOptions.GlobalIndexColumnUpdateAction.IGNORE.toString());
+        FileStoreTable table = getTableDefault().copy(writeOptions);
+        RowType writeType = table.rowType().project("dt", column);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite batchWrite = writeBuilder.newWrite().withWriteType(writeType)) {
+            for (int i = 0; i < PART_ROW_NUM; i++) {
+                Object value =
+                        "f0".equals(column)
+                                ? i + updateRound * (int) PART_ROW_NUM
+                                : BinaryString.fromString("updated_" + updateRound + "_" + i);
+                batchWrite.write(GenericRow.of(BinaryString.fromString("p0"), value));
+            }
+            List<CommitMessage> messages = batchWrite.prepareCommit();
+            assignFirstRowId(messages, 0L);
+            try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                commit.commit(messages);
+            }
+        }
+
+        writeOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        table = getTableDefault().copy(writeOptions);
+        Snapshot compactSnapshot = table.snapshotManager().latestSnapshot();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false, false, compactSnapshot);
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : coordinator.plan()) {
+            compactMessages.add(task.doCompact(table, "test-compact"));
+        }
+        assertThat(compactMessages).isNotEmpty();
+        compactMessages.addAll(
+                new DataEvolutionCompactionCommitPreparation(table, compactSnapshot)
+                        .prepare(compactMessages));
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(compactMessages);
+        }
+
+        List<DataFileMeta> rowRangeFiles =
+                getTableDefault().store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .filter(file -> file.firstRowId() != null && file.firstRowId() == 0L)
+                        .collect(Collectors.toList());
+        assertThat(rowRangeFiles).hasSize(1);
+        assertThat(rowRangeFiles.get(0).columnMaxSequenceNumbers()).isNotNull();
+        return rowRangeFiles.get(0);
+    }
+
+    private void assignFirstRowId(List<CommitMessage> messages, long firstRowId) {
+        for (CommitMessage message : messages) {
+            CommitMessageImpl impl = (CommitMessageImpl) message;
+            List<DataFileMeta> files = new ArrayList<>(impl.newFilesIncrement().newFiles());
+            impl.newFilesIncrement().newFiles().clear();
+            impl.newFilesIncrement()
+                    .newFiles()
+                    .addAll(
+                            files.stream()
+                                    .map(file -> file.assignFirstRowId(firstRowId))
+                                    .collect(Collectors.toList()));
+        }
     }
 
     @Test

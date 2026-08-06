@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
 
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomIndexFile;
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomCompactIncrement;
@@ -40,6 +41,14 @@ public class CommitMessageSerializerTest {
         CommitMessageSerializer serializer = new CommitMessageSerializer();
 
         DataIncrement dataIncrement = randomNewFilesIncrement();
+        dataIncrement
+                .newFiles()
+                .set(
+                        0,
+                        dataIncrement
+                                .newFiles()
+                                .get(0)
+                                .withColumnMaxSequenceNumbers(Collections.singletonMap(3, 42L)));
         dataIncrement.newIndexFiles().addAll(Arrays.asList(randomIndexFile(), randomIndexFile()));
         dataIncrement
                 .deletedIndexFiles()

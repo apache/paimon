@@ -73,7 +73,8 @@ public class CopyFilesUtil {
                 oldFileMeta.valueStatsCols(),
                 newExternalPath,
                 oldFileMeta.firstRowId(),
-                oldFileMeta.writeCols());
+                oldFileMeta.writeCols(),
+                oldFileMeta.columnMaxSequenceNumbers());
     }
 
     public static IndexFileMeta toNewIndexFileMeta(IndexFileMeta oldFileMeta, String newFileName) {

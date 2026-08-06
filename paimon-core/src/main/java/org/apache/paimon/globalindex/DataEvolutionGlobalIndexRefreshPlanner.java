@@ -41,6 +41,7 @@ import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
 
+import static org.apache.paimon.utils.DataEvolutionUtils.fieldMaxSequenceNumber;
 import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
 
 /** Plans existing global index files which need refresh after data-evolution updates. */
@@ -98,7 +99,14 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
                             Pair.of(file.schemaId(), file.writeCols()),
                             key -> fileFieldIds(schemaManager::schema, file));
             if (!disjoint(indexedFieldIds, physicalFieldIds)) {
-                group.addDataFile(file);
+                long indexedMaxSequence = Long.MIN_VALUE;
+                for (Integer fieldId : indexedFieldIds) {
+                    if (physicalFieldIds.contains(fieldId)) {
+                        indexedMaxSequence =
+                                Math.max(indexedMaxSequence, fieldMaxSequenceNumber(file, fieldId));
+                    }
+                }
+                group.addDataFile(file, indexedMaxSequence);
             }
         }
 
@@ -119,7 +127,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
     private static final class RefreshGroup {
 
         private final List<IndexQuery> indexes = new ArrayList<>();
-        private final List<DataFileMeta> dataFiles = new ArrayList<>();
+        private final List<DataUpdate> dataUpdates = new ArrayList<>();
         private final MergedRanges indexedRanges = new MergedRanges();
         private long minScanSnapshotId = Long.MAX_VALUE;
 
@@ -134,27 +142,44 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
                     && indexedRanges.intersects(file.nonNullRowIdRange());
         }
 
-        private void addDataFile(DataFileMeta file) {
-            dataFiles.add(file);
+        private void addDataFile(DataFileMeta file, long maxSequenceNumber) {
+            if (maxSequenceNumber > minScanSnapshotId) {
+                dataUpdates.add(new DataUpdate(file.nonNullRowIdRange(), maxSequenceNumber));
+            }
         }
 
         private void markIndexesToRefresh(boolean[] result) {
             // As scan watermarks decrease, eligible data files only grow.
-            dataFiles.sort(Comparator.comparingLong(DataFileMeta::maxSequenceNumber).reversed());
+            dataUpdates.sort(Comparator.comparingLong(DataUpdate::maxSequenceNumber).reversed());
             indexes.sort((left, right) -> Long.compare(right.scanSnapshotId, left.scanSnapshotId));
 
             MergedRanges updatedRanges = new MergedRanges();
             int nextFile = 0;
             for (IndexQuery index : indexes) {
-                while (nextFile < dataFiles.size()
-                        && dataFiles.get(nextFile).maxSequenceNumber() > index.scanSnapshotId) {
-                    updatedRanges.add(dataFiles.get(nextFile).nonNullRowIdRange());
+                while (nextFile < dataUpdates.size()
+                        && dataUpdates.get(nextFile).maxSequenceNumber > index.scanSnapshotId) {
+                    updatedRanges.add(dataUpdates.get(nextFile).rowRange);
                     nextFile++;
                 }
                 if (updatedRanges.intersects(index.rowRange)) {
                     result[index.ordinal] = true;
                 }
             }
+        }
+    }
+
+    private static final class DataUpdate {
+
+        private final Range rowRange;
+        private final long maxSequenceNumber;
+
+        private DataUpdate(Range rowRange, long maxSequenceNumber) {
+            this.rowRange = rowRange;
+            this.maxSequenceNumber = maxSequenceNumber;
+        }
+
+        private long maxSequenceNumber() {
+            return maxSequenceNumber;
         }
     }
 

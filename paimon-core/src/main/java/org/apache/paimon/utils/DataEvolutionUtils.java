@@ -26,6 +26,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -54,6 +55,15 @@ public class DataEvolutionUtils {
             }
         }
         return ids;
+    }
+
+    /** Returns the latest sequence known for a field physically present in the file. */
+    public static long fieldMaxSequenceNumber(DataFileMeta file, int fieldId) {
+        Map<Integer, Long> columnSequences = file.columnMaxSequenceNumbers();
+        if (columnSequences == null) {
+            return file.maxSequenceNumber();
+        }
+        return columnSequences.getOrDefault(fieldId, file.maxSequenceNumber());
     }
 
     /**

@@ -28,7 +28,6 @@ import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
-import org.apache.paimon.utils.CompatibilityUtils;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
@@ -51,7 +50,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link SplitSerializer}. */
 public class SplitSerializerTest {
 
-    private static final String GENERATE_GOLDEN_FILES_PROPERTY = "generateSplitGoldenFiles";
     private static final String RESOURCE_PREFIX = "compatibility/";
 
     @Test
@@ -63,18 +61,11 @@ public class SplitSerializerTest {
     }
 
     @Test
-    public void testGoldenFiles() throws IOException {
-        boolean generateGoldenFiles =
-                Boolean.parseBoolean(
-                        System.getProperties().getProperty(GENERATE_GOLDEN_FILES_PROPERTY));
+    public void testVersion1GoldenFiles() throws IOException {
         for (GoldenCase goldenCase : goldenCases()) {
-            byte[] actual = SplitSerializer.serialize(goldenCase.split);
-            if (generateGoldenFiles) {
-                CompatibilityUtils.writeCompatibilityFile(goldenCase.fileName, actual);
-            } else {
-                assertThat(actual).isEqualTo(readGoldenFile(goldenCase.fileName));
-            }
-            assertSplitEquals(goldenCase.split, SplitSerializer.deserialize(actual));
+            assertSplitEquals(
+                    goldenCase.split,
+                    SplitSerializer.deserialize(readGoldenFile(goldenCase.fileName)));
         }
     }
 
