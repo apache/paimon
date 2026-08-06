@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FunctionWithException;
@@ -253,10 +254,14 @@ public class TimeTravelUtil {
     }
 
     public static void checkRescaleBucketForIncrementalDiffQuery(
+            TableSchema schema,
             Snapshot start,
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> startFiles,
             Snapshot end,
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> endFiles) {
+        if (schema.primaryKeys().isEmpty() && schema.numBuckets() == -1) {
+            return;
+        }
 
         for (Map.Entry<BinaryRow, Map<Integer, List<ManifestEntry>>> entry :
                 startFiles.entrySet()) {

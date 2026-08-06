@@ -609,7 +609,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
                 groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
         TimeTravelUtil.checkRescaleBucketForIncrementalDiffQuery(
-                before, beforeFiles, plan.snapshot(), afterFiles);
+                tableSchema, before, beforeFiles, plan.snapshot(), afterFiles);
         return toIncrementalPlan(
                 false,
                 new LazyField<>(() -> before),
