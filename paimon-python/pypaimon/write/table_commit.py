@@ -61,10 +61,6 @@ class TableCommit:
         """Register a callback to be invoked after each successful commit."""
         self._commit_callbacks.append(callback)
 
-    def protect_from_schema_changes(self, schema_id):
-        self.file_store_commit.protect_from_schema_changes(schema_id)
-        return self
-
     def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
 
@@ -84,7 +80,6 @@ class TableCommit:
                 )
             else:
                 if not non_empty_messages:
-                    self.file_store_commit.clear_commit_context()
                     return
                 logger.info(
                     "Committing table %s, %d non-empty messages",

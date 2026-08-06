@@ -59,7 +59,6 @@ def _write_dataset_periodically(
 
     committer = _PeriodicDatasetCommitter(
         table,
-        table.table_schema.id,
         commit_interval_seconds,
     )
     windows = _dataset_windows(dataset, commit_interval_seconds)
@@ -132,9 +131,8 @@ def _dataset_windows(dataset, interval):
 
 class _PeriodicDatasetCommitter:
 
-    def __init__(self, table, schema_id, commit_interval_seconds):
+    def __init__(self, table, commit_interval_seconds):
         self._table = table
-        self._schema_id = schema_id
         self._commit_interval = commit_interval_seconds
         self._last_commit = time.monotonic()
         builder = table.new_stream_write_builder()
@@ -158,12 +156,10 @@ class _PeriodicDatasetCommitter:
         messages = self._pending
         self._pending = []
         commit_id = self._next_commit_id
-        self._commit.protect_from_schema_changes(self._schema_id)
         self._commit.commit(messages, commit_id)
         committed = self._callback.pop(commit_id)
         if committed is None:
             raise RuntimeError("Committed periodic write snapshot is missing.")
-        _validate_schema(self._table, self._schema_id)
         self._next_commit_id += 1
         self._last_commit = time.monotonic()
 
@@ -202,9 +198,3 @@ def _abort_messages(table, messages):
         commit.abort(messages)
     finally:
         commit.close()
-
-
-def _validate_schema(table, schema_id):
-    latest = table.schema_manager.latest()
-    if latest is None or latest.id != schema_id:
-        raise RuntimeError("Target schema changed during incremental write.")

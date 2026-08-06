@@ -170,7 +170,6 @@ class FileStoreCommit:
         self.table: FileStoreTable = table
         self.commit_user = commit_user
         self.commit_callbacks: List[CommitCallback] = commit_callbacks if commit_callbacks is not None else []
-        self.expected_schema_id = None
 
         self.snapshot_manager = table.snapshot_manager()
         self.manifest_file_manager = ManifestFileManager(table)
@@ -205,16 +204,9 @@ class FileStoreCommit:
         table_rollback = table.catalog_environment.catalog_table_rollback()
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
-    def protect_from_schema_changes(self, schema_id):
-        self.expected_schema_id = schema_id
-
-    def clear_commit_context(self):
-        self.expected_schema_id = None
-
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in normal append mode."""
         if not commit_messages:
-            self.clear_commit_context()
             return
 
         # Extract the minimum check_from_snapshot from commit messages
@@ -465,7 +457,6 @@ class FileStoreCommit:
             # No entries to commit (e.g. drop_partitions with no matching data): skip commit
             # to avoid creating manifest/snapshot with empty partition_stats (causes read errors).
             if not commit_entries and not index_deletes and not index_adds:
-                self.clear_commit_context()
                 break
 
             result = self._try_commit_once(
@@ -512,7 +503,6 @@ class FileStoreCommit:
                         self.table.identifier,
                         commit_duration_ms,
                     )
-                self.clear_commit_context()
                 break
             else:
                 retry_result = result
@@ -574,15 +564,6 @@ class FileStoreCommit:
             return SuccessResult()
 
         latest_snapshot_id = latest_snapshot.id if latest_snapshot else 0
-        if self.expected_schema_id is not None:
-            latest_schema = self.table.schema_manager.latest()
-            latest_schema_id = latest_schema.id if latest_schema else None
-            if latest_schema_id != self.expected_schema_id:
-                conflict = RuntimeError("Target schema changed during write.")
-                if retry_result is None or retry_result.exception is None:
-                    raise CommitConflictError(str(conflict)) from conflict
-                raise conflict
-
         if (
             hash_index_base_snapshot is not None
             and latest_snapshot_id != hash_index_base_snapshot

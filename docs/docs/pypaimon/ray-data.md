@@ -298,7 +298,6 @@ updated columns. Completed commits remain visible after failure; retrying
 reruns the Ray Dataset. The interval is a target and may be exceeded while a
 group is still writing. This mode requires Ray 2.33 or later. Concurrent partial
 updates are allowed, but updates to the same field have no deterministic winner.
-Schema changes fail the write.
 
 ### `TableWrite.write_ray()` (lower-level)
 

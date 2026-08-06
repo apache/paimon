@@ -29,8 +29,6 @@ ray = pytest.importorskip("ray")
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.ray import write_paimon
-from pypaimon.schema.data_types import AtomicType
-from pypaimon.schema.schema_change import SchemaChange
 
 
 class RayIncrementalWriteTest(unittest.TestCase):
@@ -401,30 +399,6 @@ class RayIncrementalWriteTest(unittest.TestCase):
             "feature_a": [101],
             "feature_b": [202],
         }, self._read(target).to_pydict())
-
-    def test_rejects_schema_change(self):
-        from pypaimon.write import ray_datasink
-
-        target = self._create_target()
-        real_write = ray_datasink._write_primary_key_groups
-
-        def alter_schema(*args, **kwargs):
-            self.catalog.alter_table(target, [
-                SchemaChange.add_column(
-                    "extra", AtomicType("STRING"))], False)
-            return real_write(*args, **kwargs)
-
-        with mock.patch.object(
-                ray_datasink,
-                "_write_primary_key_groups",
-                side_effect=alter_schema):
-            with self.assertRaisesRegex(RuntimeError, "schema changed"):
-                self._write_incrementally(target, pa.table({
-                    "id": [1], "feature": [101],
-                }, schema=self.source_schema))
-
-        self._assert_features(target, [10, 20, 30])
-
 
 if __name__ == "__main__":
     unittest.main()
