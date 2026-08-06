@@ -40,7 +40,9 @@ from pypaimon.schema.data_types import (
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
 from pypaimon.utils.range import Range
+from pypaimon.utils.range_helper import RangeHelper
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 from pypaimon.write.row_utils import (
@@ -142,41 +144,26 @@ class TableUpdateByRowId:
             cls, snapshot_id: int, splits: List[DataSplit]) -> _FilesInfo:
         index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = {}
         row_id_ranges: List[Range] = []
+        range_helper = RangeHelper(lambda file: file.non_null_row_id_range())
         for split in splits:
             files_with_row_id = [
                 file for file in split.files if file.first_row_id is not None
             ]
-            data_files = [
-                file for file in files_with_row_id
-                if not DataFileMeta.is_blob_file(file.file_name)
-            ]
-            for file in split.files:
-                if (
-                        file.first_row_id is None
-                        or DataFileMeta.is_blob_file(file.file_name)
-                ):
-                    continue
-                row_id_ranges.append(file.row_id_range())
-            for file in data_files:
-                target_files = [
-                    target_file
-                    for target_file in files_with_row_id
-                    if cls._overlaps(
-                        file.row_id_range(), target_file.row_id_range()
-                    )
-                ]
-
-                entry = index.get(file.first_row_id)
+            for group in range_helper.merge_overlapping_ranges(
+                    files_with_row_id):
+                anchor = retrieve_anchor_file(group)
+                first_row_id = anchor.first_row_id
+                row_id_ranges.append(anchor.non_null_row_id_range())
+                entry = index.get(first_row_id)
                 if entry is None:
-                    index[file.first_row_id] = (split, target_files)
+                    index[first_row_id] = (split, list(group))
                 else:
                     existing_files = entry[1]
                     existing_names = {
                         existing.file_name for existing in existing_files
                     }
                     existing_files.extend(
-                        target_file
-                        for target_file in target_files
+                        target_file for target_file in group
                         if target_file.file_name not in existing_names
                     )
 
@@ -191,10 +178,6 @@ class TableUpdateByRowId:
             first_row_id_index=index,
             valid_row_id_ranges=merged,
         )
-
-    @staticmethod
-    def _overlaps(left: Range, right: Range) -> bool:
-        return left.from_ <= right.to and right.from_ <= left.to
 
     def update_columns(self, data: pa.Table, column_names: List[str]) -> List[CommitMessage]:
         """

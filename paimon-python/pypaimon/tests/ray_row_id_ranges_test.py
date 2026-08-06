@@ -59,12 +59,14 @@ class RayRowIdRangesTest(unittest.TestCase):
             ray.shutdown()
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def _create(self, schema=None):
+    def _create(self, schema=None, options=None):
         target = "default.r_{}".format(uuid.uuid4().hex[:8])
         self.catalog.create_table(
             target,
             Schema.from_pyarrow_schema(
-                schema or self.schema, options=self.options),
+                schema or self.schema,
+                options=self.options if options is None else options,
+            ),
             False,
         )
         return target
@@ -142,6 +144,60 @@ class RayRowIdRangesTest(unittest.TestCase):
             self._read(target)["embedding"].to_pylist(),
         )
         self.assertFalse(self.catalog.get_table(target).list_tags())
+
+    def test_rolling_vector_files_stay_in_one_range(self):
+        schema = pa.schema([
+            ("id", pa.int32()),
+            ("text", pa.string()),
+            ("embedding", pa.list_(pa.float32(), 16)),
+        ])
+        target = self._create(schema, {
+            **self.options,
+            "vector.file.format": "parquet",
+            "vector.target-file-size": "1KB",
+        })
+        rows = 128
+        self._write(target, pa.Table.from_arrays([
+            pa.array(range(rows), pa.int32()),
+            pa.array(["old"] * rows),
+            pa.FixedSizeListArray.from_arrays(
+                pa.array([0.1] * rows * 16, pa.float32()), 16),
+        ], schema=schema))
+
+        table = self.catalog.get_table(target)
+        files = [
+            file
+            for split in table.new_read_builder().new_scan(
+            ).plan_for_write().splits()
+            for file in split.files
+        ]
+        from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+        self.assertGreater(sum(
+            DataFileMeta.is_vector_file(file.file_name) for file in files), 1)
+
+        def process(context):
+            source = context.read(["id"])
+            updates = source.map_batches(
+                lambda batch: pa.table({
+                    "_ROW_ID": batch["_ROW_ID"],
+                    "text": ["updated"] * batch.num_rows,
+                }),
+                batch_format="pyarrow",
+            )
+            context.update_by_row_id(updates, ["text"])
+
+        result = process_row_id_ranges(
+            target,
+            self.catalog_options,
+            target_rows_per_range=64,
+            processor=process,
+        )
+        self.assertEqual({"num_ranges": 1, "num_updated": rows}, result)
+        read = table.new_read_builder().with_projection(["id", "text"])
+        actual = read.new_read().to_arrow(
+            read.new_scan().plan().splits()).sort_by("id")
+        self.assertEqual(["updated"] * rows,
+                         actual["text"].to_pylist())
 
     def test_reads_current_schema_from_pinned_snapshot(self):
         from pypaimon.schema.data_types import AtomicType
