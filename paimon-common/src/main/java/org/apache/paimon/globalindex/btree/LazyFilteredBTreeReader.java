@@ -59,6 +59,11 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     }
 
     @Override
+    public boolean supportsRangeComplement() {
+        return true;
+    }
+
+    @Override
     protected Optional<GlobalIndexResult> visitIsNotNull(BTreeIndexReader reader) {
         return reader.visitIsNotNull();
     }

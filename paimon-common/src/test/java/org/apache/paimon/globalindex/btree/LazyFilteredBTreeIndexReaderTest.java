@@ -19,18 +19,22 @@
 package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.btree.BTreeIndexReader.KeyRowIds;
+import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
 
@@ -41,6 +45,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -176,6 +181,34 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
 
             GlobalIndexResult result = reader.visitGreaterOrEqual(ref, secondFileMin).join().get();
             assertResult(result, filter(obj -> comparator.compare(obj, secondFileMin) >= 0));
+        }
+    }
+
+    @TestTemplate
+    public void testOffsetRangeComplementAvoidsOpeningAllBTreeFiles() throws Exception {
+        if (!(dataType instanceof IntType)) {
+            // The test uses Integer literals; file pruning itself is independent of the key type.
+            return;
+        }
+
+        List<GlobalIndexIOMeta> written = new ArrayList<>();
+        written.add(writeData(singletonData(1, 0L)));
+        written.add(writeData(singletonData(100, 1L)));
+        written.add(writeData(singletonData(200, 2L)));
+        written.add(writeData(singletonData(null, 3L)));
+
+        CountingGlobalIndexFileReader countingReader = new CountingGlobalIndexFileReader();
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        try (GlobalIndexReader reader =
+                new OffsetGlobalIndexReader(
+                        globalIndexer.createReader(
+                                countingReader, written, newDirectExecutorService()),
+                        1000L,
+                        1003L)) {
+            GlobalIndexResult result = reader.visitNotEqual(ref, 100).join().get();
+
+            assertRows(result, 1000L, 1002L);
+            assertThat(countingReader.openedFiles).hasSize(2);
         }
     }
 
@@ -340,6 +373,20 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
                 new Path(new Path(tempPath.toUri()), fileName),
                 fileIO.getFileSize(new Path(new Path(tempPath.toUri()), fileName)),
                 resultEntry.meta());
+    }
+
+    private List<Pair<Object, Long>> singletonData(Object key, long rowId) {
+        List<Pair<Object, Long>> result = new ArrayList<>();
+        result.add(Pair.of(key, rowId));
+        return result;
+    }
+
+    private void assertRows(GlobalIndexResult indexResult, Long... expected) {
+        List<Long> actual = new ArrayList<>();
+        for (Long rowId : indexResult.results()) {
+            actual.add(rowId);
+        }
+        assertThat(actual).containsExactlyInAnyOrder(expected);
     }
 
     /**
@@ -512,6 +559,17 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
                 break;
             default:
                 break;
+        }
+    }
+
+    private class CountingGlobalIndexFileReader implements GlobalIndexFileReader {
+
+        private final Set<Path> openedFiles = new HashSet<>();
+
+        @Override
+        public SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException {
+            openedFiles.add(meta.filePath());
+            return fileReader.getInputStream(meta);
         }
     }
 }

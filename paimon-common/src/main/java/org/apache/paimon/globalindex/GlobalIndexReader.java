@@ -36,6 +36,11 @@ import java.util.concurrent.CompletableFuture;
 public interface GlobalIndexReader
         extends FunctionVisitor<CompletableFuture<Optional<GlobalIndexResult>>>, Closeable {
 
+    /** Whether this reader can answer negative predicates by complementing a known row range. */
+    default boolean supportsRangeComplement() {
+        return false;
+    }
+
     @Override
     default CompletableFuture<Optional<GlobalIndexResult>> visitIsNaN(FieldRef fieldRef) {
         return CompletableFuture.completedFuture(Optional.empty());

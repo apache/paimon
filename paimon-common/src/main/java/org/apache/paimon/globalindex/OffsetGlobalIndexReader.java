@@ -23,6 +23,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
+import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -48,6 +49,9 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
+        if (wrapped.supportsRangeComplement()) {
+            return complement(wrapped.visitIsNull(fieldRef));
+        }
         return wrapped.visitIsNotNull(fieldRef).thenApply(this::applyOffset);
     }
 
@@ -95,6 +99,12 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
             FieldRef fieldRef, Object literal) {
+        if (literal == null) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        if (wrapped.supportsRangeComplement()) {
+            return complement(wrapped.visitIsNull(fieldRef), wrapped.visitEqual(fieldRef, literal));
+        }
         return wrapped.visitNotEqual(fieldRef, literal).thenApply(this::applyOffset);
     }
 
@@ -125,6 +135,15 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
             FieldRef fieldRef, List<Object> literals) {
+        for (Object literal : literals) {
+            if (literal == null) {
+                return CompletableFuture.completedFuture(
+                        Optional.of(GlobalIndexResult.createEmpty()));
+            }
+        }
+        if (wrapped.supportsRangeComplement()) {
+            return complement(wrapped.visitIsNull(fieldRef), wrapped.visitIn(fieldRef, literals));
+        }
         return wrapped.visitNotIn(fieldRef, literals).thenApply(this::applyOffset);
     }
 
@@ -176,6 +195,26 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
 
     private Optional<GlobalIndexResult> applyOffset(Optional<GlobalIndexResult> result) {
         return result.map(r -> r.offset(offset));
+    }
+
+    @SafeVarargs
+    private final CompletableFuture<Optional<GlobalIndexResult>> complement(
+            CompletableFuture<Optional<GlobalIndexResult>>... excludeFutures) {
+        return CompletableFuture.allOf(excludeFutures)
+                .thenApply(
+                        ignored -> {
+                            GlobalIndexResult result =
+                                    GlobalIndexResult.fromRange(new Range(offset, to));
+                            for (CompletableFuture<Optional<GlobalIndexResult>> future :
+                                    excludeFutures) {
+                                Optional<GlobalIndexResult> excluded = future.join();
+                                if (!excluded.isPresent()) {
+                                    return Optional.empty();
+                                }
+                                result = result.andNot(excluded.get().offset(offset));
+                            }
+                            return Optional.of(result);
+                        });
     }
 
     @Override
