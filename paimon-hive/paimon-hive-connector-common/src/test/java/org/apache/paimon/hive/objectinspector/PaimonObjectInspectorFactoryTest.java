@@ -21,7 +21,10 @@ package org.apache.paimon.hive.objectinspector;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.VarCharType;
 
+import org.apache.hadoop.hive.common.type.HiveChar;
+import org.apache.hadoop.hive.common.type.HiveVarchar;
 import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.junit.jupiter.api.Test;
@@ -67,5 +70,41 @@ public class PaimonObjectInspectorFactoryTest {
         assertThat(inspector.getAllStructFieldRefs()).hasSize(2);
         assertThat(inspector.getStructFieldRef("tags").getFieldObjectInspector().getTypeName())
                 .isEqualTo("map<string,int>");
+    }
+
+    @Test
+    public void testCreateCharVarcharObjectInspectorExceedingHiveLimit() {
+        assertThat(
+                        PaimonObjectInspectorFactory.create(
+                                        DataTypes.CHAR(HiveChar.MAX_CHAR_LENGTH + 1))
+                                .getTypeName())
+                .isEqualTo("string");
+        assertThat(
+                        PaimonObjectInspectorFactory.create(
+                                        DataTypes.VARCHAR(HiveVarchar.MAX_VARCHAR_LENGTH + 1))
+                                .getTypeName())
+                .isEqualTo("string");
+        // the reproducing case of issue #1565
+        assertThat(
+                        PaimonObjectInspectorFactory.create(
+                                        DataTypes.VARCHAR(VarCharType.MAX_LENGTH - 1))
+                                .getTypeName())
+                .isEqualTo("string");
+    }
+
+    @Test
+    public void testCreateCharVarcharObjectInspectorWithinHiveLimit() {
+        assertThat(
+                        PaimonObjectInspectorFactory.create(
+                                        DataTypes.CHAR(HiveChar.MAX_CHAR_LENGTH))
+                                .getTypeName())
+                .isEqualTo("char(" + HiveChar.MAX_CHAR_LENGTH + ")");
+        assertThat(
+                        PaimonObjectInspectorFactory.create(
+                                        DataTypes.VARCHAR(HiveVarchar.MAX_VARCHAR_LENGTH))
+                                .getTypeName())
+                .isEqualTo("varchar(" + HiveVarchar.MAX_VARCHAR_LENGTH + ")");
+        assertThat(PaimonObjectInspectorFactory.create(DataTypes.STRING()).getTypeName())
+                .isEqualTo("string");
     }
 }

@@ -518,7 +518,7 @@ private[spark] class SparkPostponeStagedCommitter(
     // per-partition totalBuckets values, so the copied table's uniform bucket number is only a
     // compatibility fallback for the existing commit API.
     val commitTable =
-      PostponeUtils.tableForPostponeCompact(table, rescaleBucketNums.values.max, snapshotId)
+      PostponeUtils.tableForPostponeRewrite(table, rescaleBucketNums.values.max, snapshotId)
     val commit = commitTable
       .newCommit(fixedWriteCommitUser)
       .appendCommitCheckConflict(true)
@@ -579,7 +579,7 @@ private[spark] class SparkPostponeStagedCommitter(
     bucketNums.foreach {
       case (partition, buckets) => javaBucketNums.put(partition, Integer.valueOf(buckets))
     }
-    PostponeUtils.createPostponeBucketRouter(table, javaBucketNums, 1)
+    PostponeUtils.createPostponeBucketRouter(table, javaBucketNums)
   }
 
   private def shuffleParallelism(bucketNums: Map[BinaryRow, Int]): Int = {

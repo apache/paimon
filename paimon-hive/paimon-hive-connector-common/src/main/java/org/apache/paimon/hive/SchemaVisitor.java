@@ -21,7 +21,9 @@ package org.apache.paimon.hive;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -89,6 +91,16 @@ public abstract class SchemaVisitor<P, R> {
                 P valuePartner = partner != null ? accessors.mapValuePartner(partner) : null;
                 valueResult = visit(map.getValueType(), valuePartner, visitor, accessors);
                 return visitor.map(map, partner, keyResult, valueResult);
+
+            case MULTISET:
+                // a multiset is represented as a map from element to its count, the same mapping
+                // used by PaimonObjectInspectorFactory on the read side
+                MultisetType multiset = (MultisetType) type;
+                return visit(
+                        new MapType(type.isNullable(), multiset.getElementType(), new IntType()),
+                        partner,
+                        visitor,
+                        accessors);
 
             default:
                 return visitor.primitive(type, partner);

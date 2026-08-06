@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive.utils;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.HiveConnectorOptions;
 import org.apache.paimon.hive.mapred.PaimonInputSplit;
 import org.apache.paimon.io.DataFileMeta;
@@ -31,6 +32,7 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BinPacking;
+import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.mapred.InputSplit;
@@ -135,17 +137,13 @@ public class HiveSplitGenerator {
             String defaultPartName) {
         Set<String> partitionKeySet = new HashSet<>(partitionKeys);
         LinkedHashMap<String, String> partition = new LinkedHashMap<>();
-        for (String s : partitionDir.split("/")) {
-            s = s.trim();
-            if (s.isEmpty()) {
-                continue;
-            }
-            String[] kv = s.split("=");
-            if (kv.length != 2) {
-                continue;
-            }
-            if (partitionKeySet.contains(kv[0])) {
-                partition.put(kv[0], kv[1]);
+        // the directory names are escaped by PartitionPathUtils#escapePathName when the partition
+        // is created, so they must be unescaped to get back the raw partition values
+        LinkedHashMap<String, String> spec =
+                PartitionPathUtils.extractPartitionSpecFromPath(new Path(partitionDir));
+        for (Map.Entry<String, String> entry : spec.entrySet()) {
+            if (partitionKeySet.contains(entry.getKey())) {
+                partition.put(entry.getKey(), entry.getValue());
             }
         }
         if (partition.isEmpty() || partition.size() != partitionKeys.size()) {

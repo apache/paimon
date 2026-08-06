@@ -1316,9 +1316,9 @@ For an internal format table in a REST catalog, it also makes the catalog own th
         </tr>
         <tr>
             <td><h5>postpone.default-bucket-num</h5></td>
-            <td style="word-wrap: break-word;">1</td>
+            <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
-            <td>Bucket number for the partitions compacted for the first time in postpone bucket tables.</td>
+            <td>Optional bucket number for partitions receiving real buckets for the first time and for fixed-bucket overwrite writes. The configured value is used exactly and takes precedence over automatic bucket estimation. When unset, Paimon estimates the bucket number from the target row count or target file size.</td>
         </tr>
         <tr>
             <td><h5>postpone.merge-on-read</h5></td>
@@ -1330,13 +1330,13 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td><h5>postpone.target-row-num-per-bucket</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
-            <td>Target row number per bucket when estimating the required bucket number from the current staged batch or compacting postpone bucket files.</td>
+            <td>Target postpone row count per bucket when estimating the required bucket number from staged or committed postpone files. When configured, this option takes precedence over 'postpone.target-size-per-bucket'.</td>
         </tr>
         <tr>
             <td><h5>postpone.target-size-per-bucket</h5></td>
             <td style="word-wrap: break-word;">1 gb</td>
             <td>MemorySize</td>
-            <td>Target staged file size per bucket when Spark estimates the required bucket number from the current staged batch. This option is ignored when 'postpone.target-row-num-per-bucket' is configured.</td>
+            <td>Target postpone file size per bucket when estimating the required bucket number from staged or committed postpone files. This option is ignored when 'postpone.target-row-num-per-bucket' is configured.</td>
         </tr>
         <tr>
             <td><h5>primary-key</h5></td>

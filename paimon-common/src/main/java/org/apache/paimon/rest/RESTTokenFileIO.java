@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.ConfigOption;
@@ -130,6 +131,13 @@ public class RESTTokenFileIO implements FileIO {
     @Override
     public FileStatus[] listStatus(Path path) throws IOException {
         return fileIO().listStatus(path);
+    }
+
+    @Override
+    public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        // the interface default would hide the inner FileIO's iterative listing override
+        return fileIO().listFilesIterative(path, recursive);
     }
 
     @Override

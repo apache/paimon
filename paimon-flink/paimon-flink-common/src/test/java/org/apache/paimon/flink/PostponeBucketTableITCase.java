@@ -560,6 +560,22 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                                         "SELECT `partition`, COUNT(DISTINCT bucket) FROM `T$files` "
                                                 + "GROUP BY `partition`")))
                 .containsExactlyInAnyOrder("+I[{0}, 1]", "+I[{1}, 3]");
+
+        tEnv.executeSql("ALTER TABLE T SET ('postpone.default-bucket-num' = '2')").await();
+        values.clear();
+        for (int j = 0; j < 450; j++) {
+            values.add(String.format("(2, %d, %d)", j, j));
+        }
+        tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
+        // An explicitly configured default takes precedence over the row-count estimate of 3.
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT COUNT(DISTINCT bucket) FROM `T$files` "
+                                                + "WHERE `partition` = '{2}'")))
+                .containsExactly("+I[2]");
     }
 
     @Timeout(TIMEOUT)
