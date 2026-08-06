@@ -442,10 +442,14 @@ This section introduce all available spark procedures about paimon.
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>options: the additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
             <li>dry_run (Boolean, optional): when true, logs manifest metadata statistics without actually compacting. The result is printed to the application log; the SQL return value is still `true`.</li>
+            <li>manifest_sort_enabled (Boolean, optional): whether to use manifest sort rewrite for this invocation.</li>
+            <li>manifest_sort_partition_field (String, optional): partition field used to sort manifest entries. Defaults to the first partition field.</li>
+            <li>manifest_sort_max_rewrite_size (String, optional): maximum manifest size rewritten by one sort pass.</li>
       </td>
       <td>
          CALL sys.compact_manifest(`table` => 'default.T')<br/>
-         CALL sys.compact_manifest(`table` => 'default.T', dry_run => true)
+         CALL sys.compact_manifest(`table` => 'default.T', dry_run => true)<br/>
+         CALL sys.compact_manifest(`table` => 'default.T', manifest_sort_enabled => true, manifest_sort_partition_field => 'dt', manifest_sort_max_rewrite_size => '1 gb')
       </td>
    </tr>
    <tr>
