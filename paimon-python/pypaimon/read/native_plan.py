@@ -22,7 +22,7 @@ Predicates and limits are pushed into Rust planning. The normal pypaimon reader
 still applies them while reading, so pushdown remains an optimization.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
@@ -171,7 +171,8 @@ def native_plan(
         table,
         predicate: Optional[Predicate] = None,
         limit: Optional[int] = None,
-        projection: Optional[List[str]] = None) -> List[Split]:
+        projection: Optional[List[str]] = None,
+        row_ranges: Optional[List[Tuple[int, int]]] = None) -> List[Split]:
     """Plan with pypaimon_rust and return the decoded pypaimon splits.
 
     Native conversion or planning failures are handled by TableScan, which
@@ -190,6 +191,8 @@ def native_plan(
         builder = builder.with_filter(_predicate_to_native(predicate))
     if limit is not None:
         builder = builder.with_limit(limit)
+    if row_ranges is not None:
+        builder = builder.with_row_ranges(row_ranges)
     rust_splits = builder.new_scan().plan().splits()
     pfields = _partition_fields(table)
     # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).

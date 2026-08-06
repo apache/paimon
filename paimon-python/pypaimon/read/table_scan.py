@@ -17,7 +17,7 @@
 
 import json as _json
 import logging
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.common.identifier import UNKNOWN_DATABASE
@@ -95,9 +95,9 @@ class TableScan:
 
     def _native_plan_supported_impl(self) -> bool:
         """Fall back to the Python scanner for scans native can't carry:
-        shard/slice, chunk-shuffle, global-index/row-ranges, first-row
-        merge-engine (Rust drops L0), deletion vectors, postpone bucket
-        (drops synthetic buckets),
+        shard/slice, chunk-shuffle, explicit row ranges, scored or primary-key
+        global-index results, first-row merge-engine (Rust drops L0), deletion
+        vectors, postpone bucket,
         a primary-key table whose trimmed PK is empty (PK equals the partition
         key; native may mark splits raw-convertible and skip merge), dynamic
         bucket / cross-partition PK tables (unconfirmed Rust parity), a stale
@@ -113,8 +113,8 @@ class TableScan:
         if (getattr(fs, 'idx_of_this_subtask', None) is not None
                 or getattr(fs, 'start_pos_of_this_subtask', None) is not None
                 or getattr(fs, 'chunk_shuffle', None) is not None
-                or getattr(fs, '_global_index_result', None) is not None
                 or getattr(fs, '_row_ranges', None) is not None
+                or not self._native_global_index_result_supported()
                 or getattr(fs, 'deletion_vectors_enabled', False)
                 or getattr(fs, 'only_read_real_buckets', False)):
             return False
@@ -173,16 +173,36 @@ class TableScan:
             return False
         return not options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
 
+    def _native_global_index_result_supported(self) -> bool:
+        result = self.file_scanner._global_index_result
+        if result is None:
+            return True
+        if (self.table.is_primary_key_table
+                or not self.file_scanner.data_evolution):
+            return False
+        from pypaimon.globalindex.global_index_result import GlobalIndexResult
+        from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
+        return (isinstance(result, GlobalIndexResult)
+                and not isinstance(result, ScoredGlobalIndexResult))
+
+    def _native_global_index_row_ranges(self) -> Optional[List[Tuple[int, int]]]:
+        result = self.file_scanner._global_index_result
+        if result is None:
+            return None
+        return [(range_.from_, range_.to)
+                for range_ in result.results().to_range_list()]
+
     def _try_native_plan(self) -> Optional[Plan]:
         """Plan via pypaimon_rust, then drop partitions the predicate rejects.
 
         Predicate and limit are pushed into Rust planning and are still enforced
-        by the reader. Return None when Rust finds no splits so the caller can use
-        the matching Python fallback (with scan stats when requested).
+        by the reader. Empty unrestricted scans fall back to preserve snapshot
+        metadata; explicit empty row ranges are a terminal empty result.
         """
         from pypaimon.read.native_plan import native_plan
 
         try:
+            row_ranges = self._native_global_index_row_ranges()
             native_predicate = self.predicate
             if self.partition_predicate is not None:
                 native_predicate = PredicateBuilder.and_predicates([
@@ -198,9 +218,10 @@ class TableScan:
                 projection=(
                     [field.name for field in self._read_type]
                     if self._read_type is not None else None),
+                row_ranges=row_ranges,
             )
             if not splits:
-                return None
+                return Plan([]) if row_ranges is not None else None
             snapshot_id = splits[0].snapshot_id
             partition_predicate = self.file_scanner.partition_key_predicate
             if partition_predicate is not None:
