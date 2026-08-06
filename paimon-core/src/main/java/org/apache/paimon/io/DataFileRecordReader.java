@@ -178,9 +178,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         }
 
         if (iterator instanceof ColumnarRowIterator) {
-            iterator =
-                    ((ColumnarRowIterator) iterator)
-                            .mapping(tableRowType, partitionInfo, indexMapping);
+            iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
             if (rowTrackingEnabled) {
                 iterator =
                         ((ColumnarRowIterator) iterator)
