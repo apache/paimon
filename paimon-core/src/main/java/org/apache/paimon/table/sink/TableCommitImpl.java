@@ -61,7 +61,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -89,7 +88,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private final AtomicReference<Throwable> maintainError;
     private final String tableName;
     private final boolean forceCreatingSnapshot;
-    private final ThreadPoolExecutor fileCheckExecutor;
+    private final ExecutorService fileCheckExecutor;
 
     @Nullable private Map<String, String> overwritePartitionSpec = null;
     @Nullable private List<BinaryRow> overwriteStaticPartitions = null;
