@@ -80,7 +80,7 @@ class TableCommit:
                     "Committing overwrite to table %s, %d non-empty messages",
                     self.table.identifier, len(non_empty_messages)
                 )
-                self.file_store_commit.overwrite(
+                return self.file_store_commit.overwrite(
                     overwrite_partition=self.overwrite_partition,
                     commit_messages=non_empty_messages,
                     commit_identifier=commit_identifier
@@ -92,7 +92,7 @@ class TableCommit:
                     "Committing table %s, %d non-empty messages",
                     self.table.identifier, len(non_empty_messages)
                 )
-                self.file_store_commit.commit(
+                return self.file_store_commit.commit(
                     commit_messages=non_empty_messages,
                     commit_identifier=commit_identifier
                 )
@@ -125,7 +125,7 @@ class BatchTableCommit(TableCommit):
 
     def commit(self, commit_messages: List[CommitMessage]):
         self._check_committed()
-        self._commit(commit_messages, BATCH_COMMIT_IDENTIFIER)
+        return self._commit(commit_messages, BATCH_COMMIT_IDENTIFIER)
 
     def truncate_table(self) -> None:
         """Truncate the entire table, deleting all data."""
@@ -151,4 +151,4 @@ class StreamTableCommit(TableCommit):
     """
 
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
-        self._commit(commit_messages, commit_identifier)
+        return self._commit(commit_messages, commit_identifier)

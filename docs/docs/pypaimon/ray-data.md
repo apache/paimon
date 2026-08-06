@@ -541,60 +541,48 @@ For an end-to-end feature update workflow on Blob tables, see
   or `insert="*"`, the source must include the corresponding blob columns.
   If an insert mapping omits a blob column, that column is written as `NULL`.
 
-## Update By Transform
+## Process Row-Id Ranges
 
-`update_by_transform` runs a column backfill on a non-primary-key
-**data-evolution** table. It automatically processes the table in batches of
-approximately `rows_per_commit` rows. Each completed batch is committed and
-becomes visible independently, even if a later batch fails.
+`process_row_id_ranges` splits a long backfill into file-group-aligned ranges.
+Each range follows `read -> process -> update -> commit`; completed ranges are
+visible even if a later range fails. The application configures only the target
+row count and processing callback.
 
 ```python
 import pyarrow as pa
+from pypaimon.ray import process_row_id_ranges
 
-class GenerateTextEmbedding:
-    def __init__(self):
-        self.model = load_model()
+def process(ctx):
+    source = ctx.read(["text"], filter="language = 'en'")
 
-    def __call__(self, rows):
+    def embed(batch):
         return pa.table({
-            "text_embedding": self.model(rows["text"]),
+            "_ROW_ID": batch["_ROW_ID"],
+            "text_embedding": model(batch["text"]),
         })
 
-from pypaimon.ray import update_by_transform
+    updates = source.map_batches(embed, batch_format="pyarrow")
+    ctx.update_by_row_id(updates, ["text_embedding"])
 
-metrics = update_by_transform(
+process_row_id_ranges(
     target="database_name.documents",
     catalog_options={"warehouse": "/path/to/warehouse"},
-    filter="language = 'en'",      # optional; omit to process the full table
-    read_projection=["text"],
-    transform=GenerateTextEmbedding,
-    update_cols=["text_embedding"],
-    rows_per_commit=1_000_000,
-    ray_remote_args={"num_gpus": 1},
+    target_rows_per_range=1_000_000,
+    processor=process,
 )
 ```
 
-The transform receives `read_projection` for matching rows and returns
-`update_cols` with the same row count and order. A string `filter` is pushed
-down to Paimon; a callable `filter` receives each Arrow batch and returns one
-boolean per row. `transform_batch_size` controls rows per call. Callable classes
-run as Ray actors; use `functools.partial` for constructor arguments.
+The row count is approximate because boundaries never split a logical file
+group. `ctx.read()` includes `_ROW_ID`; distributed processing may reorder rows
+but must preserve this column in its output. Use `plan_row_id_ranges` directly
+when the application needs explicit range metadata or operations.
 
-`rows_per_commit` is approximate because boundaries align with complete file
-groups. With a sparse filter, commits may contain fewer rows. Completed
-ranges remain visible after a later failure.
-
-Requires `ray >= 2.50` and a target with `data-evolution.enabled` and
-`row-tracking.enabled`.
-
-**Notes:**
-- Concurrent append, compaction, and non-conflicting column updates are
-  allowed. Updates to a read, filter, or output column on overlapping rows,
-  schema changes, and other external rewrites fail.
-- Source progress is not checkpointed. Retry may replay completed batches, so
-  transforms must be idempotent.
-- A temporary `pypaimon-transform-update-*` tag protects the planned snapshot and is
-  removed on normal exit. A hard driver failure may retain it for up to 30 days.
+Requires `ray >= 2.50` and a non-primary-key table with
+`data-evolution.enabled` and `row-tracking.enabled`. Concurrent append and
+compaction are allowed; conflicting rewrites, column updates, and schema changes
+fail. Retry may replay completed ranges. A temporary `pypaimon-row-id-range-*`
+tag protects the planned snapshot; it is removed on normal exit and expires
+after 30 days following a hard driver failure.
 
 ## Update By Row Id
 

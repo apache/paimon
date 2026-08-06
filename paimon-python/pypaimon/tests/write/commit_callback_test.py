@@ -91,18 +91,11 @@ class CommitCallbackTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
-    def test_callback_invoked_when_retry_finds_commit(self):
-        table = self._create_table(
-            'test_callback_after_uncertain_commit', options={
-                'row-tracking.enabled': 'true',
-                'data-evolution.enabled': 'true',
-            })
+    def test_commit_returns_snapshot_after_uncertain_retry(self):
+        table = self._create_table('test_uncertain_commit_result')
         builder = table.new_batch_write_builder()
         table_write = builder.new_write()
         table_commit = builder.new_commit()
-        callback = RecordingCallback()
-        table_commit.add_commit_callback(callback)
-
         table_write.write_arrow(pa.Table.from_pydict({
             'id': [1], 'name': ['a'], 'dt': ['p1'],
         }, schema=self.pa_schema))
@@ -115,16 +108,9 @@ class CommitCallbackTest(unittest.TestCase):
         table_commit.file_store_commit.snapshot_commit.commit = (
             commit_then_lose_response)
         table_commit.file_store_commit._commit_retry_wait = lambda _: None
-        table_commit.commit(table_write.prepare_commit())
+        snapshot = table_commit.commit(table_write.prepare_commit())
 
-        self.assertEqual(1, len(callback.contexts))
-        ctx = callback.contexts[0]
-        self.assertEqual(1, ctx.snapshot.id)
-        self.assertEqual(1, ctx.snapshot.next_row_id)
-        self.assertEqual([0], [
-            entry.file.first_row_id for entry in ctx.commit_entries
-            if entry.kind == 0
-        ])
+        self.assertEqual(1, snapshot.id)
         table_write.close()
         table_commit.close()
 

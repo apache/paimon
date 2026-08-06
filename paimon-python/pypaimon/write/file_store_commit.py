@@ -66,6 +66,9 @@ class CommitResult:
 class SuccessResult(CommitResult):
     """Result indicating successful commit."""
 
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+
     def is_success(self) -> bool:
         return True
 
@@ -132,8 +135,7 @@ class RetryResult(CommitResult):
     def __init__(self, latest_snapshot, exception: Optional[Exception] = None,
                  base_data_files: Optional[List[ManifestEntry]] = None,
                  commit_result_may_be_uncertain: bool = False,
-                 manifest_merge_result: Optional[ManifestMergeResult] = None,
-                 commit_entries: Optional[List[ManifestEntry]] = None):
+                 manifest_merge_result: Optional[ManifestMergeResult] = None):
         self.latest_snapshot = latest_snapshot
         self.exception = exception
         self.commit_result_may_be_uncertain = commit_result_may_be_uncertain
@@ -141,10 +143,6 @@ class RetryResult(CommitResult):
         # them and reads only the incremental changes.
         self.base_data_files = base_data_files
         self.manifest_merge_result = manifest_merge_result
-        # Keep the entries prepared for this attempt. Row tracking metadata is
-        # assigned after planning and must be preserved if retry later finds
-        # that this attempt committed successfully.
-        self.commit_entries = commit_entries
 
     def is_success(self) -> bool:
         return False
@@ -218,7 +216,7 @@ class FileStoreCommit:
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in normal append mode."""
         if not commit_messages:
-            return
+            return None
 
         # Extract the minimum check_from_snapshot from commit messages
         valid_snapshots = [msg.check_from_snapshot for msg in commit_messages
@@ -288,15 +286,17 @@ class FileStoreCommit:
             # Detect concurrent bucket-count changes in postpone APPENDs.
             detect_conflicts = True
 
-        self._try_commit(commit_kind=commit_kind,
-                         commit_identifier=commit_identifier,
-                         commit_entries_plan=lambda snapshot: commit_entries,
-                         changelog_entries=changelog_entries,
-                         detect_conflicts=detect_conflicts,
-                         allow_rollback=allow_rollback,
-                         index_deletes=index_deletes,
-                         index_adds=index_adds,
-                         hash_index_base_snapshot=hash_index_base_snapshot)
+        return self._try_commit(
+            commit_kind=commit_kind,
+            commit_identifier=commit_identifier,
+            commit_entries_plan=lambda snapshot: commit_entries,
+            changelog_entries=changelog_entries,
+            detect_conflicts=detect_conflicts,
+            allow_rollback=allow_rollback,
+            index_deletes=index_deletes,
+            index_adds=index_adds,
+            hash_index_base_snapshot=hash_index_base_snapshot,
+        )
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -427,7 +427,7 @@ class FileStoreCommit:
             raise RuntimeError("Failed to build partition filter.")
 
         provider = self._overwrite_changes_provider(partition_filter, [])
-        self._try_commit(
+        return self._try_commit(
             commit_kind="OVERWRITE",
             commit_identifier=commit_identifier,
             commit_entries_plan=provider.provide,
@@ -468,7 +468,7 @@ class FileStoreCommit:
             # No entries to commit (e.g. drop_partitions with no matching data): skip commit
             # to avoid creating manifest/snapshot with empty partition_stats (causes read errors).
             if not commit_entries and not index_deletes and not index_adds:
-                break
+                return None
 
             result = self._try_commit_once(
                 retry_result=retry_result,
@@ -514,7 +514,7 @@ class FileStoreCommit:
                         self.table.identifier,
                         commit_duration_ms,
                     )
-                break
+                return result.snapshot
             else:
                 retry_result = result
                 if result.commit_result_may_be_uncertain:
@@ -568,16 +568,7 @@ class FileStoreCommit:
         duplicate = self._find_duplicate_commit(
             retry_result, latest_snapshot, commit_identifier, commit_kind)
         if duplicate is not None:
-            if commit_kind == "APPEND":
-                callback_entries = (
-                    retry_result.commit_entries
-                    if retry_result is not None
-                    and retry_result.commit_entries is not None
-                    else commit_entries
-                )
-                self._notify_commit_callbacks(
-                    duplicate, callback_entries, commit_identifier)
-            return SuccessResult()
+            return SuccessResult(duplicate)
 
         rewrite_conflict = (
             self.conflict_detection.check_external_rewrites(latest_snapshot))
@@ -792,6 +783,14 @@ class FileStoreCommit:
         # Use SnapshotCommit for atomic commit
         try:
             with self.snapshot_commit:
+                locked_conflict = (
+                    self.conflict_detection.check_external_rewrites(
+                        latest_snapshot))
+                if locked_conflict is not None:
+                    if commit_result_may_be_uncertain:
+                        raise locked_conflict
+                    raise CommitConflictError(
+                        str(locked_conflict)) from locked_conflict
                 success = self.snapshot_commit.commit(
                     latest_snapshot.uuid if latest_snapshot else None,
                     snapshot_data,
@@ -821,8 +820,22 @@ class FileStoreCommit:
                         None,
                         base_data_files=base_data_files,
                         manifest_merge_result=manifest_merge_result,
-                        commit_entries=commit_entries,
                     )
+        except CommitConflictError:
+            try:
+                self._clean_up_reuse_tmp_manifests(
+                    delta_manifest_list,
+                    changelog_manifest_list_name,
+                    new_index_manifest,
+                )
+                self._clean_up_no_reuse_tmp_manifests(
+                    base_manifest_list, merge_new_files)
+            except Exception:
+                logger.warning(
+                    "Failed to clean up rejected commit manifests.",
+                    exc_info=True,
+                )
+            raise
         except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
             logger.warning("Retry commit for exception.", exc_info=True)
@@ -832,7 +845,6 @@ class FileStoreCommit:
                 base_data_files=base_data_files,
                 commit_result_may_be_uncertain=True,
                 manifest_merge_result=None,
-                commit_entries=commit_entries,
             )
 
         logger.info(
@@ -848,7 +860,7 @@ class FileStoreCommit:
         self._notify_commit_callbacks(
             snapshot_data, commit_entries, commit_identifier)
 
-        return SuccessResult()
+        return SuccessResult(snapshot_data)
 
     def _try_rewrite_row_id_conflict(
             self,
