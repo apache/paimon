@@ -690,6 +690,49 @@ public class SnapshotManagerTest {
         assertThat(snapshotManager.earlierOrEqualWatermark(100)).isNull();
     }
 
+    @Test
+    public void testWatermarkSearchWithMinValueSentinelAndNullWatermarks() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // a mixed-engine history: snapshot 0 carries the Long.MIN_VALUE sentinel written by
+        // engines without watermark semantics, snapshot 1 carries no watermark at all
+        Map<Long, Long> watermarks = watermarkMap(0, Long.MIN_VALUE);
+        for (long i = 0; i < 2; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // the Long.MIN_VALUE sentinel means "no watermark" and must never match a query;
+        // in particular it must not be returned for a rollback to watermark 0
+        assertThat(snapshotManager.earlierOrEqualWatermark(0)).isNull();
+        assertThat(snapshotManager.laterOrEqualWatermark(0)).isNull();
+    }
+
+    @Test
+    public void testWatermarkSearchWithMinValueSentinelMixedWithRealWatermarks()
+            throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // snapshots 0 and 3 carry the Long.MIN_VALUE sentinel, snapshots 1 and 2 carry real
+        // watermarks
+        Map<Long, Long> watermarks =
+                watermarkMap(0, Long.MIN_VALUE, 1, 100, 2, 200, 3, Long.MIN_VALUE);
+        for (long i = 0; i < 4; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, 1000 + i * 1000, watermarks.get(i));
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // the sentinel on the latest snapshot must not short-circuit the search
+        assertThat(snapshotManager.earlierOrEqualWatermark(100).id()).isEqualTo(1);
+        assertThat(snapshotManager.earlierOrEqualWatermark(250).id()).isEqualTo(2);
+        assertThat(snapshotManager.laterOrEqualWatermark(150).id()).isEqualTo(2);
+        // the leading sentinel must not shadow the real watermarks after it
+        assertThat(snapshotManager.laterOrEqualWatermark(50).id()).isEqualTo(1);
+        assertThat(snapshotManager.earlierOrEqualWatermark(50)).isNull();
+    }
+
     /**
      * Test {@link SnapshotManager} to mock situations when there is a race condition, that the
      * earliest snapshot is deleted by another thread in the middle of the current thread's
