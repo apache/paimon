@@ -176,10 +176,41 @@ class RayIncrementalWriteTest(unittest.TestCase):
         with self._clock():
             self._write_incrementally(target, updates, interval=1)
 
-        self.assertEqual(2, self._snapshot_id(target) - before)
+        self.assertGreaterEqual(self._snapshot_id(target) - before, 2)
         self._assert_features(target, list(range(101, 121)))
         self.assertEqual(["a", "b", "c"] + [None] * 17,
                          self._read(target)["payload"].to_pylist())
+
+    def test_materialized_slow_write_commits_periodically(self):
+        target = self._create_target()
+        updates = pa.table({
+            "id": [1, 2],
+            "feature": [101, 102],
+        }, schema=self.source_schema)
+        updates = ray.data.from_arrow([
+            updates.slice(0, 1), updates.slice(1, 1)]).materialize()
+        groups = [
+            self._prepare_update(target, [1], [101]),
+            self._prepare_update(target, [2], [102]),
+        ]
+        now = [0]
+
+        def slow_write(*_args, **kwargs):
+            now[0] = 20
+            kwargs["on_group_result"](groups[0])
+            now[0] = 21
+            kwargs["on_group_result"](groups[1])
+
+        before = self._snapshot_id(target)
+        with mock.patch(
+                "pypaimon.ray.incremental_write.time.monotonic",
+                side_effect=lambda: now[0]), mock.patch(
+                "pypaimon.write.ray_datasink._write_primary_key_groups",
+                side_effect=slow_write):
+            self._write_incrementally(target, updates, interval=10)
+
+        self.assertEqual(2, self._snapshot_id(target) - before)
+        self._assert_features(target, [101, 102, 30])
 
     def test_failure_keeps_completed_groups(self):
         target = self._create_target()

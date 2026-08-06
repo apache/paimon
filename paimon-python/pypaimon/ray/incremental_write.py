@@ -60,6 +60,7 @@ def _write_dataset_periodically(
     committer = _PeriodicDatasetCommitter(
         table,
         table.table_schema.id,
+        commit_interval_seconds,
     )
     windows = _dataset_windows(dataset, commit_interval_seconds)
     try:
@@ -74,7 +75,7 @@ def _write_dataset_periodically(
                     ray_remote_args=ray_remote_args,
                     on_group_result=committer.add_group,
                 )
-                committer.commit()
+            committer.commit()
         except Exception:
             # Preserve successful groups produced before a worker failure.
             committer.commit()
@@ -131,9 +132,11 @@ def _dataset_windows(dataset, interval):
 
 class _PeriodicDatasetCommitter:
 
-    def __init__(self, table, schema_id):
+    def __init__(self, table, schema_id, commit_interval_seconds):
         self._table = table
         self._schema_id = schema_id
+        self._commit_interval = commit_interval_seconds
+        self._last_commit = time.monotonic()
         builder = table.new_stream_write_builder()
         self._commit = builder.new_commit()
         self._callback = _SnapshotCallback()
@@ -144,6 +147,10 @@ class _PeriodicDatasetCommitter:
     def add_group(self, messages):
         self._pending.extend(
             message for message in messages if not message.is_empty())
+        if (self._pending
+                and time.monotonic() - self._last_commit
+                >= self._commit_interval):
+            self.commit()
 
     def commit(self):
         if not self._pending:
@@ -158,6 +165,7 @@ class _PeriodicDatasetCommitter:
             raise RuntimeError("Committed periodic write snapshot is missing.")
         _validate_schema(self._table, self._schema_id)
         self._next_commit_id += 1
+        self._last_commit = time.monotonic()
 
     def abort_pending(self):
         if not self._pending:
