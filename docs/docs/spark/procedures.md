@@ -441,7 +441,7 @@ This section introduce all available spark procedures about paimon.
          To compact_manifest the manifests. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>options: the additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
-            <li>dry_run (Boolean, optional): when true, logs manifest metadata statistics without actually compacting. The result is printed to the application log; the SQL return value is still `true`.</li>
+            <li>dry_run (Boolean, optional): when true, logs manifest metadata statistics without actually compacting. When manifest sort is enabled, the log also contains the number of manifest files in each level built by manifest sort. The result is printed to the application log; the SQL return value is still `true`.</li>
             <li>manifest_sort_enabled (Boolean, optional): whether to use manifest sort rewrite for this invocation.</li>
             <li>manifest_sort_partition_field (String, optional): partition field used to sort manifest entries. Defaults to the first partition field.</li>
             <li>manifest_sort_max_rewrite_size (String, optional): maximum manifest size rewritten by one sort pass.</li>

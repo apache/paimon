@@ -27,6 +27,8 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** IT Case for {@link CompactManifestProcedure}. */
 public class CompactManifestProcedureITCase extends CatalogITCaseBase {
@@ -287,13 +289,29 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
 
         String dryRunResult =
                 Objects.requireNonNull(
-                                sql("CALL sys.compact_manifest(`table` => 'default.T', `dry_run` => true)")
+                                sql("CALL sys.compact_manifest("
+                                                + "`table` => 'default.T', "
+                                                + "`options` => 'manifest.target-file-size=1B', "
+                                                + "`dry_run` => true, "
+                                                + "`manifest_sort_enabled` => true, "
+                                                + "`manifest_sort_partition_field` => 'dt')")
                                         .get(0)
                                         .getField(0))
                         .toString();
 
         Assertions.assertThat(dryRunResult).startsWith("Dry run:");
         Assertions.assertThat(dryRunResult).contains("deleted entries in");
+        Matcher levelCounts =
+                Pattern.compile(
+                                "Manifest sort level files: L0=(\\d+), L1=(\\d+), L2=(\\d+), L3=(\\d+), L4=(\\d+)\\.")
+                        .matcher(dryRunResult);
+        Assertions.assertThat(levelCounts.find()).isTrue();
+        long leveledManifestFiles = 0;
+        for (int i = 1; i <= 5; i++) {
+            leveledManifestFiles += Long.parseLong(levelCounts.group(i));
+        }
+        Assertions.assertThat(leveledManifestFiles)
+                .isEqualTo(sql("SELECT count(*) FROM T$manifests").get(0).getField(0));
 
         // verify dry run did not actually compact
         Assertions.assertThat(
