@@ -22,6 +22,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.util.List;
@@ -36,6 +37,20 @@ public interface GlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             ExecutorService executor);
+
+    /**
+     * Creates a reader with the complete relative row-id range covered by the current index shard.
+     *
+     * <p>Indexers may use the range to answer negative predicates by complement. Indexers which do
+     * not need the range may use the default implementation.
+     */
+    default GlobalIndexReader createReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            Range rowIdRange,
+            ExecutorService executor) {
+        return createReader(fileReader, files, executor);
+    }
 
     static GlobalIndexer create(String type, DataField indexField, Options options) {
         GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);

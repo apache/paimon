@@ -38,6 +38,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -134,6 +135,33 @@ public class LazyFilteredBitmapIndexReaderTest {
             assertThat(reader.visitEndsWith(fieldRef, str("A")).join()).isEmpty();
             assertThat(reader.visitContains(fieldRef, str("A")).join()).isEmpty();
             assertThat(reader.visitLike(fieldRef, str("%A")).join()).isEmpty();
+        }
+    }
+
+    @Test
+    public void testRangeComplementAvoidsOpeningAllBitmapFiles() throws Exception {
+        List<GlobalIndexIOMeta> written = new ArrayList<>();
+        written.add(writeData(Collections.singletonList(Pair.of(null, 0L))));
+        written.add(writeData(Collections.singletonList(Pair.of(str("A"), 1L))));
+        written.add(writeData(Collections.singletonList(Pair.of(str("M"), 2L))));
+        written.add(writeData(Collections.singletonList(Pair.of(str("Z"), 3L))));
+
+        CountingGlobalIndexFileReader countingReader = new CountingGlobalIndexFileReader();
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        countingReader, written, new Range(0L, 3L), newDirectExecutorService())) {
+            assertRows(reader.visitNotEqual(fieldRef, null).join());
+            assertRows(reader.visitNotIn(fieldRef, Arrays.asList(str("M"), null)).join());
+            assertThat(countingReader.openCount()).isZero();
+
+            assertRows(reader.visitNotEqual(fieldRef, str("M")).join(), 1L, 3L);
+            assertThat(countingReader.openCount()).isEqualTo(2);
+
+            assertRows(reader.visitNotIn(fieldRef, Arrays.asList(str("M"), str("Z"))).join(), 1L);
+            assertThat(countingReader.openCount()).isEqualTo(3);
+
+            assertRows(reader.visitIsNotNull(fieldRef).join(), 1L, 2L, 3L);
+            assertThat(countingReader.openCount()).isEqualTo(3);
         }
     }
 

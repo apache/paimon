@@ -29,7 +29,10 @@ import org.apache.paimon.predicate.LikeOptimization;
 import org.apache.paimon.predicate.StartsWith;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -53,21 +56,35 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     private final long fallbackScanMaxSize;
     private final Map<Path, R> readerCache;
     private final ExecutorService executor;
+    @Nullable private final Range rowIdRange;
 
     protected SortedFileGlobalIndexReader(
             List<GlobalIndexIOMeta> files,
             KeySerializer keySerializer,
             long fallbackScanMaxSize,
             ExecutorService executor) {
+        this(files, keySerializer, fallbackScanMaxSize, null, executor);
+    }
+
+    protected SortedFileGlobalIndexReader(
+            List<GlobalIndexIOMeta> files,
+            KeySerializer keySerializer,
+            long fallbackScanMaxSize,
+            @Nullable Range rowIdRange,
+            ExecutorService executor) {
         this.fileSelector = new SortedFileMetaSelector(files, keySerializer);
         this.files = new ArrayList<>(files);
         this.fallbackScanMaxSize = fallbackScanMaxSize;
         this.readerCache = new ConcurrentHashMap<>();
         this.executor = executor;
+        this.rowIdRange = rowIdRange;
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
+        if (rowIdRange != null) {
+            return complement(visitIsNull(fieldRef));
+        }
         return visitParallel(() -> fileSelector.visitIsNotNull(fieldRef), this::visitIsNotNull);
     }
 
@@ -169,6 +186,13 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
             FieldRef fieldRef, Object literal) {
+        if (rowIdRange != null) {
+            if (literal == null) {
+                return CompletableFuture.completedFuture(
+                        Optional.of(GlobalIndexResult.createEmpty()));
+            }
+            return complement(visitIsNull(fieldRef), visitEqual(fieldRef, literal));
+        }
         return visitParallel(
                 () -> fileSelector.visitNotEqual(fieldRef, literal),
                 reader -> visitNotEqual(reader, literal));
@@ -215,6 +239,15 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
             FieldRef fieldRef, List<Object> literals) {
+        if (rowIdRange != null) {
+            for (Object literal : literals) {
+                if (literal == null) {
+                    return CompletableFuture.completedFuture(
+                            Optional.of(GlobalIndexResult.createEmpty()));
+                }
+            }
+            return complement(visitIsNull(fieldRef), visitIn(fieldRef, literals));
+        }
         return visitParallel(
                 () -> fileSelector.visitNotIn(fieldRef, literals),
                 reader -> visitNotIn(reader, literals));
@@ -346,6 +379,25 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
 
     private CompletableFuture<Optional<GlobalIndexResult>> unsupported() {
         return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @SafeVarargs
+    private final CompletableFuture<Optional<GlobalIndexResult>> complement(
+            CompletableFuture<Optional<GlobalIndexResult>>... excludeFutures) {
+        return CompletableFuture.allOf(excludeFutures)
+                .thenApply(
+                        ignored -> {
+                            GlobalIndexResult result = GlobalIndexResult.fromRange(rowIdRange);
+                            for (CompletableFuture<Optional<GlobalIndexResult>> future :
+                                    excludeFutures) {
+                                Optional<GlobalIndexResult> excluded = future.join();
+                                if (!excluded.isPresent()) {
+                                    return Optional.empty();
+                                }
+                                result = result.andNot(excluded.get());
+                            }
+                            return Optional.of(result);
+                        });
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> visitParallel(

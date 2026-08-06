@@ -23,7 +23,10 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedFileGlobalIndexReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
@@ -43,7 +46,17 @@ public class LazyFilteredBitmapReader extends SortedFileGlobalIndexReader<Bitmap
             KeySerializer keySerializer,
             long fallbackScanMaxSize,
             ExecutorService executor) {
-        super(files, keySerializer, fallbackScanMaxSize, executor);
+        this(fileReader, files, keySerializer, fallbackScanMaxSize, null, executor);
+    }
+
+    LazyFilteredBitmapReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            KeySerializer keySerializer,
+            long fallbackScanMaxSize,
+            @Nullable Range rowIdRange,
+            ExecutorService executor) {
+        super(files, keySerializer, fallbackScanMaxSize, rowIdRange, executor);
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
     }

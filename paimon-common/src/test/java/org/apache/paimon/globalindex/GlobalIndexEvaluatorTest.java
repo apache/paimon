@@ -807,98 +807,45 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
-    void testOffsetRangeComplementForNegativePredicates() {
+    void testOffsetDelegatesNegativePredicates() {
         FieldRef fieldRef = new FieldRef(0, "a", DataTypes.INT());
         AtomicBoolean isNotNullVisited = new AtomicBoolean();
-        AtomicBoolean notEqualVisited = new AtomicBoolean();
-        AtomicBoolean notInVisited = new AtomicBoolean();
+        AtomicInteger notEqualVisits = new AtomicInteger();
+        AtomicInteger notInVisits = new AtomicInteger();
         GlobalIndexReader delegate =
                 new StubGlobalIndexReader(null) {
-                    @Override
-                    public boolean supportsRangeComplement() {
-                        return true;
-                    }
-
-                    @Override
-                    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(
-                            FieldRef fieldRef) {
-                        return CompletableFuture.completedFuture(Optional.of(resultOf(2, 4)));
-                    }
-
-                    @Override
-                    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
-                            FieldRef fieldRef, Object literal) {
-                        return CompletableFuture.completedFuture(Optional.of(resultOf(1, 3)));
-                    }
-
-                    @Override
-                    public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
-                            FieldRef fieldRef, List<Object> literals) {
-                        return CompletableFuture.completedFuture(Optional.of(resultOf(0, 5)));
-                    }
-
                     @Override
                     public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(
                             FieldRef fieldRef) {
                         isNotNullVisited.set(true);
-                        return CompletableFuture.completedFuture(Optional.of(resultOf(999)));
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(0, 4)));
                     }
 
                     @Override
                     public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
                             FieldRef fieldRef, Object literal) {
-                        notEqualVisited.set(true);
-                        return CompletableFuture.completedFuture(Optional.of(resultOf(999)));
+                        notEqualVisits.incrementAndGet();
+                        return CompletableFuture.completedFuture(
+                                Optional.of(literal == null ? resultOf() : resultOf(1, 3)));
                     }
 
                     @Override
                     public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
                             FieldRef fieldRef, List<Object> literals) {
-                        notInVisited.set(true);
-                        return CompletableFuture.completedFuture(Optional.of(resultOf(999)));
+                        notInVisits.incrementAndGet();
+                        return CompletableFuture.completedFuture(
+                                Optional.of(literals.contains(null) ? resultOf() : resultOf(2)));
                     }
                 };
 
         GlobalIndexReader reader = new OffsetGlobalIndexReader(delegate, 10L, 15L);
 
         assertBitmapContainsExactly(
-                reader.visitIsNotNull(fieldRef).join().get().results(), 10L, 11L, 13L, 15L);
+                reader.visitIsNotNull(fieldRef).join().get().results(), 10L, 14L);
         assertBitmapContainsExactly(
-                reader.visitNotEqual(fieldRef, 5).join().get().results(), 10L, 15L);
+                reader.visitNotEqual(fieldRef, 5).join().get().results(), 11L, 13L);
         assertBitmapContainsExactly(
-                reader.visitNotIn(fieldRef, Arrays.asList(5, 6)).join().get().results(), 11L, 13L);
-        assertThat(isNotNullVisited).isFalse();
-        assertThat(notEqualVisited).isFalse();
-        assertThat(notInVisited).isFalse();
-    }
-
-    @Test
-    void testOffsetRangeComplementNullAndUnsupportedPredicates() {
-        FieldRef fieldRef = new FieldRef(0, "a", DataTypes.INT());
-        GlobalIndexReader unsupportedEqual =
-                new StubGlobalIndexReader(null) {
-                    @Override
-                    public boolean supportsRangeComplement() {
-                        return true;
-                    }
-
-                    @Override
-                    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(
-                            FieldRef fieldRef) {
-                        return CompletableFuture.completedFuture(
-                                Optional.of(GlobalIndexResult.createEmpty()));
-                    }
-
-                    @Override
-                    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
-                            FieldRef fieldRef, Object literal) {
-                        return CompletableFuture.completedFuture(Optional.empty());
-                    }
-                };
-
-        GlobalIndexReader reader = new OffsetGlobalIndexReader(unsupportedEqual, 10L, 15L);
-
-        assertThat(reader.visitNotEqual(fieldRef, 5).join()).isEmpty();
+                reader.visitNotIn(fieldRef, Arrays.asList(5, 6)).join().get().results(), 12L);
         assertThat(reader.visitNotEqual(fieldRef, null).join().get().results().isEmpty()).isTrue();
         assertThat(
                         reader.visitNotIn(fieldRef, Arrays.asList(5, null))
@@ -907,6 +854,9 @@ class GlobalIndexEvaluatorTest {
                                 .results()
                                 .isEmpty())
                 .isTrue();
+        assertThat(isNotNullVisited).isTrue();
+        assertThat(notEqualVisits).hasValue(2);
+        assertThat(notInVisits).hasValue(2);
     }
 
     @Test

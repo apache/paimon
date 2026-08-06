@@ -28,6 +28,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -73,5 +74,15 @@ public class BitmapGlobalIndexer implements GlobalIndexer {
             ExecutorService executor) {
         return new LazyFilteredBitmapReader(
                 fileReader, files, keySerializer, fallbackScanMaxSize, executor);
+    }
+
+    @Override
+    public GlobalIndexReader createReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            Range rowIdRange,
+            ExecutorService executor) {
+        return new LazyFilteredBitmapReader(
+                fileReader, files, keySerializer, fallbackScanMaxSize, rowIdRange, executor);
     }
 }

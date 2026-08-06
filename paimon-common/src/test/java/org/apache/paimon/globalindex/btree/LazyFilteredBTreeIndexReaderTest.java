@@ -36,6 +36,7 @@ import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtensio
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
 
 import org.junit.jupiter.api.Assertions;
@@ -202,7 +203,10 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         try (GlobalIndexReader reader =
                 new OffsetGlobalIndexReader(
                         globalIndexer.createReader(
-                                countingReader, written, newDirectExecutorService()),
+                                countingReader,
+                                written,
+                                new Range(0L, 3L),
+                                newDirectExecutorService()),
                         1000L,
                         1003L)) {
             GlobalIndexResult result = reader.visitNotEqual(ref, 100).join().get();

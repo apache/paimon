@@ -26,7 +26,10 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
@@ -52,15 +55,21 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
             CacheManager cacheManager,
             long fallbackScanMaxSize,
             ExecutorService executor) {
-        super(files, keySerializer, fallbackScanMaxSize, executor);
+        this(files, keySerializer, fileReader, cacheManager, fallbackScanMaxSize, null, executor);
+    }
+
+    public LazyFilteredBTreeReader(
+            List<GlobalIndexIOMeta> files,
+            KeySerializer keySerializer,
+            GlobalIndexFileReader fileReader,
+            CacheManager cacheManager,
+            long fallbackScanMaxSize,
+            @Nullable Range rowIdRange,
+            ExecutorService executor) {
+        super(files, keySerializer, fallbackScanMaxSize, rowIdRange, executor);
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
-    }
-
-    @Override
-    public boolean supportsRangeComplement() {
-        return true;
     }
 
     @Override
