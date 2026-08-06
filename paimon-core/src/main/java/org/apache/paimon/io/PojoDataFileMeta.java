@@ -28,9 +28,7 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -80,7 +78,7 @@ public class PojoDataFileMeta implements DataFileMeta {
 
     private final @Nullable List<String> writeCols;
 
-    private final @Nullable Map<Integer, Long> columnMaxSequenceNumbers;
+    private final @Nullable long[] columnMaxSequenceNumbers;
 
     public PojoDataFileMeta(
             String fileName,
@@ -148,7 +146,7 @@ public class PojoDataFileMeta implements DataFileMeta {
             @Nullable String externalPath,
             @Nullable Long firstRowId,
             @Nullable List<String> writeCols,
-            @Nullable Map<Integer, Long> columnMaxSequenceNumbers) {
+            @Nullable long[] columnMaxSequenceNumbers) {
         this.fileName = fileName;
         this.fileSize = fileSize;
 
@@ -174,10 +172,7 @@ public class PojoDataFileMeta implements DataFileMeta {
         this.firstRowId = firstRowId;
         this.writeCols = writeCols;
         this.columnMaxSequenceNumbers =
-                columnMaxSequenceNumbers == null
-                        ? null
-                        : Collections.unmodifiableMap(
-                                new LinkedHashMap<>(columnMaxSequenceNumbers));
+                columnMaxSequenceNumbers == null ? null : columnMaxSequenceNumbers.clone();
     }
 
     @Override
@@ -296,7 +291,7 @@ public class PojoDataFileMeta implements DataFileMeta {
 
     @Nullable
     @Override
-    public Map<Integer, Long> columnMaxSequenceNumbers() {
+    public long[] columnMaxSequenceNumbers() {
         return columnMaxSequenceNumbers;
     }
 
@@ -407,8 +402,7 @@ public class PojoDataFileMeta implements DataFileMeta {
     }
 
     @Override
-    public PojoDataFileMeta withColumnMaxSequenceNumbers(
-            Map<Integer, Long> columnMaxSequenceNumbers) {
+    public PojoDataFileMeta withColumnMaxSequenceNumbers(long[] columnMaxSequenceNumbers) {
         return new PojoDataFileMeta(
                 fileName,
                 fileSize,
@@ -592,7 +586,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 && Objects.equals(externalPath, that.externalPath().orElse(null))
                 && Objects.equals(firstRowId, that.firstRowId())
                 && Objects.equals(writeCols, that.writeCols())
-                && Objects.equals(columnMaxSequenceNumbers, that.columnMaxSequenceNumbers());
+                && Arrays.equals(columnMaxSequenceNumbers, that.columnMaxSequenceNumbers());
     }
 
     @Override
@@ -618,7 +612,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                Arrays.hashCode(columnMaxSequenceNumbers));
     }
 
     @Override
@@ -650,6 +644,6 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols,
-                columnMaxSequenceNumbers);
+                Arrays.toString(columnMaxSequenceNumbers));
     }
 }

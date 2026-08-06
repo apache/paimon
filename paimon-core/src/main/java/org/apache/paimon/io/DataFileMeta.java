@@ -29,7 +29,6 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
-import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.utils.Range;
@@ -115,7 +114,7 @@ public interface DataFileMeta {
                             new DataField(
                                     20,
                                     COLUMN_MAX_SEQUENCE_NUMBERS,
-                                    new MapType(true, new IntType(false), new BigIntType(false)))));
+                                    new ArrayType(true, new BigIntType(false)))));
 
     BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
@@ -224,7 +223,7 @@ public interface DataFileMeta {
             @Nullable String externalPath,
             @Nullable Long firstRowId,
             @Nullable List<String> writeCols,
-            @Nullable Map<Integer, Long> columnMaxSequenceNumbers) {
+            @Nullable long[] columnMaxSequenceNumbers) {
         return new PojoDataFileMeta(
                 fileName,
                 fileSize,
@@ -410,11 +409,14 @@ public interface DataFileMeta {
     /**
      * Maximum sequence number per physical table field after data-evolution compaction.
      *
-     * <p>A null value means that only the file-level sequence range is available. Field ids which
-     * are absent from a non-null map must also fall back to {@link #maxSequenceNumber()}.
+     * <p>Values follow the table-field order selected by {@link #writeCols()} when it is non-null
+     * (system fields are ignored), or the file schema field order otherwise. A null value means
+     * that only the file-level sequence range is available.
      */
     @Nullable
-    Map<Integer, Long> columnMaxSequenceNumbers();
+    default long[] columnMaxSequenceNumbers() {
+        return null;
+    }
 
     DataFileMeta upgrade(int newLevel);
 
@@ -424,7 +426,10 @@ public interface DataFileMeta {
 
     DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber);
 
-    DataFileMeta withColumnMaxSequenceNumbers(Map<Integer, Long> columnMaxSequenceNumbers);
+    default DataFileMeta withColumnMaxSequenceNumbers(long[] columnMaxSequenceNumbers) {
+        throw new UnsupportedOperationException(
+                "This DataFileMeta implementation does not support column sequence numbers.");
+    }
 
     DataFileMeta assignFirstRowId(long firstRowId);
 

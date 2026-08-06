@@ -28,6 +28,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
@@ -46,7 +47,7 @@ import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.fieldMaxSequenceNumber;
-import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compacts normal structured files of a data evolution table. */
@@ -85,8 +86,6 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
                         table.rowType().getFields().stream()
                                 .filter(f -> !fieldsInDedicatedFile.contains(f.name()))
                                 .collect(Collectors.toList()));
-        Map<Integer, Long> columnMaxSequenceNumbers =
-                compactedColumnMaxSequenceNumbers(table, readWriteType);
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
 
@@ -128,40 +127,43 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         dataFileMeta =
                 dataFileMeta.assignSequenceNumber(
                         minSequenceId(compactBefore), maxSequenceId(compactBefore));
-        dataFileMeta = dataFileMeta.withColumnMaxSequenceNumbers(columnMaxSequenceNumbers);
+        dataFileMeta =
+                dataFileMeta.withColumnMaxSequenceNumbers(
+                        compactedColumnMaxSequenceNumbers(table, dataFileMeta));
         compactAfter.add(dataFileMeta);
 
         return commitMessage(compactBefore, compactAfter);
     }
 
-    private Map<Integer, Long> compactedColumnMaxSequenceNumbers(
-            FileStoreTable table, RowType outputType) {
-        Map<DataFileMeta, Set<Integer>> inputFieldIds = new LinkedHashMap<>();
+    private long[] compactedColumnMaxSequenceNumbers(
+            FileStoreTable table, DataFileMeta outputFile) {
+        Map<DataFileMeta, List<DataField>> inputFields = new LinkedHashMap<>();
         for (DataFileMeta input : compactBefore) {
-            inputFieldIds.put(input, fileFieldIds(table.schemaManager()::schema, input));
+            inputFields.put(input, fileFields(table.schemaManager()::schema, input));
         }
 
         long fallbackSequence = maxSequenceId(compactBefore);
-        Map<Integer, Long> result = new LinkedHashMap<>();
-        outputType
-                .getFields()
-                .forEach(
-                        field -> {
-                            long fieldSequence = Long.MIN_VALUE;
-                            for (DataFileMeta input : compactBefore) {
-                                if (inputFieldIds.get(input).contains(field.id())) {
-                                    fieldSequence =
-                                            Math.max(
-                                                    fieldSequence,
-                                                    fieldMaxSequenceNumber(input, field.id()));
-                                }
-                            }
-                            result.put(
-                                    field.id(),
-                                    fieldSequence == Long.MIN_VALUE
-                                            ? fallbackSequence
-                                            : fieldSequence);
-                        });
+        List<DataField> outputFields = fileFields(table.schemaManager()::schema, outputFile);
+        long[] result = new long[outputFields.size()];
+        for (int outputPosition = 0; outputPosition < outputFields.size(); outputPosition++) {
+            DataField outputField = outputFields.get(outputPosition);
+            long fieldSequence = Long.MIN_VALUE;
+            for (DataFileMeta input : compactBefore) {
+                List<DataField> fields = inputFields.get(input);
+                for (int inputPosition = 0; inputPosition < fields.size(); inputPosition++) {
+                    if (fields.get(inputPosition).id() == outputField.id()) {
+                        fieldSequence =
+                                Math.max(
+                                        fieldSequence,
+                                        fieldMaxSequenceNumber(
+                                                input, inputPosition, fields.size()));
+                        break;
+                    }
+                }
+            }
+            result[outputPosition] =
+                    fieldSequence == Long.MIN_VALUE ? fallbackSequence : fieldSequence;
+        }
         return result;
     }
 }

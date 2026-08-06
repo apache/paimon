@@ -21,7 +21,6 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalArray;
-import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
@@ -34,9 +33,7 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
@@ -249,20 +246,18 @@ public final class BinaryDataFileMeta implements DataFileMeta {
 
     @Nullable
     @Override
-    public Map<Integer, Long> columnMaxSequenceNumbers() {
+    public long[] columnMaxSequenceNumbers() {
         int position = requiredPosition(Fields.COLUMN_MAX_SEQUENCE_NUMBERS);
         InternalRow row = currentRow();
         if (row.isNullAt(position)) {
             return null;
         }
-        InternalMap map = row.getMap(position);
-        InternalArray keys = map.keyArray();
-        InternalArray values = map.valueArray();
-        Map<Integer, Long> result = new LinkedHashMap<>();
-        for (int i = 0; i < map.size(); i++) {
-            result.put(keys.getInt(i), values.getLong(i));
+        InternalArray array = row.getArray(position);
+        long[] result = new long[array.size()];
+        for (int i = 0; i < array.size(); i++) {
+            result[i] = array.getLong(i);
         }
-        return Collections.unmodifiableMap(result);
+        return result;
     }
 
     public boolean containsWriteColumn(BinaryString fieldName) {
@@ -303,8 +298,8 @@ public final class BinaryDataFileMeta implements DataFileMeta {
     }
 
     @Override
-    public DataFileMeta withColumnMaxSequenceNumbers(Map<Integer, Long> columnMaxSequenceNumbers) {
-        throw unsupportedOperation("withColumnMaxSequenceNumbers(Map)");
+    public DataFileMeta withColumnMaxSequenceNumbers(long[] columnMaxSequenceNumbers) {
+        throw unsupportedOperation("withColumnMaxSequenceNumbers(long[])");
     }
 
     @Override

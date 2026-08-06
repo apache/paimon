@@ -164,7 +164,7 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
                                                 0,
                                                 100,
                                                 10,
-                                                Collections.singletonMap(VECTOR_FIELD.id(), 5L))),
+                                                new long[] {5L, 10L, 10L})),
                                 index))
                 .isEmpty();
         assertThat(
@@ -175,12 +175,50 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
                                                 0,
                                                 100,
                                                 10,
-                                                Collections.singletonMap(VECTOR_FIELD.id(), 6L))),
+                                                new long[] {6L, 10L, 10L})),
                                 index))
                 .containsExactly(index);
 
         // Legacy compacted files have no column metadata and remain conservative.
         assertThat(plan(Collections.singletonList(data("legacy", 0, 100, 10, 1)), index))
+                .containsExactly(index);
+    }
+
+    @Test
+    void testColumnSequenceNumbersFollowWriteColsOrder() {
+        IndexManifestEntry index = index("index", 0, 99, 5L, BinaryRow.EMPTY_ROW, 0);
+
+        assertThat(
+                        plan(
+                                Collections.singletonList(
+                                        dataWithColumnSequences(
+                                                "reordered-compact",
+                                                0,
+                                                100,
+                                                10,
+                                                new long[] {10L, 5L},
+                                                "unrelated",
+                                                "vector")),
+                                index))
+                .isEmpty();
+    }
+
+    @Test
+    void testMalformedColumnSequenceNumbersFallBackToFileSequence() {
+        IndexManifestEntry index = index("index", 0, 99, 5L, BinaryRow.EMPTY_ROW, 0);
+
+        assertThat(
+                        plan(
+                                Collections.singletonList(
+                                        dataWithColumnSequences(
+                                                "malformed-compact",
+                                                0,
+                                                100,
+                                                10,
+                                                new long[] {5L},
+                                                "vector",
+                                                "other")),
+                                index))
                 .containsExactly(index);
     }
 
@@ -529,9 +567,10 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
             long firstRowId,
             long rowCount,
             long maxSequenceNumber,
-            java.util.Map<Integer, Long> columnSequences) {
+            long[] columnSequences,
+            String... writeCols) {
         DataFileMeta file =
-                data(fileName, firstRowId, rowCount, maxSequenceNumber, 1)
+                data(fileName, firstRowId, rowCount, maxSequenceNumber, 1, writeCols)
                         .file()
                         .withColumnMaxSequenceNumbers(columnSequences);
         return ManifestEntry.create(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, 1, file);

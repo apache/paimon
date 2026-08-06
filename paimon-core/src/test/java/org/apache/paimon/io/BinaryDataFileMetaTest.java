@@ -56,7 +56,7 @@ public class BinaryDataFileMetaTest {
                                 "external/dir/data.parquet",
                                 10L,
                                 Collections.singletonList("write_col"))
-                        .withColumnMaxSequenceNumbers(Collections.singletonMap(7, 11L));
+                        .withColumnMaxSequenceNumbers(new long[] {11L});
         BinaryDataFileMeta actual =
                 BinaryDataFileMeta.Projection.create(DataFileMeta.SCHEMA)
                         .createDataFile()
@@ -92,7 +92,7 @@ public class BinaryDataFileMetaTest {
         assertThat(actual.firstRowId()).isEqualTo(10L);
         assertThat(actual.nonNullFirstRowId()).isEqualTo(10L);
         assertThat(actual.writeCols()).containsExactly("write_col");
-        assertThat(actual.columnMaxSequenceNumbers()).containsEntry(7, 11L);
+        assertThat(actual.columnMaxSequenceNumbers()).containsExactly(11L);
         assertThat(actual.containsWriteColumn(BinaryString.fromString("write_col"))).isTrue();
         assertThat(actual.containsWriteColumn(BinaryString.fromString("other"))).isFalse();
         assertThat(actual.toFileSelection(Collections.singletonList(new Range(11L, 12L))))
@@ -104,8 +104,8 @@ public class BinaryDataFileMetaTest {
         assertUnsupported(
                 () -> actual.assignSequenceNumber(4L, 5L), "assignSequenceNumber(long, long)");
         assertUnsupported(
-                () -> actual.withColumnMaxSequenceNumbers(Collections.singletonMap(1, 2L)),
-                "withColumnMaxSequenceNumbers(Map)");
+                () -> actual.withColumnMaxSequenceNumbers(new long[] {2L}),
+                "withColumnMaxSequenceNumbers(long[])");
         assertUnsupported(() -> actual.assignFirstRowId(20L), "assignFirstRowId(long)");
         assertUnsupported(() -> actual.newFirstRowId(20L), "newFirstRowId(Long)");
         assertUnsupported(() -> actual.copy(Collections.emptyList()), "copy(List)");

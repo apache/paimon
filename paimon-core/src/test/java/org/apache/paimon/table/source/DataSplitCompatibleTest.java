@@ -218,7 +218,7 @@ public class DataSplitCompatibleTest {
         DataFileTestDataGenerator gen = DataFileTestDataGenerator.builder().build();
         DataFileTestDataGenerator.Data data = gen.next();
         List<DataFileMeta> files = new ArrayList<>();
-        files.add(gen.next().meta.withColumnMaxSequenceNumbers(Collections.singletonMap(3, 42L)));
+        files.add(gen.next().meta.withColumnMaxSequenceNumbers(new long[] {3L, 42L}));
         for (int i = 0; i < ThreadLocalRandom.current().nextInt(10); i++) {
             files.add(gen.next().meta);
         }

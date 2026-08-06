@@ -51,6 +51,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -68,6 +69,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test class for {@link SortedGlobalIndexScanner}. */
@@ -293,11 +295,11 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
 
         DataFileMeta firstCompact = updateColumnAndCompact("f1", 1);
         int f0Id = getTableDefault().rowType().getField("f0").id();
-        long f0Sequence = firstCompact.columnMaxSequenceNumbers().get(f0Id);
+        long f0Sequence = columnSequence(firstCompact, f0Id);
         assertThat(f0Sequence).isLessThan(firstCompact.maxSequenceNumber());
 
         DataFileMeta secondCompact = updateColumnAndCompact("f1", 2);
-        assertThat(secondCompact.columnMaxSequenceNumbers()).containsEntry(f0Id, f0Sequence);
+        assertThat(columnSequence(secondCompact, f0Id)).isEqualTo(f0Sequence);
 
         FileStoreTable table = getTableDefault();
         table.newExpireSnapshots()
@@ -321,13 +323,24 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
         DataFileMeta compacted = updateColumnAndCompact("f0", 1);
 
         int f0Id = getTableDefault().rowType().getField("f0").id();
-        assertThat(compacted.columnMaxSequenceNumbers().get(f0Id))
-                .isEqualTo(compacted.maxSequenceNumber());
+        assertThat(columnSequence(compacted, f0Id)).isEqualTo(compacted.maxSequenceNumber());
 
         Optional<ScanResult<DataSplit>> scanResult =
                 dataEvolutionScanner(getTableDefault()).withIndexField("f0").incrementalScan();
         assertThat(scanResult).isPresent();
         assertThat(scanResult.get().deletedIndexEntries()).isNotEmpty();
+    }
+
+    private long columnSequence(DataFileMeta file, int fieldId) throws Exception {
+        List<DataField> fields = fileFields(getTableDefault().schemaManager()::schema, file);
+        long[] sequences = file.columnMaxSequenceNumbers();
+        assertThat(sequences).hasSize(fields.size());
+        for (int i = 0; i < fields.size(); i++) {
+            if (fields.get(i).id() == fieldId) {
+                return sequences[i];
+            }
+        }
+        throw new IllegalArgumentException("Field not found in data file: " + fieldId);
     }
 
     private SortedGlobalIndexScanner dataEvolutionScanner(FileStoreTable table) {

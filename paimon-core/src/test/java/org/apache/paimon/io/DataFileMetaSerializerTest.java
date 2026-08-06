@@ -42,7 +42,7 @@ public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFil
         return gen.next()
                 .meta
                 .copy(Arrays.asList("extra1", "extra2"))
-                .withColumnMaxSequenceNumbers(Collections.singletonMap(3, 42L));
+                .withColumnMaxSequenceNumbers(new long[] {3L, 42L});
     }
 
     @Test
@@ -67,6 +67,6 @@ public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFil
     }
 
     private void assertColumnSequences(DataFileMeta file) {
-        assertThat(file.columnMaxSequenceNumbers()).containsEntry(3, 42L);
+        assertThat(file.columnMaxSequenceNumbers()).containsExactly(3L, 42L);
     }
 }

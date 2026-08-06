@@ -42,7 +42,7 @@ import java.util.Set;
 import java.util.TreeMap;
 
 import static org.apache.paimon.utils.DataEvolutionUtils.fieldMaxSequenceNumber;
-import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 
 /** Plans existing global index files which need refresh after data-evolution updates. */
 public final class DataEvolutionGlobalIndexRefreshPlanner {
@@ -82,7 +82,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
                     .addIndex(i, indexMeta.rowRange(), scanSnapshotId);
         }
 
-        Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache = new HashMap<>();
+        Map<Pair<Long, List<String>>, List<DataField>> fileFieldsCache = new HashMap<>();
         for (ManifestEntry dataEntry : dataEntries) {
             DataFileMeta file = dataEntry.file();
             if (dataEntry.kind() != FileKind.ADD || file.firstRowId() == null) {
@@ -94,18 +94,20 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
                 continue;
             }
 
-            Set<Integer> physicalFieldIds =
-                    fileFieldIdsCache.computeIfAbsent(
+            List<DataField> physicalFields =
+                    fileFieldsCache.computeIfAbsent(
                             Pair.of(file.schemaId(), file.writeCols()),
-                            key -> fileFieldIds(schemaManager::schema, file));
-            if (!disjoint(indexedFieldIds, physicalFieldIds)) {
-                long indexedMaxSequence = Long.MIN_VALUE;
-                for (Integer fieldId : indexedFieldIds) {
-                    if (physicalFieldIds.contains(fieldId)) {
-                        indexedMaxSequence =
-                                Math.max(indexedMaxSequence, fieldMaxSequenceNumber(file, fieldId));
-                    }
+                            key -> fileFields(schemaManager::schema, file));
+            long indexedMaxSequence = Long.MIN_VALUE;
+            for (int position = 0; position < physicalFields.size(); position++) {
+                if (indexedFieldIds.contains(physicalFields.get(position).id())) {
+                    indexedMaxSequence =
+                            Math.max(
+                                    indexedMaxSequence,
+                                    fieldMaxSequenceNumber(file, position, physicalFields.size()));
                 }
+            }
+            if (indexedMaxSequence != Long.MIN_VALUE) {
                 group.addDataFile(file, indexedMaxSequence);
             }
         }
@@ -242,14 +244,5 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             return expectedExtraFields == null || expectedExtraFields.length == 0;
         }
         return expectedExtraFields != null && Arrays.equals(actualExtraFields, expectedExtraFields);
-    }
-
-    private static boolean disjoint(Set<Integer> left, Set<Integer> right) {
-        for (Integer value : left) {
-            if (right.contains(value)) {
-                return false;
-            }
-        }
-        return true;
     }
 }
