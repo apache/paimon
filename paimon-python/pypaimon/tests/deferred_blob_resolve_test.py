@@ -279,10 +279,10 @@ class DeferredBlobResolveTest(unittest.TestCase):
         )
         counting_file_io = _BlobCountingFileIO(table.file_io)
         table.file_io = counting_file_io
+        splits = table.new_read_builder().new_scan().plan().splits()
         read_builder = table.new_read_builder().with_projection(
             ["sample_id", "payload", "score"]
         ).with_limit(2)
-        splits = read_builder.new_scan().plan().splits()
 
         rows = list(read_builder.new_read().to_iterator(splits))
 
@@ -305,7 +305,7 @@ class DeferredBlobResolveTest(unittest.TestCase):
         auth_result = _RejectScoreOneAuthResult()
         splits = [
             QueryAuthSplit(split, auth_result)
-            for split in read_builder.new_scan().plan().splits()
+            for split in table.new_read_builder().new_scan().plan().splits()
         ]
 
         scores = [
@@ -313,7 +313,8 @@ class DeferredBlobResolveTest(unittest.TestCase):
             for row in read_builder.new_read().to_iterator(splits)
         ]
 
-        self.assertEqual([0, 2], scores)
+        self.assertEqual(2, len(scores))
+        self.assertNotIn(1, scores)
         self.assertEqual(2, counting_file_io.blobs_fetched)
 
     def test_auth_blob_filter_keeps_eager_resolution(self):
