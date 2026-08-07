@@ -18,7 +18,9 @@
 """File-group-aligned row-id range processing on Ray."""
 
 import logging
+import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, List, Optional, Union
 
@@ -293,12 +295,19 @@ class RowIdRangeContext:
         ray_remote_args: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, int]:
         """Update this range from values carrying the ``_ROW_ID`` read by it."""
+        if self._updated:
+            raise RuntimeError("a row-id range can be updated only once.")
+        with self._owner._update_guard(self.sequence_number):
+            return self._update_by_row_id(
+                updates, update_cols, num_partitions, ray_remote_args)
+
+    def _update_by_row_id(
+        self, updates, update_cols, num_partitions, ray_remote_args,
+    ):
         from pypaimon.schema.data_types import PyarrowFieldParser
         from pypaimon.table.special_fields import SpecialFields
 
         self._owner._check_open()
-        if self._updated:
-            raise RuntimeError("a row-id range can be updated only once.")
         self._owner._check_schema()
         if not update_cols:
             raise ValueError("update_cols must be non-empty.")
@@ -345,6 +354,8 @@ class RowIdRangeContext:
             [range_.from_ for range_ in allowed_ranges], dtype=np.int64)
         range_ends = np.asarray(
             [range_.to for range_ in allowed_ranges], dtype=np.int64)
+        range_start = self.range_start
+        range_end = self.range_end
 
         def project_and_validate(batch):
             projected = batch.select([row_id] + update_cols).cast(update_schema)
@@ -352,7 +363,7 @@ class RowIdRangeContext:
             if row_ids.null_count:
                 raise ValueError(
                     "updates contain a _ROW_ID outside [{}, {}].".format(
-                        self.range_start, self.range_end))
+                        range_start, range_end))
             values = row_ids.to_numpy(zero_copy_only=False)
             indexes = np.searchsorted(
                 range_starts, values, side="right") - 1
@@ -362,8 +373,8 @@ class RowIdRangeContext:
                 raise ValueError(
                     "updates contain _ROW_ID {} outside [{}, {}].".format(
                         values[np.flatnonzero(~valid)[0]],
-                        self.range_start,
-                        self.range_end,
+                        range_start,
+                        range_end,
                     ))
             return projected
 
@@ -409,6 +420,8 @@ class _RowIdRanges:
         self._table_commit = None
         self._commit_user = None
         self._next_identifier = 1
+        self._next_update_sequence = 0
+        self._update_lock = threading.Lock()
         self.num_updated = 0
         self.read_table = table.copy_without_time_travel({
             CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base.id),
@@ -431,6 +444,22 @@ class _RowIdRanges:
     def _check_open(self):
         if self._closed:
             raise RuntimeError("row-id range plan is closed.")
+
+    @contextmanager
+    def _update_guard(self, sequence_number):
+        if not self._update_lock.acquire(blocking=False):
+            raise RuntimeError(
+                "row-id ranges from one plan cannot be updated concurrently.")
+        try:
+            if sequence_number != self._next_update_sequence:
+                raise RuntimeError(
+                    "row-id ranges must be updated in sequence order; "
+                    "expected {}, got {}.".format(
+                        self._next_update_sequence, sequence_number))
+            yield
+            self._next_update_sequence += 1
+        finally:
+            self._update_lock.release()
 
     def _check_schema(self):
         latest = self.table.schema_manager.latest()

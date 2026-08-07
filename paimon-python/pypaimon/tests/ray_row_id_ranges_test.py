@@ -18,6 +18,7 @@
 import os
 import shutil
 import tempfile
+import threading
 import unittest
 import uuid
 
@@ -279,6 +280,52 @@ class RayRowIdRangesTest(unittest.TestCase):
         self.assertEqual(
             [1, 0, 0], self._read(target)["embedding"].to_pylist())
         self.assertFalse(table.list_tags())
+
+    def test_rejects_out_of_order_and_concurrent_updates(self):
+        target = self._create()
+        self._write_chunks(target, ([1], [2]))
+
+        with plan_row_id_ranges(
+            target,
+            self.catalog_options,
+            target_rows_per_range=1,
+        ) as ranges:
+            first, second = list(ranges)
+            second._update_by_row_id = lambda *args: {"num_updated": 0}
+            with self.assertRaisesRegex(RuntimeError, "sequence order"):
+                second.update_by_row_id(None, [])
+
+            started = threading.Event()
+            release = threading.Event()
+            errors = []
+
+            def block_first(*args):
+                started.set()
+                release.wait(10)
+                return {"num_updated": 0}
+
+            first._update_by_row_id = block_first
+
+            def update_first():
+                try:
+                    first.update_by_row_id(None, [])
+                except Exception as error:
+                    errors.append(error)
+
+            thread = threading.Thread(target=update_first, daemon=True)
+            thread.start()
+            try:
+                self.assertTrue(started.wait(10))
+                with self.assertRaisesRegex(RuntimeError, "concurrently"):
+                    second.update_by_row_id(None, [])
+            finally:
+                release.set()
+                thread.join(10)
+
+            self.assertFalse(thread.is_alive())
+            self.assertFalse(errors)
+            self.assertEqual(
+                {"num_updated": 0}, second.update_by_row_id(None, []))
 
     def test_rejects_concurrent_changes_to_read_columns(self):
         from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
