@@ -19,7 +19,6 @@ import logging
 import os
 import shutil
 import threading
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -28,7 +27,7 @@ from urllib.parse import urlparse
 import pyarrow
 import pyarrow.fs as pafs
 
-from pypaimon.common.file_io import FileIO
+from pypaimon.common.file_io import FileIO, create_temp_path
 from pypaimon.common.options import Options
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.local import PaimonLocalFileSystem
@@ -243,7 +242,7 @@ class LocalFileIO(FileIO):
         if parent and not parent.exists():
             parent.mkdir(parents=True, exist_ok=True)
         
-        temp_path = file_path.parent / f"{file_path.name}.{uuid.uuid4()}.tmp"
+        temp_path = Path(create_temp_path(str(file_path)))
         success = False
         try:
             with open(temp_path, 'w', encoding='utf-8') as f:
