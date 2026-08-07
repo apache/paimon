@@ -925,17 +925,22 @@ All available procedures are listed below.
       <td>
          CALL [catalog.]sys.compact_manifest(`table` => 'identifier')<br/>
          CALL [catalog.]sys.compact_manifest(`table` => 'identifier', 'options' => 'key1=value1,key2=value2')<br/>
-         CALL [catalog.]sys.compact_manifest(`table` => 'identifier', `dry_run` => true)
+         CALL [catalog.]sys.compact_manifest(`table` => 'identifier', `dry_run` => true)<br/>
+         CALL [catalog.]sys.compact_manifest(`table` => 'identifier', `manifest_sort_enabled` => true, `manifest_sort_partition_field` => 'dt', `manifest_sort_max_rewrite_size` => '1 gb')
       </td>
       <td>
          To compact_manifest the manifests. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>options: the additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
-            <li>dry_run (Boolean, optional): when true, returns manifest metadata statistics without actually compacting.</li>
+            <li>dry_run (Boolean, optional): when true, returns manifest metadata statistics without actually compacting. When manifest sort is enabled, the result also contains the number of manifest files in each level built by manifest sort.</li>
+            <li>manifest_sort_enabled (Boolean, optional): whether to use manifest sort rewrite for this invocation.</li>
+            <li>manifest_sort_partition_field (String, optional): partition field used to sort manifest entries. Defaults to the first partition field.</li>
+            <li>manifest_sort_max_rewrite_size (String, optional): maximum manifest size rewritten by one sort pass.</li>
       </td>
       <td>
          CALL sys.compact_manifest(`table` => 'default.T')<br/>
-         CALL sys.compact_manifest(`table` => 'default.T', `dry_run` => true)
+         CALL sys.compact_manifest(`table` => 'default.T', `dry_run` => true)<br/>
+         CALL sys.compact_manifest(`table` => 'default.T', `manifest_sort_enabled` => true, `manifest_sort_partition_field` => 'dt', `manifest_sort_max_rewrite_size` => '1 gb')
       </td>
    </tr>
    <tr>

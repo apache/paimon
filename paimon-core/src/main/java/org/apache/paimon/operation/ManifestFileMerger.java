@@ -89,9 +89,7 @@ public class ManifestFileMerger {
             // If manifest-sort.enabled is enabled and there are sortable fields, use
             // trySortRewrite. Data evolution tables sort by RowID when all manifest files contain
             // RowID ranges, so they do not require partition fields.
-            if (options.manifestSortEnabled()
-                    && (partitionType.getFieldCount() > 0
-                            || (options.dataEvolutionEnabled() && allContainsRowId(input)))) {
+            if (canUseManifestSort(input, partitionType, options)) {
                 return ManifestFileSorter.trySortCompaction(
                         input, newFilesForAbort, manifestFile, partitionType, options, ioManager);
             } else {
@@ -122,6 +120,13 @@ public class ManifestFileMerger {
             }
             throw new RuntimeException(e);
         }
+    }
+
+    static boolean canUseManifestSort(
+            List<ManifestFileMeta> input, RowType partitionType, CoreOptions options) {
+        return options.manifestSortEnabled()
+                && (partitionType.getFieldCount() > 0
+                        || (options.dataEvolutionEnabled() && allContainsRowId(input)));
     }
 
     private static List<ManifestFileMeta> tryMinorCompaction(
