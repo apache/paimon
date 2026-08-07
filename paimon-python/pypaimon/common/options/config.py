@@ -101,6 +101,8 @@ class CatalogOptions:
         "dlf.access-key-secret").string_type().no_default_value().with_description("DLF access key secret")
     DLF_ACCESS_SECURITY_TOKEN = ConfigOptions.key(
         "dlf.security-token").string_type().no_default_value().with_description("DLF security token")
+    DLF_TOKEN_PATH = ConfigOptions.key("dlf.token-path").string_type().no_default_value().with_description(
+        "DLF token file path")
     DLF_OSS_ENDPOINT = ConfigOptions.key("dlf.oss-endpoint").string_type().no_default_value().with_description(
         "DLF OSS endpoint")
     DLF_TOKEN_LOADER = ConfigOptions.key("dlf.token-loader").string_type().no_default_value().with_description(
