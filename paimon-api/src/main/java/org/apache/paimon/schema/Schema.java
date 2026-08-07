@@ -88,7 +88,12 @@ public class Schema {
         this.options = new HashMap<>(options);
         this.partitionKeys = normalizePartitionKeys(partitionKeys);
         this.primaryKeys = normalizePrimaryKeys(primaryKeys);
-        this.fields = normalizeFields(fields, this.primaryKeys, this.partitionKeys);
+        this.fields =
+                normalizeFields(
+                        fields,
+                        this.primaryKeys,
+                        this.partitionKeys,
+                        new CoreOptions(this.options).primaryKeyNullable());
         this.comment = comment;
     }
 
@@ -126,7 +131,10 @@ public class Schema {
     }
 
     private static List<DataField> normalizeFields(
-            List<DataField> fields, List<String> primaryKeys, List<String> partitionKeys) {
+            List<DataField> fields,
+            List<String> primaryKeys,
+            List<String> partitionKeys,
+            boolean primaryKeyNullable) {
         List<String> fieldNames = fields.stream().map(DataField::name).collect(Collectors.toList());
 
         Set<String> duplicateColumns = duplicateFields(fieldNames);
@@ -165,16 +173,17 @@ public class Schema {
                 fieldNames,
                 primaryKeys);
 
-        // primary key should not nullable
+        // SQL engines may implicitly make primary key fields NOT NULL. Normalize them to the
+        // nullability selected by the table option so all engines expose the same table schema.
         Set<String> pkSet = new HashSet<>(primaryKeys);
         List<DataField> newFields = new ArrayList<>();
         for (DataField field : fields) {
-            if (pkSet.contains(field.name()) && field.type().isNullable()) {
+            if (pkSet.contains(field.name()) && field.type().isNullable() != primaryKeyNullable) {
                 newFields.add(
                         new DataField(
                                 field.id(),
                                 field.name(),
-                                field.type().copy(false),
+                                field.type().copy(primaryKeyNullable),
                                 field.description(),
                                 field.defaultValue()));
             } else {
@@ -345,7 +354,8 @@ public class Schema {
 
         /**
          * Declares a primary key constraint for a set of given columns. Primary key uniquely
-         * identify a row in a table. Neither of columns in a primary can be nullable.
+         * identify a row in a table. By default, primary key columns are not nullable. Set {@link
+         * CoreOptions#PRIMARY_KEY_NULLABLE} to allow null values.
          *
          * @param columnNames columns that form a unique primary key
          */
@@ -355,7 +365,8 @@ public class Schema {
 
         /**
          * Declares a primary key constraint for a set of given columns. Primary key uniquely
-         * identify a row in a table. Neither of columns in a primary can be nullable.
+         * identify a row in a table. By default, primary key columns are not nullable. Set {@link
+         * CoreOptions#PRIMARY_KEY_NULLABLE} to allow null values.
          *
          * @param columnNames columns that form a unique primary key
          */

@@ -38,6 +38,7 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
+import static org.apache.paimon.CoreOptions.PRIMARY_KEY_NULLABLE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.VECTOR_FIELD;
 import static org.apache.paimon.CoreOptions.VECTOR_FILE_FORMAT;
@@ -49,6 +50,26 @@ import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SchemaValidationTest {
+
+    @Test
+    void testNullablePrimaryKeyRequiresPrimaryKeyTable() {
+        Map<String, String> options = new HashMap<>();
+        options.put(PRIMARY_KEY_NULLABLE.key(), "true");
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        singletonList(new DataField(0, "f0", DataTypes.INT())),
+                        10,
+                        emptyList(),
+                        emptyList(),
+                        options,
+                        "");
+
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Option 'primary-key.nullable' can only be enabled for a table with primary keys.");
+    }
 
     private void validateTableSchemaExec(Map<String, String> options) {
         List<DataField> fields =

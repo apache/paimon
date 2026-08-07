@@ -30,6 +30,29 @@ Primary keys consist of a set of columns that contain unique values for each rec
 sorting the primary key within each bucket, allowing users to achieve high performance by applying filtering conditions
 on the primary key. See [CREATE TABLE](../flink/sql-ddl#create-table).
 
+## Nullable Primary Keys
+
+Primary key fields are `NOT NULL` by default. Set `primary-key.nullable` to `true` when a source
+system can produce null key components:
+
+```sql
+CREATE TABLE orders (
+    order_id BIGINT,
+    payload STRING
+) WITH (
+    'primary-key' = 'order_id',
+    'primary-key.nullable' = 'true'
+);
+```
+
+Null key components use null-safe equality. For example, two records whose key is `(1, NULL)` are
+treated as the same key and are merged by the configured merge engine. The option is disabled by
+default and cannot be changed after the table has snapshots.
+
+In Flink, define a nullable Paimon primary key with the `primary-key` table option as shown above.
+The standard SQL `PRIMARY KEY` constraint implies `NOT NULL`, so Paimon does not expose a nullable
+key as a Flink SQL primary-key constraint.
+
 ## Bucket
 
 Unpartitioned tables, or partitions in partitioned tables, are sub-divided into buckets, to provide extra structure to the data that may be used for more efficient querying.

@@ -124,6 +124,7 @@ class CoreOptions:
         "partial-update.remove-record-on-sequence-group",
         "rowkind.field",
         "primary-key",
+        "primary-key.nullable",
         "partition",
         "dynamic-bucket.initial-buckets",
         "force-lookup",
@@ -205,6 +206,16 @@ class CoreOptions:
             "By default, if there is a primary key, the primary key will be used; "
             "if there is no primary key, the full row will be used. "
             "In this case, the sink parallelism must be set to the bucket number."
+        )
+    )
+
+    PRIMARY_KEY_NULLABLE: ConfigOption[bool] = (
+        ConfigOptions.key("primary-key.nullable")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether primary key fields can contain null values. Null values "
+            "use null-safe equality when records are merged."
         )
     )
 
@@ -1099,6 +1110,9 @@ class CoreOptions:
 
     def bucket_key(self, default=None):
         return self.options.get(CoreOptions.BUCKET_KEY, default)
+
+    def primary_key_nullable(self, default=None):
+        return self.options.get(CoreOptions.PRIMARY_KEY_NULLABLE, default)
 
     def dynamic_bucket_target_row_num(self, default=None):
         return self.options.get(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, default)

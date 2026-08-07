@@ -137,6 +137,7 @@ import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
+import static org.apache.paimon.CoreOptions.PRIMARY_KEY_NULLABLE;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_EXPIRE_LIMIT;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
@@ -155,6 +156,76 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
 public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
+
+    @Test
+    public void testNullablePrimaryKey() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(BUCKET, 3);
+                            options.set(PRIMARY_KEY_NULLABLE, true);
+                        });
+        assertThat(table.rowType().getTypeAt(0).isNullable()).isTrue();
+        assertThat(table.rowType().getTypeAt(1).isNullable()).isTrue();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(null, 1, 10L));
+            write.write(rowData(1, null, 20L));
+            write.write(rowData(null, null, 30L));
+            commit.commit(0, write.prepareCommit(true, 0));
+
+            write.write(rowData(null, 1, 11L));
+            write.write(rowData(1, null, 21L));
+            write.write(rowData(null, null, 31L));
+            write.write(rowData(1, 2, 22L));
+            commit.commit(1, write.prepareCommit(true, 1));
+        }
+
+        Function<InternalRow, String> toString =
+                row ->
+                        (row.isNullAt(0) ? "null" : String.valueOf(row.getInt(0)))
+                                + "|"
+                                + (row.isNullAt(1) ? "null" : String.valueOf(row.getInt(1)))
+                                + "|"
+                                + row.getLong(2);
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                toString))
+                .containsExactlyInAnyOrder("null|null|31", "null|1|11", "1|null|21", "1|2|22");
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (DataSplit split : splits) {
+                write.compact(split.partition(), split.bucket(), true);
+            }
+            commit.commit(write.prepareCommit());
+        }
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                toString))
+                .containsExactlyInAnyOrder("null|null|31", "null|1|11", "1|null|21", "1|2|22");
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowDataWithKind(RowKind.DELETE, null, 1, 0L));
+            write.write(rowDataWithKind(RowKind.DELETE, 1, null, 0L));
+            write.write(rowDataWithKind(RowKind.DELETE, null, null, 0L));
+            commit.commit(2, write.prepareCommit(true, 2));
+        }
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                toString))
+                .containsExactly("1|2|22");
+    }
 
     @Test
     public void testPostponeBucketWithManyPartitions() throws Exception {

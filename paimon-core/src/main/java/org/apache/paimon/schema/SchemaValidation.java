@@ -144,6 +144,12 @@ public class SchemaValidation {
 
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
         validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
+        if (options.primaryKeyNullable() && schema.primaryKeys().isEmpty()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Option '%s' can only be enabled for a table with primary keys.",
+                            CoreOptions.PRIMARY_KEY_NULLABLE.key()));
+        }
 
         validateBucket(schema, options);
 

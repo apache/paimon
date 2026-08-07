@@ -1479,6 +1479,14 @@ public class CoreOptions implements Serializable {
                             "Define primary key by table options, cannot define primary key on DDL and table options at the same time.");
 
     @Immutable
+    public static final ConfigOption<Boolean> PRIMARY_KEY_NULLABLE =
+            key("primary-key.nullable")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether primary key fields can contain null values. Null values use null-safe equality when records are merged.");
+
+    @Immutable
     public static final ConfigOption<String> PARTITION =
             key("partition")
                     .stringType()
@@ -3143,6 +3151,10 @@ public class CoreOptions implements Serializable {
 
     public String fieldsDefaultFunc() {
         return options.get(FIELDS_DEFAULT_AGG_FUNC);
+    }
+
+    public boolean primaryKeyNullable() {
+        return options.get(PRIMARY_KEY_NULLABLE);
     }
 
     public static String createCommitUser(Options options) {
