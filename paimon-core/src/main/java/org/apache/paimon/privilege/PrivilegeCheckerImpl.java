@@ -102,7 +102,7 @@ public class PrivilegeCheckerImpl implements PrivilegeChecker {
                     user,
                     "catalog",
                     FileBasedPrivilegeManager.IDENTIFIER_WHOLE_CATALOG,
-                    PrivilegeType.DROP_DATABASE);
+                    PrivilegeType.CREATE_DATABASE);
         }
     }
 
