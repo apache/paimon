@@ -59,7 +59,7 @@ public class MigrateDatabaseProcedure extends BaseProcedure {
                 ProcedureParameter.required("database", StringType),
                 ProcedureParameter.optional("options", StringType),
                 ProcedureParameter.optional(
-                        "options_map", DataTypes.createMapType(StringType, StringType)),
+                        "options_map", DataTypes.createMapType(StringType, StringType, false)),
                 ProcedureParameter.optional("parallelism", IntegerType),
             };
 
@@ -127,9 +127,12 @@ public class MigrateDatabaseProcedure extends BaseProcedure {
         HashMap<String, String> map = new HashMap<>();
         if (mapData != null) {
             for (int index = 0; index < mapData.numElements(); index++) {
-                map.put(
-                        mapData.keyArray().getUTF8String(index).toString(),
-                        mapData.valueArray().getUTF8String(index).toString());
+                String key = mapData.keyArray().getUTF8String(index).toString();
+                if (mapData.valueArray().isNullAt(index)) {
+                    throw new IllegalArgumentException(
+                            String.format("Option value for key '%s' cannot be null", key));
+                }
+                map.put(key, mapData.valueArray().getUTF8String(index).toString());
             }
         }
         return map;

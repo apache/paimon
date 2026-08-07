@@ -21,12 +21,23 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.spark.PaimonHiveTestBase
 
 import org.apache.spark.sql.Row
+import org.assertj.core.api.Assertions.assertThatThrownBy
 
 import java.util.concurrent.ThreadLocalRandom
 
 class MigrateDatabaseProcedureTest extends PaimonHiveTestBase {
 
   private val random = ThreadLocalRandom.current().nextInt(10000)
+
+  test("Paimon migrate database procedure: reject null options_map values") {
+    assertThatThrownBy(
+      () => spark.sql(s"""CALL sys.migrate_database(
+                         |  source_type => 'hive',
+                         |  database => '$hiveDbName',
+                         |  options_map => map('file.format', CAST(NULL AS STRING)))""".stripMargin))
+      .hasMessageContaining("Cannot cast")
+      .hasMessageContaining("options_map")
+  }
 
   Seq("parquet", "orc", "avro").foreach(
     format => {

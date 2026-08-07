@@ -29,6 +29,16 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
 
   private val random = ThreadLocalRandom.current().nextInt(10000)
 
+  test("Paimon migrate table procedure: reject null options_map values") {
+    assertThatThrownBy(
+      () => spark.sql(s"""CALL sys.migrate_table(
+                         |  source_type => 'hive',
+                         |  table => '$hiveDbName.source_table',
+                         |  options_map => map('file.format', CAST(NULL AS STRING)))""".stripMargin))
+      .hasMessageContaining("Cannot cast")
+      .hasMessageContaining("options_map")
+  }
+
   Seq("parquet", "orc", "avro").foreach(
     format => {
       test(s"Paimon migrate table procedure: migrate $format non-partitioned table") {
