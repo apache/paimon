@@ -88,6 +88,23 @@ class BooleanMapBlobKeySerializer(MapBlobKeySerializer):
         raise ValueError("Invalid MAP<X, BLOB> boolean key.")
 
 
+class BinaryMapBlobKeySerializer(MapBlobKeySerializer):
+
+    def __init__(self, type_name: str):
+        self._type_name = type_name
+        self.fixed_length = -1
+
+    def serialize(self, key) -> bytes:
+        if not isinstance(key, bytes):
+            raise ValueError(
+                f"MAP<X, BLOB> {self._type_name} key must be bytes."
+            )
+        return key
+
+    def deserialize(self, data: bytes):
+        return data
+
+
 class DecimalMapBlobKeySerializer(MapBlobKeySerializer):
 
     def __init__(self, type_name: str, precision: int, scale: int):
@@ -211,6 +228,12 @@ def create_map_blob_key_serializer(data_type: DataType) -> MapBlobKeySerializer:
         return DateMapBlobKeySerializer()
     if type_name == 'TIME' or type_name.startswith('TIME('):
         return TimeMapBlobKeySerializer(type_name)
+    if (
+        type_name == 'BYTES'
+        or type_name.startswith('BINARY')
+        or type_name.startswith('VARBINARY')
+    ):
+        return BinaryMapBlobKeySerializer(type_name)
     if type_name == 'STRING' or type_name.startswith('CHAR') or type_name.startswith('VARCHAR'):
         return MapBlobKeySerializer(type_name)
     raise ValueError(f"Unsupported key type for MAP<X, BLOB>: {data_type}")

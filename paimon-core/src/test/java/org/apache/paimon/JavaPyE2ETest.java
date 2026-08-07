@@ -27,6 +27,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.Decimal;
@@ -1460,6 +1461,12 @@ public class JavaPyE2ETest {
                                 DataTypes.MAP(DataTypes.DECIMAL(20, 2), DataTypes.BLOB()))
                         .column("date_payloads", DataTypes.MAP(DataTypes.DATE(), DataTypes.BLOB()))
                         .column("time_payloads", DataTypes.MAP(DataTypes.TIME(3), DataTypes.BLOB()))
+                        .column(
+                                "binary_payloads",
+                                DataTypes.MAP(DataTypes.BINARY(4), DataTypes.BLOB()))
+                        .column(
+                                "varbinary_payloads",
+                                DataTypes.MAP(DataTypes.VARBINARY(8), DataTypes.BLOB()))
                         .option(ROW_TRACKING_ENABLED.key(), "true")
                         .option(DATA_EVOLUTION_ENABLED.key(), "true")
                         .option(BUCKET.key(), "-1")
@@ -1486,6 +1493,16 @@ public class JavaPyE2ETest {
         datePayloads.put(-1, new BlobData("java-date".getBytes(StandardCharsets.UTF_8)));
         Map<Object, Object> timePayloads = new LinkedHashMap<>();
         timePayloads.put(45_296_789, new BlobData("java-time".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> binaryPayloads = new LinkedHashMap<>();
+        binaryPayloads.put(
+                new byte[] {0, (byte) 0xff, 1, 2},
+                new BlobData("java-binary-first".getBytes(StandardCharsets.UTF_8)));
+        binaryPayloads.put(
+                new byte[] {0, (byte) 0xff, 1, 2},
+                new BlobData("java-binary".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> varbinaryPayloads = new LinkedHashMap<>();
+        varbinaryPayloads.put(
+                new byte[0], new BlobData("java-varbinary".getBytes(StandardCharsets.UTF_8)));
 
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
@@ -1499,7 +1516,9 @@ public class JavaPyE2ETest {
                             new GenericMap(compactDecimalPayloads),
                             new GenericMap(highDecimalPayloads),
                             new GenericMap(datePayloads),
-                            new GenericMap(timePayloads)));
+                            new GenericMap(timePayloads),
+                            new GenericMap(binaryPayloads),
+                            new GenericMap(varbinaryPayloads)));
             write.write(
                     GenericRow.of(
                             2,
@@ -1508,9 +1527,13 @@ public class JavaPyE2ETest {
                             null,
                             null,
                             null,
+                            null,
+                            null,
                             null));
-            write.write(GenericRow.of(3, null, null, null, null, null, null));
-            write.write(GenericRow.of(4, new GenericMap(last), null, null, null, null, null));
+            write.write(GenericRow.of(3, null, null, null, null, null, null, null, null));
+            write.write(
+                    GenericRow.of(
+                            4, new GenericMap(last), null, null, null, null, null, null, null));
             commit.commit(write.prepareCommit());
         }
 
@@ -1604,6 +1627,19 @@ public class JavaPyE2ETest {
                         InternalMap timeMap = row.getMap(6);
                         assertThat(timeMap.keyArray().getInt(0)).isEqualTo(45_296_789);
                         assertSingleBlobValue(timeMap, valuePrefix + "-time");
+
+                        GenericMap binaryMap = (GenericMap) row.getMap(7);
+                        byte[] binaryKey = new byte[] {0, (byte) 0xff, 1, 2};
+                        assertThat(binaryMap.keyArray().getBinary(0)).isEqualTo(binaryKey);
+                        assertThat(binaryMap.contains(binaryKey)).isTrue();
+                        assertThat(((Blob) binaryMap.get(binaryKey)).toData())
+                                .isEqualTo(
+                                        (valuePrefix + "-binary").getBytes(StandardCharsets.UTF_8));
+                        assertThat(binaryMap.size()).isOne();
+
+                        InternalMap varbinaryMap = row.getMap(8);
+                        assertThat(varbinaryMap.keyArray().getBinary(0)).isEmpty();
+                        assertSingleBlobValue(varbinaryMap, valuePrefix + "-varbinary");
                     });
         }
         assertThat(found[0]).isTrue();

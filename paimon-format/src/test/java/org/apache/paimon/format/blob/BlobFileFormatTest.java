@@ -30,7 +30,10 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalMapSerializer;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
@@ -44,6 +47,7 @@ import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RoaringBitmap32;
 
@@ -439,22 +443,142 @@ public class BlobFileFormatTest {
 
     @Test
     public void testDuplicateMapBlobKeyLastWinsInline() throws IOException {
-        assertDuplicateMapBlobKeyLastWins(false);
+        assertDuplicateMapBlobKeyLastWins(
+                false,
+                DataTypes.STRING(),
+                BinaryString.fromString("a"),
+                BinaryString.fromString("b"),
+                BinaryString.fromString("a"),
+                (byte) 'a');
     }
 
     @Test
     public void testDuplicateMapBlobKeyLastWinsAsDescriptor() throws IOException {
-        assertDuplicateMapBlobKeyLastWins(true);
+        assertDuplicateMapBlobKeyLastWins(
+                true,
+                DataTypes.STRING(),
+                BinaryString.fromString("a"),
+                BinaryString.fromString("b"),
+                BinaryString.fromString("a"),
+                (byte) 'a');
     }
 
-    private void assertDuplicateMapBlobKeyLastWins(boolean blobAsDescriptor) throws IOException {
+    @Test
+    public void testDuplicateBinaryMapBlobKeyLastWinsInline() throws IOException {
+        assertDuplicateMapBlobKeyLastWins(
+                false,
+                DataTypes.BINARY(1),
+                new byte[] {1},
+                new byte[] {2},
+                new byte[] {1},
+                (byte) 1);
+    }
+
+    @Test
+    public void testDuplicateBinaryMapBlobKeyLastWinsAsDescriptor() throws IOException {
+        assertDuplicateMapBlobKeyLastWins(
+                true,
+                DataTypes.BINARY(1),
+                new byte[] {1},
+                new byte[] {2},
+                new byte[] {1},
+                (byte) 1);
+    }
+
+    @Test
+    public void testBinaryMapBlobCopyPreservesLookup() throws IOException {
+        RowType rowType = writeBinaryMapBlobWithNullValue();
+        InternalRow row = readBinaryMapBlobRow(rowType);
+
+        InternalMap copiedMap =
+                new InternalMapSerializer(DataTypes.BYTES(), DataTypes.BLOB()).copy(row.getMap(0));
+        assertBinaryKeyLookup(copiedMap);
+
+        InternalRow copiedRow = new InternalRowSerializer(rowType).copy(row);
+        assertBinaryKeyLookup(copiedRow.getMap(0));
+    }
+
+    @Test
+    public void testBinaryMapBlobJavaSerialization() throws Exception {
+        RowType rowType = writeBinaryMapBlobWithNullValue();
+        GenericMap map = (GenericMap) readBinaryMapBlobRow(rowType).getMap(0);
+
+        GenericMap restored = InstantiationUtil.clone(map);
+
+        assertBinaryKeyLookup(restored);
+    }
+
+    @Test
+    public void testBinaryMapBlobEqualityAcrossBackingRepresentations() throws IOException {
+        RowType rowType = writeBinaryMapBlobWithNullValue();
+        InternalRow readRow = readBinaryMapBlobRow(rowType);
+        GenericMap readMap = (GenericMap) readRow.getMap(0);
+
         Map<Object, Object> entries = new LinkedHashMap<>();
-        entries.put(BinaryString.fromString("a"), new BlobData("first".getBytes()));
-        entries.put(BinaryString.fromString("b"), new BlobData("second".getBytes()));
+        byte[] key = new byte[] {1};
+        entries.put(key, null);
+        GenericMap ordinaryMap = new GenericMap(entries);
+        GenericRow ordinaryRow = GenericRow.of(ordinaryMap);
+
+        assertThat(ordinaryMap.contains(key)).isTrue();
+        assertThat(ordinaryMap.contains(new byte[] {1})).isFalse();
+        assertThat(readMap).isEqualTo(ordinaryMap);
+        assertThat(ordinaryMap).isEqualTo(readMap);
+        assertThat(readMap.hashCode()).isEqualTo(ordinaryMap.hashCode());
+        assertThat(readRow).isEqualTo(ordinaryRow);
+        assertThat(ordinaryRow).isEqualTo(readRow);
+        assertThat(readRow.hashCode()).isEqualTo(ordinaryRow.hashCode());
+    }
+
+    private RowType writeBinaryMapBlobWithNullValue() throws IOException {
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.BYTES(), DataTypes.BLOB()));
+        Map<Object, Object> entries = new LinkedHashMap<>();
+        entries.put(new byte[] {1}, null);
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer =
+                    new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE)
+                            .createWriterFactory(rowType)
+                            .create(out, null);
+            writer.addElement(GenericRow.of(new GenericMap(entries)));
+            writer.close();
+        }
+        return rowType;
+    }
+
+    private InternalRow readBinaryMapBlobRow(RowType rowType) throws IOException {
+        FormatReaderFactory readerFactory =
+                new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE)
+                        .createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+        try (FileRecordReader<InternalRow> reader = readerFactory.createReader(context)) {
+            return reader.readBatch().next();
+        }
+    }
+
+    private void assertBinaryKeyLookup(InternalMap map) {
+        assertThat(map).isInstanceOf(GenericMap.class);
+        GenericMap genericMap = (GenericMap) map;
+        assertThat(genericMap.contains(new byte[] {1})).isTrue();
+        assertThat(genericMap.get(new byte[] {1})).isNull();
+        assertThat(genericMap.keyArray().getBinary(0)).isEqualTo(new byte[] {1});
+    }
+
+    private void assertDuplicateMapBlobKeyLastWins(
+            boolean blobAsDescriptor,
+            DataType keyType,
+            Object firstKey,
+            Object secondKey,
+            Object lookupKey,
+            byte duplicateKeyByte)
+            throws IOException {
+        Map<Object, Object> entries = new LinkedHashMap<>();
+        entries.put(firstKey, new BlobData("first".getBytes()));
+        entries.put(secondKey, new BlobData("second".getBytes()));
 
         BlobFileFormat format =
                 new BlobFileFormat(blobAsDescriptor, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
-        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()));
+        RowType rowType = RowType.of(DataTypes.MAP(keyType, DataTypes.BLOB()));
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
             FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
             writer.addElement(GenericRow.of(new GenericMap(entries)));
@@ -469,7 +593,7 @@ public class BlobFileFormatTest {
 
         java.nio.file.Path localFile = Paths.get(file.toUri());
         byte[] bytes = Files.readAllBytes(localFile);
-        bytes[payloadPosition + 10] = 'a';
+        bytes[payloadPosition + 10] = duplicateKeyByte;
         Files.write(localFile, bytes);
 
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
@@ -483,8 +607,11 @@ public class BlobFileFormatTest {
         assertThat(rows).hasSize(1);
         GenericMap result = (GenericMap) rows.get(0).getMap(0);
         assertThat(result.size()).isOne();
-        assertMapBlob(
-                result.get(BinaryString.fromString("a")), blobAsDescriptor, "second".getBytes());
+        assertThat(result.contains(lookupKey)).isTrue();
+        assertMapBlob(result.get(lookupKey), blobAsDescriptor, "second".getBytes());
+        if (lookupKey instanceof byte[]) {
+            assertThat(result.keyArray().getBinary(0)).isEqualTo(lookupKey);
+        }
     }
 
     @Test
@@ -500,6 +627,9 @@ public class BlobFileFormatTest {
                     DataTypes.DECIMAL(20, 2),
                     DataTypes.DATE(),
                     DataTypes.TIME(3),
+                    DataTypes.BINARY(4),
+                    DataTypes.VARBINARY(8),
+                    DataTypes.BYTES(),
                     DataTypes.CHAR(10),
                     DataTypes.VARCHAR(10)
                 };
@@ -514,6 +644,9 @@ public class BlobFileFormatTest {
                     Decimal.fromBigDecimal(new BigDecimal("123456789012345678.90"), 20, 2),
                     -1,
                     45_296_789,
+                    new byte[] {0, (byte) 0xff},
+                    new byte[0],
+                    new byte[] {1, 2, 3},
                     BinaryString.fromString("char"),
                     BinaryString.fromString("varchar")
                 };
@@ -538,6 +671,9 @@ public class BlobFileFormatTest {
                     },
                     {(byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff},
                     {(byte) 0x95, 0x2c, (byte) 0xb3, 0x02},
+                    {0, (byte) 0xff},
+                    {},
+                    {1, 2, 3},
                     "char".getBytes(),
                     "varchar".getBytes()
                 };
@@ -584,6 +720,9 @@ public class BlobFileFormatTest {
             GenericMap result = (GenericMap) rows.get(0).getMap(0);
             assertThat(result.contains(keys[i])).isTrue();
             assertThat(((Blob) result.get(keys[i])).toData()).isEqualTo("value".getBytes());
+            if (keys[i] instanceof byte[]) {
+                assertThat(result.keyArray().getBinary(0)).isEqualTo(keys[i]);
+            }
         }
     }
 

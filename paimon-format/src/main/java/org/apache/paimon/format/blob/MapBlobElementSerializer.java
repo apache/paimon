@@ -350,6 +350,7 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                 }
 
                 // 3. deserialize values and construct map
+                boolean binaryKey = keySerializer instanceof BinaryKeySerializer;
                 Map<Object, Object> map = new LinkedHashMap<>();
                 long valueOffset = dataStart + keyDataLength;
                 for (int i = 0; i < entryCount; i++) {
@@ -363,7 +364,7 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                     }
                     map.put(keys[i], value);
                 }
-                return new GenericMap(map);
+                return binaryKey ? GenericMap.fromBinaryKeyMap(map) : new GenericMap(map);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -470,6 +471,9 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
                 return new IntKeySerializer();
+            case BINARY:
+            case VARBINARY:
+                return new BinaryKeySerializer();
             case CHAR:
             case VARCHAR:
                 return new StringKeySerializer();
@@ -642,6 +646,25 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
         @Override
         public int fixedLength() {
             return Decimal.isCompact(precision) ? Long.BYTES : -1;
+        }
+    }
+
+    /** {@link KeySerializer} for Binary and VarBinary Types. */
+    private static final class BinaryKeySerializer implements KeySerializer {
+
+        @Override
+        public byte[] serialize(Object key) {
+            return (byte[]) key;
+        }
+
+        @Override
+        public Object deserialize(byte[] bytes) {
+            return bytes;
+        }
+
+        @Override
+        public int fixedLength() {
+            return -1;
         }
     }
 

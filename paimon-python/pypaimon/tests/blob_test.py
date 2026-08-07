@@ -3060,6 +3060,9 @@ class BlobEndToEndTest(unittest.TestCase):
             ),
             (AtomicType("DATE"), datetime.date(1969, 12, 31)),
             (AtomicType("TIME(3)"), datetime.time(12, 34, 56, 789000)),
+            (AtomicType("BINARY(4)"), bytes([0, 255])),
+            (AtomicType("VARBINARY(8)"), b""),
+            (AtomicType("BYTES"), b"bytes"),
             (AtomicType("STRING"), "string"),
             (AtomicType("CHAR(3)"), "abc"),
             (AtomicType("VARCHAR(10)"), "varchar"),
@@ -3075,6 +3078,9 @@ class BlobEndToEndTest(unittest.TestCase):
             b"\x00\xab\x54\xa9\x8c\xeb\x1f\x0a\xd2",
             b"\xff\xff\xff\xff",
             b"\x95\x2c\xb3\x02",
+            b"\x00\xff",
+            b"",
+            b"bytes",
             b"string",
             b"abc",
             b"varchar",
@@ -3172,6 +3178,19 @@ class BlobEndToEndTest(unittest.TestCase):
             invalid_key_writer.add_element(GenericRow(
                 [{"not-an-int": BlobData(b"value")}],
                 [int_key_field],
+                RowKind.INSERT,
+            ))
+
+        invalid_binary_key_writer = BlobFormatWriter(io.BytesIO())
+        binary_key_field = DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("BINARY(4)"), AtomicType("BLOB")),
+        )
+        with self.assertRaisesRegex(ValueError, "key must be bytes"):
+            invalid_binary_key_writer.add_element(GenericRow(
+                [{"not-bytes": BlobData(b"value")}],
+                [binary_key_field],
                 RowKind.INSERT,
             ))
 
