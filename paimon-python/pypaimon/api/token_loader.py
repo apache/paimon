@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -82,6 +83,49 @@ class DLFTokenLoader(ABC):
     @abstractmethod
     def description(self) -> str:
         pass
+
+
+class DLFLocalFileTokenLoader(DLFTokenLoader):
+    """Load temporary DLF credentials from a local JSON file."""
+
+    DEFAULT_MAX_RETRIES = 5
+
+    def __init__(self, token_file_path: str):
+        self.token_file_path = token_file_path
+
+    def load_token(self) -> DLFToken:
+        return self.read_token(self.token_file_path)
+
+    def description(self) -> str:
+        return self.token_file_path
+
+    @staticmethod
+    def read_token(token_file_path: str,
+                   max_retries: int = DEFAULT_MAX_RETRIES) -> DLFToken:
+        retry = 1
+        last_exception = None
+        while retry <= max_retries:
+            try:
+                with open(token_file_path, "r", encoding="utf-8") as token_file:
+                    token_json = token_file.read()
+            except Exception as e:
+                last_exception = RuntimeError(
+                    "Failed to read token file: {}".format(token_file_path)
+                )
+                last_exception.__cause__ = e
+            else:
+                try:
+                    return JSON.from_json(token_json, DLFToken)
+                except Exception:
+                    # The file contains AK/SK/STS. Do not retain the JSON
+                    # parser exception because it can include source content.
+                    last_exception = RuntimeError("Failed to parse token file.")
+
+            if retry < max_retries:
+                time.sleep(retry)
+            retry += 1
+
+        raise last_exception
 
 
 class HTTPClient:
@@ -207,7 +251,7 @@ class DLFTokenLoaderFactory:
 
     @staticmethod
     def create_token_loader(options: Options) -> Optional['DLFTokenLoader']:
-        """Create ECS token loader"""
+        """Create the configured token loader."""
         loader = options.get(CatalogOptions.DLF_TOKEN_LOADER)
         if loader == 'ecs':
             ecs_metadata_url = options.get(
@@ -216,4 +260,12 @@ class DLFTokenLoaderFactory:
             )
             role_name = options.get(CatalogOptions.DLF_TOKEN_ECS_ROLE_NAME)
             return DLFECSTokenLoader(ecs_metadata_url, role_name)
+        if loader == 'local_file':
+            return DLFLocalFileTokenLoader(
+                options.get(CatalogOptions.DLF_TOKEN_PATH)
+            )
+        if loader is None:
+            token_path = options.get(CatalogOptions.DLF_TOKEN_PATH)
+            if token_path is not None:
+                return DLFLocalFileTokenLoader(token_path)
         return None
