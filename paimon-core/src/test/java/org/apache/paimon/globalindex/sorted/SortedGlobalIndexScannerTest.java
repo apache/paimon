@@ -20,10 +20,13 @@ package org.apache.paimon.globalindex.sorted;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexRefreshPlanner;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
@@ -44,7 +47,10 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -53,6 +59,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -342,6 +349,123 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
                 200,
                 totalRowCount,
                 "incrementalScan should only return the new rows in partition p0");
+    }
+
+    @Test
+    public void testIncrementalScanRefreshesIndexAfterColumnUpdate() throws Exception {
+        write();
+        createIndex(null);
+
+        FileStoreTable table =
+                getTableDefault()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(),
+                                        "IGNORE"));
+        updateColumn(table, 0L, 5);
+
+        SortedGlobalIndexScanner scanner =
+                new SortedGlobalIndexScanner(table, "btree").withIndexField("f0");
+        ScanResult<DataSplit> scanResult =
+                scanner.incrementalScan()
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected incremental scan result after column update."));
+
+        assertThat(scanResult.deletedIndexEntries()).isNotEmpty();
+        assertThat(scanResult.deletedIndexEntries())
+                .allSatisfy(
+                        entry ->
+                                assertThat(entry.indexFile().globalIndexMeta().rowRange().from)
+                                        .isEqualTo(0L));
+    }
+
+    @Test
+    public void testFindIndexesToRefreshBinaryScanMatchesEntryScan() throws Exception {
+        write();
+        createIndex(null);
+        FileStoreTable table = getTableDefault();
+
+        // Column update overlapping indexed rows must be planned identically by both paths.
+        // Cover the whole base file so the follow-up compaction can merge the two files.
+        updateColumn(table, 0L, (int) PART_ROW_NUM);
+        assertThat(refreshPlanParity(table)).isNotEmpty();
+
+        // Compaction produces DELETE manifest entries which the binary scan must recognize.
+        doDataEvolutionCompact(table);
+        updateColumn(table, 100L, 5);
+        refreshPlanParity(table);
+    }
+
+    private List<IndexManifestEntry> refreshPlanParity(FileStoreTable table) {
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        List<IndexManifestEntry> currentIndexes =
+                table.store().newIndexFileHandler().scan(snapshot, "btree");
+        List<DataField> indexedFields = Collections.singletonList(table.rowType().getField("f0"));
+
+        List<IndexManifestEntry> viaEntries =
+                DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
+                        table.schemaManager(),
+                        table.store().newScan().withSnapshot(snapshot).plan().files(),
+                        currentIndexes,
+                        indexedFields);
+        List<IndexManifestEntry> viaBinaryScan =
+                DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
+                        table, snapshot, null, currentIndexes, indexedFields);
+
+        assertThat(viaBinaryScan).containsExactlyElementsOf(viaEntries);
+        return viaBinaryScan;
+    }
+
+    private void updateColumn(FileStoreTable table, long firstRowId, int rowCount)
+            throws Exception {
+        RowType writeType = table.rowType().project(Arrays.asList("dt", "f0"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType)) {
+            for (int i = 0; i < rowCount; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("p0"), -(int) (firstRowId + i)));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, firstRowId);
+            try (BatchTableCommit commit = builder.newCommit()) {
+                commit.commit(messages);
+            }
+        }
+    }
+
+    private void setFirstRowId(List<CommitMessage> messages, long firstRowId) {
+        for (CommitMessage message : messages) {
+            CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+            List<DataFileMeta> newFiles =
+                    new ArrayList<>(commitMessage.newFilesIncrement().newFiles());
+            commitMessage.newFilesIncrement().newFiles().clear();
+            for (DataFileMeta newFile : newFiles) {
+                commitMessage
+                        .newFilesIncrement()
+                        .newFiles()
+                        .add(newFile.assignFirstRowId(firstRowId));
+            }
+        }
+    }
+
+    private void doDataEvolutionCompact(FileStoreTable table) throws Exception {
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        table, false, false, table.latestSnapshot().get());
+        List<CommitMessage> messages = new ArrayList<>();
+        try {
+            List<DataEvolutionCompactTask> tasks;
+            while (!(tasks = coordinator.plan()).isEmpty()) {
+                for (DataEvolutionCompactTask task : tasks) {
+                    messages.add(task.doCompact(table, "test-compact"));
+                }
+            }
+        } catch (EndOfScanException ignore) {
+        }
+        if (!messages.isEmpty()) {
+            table.newBatchWriteBuilder().newCommit().commit(messages);
+        }
     }
 
     @Test
