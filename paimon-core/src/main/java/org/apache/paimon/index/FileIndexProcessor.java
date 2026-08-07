@@ -119,8 +119,7 @@ public class FileIndexProcessor {
             } else {
                 Map<String, byte[]> indexTypeBytes = maintainers.get(name);
                 Set<String> configuredIndexTypes =
-                        schemaInfo.projectedIndexTypes.getOrDefault(
-                                name, Collections.emptySet());
+                        schemaInfo.projectedIndexTypes.getOrDefault(name, Collections.emptySet());
                 indexTypeBytes
                         .keySet()
                         .removeIf(indexType -> !configuredIndexTypes.contains(indexType));
