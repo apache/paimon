@@ -20,10 +20,13 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 
 import org.junit.jupiter.api.Test;
@@ -34,8 +37,8 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link BinaryIndexManifestReader}. */
-class BinaryIndexManifestReaderTest extends TableTestBase {
+/** Tests for {@link BinaryIndexManifestEntry}. */
+class BinaryIndexManifestEntryTest extends TableTestBase {
 
     @Test
     void testProjectedScanAndReusableEntry() throws Exception {
@@ -57,7 +60,8 @@ class BinaryIndexManifestReaderTest extends TableTestBase {
         String fileName = indexManifestFile.writeWithoutRolling(Arrays.asList(add, delete));
 
         try (CloseableIterator<BinaryIndexManifestEntry> entries =
-                new BinaryIndexManifestReader(table).scan(fileName)) {
+                indexManifestFile.scan(
+                        fileName, BinaryIndexManifestEntry.GLOBAL_INDEX_PROJECTION)) {
             assertThat(entries.hasNext()).isTrue();
             BinaryIndexManifestEntry first = entries.next();
             assertThat(first.isAdd()).isTrue();
@@ -93,6 +97,36 @@ class BinaryIndexManifestReaderTest extends TableTestBase {
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("not backed by a row");
         }
+    }
+
+    @Test
+    void testCustomProjectionAndOrdering() {
+        RowType manifestType = IndexManifestEntry.MANIFEST_ROW_TYPE;
+        BinaryIndexManifestEntry entry =
+                BinaryIndexManifestEntry.Projection.create(
+                                new RowType(
+                                        false,
+                                        Arrays.asList(
+                                                manifestType.getField(
+                                                        IndexManifestEntry.INDEX_TYPE),
+                                                manifestType.getField(IndexManifestEntry.BUCKET),
+                                                manifestType.getField(IndexManifestEntry.KIND))))
+                        .createEntry()
+                        .replace(
+                                GenericRow.of(
+                                        BinaryString.fromString("btree"),
+                                        3,
+                                        FileKind.ADD.toByteValue()));
+
+        assertThat(entry.indexType().toString()).isEqualTo("btree");
+        assertThat(entry.bucket()).isEqualTo(3);
+        assertThat(entry.isAdd()).isTrue();
+        assertThatThrownBy(entry::partitionBytes)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(IndexManifestEntry.PARTITION);
+        assertThatThrownBy(entry::hasGlobalIndexMeta)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(IndexManifestEntry.GLOBAL_INDEX);
     }
 
     private static IndexManifestEntry entry(

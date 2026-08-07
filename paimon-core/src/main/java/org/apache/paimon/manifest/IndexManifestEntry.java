@@ -74,6 +74,9 @@ public class IndexManifestEntry {
                             new DataField(8, EXTERNAL_PATH, newStringType(true)),
                             new DataField(9, GLOBAL_INDEX, GlobalIndexMeta.SCHEMA)));
 
+    public static final RowType MANIFEST_ROW_TYPE =
+            ManifestSchemaUtils.withFormatIdentifier(SCHEMA);
+
     private final FileKind kind;
     private final BinaryRow partition;
     private final int bucket;
