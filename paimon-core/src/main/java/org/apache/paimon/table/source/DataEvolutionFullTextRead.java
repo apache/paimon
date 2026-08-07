@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -79,6 +80,16 @@ public class DataEvolutionFullTextRead implements FullTextRead {
 
     @Override
     public GlobalIndexResult read(List<FullTextSearchSplit> splits) {
+        return read(splits, null);
+    }
+
+    @Override
+    public GlobalIndexResult read(FullTextScan.Plan plan) {
+        return read(plan.splits(), plan.snapshot());
+    }
+
+    private GlobalIndexResult read(
+            List<FullTextSearchSplit> splits, @Nullable Snapshot planSnapshot) {
         if (splits.isEmpty()) {
             return GlobalIndexResult.createEmpty();
         }
@@ -102,13 +113,19 @@ public class DataEvolutionFullTextRead implements FullTextRead {
         }
 
         GlobalIndexFileReader indexFileReader = m -> table.fileIO().newInputStream(m.filePath());
-        RoaringNavigableMap64 liveRows = GlobalIndexLiveRowFilter.liveRows(table, partitionFilter);
+        RoaringNavigableMap64 liveRows =
+                GlobalIndexLiveRowFilter.liveRows(table, planSnapshot, partitionFilter, null);
         ScoredGlobalIndexResult result =
                 evalQuery(splitsByColumn, indexPathFactory, indexFileReader, executor, liveRows);
         if (!rawRowRanges.isEmpty()) {
             result =
                     new RawFullTextReadImpl(
-                                    table, partitionFilter, limit, textColumn, this::evalQuery)
+                                    table,
+                                    planSnapshot,
+                                    partitionFilter,
+                                    limit,
+                                    textColumn,
+                                    this::evalQuery)
                             .withRawSearch(result, rawRowRanges, splitsByColumn, executor);
         }
         return result.topK(limit);
@@ -237,7 +254,11 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                             meta.indexMeta()));
         }
         GlobalIndexReader reader =
-                globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
+                globalIndexer.createReader(
+                        indexFileReader,
+                        indexIOMetaList,
+                        rowRangeEnd - rowRangeStart + 1,
+                        executor);
         FullTextSearch fullTextSearch =
                 new FullTextSearch(
                                 textColumn.name(),

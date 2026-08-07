@@ -81,6 +81,10 @@ public class CloneProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "clone_if_exists",
                         type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "target_table_conf",
+                        type = @DataTypeHint("STRING"),
                         isOptional = true)
             })
     public String[] call(
@@ -98,13 +102,16 @@ public class CloneProcedure extends ProcedureBase {
             String preferFileFormat,
             String cloneFrom,
             Boolean metaOnly,
-            Boolean cloneIfExists)
+            Boolean cloneIfExists,
+            String targetTableConfigStr)
             throws Exception {
         Map<String, String> sourceCatalogConfig =
                 new HashMap<>(optionalConfigMap(sourceCatalogConfigStr));
 
         Map<String, String> targetCatalogConfig =
                 new HashMap<>(optionalConfigMap(targetCatalogConfigStr));
+        Map<String, String> targetTableConfig =
+                new HashMap<>(optionalConfigMap(targetTableConfigStr));
 
         List<String> includedTables =
                 StringUtils.isNullOrWhitespaceOnly(includedTablesStr)
@@ -123,6 +130,7 @@ public class CloneProcedure extends ProcedureBase {
                         targetDatabase,
                         targetTableName,
                         targetCatalogConfig,
+                        targetTableConfig,
                         parallelism,
                         where,
                         includedTables,

@@ -238,7 +238,14 @@ public class FormatReadBuilder implements ReadBuilder {
                     formatReaderContext.filePath());
         } catch (Exception e) {
             FileUtils.checkExists(formatReaderContext.fileIO(), formatReaderContext.filePath());
-            throw e;
+            // A split spans many files that a Format Table's writers may have written differently.
+            // Naming the one that failed is the only way to tell them apart from the outside.
+            throw new IOException(
+                    "Failed to read file "
+                            + formatReaderContext.filePath()
+                            + " of table "
+                            + table.fullName(),
+                    e);
         }
     }
 

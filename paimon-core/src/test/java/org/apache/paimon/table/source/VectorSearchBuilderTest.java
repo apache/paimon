@@ -19,6 +19,10 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -36,6 +40,7 @@ import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexer;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -219,6 +224,112 @@ public class VectorSearchBuilderTest extends TableTestBase {
         assertThat(result.results()).contains(2L, 3L);
         assertThat(result.results()).doesNotContain(0L, 1L);
         assertThat(readIds(table, result)).containsExactly(2, 3);
+    }
+
+    @Test
+    public void testVectorSearchExcludesDeletedRowsAcrossOverlappingPartialColumnFiles()
+            throws Exception {
+        catalog.createTable(
+                identifier("vector_search_overlapping_partial_column"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_search_overlapping_partial_column"));
+
+        float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {3.0f, 0.0f}};
+        writeVectors(table, vectors);
+        // A partial-column file over the same [0,3] row-id range that carries no
+        // deletion vector; its range must not re-add the deleted rows.
+        writeOverlappingIdColumn(table, vectors.length);
+        buildAndCommitIndex(table, vectors);
+        commitDeletionVectors(table, 0L, 1L);
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(4)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
+        assertThat(result.results()).contains(2L, 3L);
+        assertThat(result.results()).doesNotContain(0L, 1L);
+        assertThat(readIds(table, result)).containsExactly(2, 3);
+    }
+
+    @Test
+    public void testVectorSearchPinsLiveRowFilterToPlanSnapshot() throws Exception {
+        catalog.createTable(
+                identifier("vector_search_pinned_snapshot"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_search_pinned_snapshot"));
+
+        float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {3.0f, 0.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(4)
+                        .withVectorColumn(VECTOR_FIELD_NAME);
+        VectorScan.Plan plan = builder.newVectorScan().scan();
+
+        // Delete row 0 after planning. The read stays pinned to the plan's
+        // snapshot, so row 0 (live when planned) is still returned.
+        commitDeletionVectors(table, 0L);
+
+        GlobalIndexResult result = builder.newVectorRead().read(plan);
+        assertThat(result.results()).contains(0L);
+    }
+
+    @Test
+    public void testRawFallbackPinsDataReadToPlanSnapshot() throws Exception {
+        catalog.createTable(
+                identifier("vector_raw_search_pinned_snapshot"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .option(CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_raw_search_pinned_snapshot"));
+
+        writeVectors(table, new float[][] {{0.0f, 0.0f}, {1.0f, 0.0f}});
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME);
+        VectorScan.Plan plan = builder.newVectorScan().scan();
+
+        commitDeletionVectors(table, 0L);
+        Map<String, String> compactOptions = new HashMap<>();
+        compactOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
+        FileStoreTable compactTable = table.copy(compactOptions);
+        Snapshot compactSnapshot = compactTable.latestSnapshot().get();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(compactTable, false, false, compactSnapshot);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks)
+                .singleElement()
+                .extracting(DataEvolutionCompactTask::type)
+                .isEqualTo(DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
+        List<CommitMessage> messages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            messages.add(task.doCompact(compactTable, "test-vector-snapshot-pin"));
+        }
+        messages.addAll(
+                new DataEvolutionCompactionCommitPreparation(compactTable, compactSnapshot)
+                        .prepare(messages));
+        try (BatchTableCommit commit = compactTable.newBatchWriteBuilder().newCommit()) {
+            commit.commit(messages);
+        }
+
+        GlobalIndexResult result = builder.newVectorRead().read(plan);
+        assertThat(result.results()).containsExactlyInAnyOrder(0L, 1L);
     }
 
     @Test
@@ -1065,12 +1176,14 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testPartialScalarPreFilterMustNotDropUnindexedScalarRows() throws Exception {
+    public void testPartialScalarPreFilterDropsUnindexedRowsInFastMode() throws Exception {
+        // Default fast scalar mode drops unindexed rows: the btree covers ids
+        // 3-7, so id>=8 (rows 8,9 unindexed) yields an empty pre-filter.
         catalog.createTable(
-                identifier("default_scalar_full_partial_index_table"),
+                identifier("default_scalar_fast_partial_index_table"),
                 vectorSchemaBuilder(VECTOR_FIELD_NAME).build(),
                 false);
-        FileStoreTable table = getTable(identifier("default_scalar_full_partial_index_table"));
+        FileStoreTable table = getTable(identifier("default_scalar_fast_partial_index_table"));
 
         float[][] vectors = new float[10][];
         for (int i = 0; i < vectors.length; i++) {
@@ -1091,7 +1204,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
         VectorScan.Plan vectorPlan = searchBuilder.newVectorScan().scan();
         GlobalIndexResult result = searchBuilder.newVectorRead().read(vectorPlan);
-        assertThat(result.results()).contains(8L);
+        assertThat(result.results().isEmpty()).isTrue();
 
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(idFilter);
         TableScan.Plan readPlan = readBuilder.newScan().withGlobalIndexResult(result).plan();
@@ -1099,7 +1212,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(readPlan)) {
             reader.forEachRemaining(row -> ids.add(row.getInt(0)));
         }
-        assertThat(ids).containsExactly(8);
+        assertThat(ids).isEmpty();
     }
 
     @Test
@@ -1541,6 +1654,32 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
     // ====================== Helper methods ======================
 
+    private void writeOverlappingIdColumn(FileStoreTable table, int count) throws Exception {
+        long firstRowId = table.snapshotManager().latestSnapshot().nextRowId() - count;
+        RowType idType = table.rowType().project(Collections.singletonList("id"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(idType)) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(i));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> messages = write.prepareCommit();
+            assignFirstRowId(messages, firstRowId);
+            commit.commit(messages);
+        }
+    }
+
+    private void assignFirstRowId(List<CommitMessage> messages, long firstRowId) {
+        for (CommitMessage message : messages) {
+            CommitMessageImpl impl = (CommitMessageImpl) message;
+            List<DataFileMeta> newFiles = new ArrayList<>(impl.newFilesIncrement().newFiles());
+            impl.newFilesIncrement().newFiles().clear();
+            for (DataFileMeta file : newFiles) {
+                impl.newFilesIncrement().newFiles().add(file.assignFirstRowId(firstRowId));
+            }
+        }
+    }
+
     private void writeVectors(FileStoreTable table, float[][] vectors) throws Exception {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
@@ -1932,7 +2071,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         rowRange,
                         indexFields,
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        null);
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =

@@ -71,7 +71,7 @@ interface BlobElementSerializer {
     }
 
     /** Writer used for the lifetime of one output file. */
-    interface Writer {
+    interface Writer extends Closeable {
 
         long write(InternalRow row) throws IOException;
 

@@ -68,7 +68,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
     private final Function<String, File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
-    private final Function<Long, BloomFilter.Builder> bfGenerator;
+    private final Function<Long, BloomFilter.Builder> bloomFilterBuilderFactory;
     private final Cache<String, LookupFile> lookupFileCache;
     private final Set<String> ownCachedFiles;
     private final Object[] lookupFileLocks;
@@ -87,7 +87,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory,
             Function<String, File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
-            Function<Long, BloomFilter.Builder> bfGenerator,
+            Function<Long, BloomFilter.Builder> bloomFilterBuilderFactory,
             Cache<String, LookupFile> lookupFileCache) {
         this.schemaFunction = schemaFunction;
         this.currentSchemaId = currentSchemaId;
@@ -99,7 +99,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         this.fileReaderFactory = fileReaderFactory;
         this.localFileFactory = localFileFactory;
         this.lookupStoreFactory = lookupStoreFactory;
-        this.bfGenerator = bfGenerator;
+        this.bloomFilterBuilderFactory = bloomFilterBuilderFactory;
         this.lookupFileCache = lookupFileCache;
         this.ownCachedFiles = ConcurrentHashMap.newKeySet();
         this.lookupFileLocks = new Object[LOOKUP_FILE_LOCK_STRIPES];
@@ -385,7 +385,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private void createSstFileFromDataFile(DataFileMeta file, File localFile) throws IOException {
         try (LookupStoreWriter kvWriter =
                         lookupStoreFactory.createWriter(
-                                localFile, bfGenerator.apply(file.rowCount()));
+                                localFile, bloomFilterBuilderFactory.apply(file.rowCount()));
                 RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             PersistProcessor<T> processor =
                     getOrCreateProcessor(currentSchemaId, serializerFactory.version());

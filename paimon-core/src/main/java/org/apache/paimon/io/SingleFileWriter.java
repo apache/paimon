@@ -76,6 +76,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         // true first to clean file in exception
         this.deleteFileUponAbort = true;
 
+        boolean opened = false;
         try {
             if (factory instanceof SupportsDirectWrite) {
                 writer = ((SupportsDirectWrite) factory).create(fileIO, path, compression);
@@ -92,18 +93,41 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
                 fileAwareFormatWriter.setFile(path);
                 deleteFileUponAbort = fileAwareFormatWriter.deleteFileUponAbort();
             }
+            opened = true;
         } catch (IOException e) {
             LOG.warn(
                     "Failed to open the bulk writer, closing the output stream and throw the error.",
                     e);
-            if (out != null) {
-                abort();
-            }
             throw new UncheckedIOException(e);
+        } finally {
+            // only clean up what this writer managed to create, a failure before that (for example
+            // the file already exists) must not delete someone else's file
+            if (!opened && (out != null || writer != null)) {
+                cleanUpFailedOpen();
+            }
         }
 
         this.recordCount = 0;
         this.closed = false;
+    }
+
+    /**
+     * Cleans up after a failed open. This must not call the overridable {@link #abort()}, because
+     * subclass fields are still unassigned while the super constructor runs.
+     */
+    private void cleanUpFailedOpen() {
+        try {
+            IOUtils.closeQuietly(writer);
+            writer = null;
+            IOUtils.closeQuietly(out);
+            out = null;
+            if (deleteFileUponAbort) {
+                fileIO.deleteQuietly(path);
+            }
+        } catch (Throwable t) {
+            // never let the cleanup replace the failure that caused it
+            LOG.warn("Failed to clean up {} after the writer could not be opened.", path, t);
+        }
     }
 
     public Path path() {
@@ -143,14 +167,34 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
         try {
             InternalRow rowData = converter.apply(record);
-            writer.addElement(rowData);
-            recordCount++;
+            writeRowInternal(rowData);
             return rowData;
         } catch (Throwable e) {
             LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
             abort();
             throw e;
         }
+    }
+
+    /** Writes an already converted row without invoking this writer's record converter. */
+    protected InternalRow writeRow(InternalRow rowData) throws IOException {
+        if (closed) {
+            throw new RuntimeException("Writer has already closed!");
+        }
+
+        try {
+            writeRowInternal(rowData);
+            return rowData;
+        } catch (Throwable e) {
+            LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
+            abort();
+            throw e;
+        }
+    }
+
+    private void writeRowInternal(InternalRow rowData) throws IOException {
+        writer.addElement(rowData);
+        recordCount++;
     }
 
     @Override
@@ -203,9 +247,13 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
                 out.close();
                 out = null;
             }
-        } catch (IOException e) {
+        } catch (Throwable e) {
             LOG.warn("Exception occurs when closing file {}. Cleaning up.", path, e);
-            abort();
+            try {
+                abort();
+            } catch (Throwable t) {
+                e.addSuppressed(t);
+            }
             throw e;
         } finally {
             closed = true;

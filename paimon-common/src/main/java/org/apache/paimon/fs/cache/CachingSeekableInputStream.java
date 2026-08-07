@@ -33,26 +33,33 @@ public class CachingSeekableInputStream extends SeekableInputStream implements V
     private final FileIO fileIO;
     private final Path path;
     private final LocalCacheManager cache;
+    private final String cacheKey;
     private long pos;
-    private long fileSize = -1;
+    private long fileSize;
     @Nullable private SeekableInputStream remoteStream;
 
     public CachingSeekableInputStream(FileIO fileIO, Path path, LocalCacheManager cache) {
+        this(fileIO, path, cache, path.toString(), -1);
+    }
+
+    CachingSeekableInputStream(
+            FileIO fileIO, Path path, LocalCacheManager cache, String cacheKey, long fileSize) {
         this.fileIO = fileIO;
         this.path = path;
         this.cache = cache;
+        this.cacheKey = cacheKey;
+        this.fileSize = fileSize;
         this.pos = 0;
     }
 
     private long fileSize() throws IOException {
         if (fileSize == -1) {
-            String pathStr = path.toString();
-            long cached = cache.getFileSize(pathStr);
+            long cached = cache.getFileSize(cacheKey);
             if (cached >= 0) {
                 fileSize = cached;
             } else {
                 fileSize = fileIO.getFileStatus(path).getLen();
-                cache.putFileSize(pathStr, fileSize);
+                cache.putFileSize(cacheKey, fileSize);
             }
         }
         return fileSize;
@@ -142,7 +149,7 @@ public class CachingSeekableInputStream extends SeekableInputStream implements V
     }
 
     private byte[] readBlock(int blockIndex) throws IOException {
-        byte[] cached = cache.getBlock(path.toString(), blockIndex);
+        byte[] cached = cache.getBlock(cacheKey, blockIndex);
         if (cached != null) {
             return cached;
         }
@@ -153,7 +160,7 @@ public class CachingSeekableInputStream extends SeekableInputStream implements V
 
         byte[] data = readRemote(offset, readSize);
 
-        cache.putBlock(path.toString(), blockIndex, data);
+        cache.putBlock(cacheKey, blockIndex, data);
         return data;
     }
 

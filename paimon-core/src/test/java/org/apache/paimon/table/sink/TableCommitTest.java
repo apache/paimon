@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -537,6 +538,93 @@ public class TableCommitTest {
         commit1.close();
         commit1Ow1.close();
         commit1Ow2.close();
+        write2.close();
+        commit2.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testStrictModeForIndexOnlyCompact(boolean dataEvolutionEnabled) throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, dataEvolutionEnabled ? -1 : 1);
+        if (!dataEvolutionEnabled) {
+            options.set(CoreOptions.BUCKET_KEY, "k");
+        }
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, dataEvolutionEnabled);
+        options.set(CoreOptions.DATA_EVOLUTION_ENABLED, dataEvolutionEnabled);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        BinaryRow pt1 = partitionRow(1);
+
+        String user1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(user1);
+        TableCommitImpl commit1 = table.newCommit(user1);
+        write1.write(GenericRow.of(1, 0, 0L));
+        commit1.commit(1, write1.prepareCommit(false, 1));
+
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable tableWithStrict =
+                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "1"));
+        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
+        TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
+        write2.write(GenericRow.of(1, 1, 1L));
+
+        IndexFileMeta btreeIndex =
+                new IndexFileMeta(
+                        "btree",
+                        "index-only-compact",
+                        1,
+                        1,
+                        new GlobalIndexMeta(0, 0, 1, null, null),
+                        null);
+        commit1.commit(
+                2,
+                Collections.singletonList(
+                        new CommitMessageImpl(
+                                pt1,
+                                0,
+                                1,
+                                DataIncrement.emptyIncrement(),
+                                new CompactIncrement(
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        Collections.singletonList(btreeIndex),
+                                        Collections.emptyList()))));
+
+        if (dataEvolutionEnabled) {
+            assertThatCode(() -> commit2.commit(1, write2.prepareCommit(true, 1)))
+                    .doesNotThrowAnyException();
+        } else {
+            assertThatThrownBy(() -> commit2.commit(1, write2.prepareCommit(true, 1)))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining(
+                            "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+        }
+
+        write1.close();
+        commit1.close();
         write2.close();
         commit2.close();
     }

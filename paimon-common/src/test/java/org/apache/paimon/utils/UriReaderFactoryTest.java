@@ -86,6 +86,12 @@ public class UriReaderFactoryTest {
     }
 
     @Test
+    public void testInvalidUpperCaseHttpUriDoesNotFallBackToFileReader() {
+        assertThatThrownBy(() -> factory.create("HTTPS://example.com/bad path"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     public void testCreateHttpsUriReader() {
         UriReader reader = factory.create("https://example.com/file.txt");
         assertThat(reader).isInstanceOf(HttpUriReader.class);
@@ -95,6 +101,21 @@ public class UriReaderFactoryTest {
     public void testCreateFileUriReader() {
         UriReader reader = factory.create("file:///path/to/file.txt");
         assertThat(reader).isInstanceOf(FileUriReader.class);
+    }
+
+    @Test
+    public void testReadFileUriWithUnescapedCharacters() throws Exception {
+        java.nio.file.Path file = tempPath.resolve("\u4ed5\u5e9c\u516c\u9986 (2).jpg");
+        Files.write(file, new byte[] {1, 2});
+        String fileUri = "file://" + file.toAbsolutePath();
+
+        UriReader reader = factory.create(fileUri);
+
+        assertThat(reader).isInstanceOf(FileUriReader.class);
+        try (SeekableInputStream inputStream = reader.newInputStream(fileUri)) {
+            assertThat(inputStream.read()).isEqualTo(1);
+            assertThat(inputStream.read()).isEqualTo(2);
+        }
     }
 
     @Test

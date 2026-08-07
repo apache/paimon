@@ -23,6 +23,7 @@ import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /** Shared thread pool for global index read operations. */
@@ -34,6 +35,7 @@ public class GlobalIndexReadThreadPool {
             createCachedThreadPool(Runtime.getRuntime().availableProcessors(), THREAD_NAME);
 
     public static synchronized ExecutorService getExecutorService(int threadNum) {
+        checkArgument(threadNum > 0, "Option 'global-index.thread-num' must be greater than 0.");
         if (threadNum == executorService.getMaximumPoolSize()) {
             return executorService;
         }

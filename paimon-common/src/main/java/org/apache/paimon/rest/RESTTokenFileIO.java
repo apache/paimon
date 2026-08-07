@@ -20,10 +20,12 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.ConfigOption;
@@ -44,6 +46,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -131,6 +134,13 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     @Override
+    public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        // the interface default would hide the inner FileIO's iterative listing override
+        return fileIO().listFilesIterative(path, recursive);
+    }
+
+    @Override
     public boolean exists(Path path) throws IOException {
         return fileIO().exists(path);
     }
@@ -148,6 +158,22 @@ public class RESTTokenFileIO implements FileIO {
     @Override
     public boolean rename(Path src, Path dst) throws IOException {
         return fileIO().rename(src, dst);
+    }
+
+    @Override
+    public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+        // the interface default (temp file + rename) would bypass the inner FileIO's atomic
+        // override
+        return fileIO().tryToWriteAtomic(path, content);
+    }
+
+    @Override
+    public String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
+        if (!path.equals(tableRoot)) {
+            throw new IOException("Table root does not match RESTTokenFileIO bound table root.");
+        }
+        return fileIO().createBlobPresignedUrl(tableRoot, descriptor, validity);
     }
 
     @Override

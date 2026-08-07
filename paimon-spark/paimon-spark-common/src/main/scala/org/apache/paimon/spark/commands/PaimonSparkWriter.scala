@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.{CoreOptions, Snapshot}
-import org.apache.paimon.CoreOptions.{PartitionSinkStrategy, WRITE_ONLY}
+import org.apache.paimon.CoreOptions.{COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT, PartitionSinkStrategy, WRITE_ONLY}
 import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{IndexBootstrap, KeyPartOrRow}
 import org.apache.paimon.data.BinaryRow
@@ -30,14 +30,14 @@ import org.apache.paimon.fs.Path
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.FileKind
-import org.apache.paimon.spark.{SparkRow, SparkTypeUtils}
+import org.apache.paimon.spark.{SparkPostponeStagedCommitter, SparkRow, SparkTypeUtils}
 import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.sort.TableSorter
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.spark.write.{PaimonDataWrite, WriteHelper, WriteTaskResult}
-import org.apache.paimon.table.{FileStoreTable, PostponeUtils, SpecialFields}
+import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.sink._
 import org.apache.paimon.types.{RowKind, RowType}
@@ -49,6 +49,7 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
 import java.io.IOException
+import java.util.{Map => JMap}
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
@@ -68,6 +69,10 @@ case class PaimonSparkWriter(
 
   @transient private lazy val serializer = new CommitMessageSerializer
 
+  @transient private var stagedSparkSession: SparkSession = _
+  @transient private var directPostponeWriteBuilder: PostponeFixedBucketWriteBuilder = _
+  private var overwritePartitionSpec: Option[Map[String, String]] = None
+
   private val writeType = {
     if (writeRowTracking) {
       // The historical data and new data are processed separately.
@@ -84,13 +89,26 @@ case class PaimonSparkWriter(
   val postponeBatchWriteFixedBucket: Boolean =
     table.bucketMode() == POSTPONE_MODE && coreOptions.postponeBatchWriteFixedBucket()
 
-  val writeBuilder: BatchWriteBuilder = {
-    val tableForWrite = if (postponeBatchWriteFixedBucket) {
-      PostponeUtils.tableForFixBucketWrite(table)
-    } else {
-      table
+  private val postponeBaseSnapshotId =
+    if (postponeBatchWriteFixedBucket)
+      Option(table.snapshotManager().latestSnapshot()).map(_.id())
+    else None
+
+  private val configuredPostponeDefaultBucketNum: Option[Int] = {
+    val bucketNum = coreOptions.postponeDefaultBucketNum()
+    if (bucketNum.isPresent) Some(bucketNum.get().intValue()) else None
+  }
+
+  val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
+
+  def withOverwrite(): PaimonSparkWriter = withOverwrite(java.util.Collections.emptyMap())
+
+  def withOverwrite(partition: JMap[String, String]): PaimonSparkWriter = {
+    overwritePartitionSpec = Some(partition.asScala.toMap)
+    if (!postponeBatchWriteFixedBucket) {
+      writeBuilder.withOverwrite(partition)
     }
-    tableForWrite.newBatchWriteBuilder()
+    this
   }
 
   def writeOnly(): PaimonSparkWriter = {
@@ -110,6 +128,31 @@ case class PaimonSparkWriter(
     val uriReaderFactory = uriReaderFactoryForBlobDescriptor
     import sparkSession.implicits._
 
+    val directPostponeBucketNum =
+      if (
+        postponeBatchWriteFixedBucket && configuredPostponeDefaultBucketNum.isDefined &&
+        (overwritePartitionSpec.isDefined || baseSnapshotHasNoRealBuckets)
+      ) {
+        configuredPostponeDefaultBucketNum
+      } else {
+        None
+      }
+    val activeWriteBuilder: BatchWriteBuilder = directPostponeBucketNum match {
+      case Some(_) =>
+        val directWriteOptions = new java.util.HashMap[String, String]()
+        directWriteOptions.put(
+          COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(),
+          postponeBaseSnapshotId.getOrElse(0L).toString)
+        val builder = table.copy(directWriteOptions).newPostponeFixedBucketWriteBuilder()
+        overwritePartitionSpec.foreach(spec => builder.withOverwrite(spec.asJava))
+        directPostponeWriteBuilder = builder
+        builder
+      case None =>
+        directPostponeWriteBuilder = null
+        writeBuilder
+    }
+    stagedSparkSession = null
+
     val withInitBucketCol = bucketMode match {
       case BUCKET_UNAWARE => data
       case KEY_DYNAMIC if !data.schema.fieldNames.contains(ROW_KIND_COL) =>
@@ -122,26 +165,18 @@ case class PaimonSparkWriter(
     val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
     val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
     val postponePartitionBucketComputer: Option[BinaryRow => Integer] =
-      if (postponeBatchWriteFixedBucket) {
-        val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
-        val defaultPostponeNumBuckets = Math.min(
-          withInitBucketCol.rdd.getNumPartitions,
-          table.coreOptions().postponeBatchWriteFixedBucketMaxParallelism)
-        Some((p: BinaryRow) => knownNumBuckets.getOrDefault(p, defaultPostponeNumBuckets))
-      } else {
-        None
-      }
-
-    def newWrite() = PaimonDataWrite(
-      writeBuilder,
-      writeType,
-      rowKindColIdx,
-      writeRowTracking,
-      fullCompactionDeltaCommits,
-      batchId,
-      uriReaderFactory,
-      postponePartitionBucketComputer
-    )
+      directPostponeBucketNum.map(bucketNum => (_: BinaryRow) => Integer.valueOf(bucketNum))
+    def newWrite() =
+      PaimonDataWrite(
+        activeWriteBuilder,
+        writeType,
+        rowKindColIdx,
+        writeRowTracking,
+        fullCompactionDeltaCommits,
+        batchId,
+        uriReaderFactory,
+        postponePartitionBucketComputer
+      )
 
     def sparkParallelism = {
       val defaultParallelism = sparkSession.sparkContext.defaultParallelism
@@ -203,7 +238,7 @@ case class PaimonSparkWriter(
       }
     }
 
-    val written = bucketMode match {
+    val written: Dataset[_ <: WriteTaskResult] = bucketMode match {
       case KEY_DYNAMIC =>
         // Topology: input -> bootstrap -> shuffle by key hash -> bucket-assigner -> shuffle by partition & bucket
         val rowType = SparkTypeUtils.toPaimonType(withInitBucketCol.schema).asInstanceOf[RowType]
@@ -290,8 +325,9 @@ case class PaimonSparkWriter(
           )
         }
 
-      case POSTPONE_MODE if coreOptions.postponeBatchWriteFixedBucket() =>
-        // Topology: input -> bucket-assigner -> shuffle by partition & bucket
+      case POSTPONE_MODE if directPostponeBucketNum.isDefined =>
+        // The configured bucket number is final for overwrite and for a table without real
+        // buckets, so route the input directly without first materializing bucket -2 files.
         writeWithBucketProcessor(
           withInitBucketCol,
           PostponeFixBucketProcessor(
@@ -349,7 +385,11 @@ case class PaimonSparkWriter(
         throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")
     }
 
-    WriteTaskResult.merge(written.collect())
+    val taskResults = written.collect().toSeq
+    if (postponeBatchWriteFixedBucket && directPostponeWriteBuilder == null) {
+      stagedSparkSession = sparkSession
+    }
+    WriteTaskResult.merge(taskResults)
   }
 
   /**
@@ -424,16 +464,22 @@ case class PaimonSparkWriter(
   }
 
   def commit(commitMessages: Seq[CommitMessage], operation: Snapshot.Operation): Unit = {
-    val finalWriteBuilder = if (postponeBatchWriteFixedBucket) {
-      writeBuilder
-        .asInstanceOf[BatchWriteBuilderImpl]
-        .copyWithNewTable(PostponeUtils.tableForCommit(table))
-        // Need to check conflict
-        .appendCommitCheckConflict(true)
-    } else {
-      writeBuilder
+    if (postponeBatchWriteFixedBucket && directPostponeWriteBuilder == null) {
+      if (stagedSparkSession == null) {
+        throw new IllegalStateException("Postpone staged write has no SparkSession.")
+      }
+      val finalOperation = Option(operation).getOrElse(Snapshot.Operation.WRITE)
+      val finalMessages = new SparkPostponeStagedCommitter(
+        table,
+        stagedSparkSession,
+        postponeBaseSnapshotId,
+        overwritePartitionSpec).commit(commitMessages, finalOperation)
+      postCommit(finalMessages)
+      return
     }
-    val tableCommit = finalWriteBuilder.newCommit()
+    val activeWriteBuilder =
+      Option(directPostponeWriteBuilder).getOrElse(writeBuilder)
+    val tableCommit = activeWriteBuilder.newCommit()
     if (operation != null) {
       tableCommit.withOperation(operation)
     }
@@ -445,6 +491,18 @@ case class PaimonSparkWriter(
       tableCommit.close()
     }
     postCommit(commitMessages)
+  }
+
+  private def baseSnapshotHasNoRealBuckets: Boolean = {
+    postponeBaseSnapshotId.forall {
+      snapshotId =>
+        !table
+          .newSnapshotReader()
+          .withSnapshot(snapshotId)
+          .onlyReadRealBuckets()
+          .readFileIterator()
+          .hasNext
+    }
   }
 
   /** Bootstrap and repartition for cross partition mode. */
@@ -551,10 +609,10 @@ case class PaimonSparkWriter(
     override def numPartitions: Int = partitions
     override def getPartition(key: Any): Int = Math.abs(key.asInstanceOf[Int] % numPartitions)
   }
+
 }
 
 object PaimonSparkWriter {
-
   def apply(table: FileStoreTable): PaimonSparkWriter = {
     new PaimonSparkWriter(table)
   }

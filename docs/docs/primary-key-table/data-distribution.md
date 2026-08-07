@@ -70,21 +70,53 @@ Postpone bucket mode is configured by `'bucket' = '-2'`.
 This mode aims to solve the difficulty to determine a fixed number of buckets
 and support different buckets for different partitions.
 
-When writing records into the table,
-all records will first be stored in the `bucket-postpone` directory of each partition
-and are not available to readers.
+By default, `postpone.batch-write-fixed-bucket` is `true`. The fixed-bucket flow uses Spark's
+DataSource V1 write path, even when `spark.paimon.write.use-v2-write` is enabled. Unless direct
+writing applies, Spark completes each batch in three steps:
 
-To move the records into the correct bucket and make them readable,
-you need to run a compaction job.
+1. Write the current batch to uncommitted bucket `-2` files. Spark derives each partition's row
+   count and file size directly from the staged file metadata; there is no extra input scan, cache,
+   or per-row statistics pass.
+2. Calculate the required bucket number per touched partition. For a partition without real
+   buckets, an explicitly configured `postpone.default-bucket-num` is used exactly. Otherwise,
+   `postpone.target-row-num-per-bucket`, when configured, takes precedence over
+   `postpone.target-size-per-bucket` (default `1 GB`). An inferred result is at least `1`, rounded
+   up to a power of two, and capped by
+   `postpone.batch-write-fixed-bucket.max-parallelism`.
+3. Route the staged records to real buckets and commit them. The current batch becomes visible only
+   in this commit.
+
+An existing partition normally keeps its bucket number. Spark first rescales its real buckets when
+the uncapped required bucket number is greater than the existing bucket number multiplied by
+`postpone.batch-write-fixed-bucket.rescale-load-factor` (default `32`), and the capped result is
+larger than the existing layout. Different partitions may have different target bucket numbers.
+The rescale is a separate overwrite commit which changes real buckets only; the current batch is
+appended in the following commit.
+
+`postpone.default-bucket-num` has no default value. When it is explicitly configured, Spark can
+skip the staged bucket `-2` files and write directly to real buckets for `INSERT OVERWRITE`, or
+when the base snapshot contains no real buckets. An overwrite always uses the configured number
+exactly and does not rescale the replaced layout. An append to an existing real-bucket partition
+ignores this option and still uses the staged batch to decide whether rescaling is required. If a
+batch mixes existing and new real-bucket partitions, the whole batch remains staged; only the new
+partitions use the configured default.
+
+Previously committed bucket `-2` files are not included in the calculation, read, rewritten, or
+deleted by an append or rescale. They remain available to merge-on-read and regular postpone
+compaction. `INSERT OVERWRITE` still follows its normal replacement semantics.
+
+When `postpone.batch-write-fixed-bucket` is `false`,
+records are first stored in the `bucket-postpone` directory of each partition
+and are not available to readers.
+To move these records into the correct bucket and make them readable, run a compaction job.
 See `compact` [procedure](../flink/procedures).
-The bucket number for the partitions compacted for the first time
-is configured by the option `postpone.default-bucket-num`, whose default value is `1`.
-You can also configure `postpone.target-row-num-per-bucket` to calculate the bucket number
-from the row count of the files in the postpone bucket directory.
-The calculated bucket number is `ceil(row_count / postpone.target-row-num-per-bucket)`,
-and is at least `1`.
-When this option is configured, it takes precedence over `postpone.default-bucket-num`
-for partitions compacted for the first time.
+The bucket number for partitions compacted for the first time can be configured by the option
+`postpone.default-bucket-num`. Its value is used exactly and takes precedence over automatic
+estimation. Otherwise, `postpone.target-row-num-per-bucket`, when configured, calculates the
+bucket number as `ceil(row_count / target_row_count)`. If it is not configured, Paimon calculates
+the bucket number as `ceil(postpone_file_size / postpone.target-size-per-bucket)`; the target size
+defaults to `1 GB`. Both estimates are at least `1`. Execution parallelism does not determine the
+logical bucket number.
 Partitions that already have real bucket files keep their existing bucket number.
 
 Finally, when you feel that the bucket number of some partition is too small,
@@ -105,7 +137,7 @@ Performance: For tables with a large amount of data, there will be a significant
 initialization takes a long time.
 
 If your upsert does not rely on too old data, you can consider configuring index TTL to reduce Index and initialization time:
-- `'cross-partition-upsert.index-ttl'`: The TTL in rocksdb index and initialization, this can avoid maintaining too many
+- `'cross-partition-upsert.index-ttl'`: The TTL in local index and initialization, this can avoid maintaining too many
   indexes and lead to worse and worse performance.
 
 You can also use Cross Partitions Upsert with bucket (N > 0) or bucket (-2), in these modes, there is no global index to

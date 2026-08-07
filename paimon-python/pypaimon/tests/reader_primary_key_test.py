@@ -236,6 +236,44 @@ class PkReaderTest(unittest.TestCase):
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
+    def test_nullable_primary_key(self):
+        nullable_schema = pa.schema([
+            pa.field('id', pa.int64()),
+            pa.field('value', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            nullable_schema,
+            primary_keys=['id'],
+            options={
+                'bucket': '3',
+                CoreOptions.PRIMARY_KEY_NULLABLE.key(): 'true',
+            },
+        )
+        self.catalog.create_table('default.test_nullable_pk', schema, False)
+        table = self.catalog.get_table('default.test_nullable_pk')
+
+        for rows in [
+                [{'id': None, 'value': 'old'}],
+                [{'id': None, 'value': 'new'},
+                 {'id': 1, 'value': 'one'},
+                 {'id': 2, 'value': 'two'}]]:
+            write_builder = table.new_batch_write_builder()
+            writer = write_builder.new_write()
+            commit = write_builder.new_commit()
+            writer.write_arrow(pa.Table.from_pylist(rows, schema=nullable_schema))
+            commit.commit(writer.prepare_commit())
+            writer.close()
+            commit.close()
+
+        actual = self._read_test_table(table.new_read_builder()).to_pylist()
+        actual.sort(key=lambda row: (-1 if row['id'] is None else row['id']))
+        self.assertEqual(
+            actual,
+            [{'id': None, 'value': 'new'},
+             {'id': 1, 'value': 'one'},
+             {'id': 2, 'value': 'two'}],
+        )
+
     def test_pk_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],

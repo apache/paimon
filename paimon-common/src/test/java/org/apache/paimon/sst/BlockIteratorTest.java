@@ -47,7 +47,8 @@ public class BlockIteratorTest {
 
     public void innerTest(boolean aligned) throws IOException {
         MemorySlice data = writeBlock(aligned);
-        BlockIterator iterator = BlockReader.create(data, COMPARATOR).iterator();
+        BlockReader reader = BlockReader.create(data, COMPARATOR);
+        BlockIterator iterator = reader.iterator();
 
         // 1. test for normal cases:
         final int step = 3;
@@ -84,6 +85,26 @@ public class BlockIteratorTest {
         keyOut.writeInt(ROW_NUM * 2 + 2);
         iterator.seekTo(keyOut.toSlice());
         Assertions.assertFalse(iterator.hasNext());
+
+        // 2.3 seek to an existing key after the iterator has been exhausted
+        keyOut.reset();
+        keyOut.writeInt(4);
+        Assertions.assertTrue(iterator.seekTo(keyOut.toSlice()));
+        Assertions.assertTrue(iterator.hasNext());
+        entry = iterator.next();
+        Assertions.assertEquals(4, entry.getKey().readInt(0));
+
+        ReverseBlockIterator reverseIterator = reader.reverseIterator();
+        int expected = ROW_NUM - 1;
+        while (reverseIterator.hasNext()) {
+            Map.Entry<MemorySlice, MemorySlice> reverseEntry = reverseIterator.next();
+            Assertions.assertEquals(expected * 2, reverseEntry.getKey().readInt(0));
+            Assertions.assertArrayEquals(
+                    constructValue(valueOut, aligned, expected),
+                    reverseEntry.getValue().copyBytes());
+            expected--;
+        }
+        Assertions.assertEquals(-1, expected);
     }
 
     private MemorySlice writeBlock(boolean aligned) throws IOException {

@@ -59,6 +59,39 @@ public class ParquetSchemaConverter {
     public static final String MAP_VALUE_NAME = "value";
     public static final String LIST_ELEMENT_NAME = "element";
 
+    /**
+     * Whether {@code type} is an unsigned integer. Such a column stores a signed value whose bits
+     * have to be reinterpreted on read, and its statistics are ordered unsigned, so both the reader
+     * and the predicate pushdown have to treat it apart from an ordinary int.
+     */
+    public static boolean isUnsignedInt(PrimitiveType type) {
+        LogicalTypeAnnotation logicalType = type.getLogicalTypeAnnotation();
+        return logicalType instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation
+                && !((LogicalTypeAnnotation.IntLogicalTypeAnnotation) logicalType).isSigned();
+    }
+
+    /**
+     * Whether an INT32 or INT64 column's logical annotation can be represented as BIGINT. Unsigned
+     * INT32 fits in BIGINT, but unsigned INT64 and non-integer annotations do not. Other physical
+     * types are outside this annotation check.
+     */
+    public static boolean isBigIntLogicalTypeCompatible(PrimitiveType type) {
+        PrimitiveType.PrimitiveTypeName physicalType = type.getPrimitiveTypeName();
+        if (physicalType != INT32 && physicalType != INT64) {
+            return true;
+        }
+
+        LogicalTypeAnnotation logicalType = type.getLogicalTypeAnnotation();
+        if (logicalType == null) {
+            return true;
+        }
+        if (!(logicalType instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation)) {
+            return false;
+        }
+        return physicalType == INT32
+                || ((LogicalTypeAnnotation.IntLogicalTypeAnnotation) logicalType).isSigned();
+    }
+
     /** Convert paimon {@link RowType} to parquet {@link MessageType}. */
     public static MessageType convertToParquetMessageType(RowType rowType) {
         return new MessageType(PAIMON_SCHEMA, convertToParquetTypes(rowType));

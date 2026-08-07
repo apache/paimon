@@ -70,6 +70,15 @@ public class SortLookupStoreReader implements LookupStoreReader {
         return reader.createIterator();
     }
 
+    /**
+     * Close the underlying input stream without invalidating blocks in the shared cache.
+     *
+     * <p>The reader must not be used after this method returns.
+     */
+    public void closeInput() throws IOException {
+        input.close();
+    }
+
     @Override
     public void close() throws IOException {
         reader.close();

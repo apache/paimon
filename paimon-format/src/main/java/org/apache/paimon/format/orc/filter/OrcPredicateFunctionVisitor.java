@@ -230,6 +230,7 @@ public class OrcPredicateFunctionVisitor
             case SMALLINT:
             case INTEGER:
             case BIGINT:
+            case TIME_WITHOUT_TIME_ZONE:
                 return PredicateLeaf.Type.LONG;
             case FLOAT:
             case DOUBLE:

@@ -26,26 +26,31 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.SingleFileWriter;
+import org.apache.paimon.manifest.BinaryManifestEntry.Projection;
 import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
 
@@ -55,8 +60,12 @@ import java.util.function.Function;
  */
 public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
+    private static final Projection EXPIRE_FILE_PROJECTION = createExpireFileProjection();
+
     private final SchemaManager schemaManager;
     private final RowType partitionType;
+    private final FileFormat fileFormat;
+    private final RowType manifestType;
     private final FormatWriterFactory writerFactory;
     private final long suggestedFileSize;
 
@@ -64,8 +73,9 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             FileIO fileIO,
             SchemaManager schemaManager,
             RowType partitionType,
+            FileFormat fileFormat,
             ManifestEntrySerializer serializer,
-            RowType schema,
+            RowType manifestType,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
             String compression,
@@ -75,7 +85,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         super(
                 fileIO,
                 serializer,
-                schema,
+                manifestType,
                 readerFactory,
                 writerFactory,
                 compression,
@@ -83,6 +93,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
+        this.fileFormat = fileFormat;
+        this.manifestType = manifestType;
         this.writerFactory = writerFactory;
         this.suggestedFileSize = suggestedFileSize;
     }
@@ -141,18 +153,102 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         }
     }
 
+    /**
+     * Scans projected manifest entries without materializing {@link PojoManifestEntry}s.
+     *
+     * <p>The returned iterator reuses the same mutable {@link BinaryManifestEntry} for all records.
+     * An entry is only valid until the next call to {@link CloseableIterator#hasNext()}, {@link
+     * CloseableIterator#next()}, or {@link CloseableIterator#close()}, and must not be retained.
+     * The caller must close the iterator.
+     *
+     * <p>This method intentionally bypasses the manifest cache because cached entries are
+     * materialized with the complete manifest schema.
+     */
+    public CloseableIterator<BinaryManifestEntry> scan(
+            String fileName, @Nullable Long fileSize, Projection projection) {
+        BinaryManifestEntry entry = projection.createEntry();
+        try {
+            CloseableIterator<InternalRow> rows =
+                    FileUtils.createFormatReader(
+                                    fileIO,
+                                    fileFormat.createReaderFactory(
+                                            manifestType,
+                                            projection.projectedType(),
+                                            Collections.emptyList()),
+                                    pathFactory.toPath(fileName),
+                                    fileSize)
+                            .toCloseableIterator();
+            return new CloseableIterator<BinaryManifestEntry>() {
+
+                @Override
+                public boolean hasNext() {
+                    entry.clear();
+                    return rows.hasNext();
+                }
+
+                @Override
+                public BinaryManifestEntry next() {
+                    entry.clear();
+                    InternalRow row = rows.next();
+                    return row == null ? null : entry.replace(row);
+                }
+
+                @Override
+                public void close() throws Exception {
+                    entry.clear();
+                    rows.close();
+                }
+            };
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read manifest file " + fileName, e);
+        }
+    }
+
     @VisibleForTesting
     public long suggestedFileSize() {
         return suggestedFileSize;
     }
 
     public List<ExpireFileEntry> readExpireFileEntries(String fileName, @Nullable Long fileSize) {
-        List<ManifestEntry> entries = read(fileName, fileSize);
-        List<ExpireFileEntry> result = new ArrayList<>(entries.size());
-        for (ManifestEntry entry : entries) {
-            result.add(ExpireFileEntry.from(entry));
+        List<ExpireFileEntry> result = new ArrayList<>();
+        try (CloseableIterator<BinaryManifestEntry> entries =
+                scan(fileName, fileSize, EXPIRE_FILE_PROJECTION)) {
+            while (entries.hasNext()) {
+                result.add(ExpireFileEntry.from(entries.next()));
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to scan expiring entries from manifest file '%s'.", fileName),
+                    e);
         }
         return result;
+    }
+
+    private static Projection createExpireFileProjection() {
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
+        return Projection.create(
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                manifestType.getField(ManifestEntry.KIND),
+                                manifestType.getField(ManifestEntry.PARTITION),
+                                manifestType.getField(ManifestEntry.BUCKET),
+                                manifestType.getField(ManifestEntry.TOTAL_BUCKETS),
+                                manifestType
+                                        .getField(ManifestEntry.FILE)
+                                        .newType(
+                                                DataFileMeta.SCHEMA.project(
+                                                        DataFileMeta.FILE_NAME,
+                                                        DataFileMeta.ROW_COUNT,
+                                                        DataFileMeta.MIN_KEY,
+                                                        DataFileMeta.MAX_KEY,
+                                                        DataFileMeta.LEVEL,
+                                                        DataFileMeta.EXTRA_FILES,
+                                                        DataFileMeta.EMBEDDED_FILE_INDEX,
+                                                        DataFileMeta.FILE_SOURCE,
+                                                        DataFileMeta.EXTERNAL_PATH,
+                                                        DataFileMeta.FIRST_ROW_ID)))));
     }
 
     /**
@@ -211,7 +307,11 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
         @Override
         public void write(ManifestEntry entry) throws IOException {
-            super.write(entry);
+            if (entry instanceof BinaryManifestEntry) {
+                writeRow(((BinaryManifestEntry) entry).fullRow());
+            } else {
+                super.write(entry);
+            }
 
             switch (entry.kind()) {
                 case ADD:
@@ -307,11 +407,12 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         }
 
         public ManifestFile create() {
-            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.SCHEMA);
+            RowType entryType = ManifestEntry.MANIFEST_ROW_TYPE;
             return new ManifestFile(
                     fileIO,
                     schemaManager,
                     partitionType,
+                    fileFormat,
                     new ManifestEntrySerializer(),
                     entryType,
                     fileFormat.createReaderFactory(entryType, entryType, new ArrayList<>()),

@@ -83,6 +83,7 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
                 table.partitionKeys(),
                 table.fileIO(),
                 formatTablePartitionOnlyValueInPath,
+                table.defaultPartName(),
                 overwrite,
                 Identifier.fromString(table.fullName()),
                 staticPartition,

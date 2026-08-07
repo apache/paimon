@@ -151,4 +151,18 @@ class PartitionPathUtilsTest {
         assertThat(mightMatch(p, 0, 1, GenericRow.of(2025, 6))).isTrue();
         assertThat(mightMatch(p, 0, 1, GenericRow.of(2025, 5))).isFalse();
     }
+
+    @Test
+    void testIsHiddenName() {
+        for (String name :
+                new String[] {"File.txt", "file.txt", "123file.txt", "data", "a_b.log"}) {
+            assertThat(PartitionPathUtils.isHiddenName(name)).as(name).isFalse();
+        }
+        for (String name : new String[] {".hidden", "_file.txt", "_temporary", "__magic_job-1"}) {
+            assertThat(PartitionPathUtils.isHiddenName(name)).as(name).isTrue();
+        }
+        // A name that is absent or empty is not a hidden one.
+        assertThat(PartitionPathUtils.isHiddenName(null)).isFalse();
+        assertThat(PartitionPathUtils.isHiddenName("")).isFalse();
+    }
 }

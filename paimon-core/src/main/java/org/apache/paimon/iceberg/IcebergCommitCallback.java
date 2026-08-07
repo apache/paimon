@@ -198,13 +198,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         IcebergOptions.StorageType storageType =
                 table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
 
-        if (!dbPath.getName().endsWith(dbSuffix)) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "Storage type %s can only be used on Paimon tables in a Paimon warehouse.",
-                            storageType.name()));
-        }
-
         IcebergOptions.StorageLocation storageLocation =
                 table.coreOptions()
                         .toConfiguration()
@@ -213,8 +206,23 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         switch (storageLocation) {
             case TABLE_LOCATION:
+                // Iceberg metadata is written beside the table, under the database's own location,
+                // so no warehouse (<db>.db) layout is required. This lets the table register in any
+                // catalog, including a database whose location is not a Paimon warehouse path (e.g.
+                // an externally-provisioned / cross-account catalog database).
                 return dbPath;
             case CATALOG_STORAGE:
+                // Catalog-storage derives a warehouse-relative iceberg/<db>/ path by stripping the
+                // ".db" suffix, so it only applies under the Paimon <db>.db warehouse layout.
+                if (!dbPath.getName().endsWith(dbSuffix)) {
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Storage type %s with catalog-location Iceberg metadata requires a "
+                                            + "Paimon warehouse database (a <db>.db location); set "
+                                            + "metadata.iceberg.storage-location=table-location for a "
+                                            + "database with a non-warehouse location.",
+                                    storageType.name()));
+                }
                 String dbName =
                         dbPath.getName()
                                 .substring(0, dbPath.getName().length() - dbSuffix.length());

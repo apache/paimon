@@ -46,6 +46,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
@@ -84,6 +85,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -105,6 +108,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
+import static org.apache.paimon.table.BucketMode.POSTPONE_BUCKET;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -254,6 +258,69 @@ public class FileStoreCommitTest {
                                             null))
                     .hasMessageContaining("new bucket num 4")
                     .hasMessageContaining("previous bucket num is 2");
+        }
+    }
+
+    @Test
+    public void testPostponeBucketCheckIsNotSkippedByCache() throws Exception {
+        TestFileStore store = createStore(false, POSTPONE_BUCKET);
+        BinaryRow partition =
+                gen.getPartition(gen.nextInsert("20201110", 10, 1L, new int[] {1, 1}, "first"));
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(
+                            commit.tryCommitOnce(
+                                            null,
+                                            Collections.singletonList(addFile(partition, 0, 2, 0)),
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            0,
+                                            null,
+                                            new HashMap<>(),
+                                            Snapshot.CommitKind.APPEND,
+                                            false,
+                                            null,
+                                            true,
+                                            null)
+                                    .isSuccess())
+                    .isTrue();
+
+            Snapshot latestSnapshot = store.snapshotManager().latestSnapshot();
+            assertThat(
+                            commit.tryCommitOnce(
+                                            null,
+                                            Collections.singletonList(addFile(partition, 1, 2, 1)),
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            1,
+                                            null,
+                                            new HashMap<>(),
+                                            Snapshot.CommitKind.APPEND,
+                                            false,
+                                            latestSnapshot,
+                                            true,
+                                            null)
+                                    .isSuccess())
+                    .isTrue();
+
+            latestSnapshot = store.snapshotManager().latestSnapshot();
+            Snapshot finalLatestSnapshot = latestSnapshot;
+            assertThatThrownBy(
+                            () ->
+                                    commit.tryCommitOnce(
+                                            null,
+                                            Collections.singletonList(addFile(partition, 2, 3, 2)),
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            2,
+                                            null,
+                                            new HashMap<>(),
+                                            Snapshot.CommitKind.APPEND,
+                                            false,
+                                            finalLatestSnapshot,
+                                            true,
+                                            null))
+                    .hasMessageContaining("changed from 2 to 3 without overwrite");
         }
     }
 
@@ -847,6 +914,36 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testMaterializedCompactionOnlyRefreshesGlobalIndexInSameBucket() throws Exception {
+        TestFileStore store = createStore(false, 2);
+        BinaryRow partition = gen.getPartition(gen.next());
+        IndexManifestEntry materializedBucketDelete =
+                globalIndexDeleteEntry(partition, 0, "materialized-bucket-index");
+        IndexManifestEntry otherBucketDelete =
+                globalIndexDeleteEntry(partition, 1, "other-bucket-index");
+        ManifestEntryChanges changes = new ManifestEntryChanges(2);
+        changes.compactIndexFiles.add(materializedBucketDelete);
+        changes.compactIndexFiles.add(otherBucketDelete);
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            CommitChanges refreshed =
+                    commit.compactChangesProvider(
+                                    changes, Collections.singleton(Pair.of(partition, 0)))
+                            .provide(null);
+
+            assertThat(refreshed.indexFiles).containsExactly(otherBucketDelete);
+        }
+    }
+
+    private static IndexManifestEntry globalIndexDeleteEntry(
+            BinaryRow partition, int bucket, String fileName) {
+        IndexFileMeta file =
+                new IndexFileMeta(
+                        "btree", fileName, 1, 1, new GlobalIndexMeta(0, 0, 0, null, null), null);
+        return new IndexManifestEntry(FileKind.DELETE, partition, bucket, file);
+    }
+
+    @Test
     public void testWriteStats() throws Exception {
         TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
         StatsFileHandler statsFileHandler = store.newStatsFileHandler();
@@ -1358,6 +1455,27 @@ public class FileStoreCommitTest {
                     .hasMessageContaining("missing-index")
                     .hasMessageContaining("[" + missingRowId + ", " + missingRowId + "]");
         }
+    }
+
+    @Test
+    public void testMissingGlobalIndexDeleteRejected() throws Exception {
+        TestFileStore store = createStore(false);
+        KeyValue record = gen.next();
+        BinaryRow partition = gen.getPartition(record);
+        store.commitData(Collections.singletonList(record), s -> partition, kv -> 0);
+
+        assertThatThrownBy(
+                        () -> {
+                            try (FileStoreCommitImpl commit = store.newCommit()) {
+                                commit.commit(
+                                        deleteIndexCommittable(partition, "missing-index", 0, 0),
+                                        false);
+                            }
+                        })
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalStateException.class,
+                                "Trying to delete global index file missing-index which does not exist."));
     }
 
     @Test
@@ -1918,6 +2036,28 @@ public class FileStoreCommitTest {
         return committable;
     }
 
+    private ManifestCommittable deleteIndexCommittable(
+            BinaryRow partition, String fileName, long rowRangeStart, long rowRangeEnd) {
+        ManifestCommittable committable = new ManifestCommittable(0);
+        committable.addFileCommittable(
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        null,
+                        DataIncrement.deleteIndexIncrement(
+                                Collections.singletonList(
+                                        new IndexFileMeta(
+                                                "btree",
+                                                fileName,
+                                                1,
+                                                1,
+                                                new GlobalIndexMeta(
+                                                        rowRangeStart, rowRangeEnd, 0, null, null),
+                                                null))),
+                        CompactIncrement.emptyIncrement()));
+        return committable;
+    }
+
     private static List<ManifestEntry> tableFilesFrom(
             ManifestCommittable committable, CoreOptions options) {
         ManifestEntryChanges changes = new ManifestEntryChanges(options.bucket());
@@ -1962,12 +2102,13 @@ public class FileStoreCommitTest {
 
         @Override
         public boolean commit(
+                @Nullable String baseSnapshotUuid,
                 Snapshot snapshot,
                 String branch,
                 List<org.apache.paimon.partition.PartitionStatistics> statistics)
                 throws Exception {
             if (commitAttempt >= conflictDeltaFilesByAttempt.size()) {
-                return delegate.commit(snapshot, branch, statistics);
+                return delegate.commit(baseSnapshotUuid, snapshot, branch, statistics);
             }
 
             List<ManifestEntry> conflictDeltaFiles = conflictDeltaFilesByAttempt.get(commitAttempt);
@@ -2042,8 +2183,15 @@ public class FileStoreCommitTest {
                             previousSnapshot == null ? null : previousSnapshot.watermark(),
                             previousSnapshot == null ? null : previousSnapshot.statistics(),
                             previousSnapshot == null ? null : previousSnapshot.properties(),
-                            previousSnapshot == null ? null : previousSnapshot.nextRowId());
-            assertThat(delegate.commit(conflictSnapshot, branch, Collections.emptyList())).isTrue();
+                            previousSnapshot == null ? null : previousSnapshot.nextRowId(),
+                            null);
+            assertThat(
+                            delegate.commit(
+                                    baseSnapshotUuid,
+                                    conflictSnapshot,
+                                    branch,
+                                    Collections.emptyList()))
+                    .isTrue();
             return false;
         }
 
@@ -2100,11 +2248,12 @@ public class FileStoreCommitTest {
 
         @Override
         public boolean commit(
+                @Nullable String baseSnapshotUuid,
                 Snapshot snapshot,
                 String branch,
                 List<org.apache.paimon.partition.PartitionStatistics> statistics)
                 throws Exception {
-            boolean committed = delegate.commit(snapshot, branch, statistics);
+            boolean committed = delegate.commit(baseSnapshotUuid, snapshot, branch, statistics);
             if (firstCommit) {
                 firstCommit = false;
                 assertThat(committed).isTrue();

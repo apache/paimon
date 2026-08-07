@@ -62,6 +62,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
@@ -75,6 +76,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     // per-file column pruning in postFilterManifestEntries.
     private final ConcurrentMap<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache =
             new ConcurrentHashMap<>();
+    private final EvolutionStatsCache evolutionStatsCache = new EvolutionStatsCache();
 
     public DataEvolutionFileStoreScan(
             ManifestsReader manifestsReader,
@@ -181,28 +183,32 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     @Override
     protected boolean postFilterManifestEntriesEnabled() {
-        // Always enable post-filtering. The list filterByStats handles predicate-based pruning
-        // and pruneByReadType strips per-file columns that are not requested — both
-        // need row-id-range grouping that single filterByStats(ManifestEntry) cannot see.
-        return inputFilter != null || readType != null;
+        return true;
     }
 
     @Override
     protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
-        // group by row id range
-        RangeHelper<ManifestEntry> rangeHelper =
-                new RangeHelper<>(e -> e.file().nonNullRowIdRange());
-        List<List<ManifestEntry>> splitByRowId = rangeHelper.mergeOverlappingRanges(entries);
+        if (inputFilter != null || readType != null) {
+            // group by row id range
+            RangeHelper<ManifestEntry> rangeHelper =
+                    new RangeHelper<>(e -> e.file().nonNullRowIdRange());
+            List<List<ManifestEntry>> splitByRowId = rangeHelper.mergeOverlappingRanges(entries);
 
-        return splitByRowId.stream()
-                .filter(group -> inputFilter == null || filterByStats(group))
-                .flatMap(group -> pruneByReadType(group).stream())
-                .map(entry -> dropStats ? dropStats(entry) : entry)
-                .collect(Collectors.toList());
+            return splitByRowId.stream()
+                    .filter(group -> inputFilter == null || filterByStats(group))
+                    .flatMap(group -> pruneByReadType(group).stream())
+                    .map(entry -> dropStats ? dropStats(entry) : entry)
+                    .collect(Collectors.toList());
+        } else if (dropStats) {
+            return entries.stream().map(this::dropStats).collect(Collectors.toList());
+        } else {
+            return entries;
+        }
     }
 
     private boolean filterByStats(List<ManifestEntry> entries) {
-        EvolutionStats stats = evolutionStats(schema, this::scanTableSchema, entries);
+        EvolutionStats stats =
+                evolutionStats(schema, this::scanTableSchema, entries, evolutionStatsCache);
         return inputFilter.test(
                 stats.rowCount(), stats.minValues(), stats.maxValues(), stats.nullCounts());
     }
@@ -251,32 +257,15 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     private Set<Integer> fileFieldIdsForEntry(ManifestEntry entry) {
         return fileFieldIdsCache.computeIfAbsent(
                 Pair.of(entry.file().schemaId(), entry.file().writeCols()),
-                pair -> computeFileFieldIds(this::scanTableSchema, entry.file()));
+                pair -> fileFieldIds(this::scanTableSchema, entry.file()));
     }
 
-    /**
-     * Field ids of the columns physically present in {@code file}, resolved through the file's own
-     * schema (i.e. the schema the file was written under). Field id, not field name, is the stable
-     * identity across schemas — necessary so a renamed column matches an old file written under the
-     * pre-rename name.
-     */
-    @VisibleForTesting
-    static Set<Integer> computeFileFieldIds(
-            Function<Long, TableSchema> scanTableSchema, DataFileMeta file) {
-        Set<Integer> ids = new HashSet<>();
-        for (DataField f :
-                scanTableSchema.apply(file.schemaId()).project(file.writeCols()).fields()) {
-            ids.add(f.id());
-        }
-        return ids;
-    }
-
-    /** TODO: Optimize implementation of this method. */
     @VisibleForTesting
     static EvolutionStats evolutionStats(
             TableSchema schema,
             Function<Long, TableSchema> scanTableSchema,
-            List<ManifestEntry> metas) {
+            List<ManifestEntry> metas,
+            EvolutionStatsCache evolutionStatsCache) {
         Set<Integer> excludedFileFieldIds =
                 metas.stream()
                         .filter(
@@ -285,7 +274,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                                                 || isVectorStoreFile(entry.file().fileName()))
                         .flatMap(
                                 entry ->
-                                        computeFileFieldIds(scanTableSchema, entry.file()).stream())
+                                        evolutionStatsCache.get(scanTableSchema, entry.file())
+                                                .dataFileSchema().fields().stream()
+                                                .map(DataField::id))
                         .collect(Collectors.toSet());
         // exclude blob and vector-store files, useless for predicate eval
         metas =
@@ -298,6 +289,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         metas.sort(Comparator.comparingLong(maxSeqFunc).reversed());
 
         int[] allFields = schema.fields().stream().mapToInt(DataField::id).toArray();
+        DataType[] targetTypes =
+                schema.fields().stream().map(DataField::type).toArray(DataType[]::new);
         int fieldsCount = schema.fields().size();
         int[] rowOffsets = new int[fieldsCount];
         int[] fieldOffsets = new int[fieldsCount];
@@ -316,49 +309,38 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             nullCounts[i] = stats.nullCounts();
         }
 
+        int unresolvedFields = fieldsCount;
         for (int i = 0; i < metas.size(); i++) {
             DataFileMeta fileMeta = metas.get(i).file();
+            EvolutionStatsCache.ProjectedFileSchema projectedFileSchema =
+                    evolutionStatsCache.get(scanTableSchema, fileMeta);
 
-            TableSchema dataFileSchema =
-                    scanTableSchema.apply(fileMeta.schemaId()).project(fileMeta.writeCols());
-
-            TableSchema dataFileSchemaWithStats = dataFileSchema.project(fileMeta.valueStatsCols());
-
-            int[] fieldIds =
-                    dataFileSchema.logicalRowType().getFields().stream()
-                            .mapToInt(DataField::id)
-                            .toArray();
-
-            int[] fieldIdsWithStats =
-                    dataFileSchemaWithStats.logicalRowType().getFields().stream()
-                            .mapToInt(DataField::id)
-                            .toArray();
-
-            loop1:
             for (int j = 0; j < fieldsCount; j++) {
                 if (rowOffsets[j] != -1) {
                     continue;
                 }
                 int targetFieldId = allFields[j];
-                DataType targetType = schema.fields().get(j).type();
-                for (int fieldId : fieldIds) {
-                    if (targetFieldId == fieldId) {
-                        for (int k = 0; k < fieldIdsWithStats.length; k++) {
-                            if (fieldId == fieldIdsWithStats[k]) {
-                                DataType fileType = dataFileSchemaWithStats.fields().get(k).type();
-                                if (!fileType.equalsIgnoreFieldId(targetType)) {
-                                    typeMismatchedFieldIds.add(targetFieldId);
-                                    continue loop1;
-                                }
-                                rowOffsets[j] = i;
-                                fieldOffsets[j] = k;
-                                continue loop1;
-                            }
-                        }
-                        rowOffsets[j] = -2;
-                        continue loop1;
-                    }
+                EvolutionStatsCache.FileFieldStats fileFieldStats =
+                        projectedFileSchema.fieldStats(targetFieldId);
+                if (fileFieldStats == null) {
+                    continue;
                 }
+                if (!fileFieldStats.hasStats()) {
+                    rowOffsets[j] = -2;
+                    unresolvedFields--;
+                    continue;
+                }
+                DataType fileType = fileFieldStats.type();
+                if (!fileType.equalsIgnoreFieldId(targetTypes[j])) {
+                    typeMismatchedFieldIds.add(targetFieldId);
+                    continue;
+                }
+                rowOffsets[j] = i;
+                fieldOffsets[j] = fileFieldStats.index();
+                unresolvedFields--;
+            }
+            if (unresolvedFields == 0) {
+                break;
             }
         }
 

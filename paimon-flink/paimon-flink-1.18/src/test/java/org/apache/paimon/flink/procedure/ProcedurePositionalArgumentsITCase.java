@@ -483,6 +483,19 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testRepairEarliestSnapshot() throws Exception {
+        sql("CREATE TABLE T (k INT)");
+        FileStoreTable table = paimonTable("T");
+        table.fileIO().tryToWriteAtomic(table.snapshotManager().snapshotPath(1), "");
+        table.fileIO().tryToWriteAtomic(table.snapshotManager().snapshotPath(5), "");
+        table.snapshotManager().commitEarliestHint(1);
+        table.snapshotManager().commitLatestHint(5);
+
+        assertThat(sql("CALL sys.repair_earliest_snapshot('default.T', 5)"))
+                .containsExactly(Row.of(1L, 5L));
+    }
+
+    @Test
     public void testRewriteFileIndex() {
         sql(
                 "CREATE TABLE T ("

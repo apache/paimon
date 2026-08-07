@@ -32,6 +32,8 @@ public class TagTest {
 
     private final Snapshot snapshot =
             new Snapshot(
+                    3,
+                    "snapshot-uuid",
                     0,
                     0L,
                     null,
@@ -60,6 +62,7 @@ public class TagTest {
         assertEquals(
                 "{\n"
                         + "  \"version\" : 3,\n"
+                        + "  \"uuid\" : \"snapshot-uuid\",\n"
                         + "  \"id\" : 0,\n"
                         + "  \"schemaId\" : 0,\n"
                         + "  \"baseManifestList\" : null,\n"
@@ -85,6 +88,7 @@ public class TagTest {
         assertEquals(
                 "{\n"
                         + "  \"version\" : 3,\n"
+                        + "  \"uuid\" : \"snapshot-uuid\",\n"
                         + "  \"id\" : 0,\n"
                         + "  \"schemaId\" : 0,\n"
                         + "  \"baseManifestList\" : null,\n"

@@ -156,7 +156,8 @@ public class CdcSchema implements Serializable {
 
         /**
          * Declares a primary key constraint for a set of given columns. Primary key uniquely
-         * identify a row in a table. Neither of columns in a primary can be nullable.
+         * identify a row in a table. Primary key columns are not nullable unless the target table
+         * enables {@code primary-key.nullable}.
          *
          * @param columnNames columns that form a unique primary key
          */
@@ -166,7 +167,8 @@ public class CdcSchema implements Serializable {
 
         /**
          * Declares a primary key constraint for a set of given columns. Primary key uniquely
-         * identify a row in a table. Neither of columns in a primary can be nullable.
+         * identify a row in a table. Primary key columns are not nullable unless the target table
+         * enables {@code primary-key.nullable}.
          *
          * @param columnNames columns that form a unique primary key
          */

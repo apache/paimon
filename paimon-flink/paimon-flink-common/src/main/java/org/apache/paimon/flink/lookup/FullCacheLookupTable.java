@@ -24,11 +24,11 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.StateFactory;
+import org.apache.paimon.lookup.StateUtils;
+import org.apache.paimon.lookup.local.LocalKvStateFactory;
 import org.apache.paimon.lookup.memory.InMemoryStateFactory;
-import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
-import org.apache.paimon.lookup.rocksdb.RocksDBState;
-import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -185,7 +185,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
         if (options.get(LOOKUP_CACHE_MODE) == MEMORY) {
             return new InMemoryStateFactory();
         } else {
-            return new RocksDBStateFactory(diskDir, options, null);
+            return new LocalKvStateFactory(diskDir, options, null, null, false);
         }
     }
 
@@ -224,7 +224,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
         boolean useParallelBootstrapRead = !(blobAsDescriptor && hasBlobFileFields);
 
         BinaryExternalSortBuffer bulkLoadSorter =
-                RocksDBState.createBulkLoadSorter(
+                StateUtils.createBulkLoadSorter(
                         IOManager.create(context.tempPath.toString()), context.table.coreOptions());
         Predicate predicate = projectedPredicate();
         try (RecordReaderIterator<InternalRow> batch =
@@ -246,7 +246,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
             while ((row = keyIterator.next(row)) != null) {
                 bulkLoader.write(row.getBinary(0), row.getBinary(1));
             }
-        } catch (RocksDBBulkLoader.WriteException e) {
+        } catch (BulkLoader.WriteException e) {
             throw new RuntimeException(
                     "Exception in bulkLoad, the most suspicious reason is that "
                             + "your data contains duplicates, please check your lookup table. ",
@@ -434,7 +434,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     /** Bulk loader for the table. */
     public interface TableBulkLoader {
 
-        void write(byte[] key, byte[] value) throws RocksDBBulkLoader.WriteException, IOException;
+        void write(byte[] key, byte[] value) throws BulkLoader.WriteException, IOException;
 
         void finish() throws IOException;
     }

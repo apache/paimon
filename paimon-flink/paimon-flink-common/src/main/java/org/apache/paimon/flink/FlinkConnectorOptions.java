@@ -224,7 +224,7 @@ public class FlinkConnectorOptions {
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(256))
                     .withDescription(
-                            "Weight of managed memory for RocksDB in cross-partition update, Flink will compute the memory size "
+                            "Weight of managed memory for the local key-value index in cross-partition update, Flink will compute the memory size "
                                     + "according to the weight, the actual memory used depends on the running environment.");
 
     public static final ConfigOption<Boolean> SOURCE_CHECKPOINT_ALIGN_ENABLED =

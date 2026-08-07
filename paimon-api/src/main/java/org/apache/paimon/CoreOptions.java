@@ -595,13 +595,6 @@ public class CoreOptions implements Serializable {
                                     + " skipped. Set to a larger value to allow more aggressive"
                                     + " sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.");
 
-    public static final ConfigOption<String> UPSERT_KEY =
-            key("upsert-key")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Define upsert key to do MERGE INTO when executing INSERT INTO, cannot be defined with primary key.");
-
     public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
             key("partition.default-name")
                     .stringType()
@@ -870,8 +863,9 @@ public class CoreOptions implements Serializable {
                                     + "compaction is size-based and may merge into larger files, and "
                                     + "data-evolution compaction still produces a single file. Bounds "
                                     + "per-file rows for wide columns to avoid data-evolution OOM. "
-                                    + "PyPaimon file-store writers do not support this option and "
-                                    + "fail fast when it is enabled. Disabled by default.");
+                                    + "PyPaimon supports this for data-evolution append tables; its "
+                                    + "primary-key, blob and vector writers still fail fast when it "
+                                    + "is enabled. Disabled by default.");
 
     public static final ConfigOption<Double> COMPACTION_SMALL_FILE_RATIO =
             key("compaction.small-file-ratio")
@@ -1485,6 +1479,14 @@ public class CoreOptions implements Serializable {
                             "Define primary key by table options, cannot define primary key on DDL and table options at the same time.");
 
     @Immutable
+    public static final ConfigOption<Boolean> PRIMARY_KEY_NULLABLE =
+            key("primary-key.nullable")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether primary key fields can contain null values. Null values use null-safe equality when records are merged.");
+
+    @Immutable
     public static final ConfigOption<String> PARTITION =
             key("partition")
                     .stringType()
@@ -1497,6 +1499,19 @@ public class CoreOptions implements Serializable {
                     .floatType()
                     .defaultValue(0.75F)
                     .withDescription("The index load factor for lookup.");
+
+    public static final ConfigOption<Long> LOOKUP_CACHE_ROWS =
+            key("lookup.cache-rows")
+                    .longType()
+                    .defaultValue(10_000L)
+                    .withDescription("The maximum number of rows to store in the cache.");
+
+    public static final ConfigOption<Duration> LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL =
+            key("lookup.continuous.discovery-interval")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The discovery interval of lookup continuous reading. This is used as an SQL hint. If it's not configured, the lookup function will fallback to 'continuous.discovery-interval'.");
 
     public static final ConfigOption<Duration> LOOKUP_CACHE_FILE_RETENTION =
             key("lookup.cache-file-retention")
@@ -2068,7 +2083,7 @@ public class CoreOptions implements Serializable {
                     .durationType()
                     .noDefaultValue()
                     .withDescription(
-                            "The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), "
+                            "The TTL in local index for cross partition upsert (primary keys not contain all partition fields), "
                                     + "this can avoid maintaining too many indexes and lead to worse and worse performance, "
                                     + "but please note that this may also cause data duplication.");
 
@@ -2454,6 +2469,12 @@ public class CoreOptions implements Serializable {
                                     + "producing files that are internally ordered. "
                                     + "'local-sort' is cheaper and sufficient for Parquet lookup optimizations.");
 
+    public static final ConfigOption<MemorySize> LOCAL_KV_DB_BLOCK_SIZE =
+            key("local-kv-db.block-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("4 kb"))
+                    .withDescription("Block size of the local key-value database.");
+
     @Immutable
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
@@ -2476,6 +2497,25 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
+
+    public static final ConfigOption<Long> DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT =
+            key("data-evolution.reassign.skip-contiguous-row-count")
+                    .longType()
+                    .defaultValue(1_000_000_000L)
+                    .withDescription(
+                            "Strictly contiguous same-partition logical row-id runs containing "
+                                    + "more than this number of rows are excluded from row-id "
+                                    + "reassignment. Set to 0 to disable this filtering.");
+
+    public static final ConfigOption<MemorySize> DATA_EVOLUTION_ROW_ID_CONFLICT_REWRITE_MAX_SIZE =
+            key("data-evolution.row-id-conflict-rewrite.max-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(256))
+                    .withDescription(
+                            "Maximum total size of current data files whose row-id ranges PyPaimon "
+                                    + "may automatically rebase staged updates against when a "
+                                    + "concurrent compaction changes file boundaries. Set to 0 B "
+                                    + "to disable.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_ROW_SIDECAR_ENABLED =
             key("data-evolution.row-sidecar.enabled")
@@ -2568,7 +2608,7 @@ public class CoreOptions implements Serializable {
                             .defaultValue(GlobalIndexColumnUpdateAction.THROW_ERROR)
                             .withDescription(
                                     "Defines the action to take when an update modifies columns that are covered by a global index. "
-                                            + "IGNORE leaves existing index files unchanged and may make the index stale.");
+                                            + "IGNORE leaves existing index files unchanged during the update and enables a later incremental index build to refresh affected row ranges.");
 
     public static final ConfigOption<MemorySize> LOOKUP_MERGE_BUFFER_SIZE =
             key("lookup.merge-buffer-size")
@@ -2713,21 +2753,38 @@ public class CoreOptions implements Serializable {
             key("postpone.batch-write-fixed-bucket.max-parallelism")
                     .intType()
                     .defaultValue(2048)
-                    .withDescription("The number of partitions for global index.");
+                    .withDescription(
+                            "Maximum bucket number inferred for a partition by a fixed-bucket batch write. The inferred number is rounded up to a power of two before applying this limit.");
+
+    public static final ConfigOption<Integer>
+            POSTPONE_BATCH_WRITE_FIXED_BUCKET_RESCALE_LOAD_FACTOR =
+                    key("postpone.batch-write-fixed-bucket.rescale-load-factor")
+                            .intType()
+                            .defaultValue(32)
+                            .withDescription(
+                                    "Maximum tolerated ratio between the required bucket number and the existing bucket number before a fixed-bucket batch write enlarges the existing layout. Rescaling also requires the configured maximum parallelism to permit a larger bucket number.");
 
     public static final ConfigOption<Integer> POSTPONE_DEFAULT_BUCKET_NUM =
             key("postpone.default-bucket-num")
                     .intType()
-                    .defaultValue(1)
+                    .noDefaultValue()
                     .withDescription(
-                            "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
+                            "Optional bucket number for partitions receiving real buckets for the first time and for fixed-bucket overwrite writes. The configured value is used exactly and takes precedence over automatic bucket estimation. When unset, Paimon estimates the bucket number from the target row count or target file size.");
 
     public static final ConfigOption<Long> POSTPONE_TARGET_ROW_NUM_PER_BUCKET =
             key("postpone.target-row-num-per-bucket")
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "Target row number per bucket for partitions compacted from postpone bucket files for the first time.");
+                            "Target postpone row count per bucket when estimating the required bucket number from staged or committed postpone files. When configured, this option takes precedence over 'postpone.target-size-per-bucket'.");
+
+    public static final ConfigOption<MemorySize> POSTPONE_TARGET_SIZE_PER_BUCKET =
+            key("postpone.target-size-per-bucket")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("1 gb"))
+                    .withDescription(
+                            "Target postpone file size per bucket when estimating the required bucket number from staged or committed postpone files. "
+                                    + "This option is ignored when 'postpone.target-row-num-per-bucket' is configured.");
 
     public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
             key("global-index.row-count-per-shard")
@@ -2768,7 +2825,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<GlobalIndexSearchMode> SCALAR_INDEX_SEARCH_MODE =
             key("scalar-index.search-mode")
                     .enumType(GlobalIndexSearchMode.class)
-                    .defaultValue(GlobalIndexSearchMode.FULL)
+                    .defaultValue(GlobalIndexSearchMode.FAST)
                     .withDescription("Search mode for scalar index queries.");
 
     public static final ConfigOption<GlobalIndexSearchMode> VECTOR_INDEX_SEARCH_MODE =
@@ -2788,7 +2845,8 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(32)
                     .withDescription(
-                            "The maximum number of concurrent threads for global index I/O.");
+                            "The maximum number of concurrent threads for global index I/O. "
+                                    + "Must be greater than 0.");
 
     public static final ConfigOption<Boolean> OVERWRITE_UPGRADE =
             key("overwrite-upgrade")
@@ -2966,6 +3024,17 @@ public class CoreOptions implements Serializable {
         return options.get(PK_CLUSTERING_OVERRIDE);
     }
 
+    public int localKvDbBlockSize() {
+        long bytes = options.get(LOCAL_KV_DB_BLOCK_SIZE).getBytes();
+        checkArgument(
+                bytes > 0 && bytes <= Integer.MAX_VALUE,
+                "'%s' must be between 1 byte and %s bytes, but was %s bytes.",
+                LOCAL_KV_DB_BLOCK_SIZE.key(),
+                Integer.MAX_VALUE,
+                bytes);
+        return (int) bytes;
+    }
+
     public String formatType() {
         return normalizeFileFormat(options.get(FILE_FORMAT));
     }
@@ -3084,12 +3153,13 @@ public class CoreOptions implements Serializable {
         return options.get(FIELDS_DEFAULT_AGG_FUNC);
     }
 
-    public List<String> upsertKey() {
-        String upsertKey = options.get(UPSERT_KEY);
-        if (StringUtils.isEmpty(upsertKey)) {
-            return Collections.emptyList();
-        }
-        return Arrays.asList(upsertKey.split(","));
+    public boolean primaryKeyNullable() {
+        return options.get(PRIMARY_KEY_NULLABLE);
+    }
+
+    public static boolean primaryKeyNullable(Map<String, String> options) {
+        return Options.fromMap(options)
+                .getBoolean(PRIMARY_KEY_NULLABLE.key(), PRIMARY_KEY_NULLABLE.defaultValue());
     }
 
     public static String createCommitUser(Options options) {
@@ -4177,6 +4247,19 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_EVOLUTION_ENABLED);
     }
 
+    public long dataEvolutionReassignSkipContiguousRowCount() {
+        long threshold = options.get(DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT);
+        checkArgument(
+                threshold >= 0,
+                "The option %s cannot be negative.",
+                DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT.key());
+        return threshold;
+    }
+
+    public long dataEvolutionRowIdConflictRewriteMaxSize() {
+        return options.get(DATA_EVOLUTION_ROW_ID_CONFLICT_REWRITE_MAX_SIZE).getBytes();
+    }
+
     public boolean dataEvolutionRowSidecarEnabled() {
         return options.get(DATA_EVOLUTION_ROW_SIDECAR_ENABLED);
     }
@@ -4380,12 +4463,27 @@ public class CoreOptions implements Serializable {
         return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET_MAX_PARALLELISM);
     }
 
-    public int postponeDefaultBucketNum() {
-        return options.get(POSTPONE_DEFAULT_BUCKET_NUM);
+    public int postponeBatchWriteFixedBucketRescaleLoadFactor() {
+        return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET_RESCALE_LOAD_FACTOR);
+    }
+
+    public Optional<Integer> postponeDefaultBucketNum() {
+        Optional<Integer> bucketNum = options.getOptional(POSTPONE_DEFAULT_BUCKET_NUM);
+        bucketNum.ifPresent(
+                value ->
+                        checkArgument(
+                                value > 0,
+                                "Option '%s' must be greater than 0.",
+                                POSTPONE_DEFAULT_BUCKET_NUM.key()));
+        return bucketNum;
     }
 
     public Optional<Long> postponeTargetRowNumPerBucket() {
         return options.getOptional(POSTPONE_TARGET_ROW_NUM_PER_BUCKET);
+    }
+
+    public long postponeTargetSizePerBucket() {
+        return options.get(POSTPONE_TARGET_SIZE_PER_BUCKET).getBytes();
     }
 
     public long globalIndexRowCountPerShard() {

@@ -311,6 +311,22 @@ class TestOverwriteConflictDetection(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("File deletion conflicts", str(result))
 
+    def test_bucket_num_mismatch_conflicts(self):
+        detection = self._make_detection()
+        old = _make_entry("old")
+        new = _make_entry("new")
+        new.total_buckets = 2
+
+        result = detection.check_conflicts(
+            latest_snapshot=None,
+            base_entries=[old],
+            delta_entries=[new],
+            commit_kind="APPEND",
+        )
+
+        self.assertIsNotNone(result)
+        self.assertIn("Total buckets", str(result))
+
 
 class _FakeSnapshot:
 

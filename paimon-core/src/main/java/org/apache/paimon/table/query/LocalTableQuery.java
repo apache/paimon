@@ -62,7 +62,7 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
+import static org.apache.paimon.lookup.LookupStoreFactory.bloomFilterBuilderFactory;
 import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 
 /** Implementation for {@link TableQuery} for caching data and file in local. */
@@ -176,7 +176,7 @@ public class LocalTableQuery implements TableQuery {
                                                         partitionType, partition, bucket, file))
                                         .getPathFile(),
                         lookupStoreFactory,
-                        bfGenerator(options),
+                        bloomFilterBuilderFactory(options),
                         lookupFileCache(options));
 
         // Optimization - download lookup files if already persisted to object store

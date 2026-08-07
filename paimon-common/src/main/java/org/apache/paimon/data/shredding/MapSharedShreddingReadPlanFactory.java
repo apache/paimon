@@ -27,7 +27,7 @@ import javax.annotation.Nullable;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Creates per-file shared-shredding MAP read plans. */
+/** Creates per-file MAP read plans for shared-shredding and selected-key fallback reads. */
 public class MapSharedShreddingReadPlanFactory implements ShreddingReadPlanFactory {
 
     private final RowType logicalRowType;
@@ -46,7 +46,8 @@ public class MapSharedShreddingReadPlanFactory implements ShreddingReadPlanFacto
             Map<String, Map<String, String>> fieldMetadata, @Nullable Object fileSchema) {
         for (DataField field : logicalRowType.getFields()) {
             Map<String, String> metadata = fieldMetadata.get(field.name());
-            if (MapSharedShreddingUtils.hasShreddingMetadata(metadata)) {
+            if (MapSharedShreddingUtils.hasShreddingMetadata(metadata)
+                    || MapSelectedKeysMetadataUtils.isMapSelectedKeysField(field)) {
                 return true;
             }
         }

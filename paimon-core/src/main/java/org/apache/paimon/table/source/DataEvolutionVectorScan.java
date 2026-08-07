@@ -55,6 +55,7 @@ public class DataEvolutionVectorScan implements VectorScan {
     @Nullable private final Predicate filter;
     private final DataField vectorColumn;
     private final Map<String, String> options;
+    @Nullable private final Snapshot pinnedSnapshot;
 
     public DataEvolutionVectorScan(
             FileStoreTable table,
@@ -62,10 +63,21 @@ public class DataEvolutionVectorScan implements VectorScan {
             @Nullable Predicate filter,
             DataField vectorColumn,
             @Nullable Map<String, String> options) {
+        this(table, partitionFilter, filter, vectorColumn, options, null);
+    }
+
+    public DataEvolutionVectorScan(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            DataField vectorColumn,
+            @Nullable Map<String, String> options,
+            @Nullable Snapshot pinnedSnapshot) {
         this.table = table;
         this.partitionFilter = partitionFilter;
         this.filter = filter;
         this.vectorColumn = vectorColumn;
+        this.pinnedSnapshot = pinnedSnapshot;
         this.options =
                 options == null
                         ? Collections.emptyMap()
@@ -77,7 +89,9 @@ public class DataEvolutionVectorScan implements VectorScan {
         Objects.requireNonNull(vectorColumn, "Vector column must be set");
 
         Set<Integer> filterFieldIds = collectFieldIds(table.rowType(), filter);
-        @Nullable Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(table);
+        @Nullable
+        Snapshot snapshot =
+                pinnedSnapshot != null ? pinnedSnapshot : TimeTravelUtil.tryTravelOrLatest(table);
         IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
         Filter<IndexManifestEntry> indexFileFilter =
                 entry -> {
@@ -181,10 +195,16 @@ public class DataEvolutionVectorScan implements VectorScan {
                             vectorIndexType));
         }
 
+        @Nullable Snapshot planSnapshot = snapshot;
         return new Plan() {
             @Override
             public List<VectorSearchSplit> splits() {
                 return splits;
+            }
+
+            @Override
+            public Snapshot snapshot() {
+                return planSnapshot;
             }
         };
     }

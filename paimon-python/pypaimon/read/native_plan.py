@@ -18,15 +18,16 @@
 """Plan splits with pypaimon_rust, decoded for the normal pypaimon reader.
 
 Optional, lazily-imported dependency; enabled by ``scan.native-plan.enabled``.
-The predicate is applied pypaimon-side (partition pruning + row/limit filter),
-so results match the normal path.
+Predicates and limits are pushed into Rust planning. The normal pypaimon reader
+still applies them while reading, so pushdown remains an optimization.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options_utils import OptionsUtils
+from pypaimon.common.predicate import Predicate
 from pypaimon.read.split import Split
 from pypaimon.read.split_serializer import deserialize_split_v1
 
@@ -96,20 +97,86 @@ def _catalog_options(table) -> dict:
 
 
 def _read_options(table) -> dict:
-    """Effective split-shaping options, including FileStoreTable.copy overrides."""
-    return {
+    """Effective Rust read options, including FileStoreTable.copy overrides."""
+    options = {
         CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): str(
             table.options.source_split_target_size()),
         CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): str(
             table.options.source_split_open_file_cost()),
     }
+    table_options = table.options.options
+    for option in (
+            CoreOptions.SCAN_SNAPSHOT_ID,
+            CoreOptions.SCAN_TAG_NAME,
+            CoreOptions.SCAN_TIMESTAMP_MILLIS):
+        if table_options.contains_key(option.key()):
+            options[option.key()] = _option_value_to_string(
+                table_options.get(option))
+
+    # Rust takes epoch millis but PyPaimon also accepts a timestamp string.
+    if table_options.contains_key(CoreOptions.SCAN_TIMESTAMP.key()):
+        from pypaimon.snapshot.time_travel_util import _parse_timestamp_to_millis
+        options[CoreOptions.SCAN_TIMESTAMP_MILLIS.key()] = str(
+            _parse_timestamp_to_millis(
+                table_options.get(CoreOptions.SCAN_TIMESTAMP)))
+    return options
 
 
-def native_plan(table) -> List[Split]:
+def _predicate_to_native(predicate: Predicate) -> dict:
+    """Convert PyPaimon's predicate tree to pypaimon-rust's dict API."""
+    if predicate.method in ('and', 'or'):
+        children = predicate.literals or []
+        if not children:
+            raise ValueError("Native compound predicate requires children")
+        return {
+            'method': predicate.method,
+            'children': [_predicate_to_native(child) for child in children],
+        }
+    return {
+        'method': predicate.method,
+        'field': predicate.field,
+        'literals': list(predicate.literals or []),
+    }
+
+
+def _restore_python_partition_paths(table, splits: List[Split]) -> None:
+    """Restore legacy PyPaimon paths with one listing per bucket."""
+    if not table.partition_keys:
+        return
+    path_factory = table.path_factory()
+    bucket_files = {}
+    for split in splits:
+        bucket_path = path_factory.bucket_path(
+            tuple(split.partition.values), split.bucket)
+        candidates = []
+        for data_file in split.files:
+            python_path = "%s/%s" % (
+                bucket_path.rstrip('/'), data_file.file_name)
+            if (not data_file.external_path
+                    and python_path != data_file.file_path):
+                candidates.append((data_file, python_path))
+        if not candidates:
+            continue
+        if bucket_path not in bucket_files:
+            bucket_files[bucket_path] = {
+                status.base_name
+                for status in table.file_io.list_status(bucket_path)
+            }
+        for data_file, python_path in candidates:
+            if data_file.file_name in bucket_files[bucket_path]:
+                data_file.file_path = python_path
+
+
+def native_plan(
+        table,
+        predicate: Optional[Predicate] = None,
+        limit: Optional[int] = None,
+        projection: Optional[List[str]] = None,
+        row_ranges: Optional[List[Tuple[int, int]]] = None) -> List[Split]:
     """Plan with pypaimon_rust and return the decoded pypaimon splits.
 
-    Predicate/limit are not pushed to the native planner (pushdown is a
-    follow-up); pypaimon applies them at read time.
+    Native conversion or planning failures are handled by TableScan, which
+    falls back to the Python planner.
     """
     if not native_runtime_available():
         raise RuntimeError(
@@ -117,8 +184,19 @@ def native_plan(table) -> List[Split]:
     from pypaimon_rust.datafusion import PaimonCatalog
 
     rt = PaimonCatalog(_catalog_options(table)).get_table(table.identifier.get_full_name())
-    rust_splits = rt.new_read_builder(_read_options(table)).new_scan().plan().splits()
+    builder = rt.new_read_builder(_read_options(table))
+    if projection is not None:
+        builder = builder.with_projection(projection)
+    if predicate is not None:
+        builder = builder.with_filter(_predicate_to_native(predicate))
+    if limit is not None:
+        builder = builder.with_limit(limit)
+    if row_ranges is not None:
+        builder = builder.with_row_ranges(row_ranges)
+    rust_splits = builder.new_scan().plan().splits()
     pfields = _partition_fields(table)
     # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).
     kfields = table.trimmed_primary_keys_fields
-    return [deserialize_split_v1(s.serialize(), pfields, kfields) for s in rust_splits]
+    splits = [deserialize_split_v1(s.serialize(), pfields, kfields) for s in rust_splits]
+    _restore_python_partition_paths(table, splits)
+    return splits

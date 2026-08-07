@@ -30,6 +30,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 /** Schema for global index. */
 public class GlobalIndexMeta {
@@ -152,5 +153,31 @@ public class GlobalIndexMeta {
             names.add(rowType.getField(id).name());
         }
         return names;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        GlobalIndexMeta that = (GlobalIndexMeta) o;
+        return rowRangeStart == that.rowRangeStart
+                && rowRangeEnd == that.rowRangeEnd
+                && indexFieldId == that.indexFieldId
+                && Arrays.equals(extraFieldIds, that.extraFieldIds)
+                && Arrays.equals(indexMeta, that.indexMeta)
+                && Arrays.equals(sourceMeta, that.sourceMeta);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = Objects.hash(rowRangeStart, rowRangeEnd, indexFieldId);
+        result = 31 * result + Arrays.hashCode(extraFieldIds);
+        result = 31 * result + Arrays.hashCode(indexMeta);
+        result = 31 * result + Arrays.hashCode(sourceMeta);
+        return result;
     }
 }

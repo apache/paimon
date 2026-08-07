@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
@@ -48,12 +49,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
+import static org.apache.paimon.table.source.BlobViewTableReadSupport.blobViewFieldIndexes;
+
 /**
  * An abstraction layer above {@link MergeFileSplitRead} to provide reading of {@link InternalRow}.
  */
 public final class KeyValueTableRead extends AbstractDataTableRead {
 
+    private final Supplier<MergeFileSplitRead> mergeReadSupplier;
+    private final Supplier<RawFileSplitRead> batchRawReadSupplier;
     private final List<SplitReadProvider> readProviders;
+    private final CoreOptions options;
+    @Nullable private final CatalogContext catalogContext;
 
     @Nullable private RowType readType = null;
     private boolean forceKeepDelete = false;
@@ -65,8 +72,14 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     public KeyValueTableRead(
             Supplier<MergeFileSplitRead> mergeReadSupplier,
             Supplier<RawFileSplitRead> batchRawReadSupplier,
-            TableSchema schema) {
+            TableSchema schema,
+            CoreOptions options,
+            @Nullable CatalogContext catalogContext) {
         super(schema);
+        this.mergeReadSupplier = mergeReadSupplier;
+        this.batchRawReadSupplier = batchRawReadSupplier;
+        this.options = options;
+        this.catalogContext = catalogContext;
         this.readProviders =
                 Arrays.asList(
                         new PrimaryKeyIndexedSplitReadProvider(batchRawReadSupplier, this::config),
@@ -140,7 +153,52 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
 
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
-        return LimitRecordReader.limit(super.createReader(split), limit);
+        QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
+        RecordReader<InternalRow> reader;
+        int[] blobViewFields = blobViewFieldIndexes(currentReadType(), options);
+        if (catalogContext != null && blobViewFields.length > 0) {
+            reader = createReaderWithBlobView(queryAuthContext, blobViewFields);
+        } else {
+            reader = createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
+        }
+        return LimitRecordReader.limit(reader, limit);
+    }
+
+    private RecordReader<InternalRow> createReaderWithBlobView(
+            QueryAuthContext queryAuthContext, int[] blobViewFields) throws IOException {
+        RecordReader<InternalRow> reader;
+        reader =
+                BlobViewTableReadSupport.createBlobViewReader(
+                        catalogContext,
+                        queryAuthContext.split(),
+                        queryAuthContext.authResult(),
+                        blobViewFields,
+                        currentReadType(),
+                        predicate(),
+                        topN,
+                        limit,
+                        executeFilter,
+                        () ->
+                                createDataReader(
+                                        queryAuthContext.split(), queryAuthContext.authResult()),
+                        this::createBlobViewPrescanRead);
+        return reader;
+    }
+
+    private InnerTableRead createBlobViewPrescanRead() {
+        KeyValueTableRead read =
+                new KeyValueTableRead(
+                        mergeReadSupplier, batchRawReadSupplier, schema(), options, null);
+        if (ioManager != null) {
+            read.withIOManager(ioManager);
+        }
+        if (forceKeepDelete) {
+            read.forceKeepDelete();
+        }
+        if (executeFilter) {
+            read.executeFilter();
+        }
+        return read;
     }
 
     @Override

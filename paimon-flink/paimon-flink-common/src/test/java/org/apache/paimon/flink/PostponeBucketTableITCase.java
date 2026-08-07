@@ -560,6 +560,22 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                                         "SELECT `partition`, COUNT(DISTINCT bucket) FROM `T$files` "
                                                 + "GROUP BY `partition`")))
                 .containsExactlyInAnyOrder("+I[{0}, 1]", "+I[{1}, 3]");
+
+        tEnv.executeSql("ALTER TABLE T SET ('postpone.default-bucket-num' = '2')").await();
+        values.clear();
+        for (int j = 0; j < 450; j++) {
+            values.add(String.format("(2, %d, %d)", j, j));
+        }
+        tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
+        // An explicitly configured default takes precedence over the row-count estimate of 3.
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT COUNT(DISTINCT bucket) FROM `T$files` "
+                                                + "WHERE `partition` = '{2}'")))
+                .containsExactly("+I[2]");
     }
 
     @Timeout(TIMEOUT)
@@ -1005,6 +1021,43 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         "+I[4, 42]",
                         "+I[1, 103]",
                         "+I[5, 53]");
+    }
+
+    @Test
+    public void testFixedBucketWriteDoesNotCompact() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'postpone.batch-write-fixed-bucket.max-parallelism' = '1',\n"
+                        + "  'num-sorted-run.compaction-trigger' = '2'\n"
+                        + ")");
+
+        tEnv.executeSql("INSERT INTO T VALUES (1, 'a')").await();
+        tEnv.executeSql("INSERT INTO T VALUES (2, 'b')").await();
+
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, a]", "+I[2, b]");
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level = 0"))).hasSize(2);
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
     }
 
     @Test

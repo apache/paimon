@@ -399,6 +399,28 @@ class ConflictDetectionTest {
     }
 
     @Test
+    void testMaterializeDvRowIdCheckOnlyAppliesToCompactCommit() {
+        ConflictDetection detection = createConflictDetection();
+
+        detection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(1L);
+        assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.APPEND)).isFalse();
+        assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.OVERWRITE)).isFalse();
+        assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.COMPACT)).isTrue();
+        assertThat(detection.shouldCheckHistoricalRowIdEntry(FileKind.ADD)).isTrue();
+        assertThat(detection.shouldCheckHistoricalRowIdEntry(FileKind.DELETE)).isFalse();
+
+        detection.setRowIdCheckFromSnapshot(1L);
+        assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.APPEND)).isTrue();
+        assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.COMPACT)).isTrue();
+        assertThat(detection.shouldCheckHistoricalRowIdEntry(FileKind.ADD)).isTrue();
+        assertThat(detection.shouldCheckHistoricalRowIdEntry(FileKind.DELETE)).isTrue();
+
+        detection.setRowIdCheckFromSnapshot(null);
+        assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.APPEND)).isFalse();
+        assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.COMPACT)).isFalse();
+    }
+
+    @Test
     void testChangedPartitionsIncludesGlobalIndexFiles() {
         BinaryRow partition = BinaryRow.singleColumn(1);
 
@@ -439,7 +461,9 @@ class ConflictDetectionTest {
                 detection.checkRowIdExistence(
                         baseEntries, deltaEntries, 100L, Snapshot.CommitKind.APPEND);
         assertThat(result).isPresent();
-        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+        assertThat(result.get())
+                .isInstanceOf(RowIdExistenceConflictException.class)
+                .hasMessageContaining("Row ID existence conflict");
     }
 
     @Test
@@ -456,7 +480,9 @@ class ConflictDetectionTest {
                 detection.checkRowIdExistence(
                         baseEntries, deltaEntries, 200L, Snapshot.CommitKind.APPEND);
         assertThat(result).isPresent();
-        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+        assertThat(result.get())
+                .isInstanceOf(RowIdExistenceConflictException.class)
+                .hasMessageContaining("Row ID existence conflict");
     }
 
     @Test

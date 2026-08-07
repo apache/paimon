@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 import pyarrow as pa
 
@@ -83,6 +84,25 @@ class FileStoreTableTest(unittest.TestCase):
             self.table.copy(new_options)
 
         self.assertIn("Cannot change bucket number", str(context.exception))
+
+    def test_copy_without_time_travel_preserves_resolved_schema(self):
+        current_schema = self.table.table_schema
+        with mock.patch.object(
+                self.table,
+                "_try_time_travel",
+                side_effect=AssertionError("must not resolve time travel again")):
+            copied_table = self.table.copy_without_time_travel({
+                CoreOptions.SCAN_MODE.key(): "from-snapshot",
+                CoreOptions.SCAN_SNAPSHOT_ID.key(): "1",
+            })
+
+        self.assertEqual(current_schema.fields, copied_table.table_schema.fields)
+        self.assertEqual(current_schema.id, copied_table.table_schema.id)
+        self.assertEqual(
+            "1",
+            copied_table.table_schema.options[
+                CoreOptions.SCAN_SNAPSHOT_ID.key()],
+        )
 
     def test_consumer_manager(self):
         """Test that FileStoreTable has consumer_manager method."""

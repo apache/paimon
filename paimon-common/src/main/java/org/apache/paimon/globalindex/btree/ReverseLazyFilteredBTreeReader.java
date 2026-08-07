@@ -39,8 +39,16 @@ public class ReverseLazyFilteredBTreeReader extends LazyFilteredBTreeReader {
             GlobalIndexFileReader fileReader,
             CacheManager cacheManager,
             long fallbackScanMaxSize,
+            long totalRowCount,
             ExecutorService executor) {
-        super(files, keySerializer, fileReader, cacheManager, fallbackScanMaxSize, executor);
+        super(
+                files,
+                keySerializer,
+                fileReader,
+                cacheManager,
+                fallbackScanMaxSize,
+                totalRowCount,
+                executor);
     }
 
     @Override

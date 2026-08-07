@@ -69,6 +69,7 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "merge_map_with_keytime",
     "merge_map",
     "theta_sketch",
+    "rbm32",
 ])
 _FIELDS_PREFIX = "fields."
 _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
@@ -214,9 +215,8 @@ def check_supported(table) -> None:
                 "built-in aggregators ({}); retract opt-ins "
                 "(aggregation.remove-record-on-delete, "
                 "fields.<f>.ignore-retract) "
-                "and other aggregators (product / listagg / collect / "
-                "nested_update* / theta_sketch / "
-                "hll_sketch / roaring_bitmap_*) are not yet supported. "
+                "and other aggregators (hll_sketch / rbm64) "
+                "are not yet supported. "
                 "Open an issue to track support.".format(
                     ", ".join(sorted(unsupported)),
                     ", ".join(sorted(_AGGREGATION_SUPPORTED_AGG_FUNCS)),
@@ -266,8 +266,7 @@ def aggregation_unsupported_options(table) -> Set[str]:
        ``builtin_seq_comparator``).
     3. Out-of-scope aggregator selections: ``fields.<f>.aggregate-
        function`` and ``fields.default-aggregate-function`` set to an
-       identifier this engine doesn't support yet (e.g. ``collect``,
-       ``nested_update``).
+       identifier this engine doesn't support yet (e.g. ``hll_sketch``).
     """
     flagged: Set[str] = set()
     raw = table.options.options.to_map()

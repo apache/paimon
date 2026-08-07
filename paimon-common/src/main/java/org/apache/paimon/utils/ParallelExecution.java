@@ -173,7 +173,19 @@ public class ParallelExecution<T, E> implements Closeable {
 
     @Override
     public void close() throws IOException {
-        this.executorService.shutdownNow();
+        if (latch.getCount() == 0) {
+            this.executorService.shutdown();
+        } else {
+            this.executorService.shutdownNow();
+        }
+        try {
+            if (!this.executorService.awaitTermination(1, TimeUnit.MINUTES)) {
+                throw new IOException("Timed out while closing parallel execution.");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while closing parallel execution.", e);
+        }
     }
 
     private ParallelBatch<T, E> iterator(MemorySegment page, int numRecords, E extraMessage) {

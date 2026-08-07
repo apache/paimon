@@ -123,6 +123,10 @@ class RoaringBitmap64:
         result._data = a._data - b._data
         return result
 
+    def remove_all_inplace(self, other: 'RoaringBitmap64') -> None:
+        """Remove all values contained in ``other`` from this bitmap, in place."""
+        self._data -= other._data
+
     def serialize(self) -> bytes:
         """Serialize the bitmap to bytes."""
         return self._data.serialize()

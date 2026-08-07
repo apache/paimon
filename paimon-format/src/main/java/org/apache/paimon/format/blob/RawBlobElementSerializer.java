@@ -106,13 +106,13 @@ final class RawBlobElementSerializer implements BlobElementSerializer {
                 return writePlaceholderElement();
             }
 
-            SeekableInputStream in = openBlobInputStream(blob);
-            if (in == null) {
+            BlobCopySource source = prepareBlobSource(blob);
+            if (source == null) {
                 return writeNullElement();
             }
 
             long recordPosition = startRecord();
-            BlobDescriptor descriptor = writeBlobData(in);
+            BlobDescriptor descriptor = writeBlobData(source);
             long recordLength = finishRecord(recordPosition);
             if (accept(descriptor)) {
                 flush();

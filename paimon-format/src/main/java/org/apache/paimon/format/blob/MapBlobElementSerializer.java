@@ -24,6 +24,7 @@ import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.BlobMapPlaceholder;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -33,6 +34,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.utils.DeltaVarintCompressor;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Preconditions;
@@ -208,12 +210,12 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                     valueLengths[i] = NULL_VALUE_LENGTH;
                     continue;
                 }
-                SeekableInputStream in = openBlobInputStream(blob);
-                if (in == null) {
+                BlobCopySource source = prepareBlobSource(blob);
+                if (source == null) {
                     valueLengths[i] = NULL_VALUE_LENGTH;
                     continue;
                 }
-                BlobDescriptor descriptor = writeBlobData(in);
+                BlobDescriptor descriptor = writeBlobData(source);
                 valueLengths[i] = descriptor.length();
                 flush |= accept(descriptor);
                 recordSuccess(descriptor.length());
@@ -348,6 +350,7 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                 }
 
                 // 3. deserialize values and construct map
+                boolean binaryKey = keySerializer instanceof BinaryKeySerializer;
                 Map<Object, Object> map = new LinkedHashMap<>();
                 long valueOffset = dataStart + keyDataLength;
                 for (int i = 0; i < entryCount; i++) {
@@ -361,7 +364,7 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                     }
                     map.put(keys[i], value);
                 }
-                return new GenericMap(map);
+                return binaryKey ? GenericMap.fromBinaryKeyMap(map) : new GenericMap(map);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -460,6 +463,17 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                 return new IntKeySerializer();
             case BIGINT:
                 return new BigIntKeySerializer();
+            case BOOLEAN:
+                return new BooleanKeySerializer();
+            case DECIMAL:
+                DecimalType decimalType = (DecimalType) keyType;
+                return new DecimalKeySerializer(decimalType.getPrecision(), decimalType.getScale());
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                return new IntKeySerializer();
+            case BINARY:
+            case VARBINARY:
+                return new BinaryKeySerializer();
             case CHAR:
             case VARCHAR:
                 return new StringKeySerializer();
@@ -563,6 +577,94 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
         @Override
         public int fixedLength() {
             return Long.BYTES;
+        }
+    }
+
+    /** {@link KeySerializer} for Boolean Type. */
+    private static final class BooleanKeySerializer implements KeySerializer {
+
+        @Override
+        public byte[] serialize(Object key) {
+            return new byte[] {(Boolean) key ? (byte) 1 : (byte) 0};
+        }
+
+        @Override
+        public Object deserialize(byte[] bytes) {
+            checkKeyLength(bytes, Byte.BYTES);
+            if (bytes[0] == 0) {
+                return false;
+            }
+            if (bytes[0] == 1) {
+                return true;
+            }
+            throw new IllegalArgumentException("Invalid MAP<X, BLOB> boolean key.");
+        }
+
+        @Override
+        public int fixedLength() {
+            return Byte.BYTES;
+        }
+    }
+
+    /** {@link KeySerializer} for Decimal Type. */
+    private static final class DecimalKeySerializer implements KeySerializer {
+
+        private final int precision;
+        private final int scale;
+
+        private DecimalKeySerializer(int precision, int scale) {
+            this.precision = precision;
+            this.scale = scale;
+        }
+
+        @Override
+        public byte[] serialize(Object key) {
+            Decimal decimal = (Decimal) key;
+            return Decimal.isCompact(precision)
+                    ? longToLittleEndian(decimal.toUnscaledLong())
+                    : decimal.toUnscaledBytes();
+        }
+
+        @Override
+        public Object deserialize(byte[] bytes) {
+            Decimal decimal;
+            if (Decimal.isCompact(precision)) {
+                checkKeyLength(bytes, Long.BYTES);
+                decimal =
+                        Decimal.fromUnscaledLong(
+                                littleEndianBuffer(bytes).getLong(), precision, scale);
+            } else {
+                decimal = Decimal.fromUnscaledBytes(bytes, precision, scale);
+            }
+            if (decimal == null) {
+                throw new IllegalArgumentException(
+                        "MAP<X, BLOB> decimal key exceeds declared precision.");
+            }
+            return decimal;
+        }
+
+        @Override
+        public int fixedLength() {
+            return Decimal.isCompact(precision) ? Long.BYTES : -1;
+        }
+    }
+
+    /** {@link KeySerializer} for Binary and VarBinary Types. */
+    private static final class BinaryKeySerializer implements KeySerializer {
+
+        @Override
+        public byte[] serialize(Object key) {
+            return (byte[]) key;
+        }
+
+        @Override
+        public Object deserialize(byte[] bytes) {
+            return bytes;
+        }
+
+        @Override
+        public int fixedLength() {
+            return -1;
         }
     }
 

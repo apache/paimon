@@ -116,9 +116,18 @@ public class UniversalCompaction implements CompactStrategy {
             candidateCount++;
         }
 
-        return candidateCount == 0
-                ? Optional.empty()
-                : Optional.of(pickForSizeRatio(numLevels - 1, runs, candidateCount, true));
+        if (candidateCount == 0) {
+            return Optional.empty();
+        }
+
+        // Level 1 must be compacted with level 0 to avoid producing level 0. Include it in the
+        // initial candidates so that the size-ratio check also considers level 2 based on the
+        // combined size of level 0 and level 1.
+        if (candidateCount < runs.size() && runs.get(candidateCount).level() == 1) {
+            candidateCount++;
+        }
+
+        return Optional.of(pickForSizeRatio(numLevels - 1, runs, candidateCount, true));
     }
 
     @VisibleForTesting

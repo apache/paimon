@@ -23,6 +23,7 @@ import unittest
 from unittest import mock
 
 import pyarrow as pa
+import pytest
 
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
@@ -197,6 +198,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             self._read_all(table)['age'].to_pylist(),
         )
 
+    @pytest.mark.python_plan
     def test_update_by_predicate(self):
         table = self._create_seeded_table()
         wb = self._make_write_builder(table)
@@ -758,6 +760,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
                 '_ROW_ID': [0, 1],
             }), cid)
 
+    @pytest.mark.python_plan
     def test_partitioned_table_update(self):
         """Updates work on a partitioned table the same as a flat one."""
         table = self._create_table(partition_keys=['city'])

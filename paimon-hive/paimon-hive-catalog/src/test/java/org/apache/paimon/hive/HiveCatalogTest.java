@@ -25,6 +25,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -33,6 +35,9 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.CommonTestUtils;
@@ -43,6 +48,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.thrift.TException;
 import org.junit.jupiter.api.BeforeEach;
@@ -577,6 +583,115 @@ public class HiveCatalogTest extends CatalogTestBase {
                 .containsExactlyInAnyOrder(
                         Collections.singletonMap("dt", "20250102"),
                         Collections.singletonMap("dt", "20250101"));
+    }
+
+    @Test
+    public void testListPartitionsWithDoneStatus() throws Exception {
+        String databaseName = "testListPartitionsWithDoneStatus";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.PARTITION_MARK_DONE_ACTION.key(), "mark-event")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20250101"),
+                        Collections.singletonMap("dt", "20250102"));
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Map<String, String> partitionSpec : partitionSpecs) {
+                write.write(GenericRow.of(0, BinaryString.fromString(partitionSpec.get("dt"))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        assertThat(catalog.listPartitions(identifier)).allMatch(partition -> !partition.done());
+
+        catalog.markDonePartitions(identifier, Collections.singletonList(partitionSpecs.get(0)));
+
+        Map<Map<String, String>, Boolean> doneByPartition = new HashMap<>();
+        for (Partition partition : catalog.listPartitions(identifier)) {
+            doneByPartition.put(partition.spec(), partition.done());
+        }
+        assertThat(doneByPartition)
+                .containsEntry(partitionSpecs.get(0), true)
+                .containsEntry(partitionSpecs.get(1), false);
+    }
+
+    @Test
+    public void testCreateTableWithLongColumnComment() throws Exception {
+        String databaseName = "testCreateTableWithLongColumnComment";
+        catalog.createDatabase(databaseName, false);
+
+        String longComment = "line1\n" + repeat('a', 300);
+        String shortComment = "a short comment";
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("col", DataTypes.INT(), longComment)
+                        .column("col2", DataTypes.INT(), shortComment)
+                        .build(),
+                false);
+
+        // the comment mirrored to the metastore is truncated and contains no line break
+        List<FieldSchema> cols =
+                ((HiveCatalog) catalog)
+                        .getHmsClient()
+                        .getTable(databaseName, "table")
+                        .getSd()
+                        .getCols();
+        assertThat(cols.get(0).getComment()).hasSize(255).endsWith("...").doesNotContain("\n");
+        // a short comment without line breaks is left untouched
+        assertThat(cols.get(1).getComment()).isEqualTo(shortComment);
+
+        // the Paimon schema keeps the original comment
+        assertThat(catalog.getTable(identifier).rowType().getFields())
+                .extracting(DataField::description)
+                .containsExactly(longComment, shortComment);
+    }
+
+    @Test
+    public void testCreateTableWithLongPartitionKeyComment() throws Exception {
+        String databaseName = "testCreateTableWithLongPartitionKeyComment";
+        catalog.createDatabase(databaseName, false);
+
+        // partition key comments are stored in PARTITION_KEYS.PKEY_COMMENT, which allows longer
+        // values than COLUMNS_V2.COMMENT, so they must not be truncated
+        String longComment = repeat('a', 300);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING(), longComment)
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+
+        List<FieldSchema> partitionKeys =
+                ((HiveCatalog) catalog)
+                        .getHmsClient()
+                        .getTable(databaseName, "table")
+                        .getPartitionKeys();
+        assertThat(partitionKeys).hasSize(1);
+        assertThat(partitionKeys.get(0).getComment()).isEqualTo(longComment);
+    }
+
+    private static String repeat(char c, int count) {
+        char[] chars = new char[count];
+        Arrays.fill(chars, c);
+        return new String(chars);
     }
 
     @Test

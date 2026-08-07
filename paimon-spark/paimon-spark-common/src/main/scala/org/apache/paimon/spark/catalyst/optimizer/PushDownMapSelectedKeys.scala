@@ -187,16 +187,23 @@ abstract class PushDownMapSelectedKeysBase extends Rule[LogicalPlan] {
       return false
     }
 
+    val options = CoreOptions.fromMap(scan.table.options())
     access.mapType match {
       case MapType(StringType, _, _) =>
         fieldType(scan.table.rowType(), access.fieldName) match {
           case Some(mapType: org.apache.paimon.types.MapType) if isStringKeyMap(mapType) =>
-            CoreOptions.fromMap(scan.table.options()).mapStorageLayout(access.fieldName) ==
-              MapStorageLayout.SHARED_SHREDDING
+            options.mapStorageLayout(access.fieldName) == MapStorageLayout.SHARED_SHREDDING &&
+            !hasConfiguredAggregator(options, access.fieldName)
           case _ => false
         }
       case _ => false
     }
+  }
+
+  private def hasConfiguredAggregator(options: CoreOptions, fieldName: String): Boolean = {
+    Option(options.fieldAggFunc(fieldName))
+      .orElse(Option(options.fieldsDefaultFunc()))
+      .isDefined
   }
 
   private def canEncodeKey(key: String): Boolean = {

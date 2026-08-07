@@ -38,6 +38,7 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 import org.apache.paimon.spark.SparkUtils;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.sort.TableSorter;
@@ -94,6 +95,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import scala.collection.JavaConverters;
@@ -322,13 +324,19 @@ public class CompactProcedure extends BaseProcedure {
         if (partitionPredicate != null) {
             snapshotReader.withPartitionFilter(partitionPredicate);
         }
+        boolean filterByPartitionIdleTime = partitionIdleTime != null;
         Set<BinaryRow> partitionToBeCompacted =
-                getHistoryPartition(snapshotReader, partitionIdleTime);
+                getPartitionsToCompact(snapshotReader, partitionIdleTime);
+        Predicate<BinaryRow> shouldCompactPartition = nonExpiredPartitionPredicate(table);
         List<Pair<byte[], Integer>> partitionBuckets =
                 snapshotReader.bucketEntries().stream()
                         .map(entry -> Pair.of(entry.partition(), entry.bucket()))
                         .distinct()
-                        .filter(pair -> partitionToBeCompacted.contains(pair.getKey()))
+                        .filter(
+                                pair ->
+                                        !filterByPartitionIdleTime
+                                                || partitionToBeCompacted.contains(pair.getKey()))
+                        .filter(pair -> shouldCompactPartition.test(pair.getKey()))
                         .map(
                                 p ->
                                         Pair.of(
@@ -381,15 +389,31 @@ public class CompactProcedure extends BaseProcedure {
 
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             CommitMessageSerializer serializer = new CommitMessageSerializer();
-            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
-            List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
-            for (byte[] serializedMessage : serializedMessages) {
-                messages.add(serializer.deserialize(serializer.getVersion(), serializedMessage));
-            }
+            List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
+            List<CommitMessage> messages =
+                    deserializeCommitMessagesAndReleaseSerializedBytes(
+                            serializer, serializedMessages);
             commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static Predicate<BinaryRow> nonExpiredPartitionPredicate(FileStoreTable table) {
+        CoreOptions options = table.coreOptions();
+        if (!options.compactionSkipExpiredPartitions()
+                || options.partitionExpireTime() == null
+                || !CoreOptions.PartitionExpireStrategy.VALUES_TIME
+                        .toString()
+                        .equals(options.partitionExpireStrategy())) {
+            return partition -> true;
+        }
+
+        LocalDateTime expireDateTime = LocalDateTime.now().minus(options.partitionExpireTime());
+        PartitionValuesTimeExpireStrategy expireStrategy =
+                new PartitionValuesTimeExpireStrategy(
+                        options, table.schema().logicalPartitionType());
+        return partition -> !expireStrategy.isExpired(expireDateTime, partition);
     }
 
     private void compactUnAwareBucketTable(
@@ -480,13 +504,10 @@ public class CompactProcedure extends BaseProcedure {
 
         try (TableCommitImpl commit = table.newCommit(commitUser)) {
             CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
-            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
-            List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
-            for (byte[] serializedMessage : serializedMessages) {
-                messages.add(
-                        messageSerializerser.deserialize(
-                                messageSerializerser.getVersion(), serializedMessage));
-            }
+            List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
+            List<CommitMessage> messages =
+                    deserializeCommitMessagesAndReleaseSerializedBytes(
+                            messageSerializerser, serializedMessages);
             commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -540,6 +561,7 @@ public class CompactProcedure extends BaseProcedure {
                     LOG.info("Task plan is empty, no compact job to execute.");
                     continue;
                 }
+                boolean containsMaterializeDeletion = containsMaterializeDeletion(compactionTasks);
 
                 DataEvolutionCompactTaskSerializer serializer =
                         new DataEvolutionCompactTaskSerializer();
@@ -578,14 +600,14 @@ public class CompactProcedure extends BaseProcedure {
                                                     return messagesBytes.iterator();
                                                 });
 
-                List<CommitMessage> messages = new ArrayList<>();
-                List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
+                List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
                 try (TableCommitImpl commit = table.newCommit(commitUser)) {
-                    for (byte[] serializedMessage : serializedMessages) {
-                        messages.add(
-                                messageSerializerser.deserialize(
-                                        messageSerializerser.getVersion(), serializedMessage));
+                    if (containsMaterializeDeletion) {
+                        commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id());
                     }
+                    List<CommitMessage> messages =
+                            deserializeCommitMessagesAndReleaseSerializedBytes(
+                                    messageSerializerser, serializedMessages);
                     messages.addAll(
                             new DataEvolutionCompactionCommitPreparation(table, snapshot)
                                     .prepare(messages));
@@ -599,29 +621,44 @@ public class CompactProcedure extends BaseProcedure {
         }
     }
 
-    private Set<BinaryRow> getHistoryPartition(
-            SnapshotReader snapshotReader, @Nullable Duration partitionIdleTime) {
-        Set<Pair<BinaryRow, Long>> partitionInfo =
-                snapshotReader.partitionEntries().stream()
-                        .map(
-                                partitionEntry ->
-                                        Pair.of(
-                                                partitionEntry.partition(),
-                                                partitionEntry.lastFileCreationTime()))
-                        .collect(Collectors.toSet());
-        if (partitionIdleTime != null) {
-            long historyMilli =
-                    LocalDateTime.now()
-                            .minus(partitionIdleTime)
-                            .atZone(ZoneId.systemDefault())
-                            .toInstant()
-                            .toEpochMilli();
-            partitionInfo =
-                    partitionInfo.stream()
-                            .filter(partition -> partition.getValue() <= historyMilli)
-                            .collect(Collectors.toSet());
+    static boolean containsMaterializeDeletion(List<DataEvolutionCompactTask> compactionTasks) {
+        return compactionTasks.stream()
+                .anyMatch(
+                        task ->
+                                task.type()
+                                        == DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
+    }
+
+    private static List<CommitMessage> deserializeCommitMessagesAndReleaseSerializedBytes(
+            CommitMessageSerializer serializer, List<byte[]> serializedMessages)
+            throws IOException {
+        List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
+        for (int i = 0; i < serializedMessages.size(); i++) {
+            byte[] serializedMessage = serializedMessages.set(i, null);
+            messages.add(serializer.deserialize(serializer.getVersion(), serializedMessage));
         }
-        return partitionInfo.stream().map(Pair::getKey).collect(Collectors.toSet());
+        return messages;
+    }
+
+    static Set<BinaryRow> getPartitionsToCompact(
+            SnapshotReader snapshotReader, @Nullable Duration partitionIdleTime) {
+        return partitionIdleTime == null
+                ? Collections.emptySet()
+                : getHistoryPartition(snapshotReader, partitionIdleTime);
+    }
+
+    private static Set<BinaryRow> getHistoryPartition(
+            SnapshotReader snapshotReader, Duration partitionIdleTime) {
+        long historyMilli =
+                LocalDateTime.now()
+                        .minus(partitionIdleTime)
+                        .atZone(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli();
+        return snapshotReader.partitionEntries().stream()
+                .filter(partition -> partition.lastFileCreationTime() <= historyMilli)
+                .map(PartitionEntry::partition)
+                .collect(Collectors.toSet());
     }
 
     private void sortCompactUnAwareBucketTable(
@@ -655,7 +692,7 @@ public class CompactProcedure extends BaseProcedure {
         if (datasetForWrite != null) {
             PaimonSparkWriter writer = PaimonSparkWriter.apply(table);
             // Use dynamic partition overwrite
-            writer.writeBuilder().withOverwrite();
+            writer.withOverwrite();
             writer.commit(writer.write(datasetForWrite));
         }
     }

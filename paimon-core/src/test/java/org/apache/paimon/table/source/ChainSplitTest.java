@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,12 +57,55 @@ public class ChainSplitTest {
         }
         ChainSplit split =
                 new ChainSplit(
-                        logicalPartition, dataFiles, fileBranchMapping, fileBucketPathMapping);
+                        logicalPartition,
+                        dataFiles,
+                        fileBranchMapping,
+                        fileBucketPathMapping,
+                        null);
         byte[] bytes = InstantiationUtil.serializeObject(split);
         ChainSplit newSplit =
                 InstantiationUtil.deserializeObject(bytes, ChainSplit.class.getClassLoader());
         assertThat(fileBucketPathMapping).isEqualTo(newSplit.fileBucketPathMapping());
         assertThat(fileBranchMapping).isEqualTo(newSplit.fileBranchMapping());
+        assertThat(newSplit.deletionFiles()).isEmpty();
+        assertThat(newSplit).isEqualTo(split);
+    }
+
+    @Test
+    public void testChainSplitSerdeWithDeletionFiles() throws IOException, ClassNotFoundException {
+        BinaryRow logicalPartition = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(logicalPartition);
+        writer.writeString(0, BinaryString.fromString("20251202"));
+        DataFileTestDataGenerator gen = DataFileTestDataGenerator.builder().build();
+        List<DataFileMeta> dataFiles = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            dataFiles.add(gen.next().meta);
+        }
+        Map<String, String> fileBucketPathMapping = new HashMap<>();
+        Map<String, String> fileBranchMapping = new HashMap<>();
+        List<DeletionFile> deletionFiles =
+                Arrays.asList(
+                        new DeletionFile("dv1", 0, 100, 1L),
+                        null,
+                        new DeletionFile("dv3", 0, 50, 1L));
+        for (DataFileMeta dataFile : dataFiles) {
+            fileBucketPathMapping.put(dataFile.fileName(), "dt=20251202/bucket_0");
+            fileBranchMapping.put(dataFile.fileName(), "branch_0");
+        }
+        ChainSplit split =
+                new ChainSplit(
+                        logicalPartition,
+                        dataFiles,
+                        fileBranchMapping,
+                        fileBucketPathMapping,
+                        deletionFiles);
+        byte[] bytes = InstantiationUtil.serializeObject(split);
+        ChainSplit newSplit =
+                InstantiationUtil.deserializeObject(bytes, ChainSplit.class.getClassLoader());
+        assertThat(fileBucketPathMapping).isEqualTo(newSplit.fileBucketPathMapping());
+        assertThat(fileBranchMapping).isEqualTo(newSplit.fileBranchMapping());
+        assertThat(newSplit.deletionFiles().isPresent());
+        assertThat(newSplit.deletionFiles().get()).isEqualTo(deletionFiles);
         assertThat(newSplit).isEqualTo(split);
     }
 }

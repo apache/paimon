@@ -150,6 +150,15 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class RESTApi {
 
     public static final String HEADER_PREFIX = "header.";
+    /**
+     * Optional header carrying the URL-encoded {@link Identifier} JSON of the table which initiated
+     * a dependency read.
+     *
+     * <p>This header only provides request context. Servers must not treat it as authorization
+     * proof.
+     */
+    public static final String READ_VIA_HEADER = "X-Paimon-Read-Via";
+
     public static final String MAX_RESULTS = "maxResults";
     public static final String PAGE_TOKEN = "pageToken";
 
@@ -660,6 +669,7 @@ public class RESTApi {
      *
      * @param identifier database name and table name.
      * @param tableUuid Uuid of the table to avoid wrong commit
+     * @param baseSnapshotUuid Uuid of the snapshot on which the commit is based
      * @param snapshot snapshot for committing
      * @param statistics statistics for this snapshot incremental
      * @return true if commit success
@@ -670,9 +680,11 @@ public class RESTApi {
     public boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,
+            @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             List<PartitionStatistics> statistics) {
-        CommitTableRequest request = new CommitTableRequest(tableUuid, snapshot, statistics);
+        CommitTableRequest request =
+                new CommitTableRequest(tableUuid, baseSnapshotUuid, snapshot, statistics);
         CommitTableResponse response =
                 client.post(
                         resourcePaths.commitTable(

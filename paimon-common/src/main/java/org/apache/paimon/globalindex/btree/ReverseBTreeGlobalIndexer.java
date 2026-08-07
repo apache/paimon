@@ -49,8 +49,15 @@ public class ReverseBTreeGlobalIndexer extends BTreeGlobalIndexer {
             GlobalIndexFileReader fileReader,
             CacheManager cacheManager,
             long fallbackScanMaxSize,
+            long totalRowCount,
             ExecutorService executor) {
         return new ReverseLazyFilteredBTreeReader(
-                files, keySerializer, fileReader, cacheManager, fallbackScanMaxSize, executor);
+                files,
+                keySerializer,
+                fileReader,
+                cacheManager,
+                fallbackScanMaxSize,
+                totalRowCount,
+                executor);
     }
 }

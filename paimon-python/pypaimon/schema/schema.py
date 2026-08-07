@@ -48,6 +48,17 @@ class Schema:
         self.options = options if options is not None else {}
         self.comment = comment
 
+        primary_key_nullable = CoreOptions.primary_key_nullable_from_dict(self.options)
+        if primary_key_nullable and not self.primary_keys:
+            raise ValueError(
+                "Option 'primary-key.nullable' can only be enabled for a table "
+                "with primary keys."
+            )
+        pk_set = set(self.primary_keys)
+        for field in self.fields:
+            if field.name in pk_set:
+                field.type.nullable = primary_key_nullable
+
         changelog_producer = self.options.get(CoreOptions.CHANGELOG_PRODUCER.key(), 'none')
         if changelog_producer != 'none' and not self.primary_keys:
             raise ValueError(
@@ -61,13 +72,6 @@ class Schema:
                             comment: Optional[str] = None):
         # Convert PyArrow schema to Paimon fields
         fields = PyarrowFieldParser.to_paimon_schema(pa_schema)
-
-        # Primary key fields must be NOT NULL
-        pk_set = set(primary_keys) if primary_keys else set()
-        if pk_set:
-            for field in fields:
-                if field.name in pk_set:
-                    field.type.nullable = False
 
         # Check if Vector type with dedicated file format
         vector_names = [

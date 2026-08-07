@@ -90,9 +90,8 @@ class TableCommit:
                     commit_identifier=commit_identifier
                 )
         except CommitConflictError:
-            # Conflict detection runs before manifest and snapshot creation, so
-            # these files are known to be uncommitted. Generic commit failures
-            # are intentionally not aborted because their success is uncertain.
+            # These files are known to be uncommitted. Generic commit failures
+            # remain untouched because their success is uncertain.
             try:
                 self.file_store_commit.abort(non_empty_messages)
             except Exception:

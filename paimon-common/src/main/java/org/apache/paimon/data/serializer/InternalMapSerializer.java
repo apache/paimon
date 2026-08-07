@@ -100,6 +100,8 @@ public class InternalMapSerializer implements Serializer<InternalMap> {
     }
 
     private GenericMap copyBlobMap(InternalMap map) {
+        DataTypeRoot keyRoot = keyType.getTypeRoot();
+        boolean binaryKey = keyRoot == DataTypeRoot.BINARY || keyRoot == DataTypeRoot.VARBINARY;
         Map<Object, Object> copied = new LinkedHashMap<>();
         InternalArray keys = map.keyArray();
         InternalArray values = map.valueArray();
@@ -110,7 +112,7 @@ public class InternalMapSerializer implements Serializer<InternalMap> {
                     key == null ? null : keySerializer.copy(key),
                     value == null ? null : valueSerializer.copy(value));
         }
-        return new GenericMap(copied);
+        return binaryKey ? GenericMap.fromBinaryKeyMap(copied) : new GenericMap(copied);
     }
 
     @Override

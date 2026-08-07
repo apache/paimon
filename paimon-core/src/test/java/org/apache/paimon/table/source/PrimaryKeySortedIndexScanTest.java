@@ -191,7 +191,7 @@ class PrimaryKeySortedIndexScanTest {
                         rowType,
                         predicate,
                         Collections.singletonList(definition),
-                        (ignoredFile, ignoredDefinition, payloads) -> {
+                        (ignoredFile, ignoredDefinition, payloads, ignoredTotalRowCount) -> {
                             readersCreated.incrementAndGet();
                             return reader;
                         });
@@ -248,9 +248,10 @@ class PrimaryKeySortedIndexScanTest {
                         rowType,
                         predicate,
                         Collections.singletonList(definition),
-                        (ignoredFile, ignoredDefinition, payloads) -> {
+                        (ignoredFile, ignoredDefinition, payloads, totalRowCount) -> {
                             readersCreated.incrementAndGet();
                             assertThat(payloads).containsExactly(mergedPayload);
+                            assertThat(totalRowCount).isEqualTo(5);
                             return reader;
                         });
         PrimaryKeySortedIndexResult result = new PrimaryKeySortedIndexResult(evaluated);
@@ -297,14 +298,16 @@ class PrimaryKeySortedIndexScanTest {
                         rowType,
                         PredicateBuilder.and(builder.equal(0, 42), builder.equal(1, 99)),
                         Collections.singletonList(definition),
-                        (ignoredFile, ignoredDefinition, ignoredPayloads) -> reader);
+                        (ignoredFile, ignoredDefinition, ignoredPayloads, ignoredTotalRowCount) ->
+                                reader);
         PrimaryKeySortedIndexScan.EvaluatedPlan orResult =
                 PrimaryKeySortedIndexScan.evaluate(
                         plan,
                         rowType,
                         PredicateBuilder.or(builder.equal(0, 42), builder.equal(1, 99)),
                         Collections.singletonList(definition),
-                        (ignoredFile, ignoredDefinition, ignoredPayloads) -> reader);
+                        (ignoredFile, ignoredDefinition, ignoredPayloads, ignoredTotalRowCount) ->
+                                reader);
 
         assertThat(andResult.files().get(0).result()).isPresent();
         assertThat(andResult.files().get(0).result().get().results()).containsExactly(2L);
@@ -346,7 +349,8 @@ class PrimaryKeySortedIndexScanTest {
                         rowType,
                         predicate,
                         Collections.singletonList(definition),
-                        (file, ignoredDefinition, ignoredPayloads) -> failedReader);
+                        (file, ignoredDefinition, ignoredPayloads, ignoredTotalRowCount) ->
+                                failedReader);
 
         assertThat(evaluated.files()).hasSize(2);
         assertThat(evaluated.files().get(0).result()).isEmpty();

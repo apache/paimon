@@ -70,6 +70,7 @@ import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 /** Test for table with data evolution. */
@@ -2096,18 +2097,26 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(plannedFileCount(table, readF2, null)).isEqualTo(2);
     }
 
-    /**
-     * System-field-only projection is filtered out of readType in
-     * DataEvolutionFileStoreScan.withReadType — readType stays null and
-     * postFilterManifestEntriesEnabled returns false. The column-pruning path is not entered, so
-     * every file in every group flows through unchanged.
-     */
+    /** System-field-only projection is not used for per-file column pruning. */
     @Test
     public void testSystemFieldOnlyProjectionIsNotPruned() throws Exception {
         write(5);
         FileStoreTable table = getTableDefault();
         assertThat(plannedFileCount(table, null, null)).isEqualTo(2);
         assertThat(plannedFileCount(table, RowType.of(SpecialFields.ROW_ID), null)).isEqualTo(2);
+    }
+
+    @Test
+    public void testDropStatsWithoutFilterOrReadType() throws Exception {
+        write(5);
+
+        List<ManifestEntry> entries =
+                getTableDefault().store().newScan().dropStats().plan().files();
+
+        assertThat(entries.isEmpty()).isFalse();
+        for (ManifestEntry entry : entries) {
+            assertThat(entry.file().valueStats()).isEqualTo(EMPTY_STATS);
+        }
     }
 
     private List<DataFileMeta> writeOneFullRowAndCollectNewFiles(FileStoreTable table)

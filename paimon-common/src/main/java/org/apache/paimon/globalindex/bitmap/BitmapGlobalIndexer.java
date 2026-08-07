@@ -70,8 +70,9 @@ public class BitmapGlobalIndexer implements GlobalIndexer {
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
+            long totalRowCount,
             ExecutorService executor) {
         return new LazyFilteredBitmapReader(
-                fileReader, files, keySerializer, fallbackScanMaxSize, executor);
+                fileReader, files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);
     }
 }

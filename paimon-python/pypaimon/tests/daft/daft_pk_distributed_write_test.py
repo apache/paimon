@@ -227,6 +227,10 @@ def test_postpone_mode_primary_key_write_preserves_existing_path(catalog):
 
     assert sum(summary["rows"]) == 2
     assert table.snapshot_manager().get_latest_snapshot() is not None
+    scanner = table.new_read_builder().new_scan().file_scanner
+    manifests, _ = scanner.manifest_scanner()
+    entries = scanner.manifest_file_manager.read_entries_parallel(manifests)
+    assert {entry.bucket for entry in entries} == {-2}
 
 
 def test_group_udfs_reuse_worker_table_metadata(catalog, monkeypatch):

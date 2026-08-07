@@ -46,7 +46,7 @@ import java.util.stream.Collectors;
  *       columns also overlap, return conflicting result.
  * </ol>
  */
-public class RowIdColumnConflictChecker {
+public class RowIdColumnConflictChecker implements RowIdConflictChecker {
 
     private final SchemaManager schemaManager;
     private final List<WriteRange> writeRanges;
@@ -122,7 +122,8 @@ public class RowIdColumnConflictChecker {
         return new Range(from, to);
     }
 
-    boolean isEmpty() {
+    @Override
+    public boolean isEmpty() {
         return writeRanges.isEmpty();
     }
 
@@ -134,7 +135,8 @@ public class RowIdColumnConflictChecker {
      * @param file committed incremental data file
      * @return true if conflict
      */
-    boolean conflictsWith(DataFileMeta file) {
+    @Override
+    public boolean conflictsWith(DataFileMeta file) {
         Long firstRowId = file.firstRowId();
         if (firstRowId == null) {
             return false;

@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -29,6 +30,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -66,6 +68,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /** Scanner for shard-based global indexes on data-evolution tables. */
 public class DataEvolutionGlobalIndexScanner implements Closeable {
 
+    private static final int MAX_TOP_N_LIMIT = 100;
+
     private static final Logger LOG =
             LoggerFactory.getLogger(DataEvolutionGlobalIndexScanner.class);
 
@@ -86,6 +90,28 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             FileIO fileIO,
             IndexPathFactory indexPathFactory,
             Collection<IndexFileMeta> indexFiles) {
+        this(
+                table,
+                snapshot,
+                partitionFilter,
+                options,
+                rowType,
+                fileIO,
+                indexPathFactory,
+                indexFiles,
+                indexFiles);
+    }
+
+    private DataEvolutionGlobalIndexScanner(
+            FileStoreTable table,
+            @Nullable Snapshot snapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            Options options,
+            RowType rowType,
+            FileIO fileIO,
+            IndexPathFactory indexPathFactory,
+            Collection<IndexFileMeta> coverageIndexFiles,
+            Collection<IndexFileMeta> indexFiles) {
         this.table = table;
         this.options = options;
         this.rowType = rowType;
@@ -97,7 +123,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table,
                         snapshot,
                         partitionFilter,
-                        indexFiles,
+                        coverageIndexFiles,
                         table.coreOptions().scalarIndexSearchMode());
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, IndexMetaFileGroup> indexMetas = new HashMap<>();
@@ -128,7 +154,6 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             }
             group.addFile(indexType, range, indexFile);
         }
-
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
                 fId -> {
                     List<IndexMetaFileGroup> groups = new ArrayList<>();
@@ -195,11 +220,12 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
 
     public static Optional<DataEvolutionGlobalIndexScanner> create(
             FileStoreTable table, Collection<IndexFileMeta> indexFiles) {
-        return create(table, null, indexFiles);
+        return create(table, null, null, indexFiles);
     }
 
     public static Optional<DataEvolutionGlobalIndexScanner> create(
             FileStoreTable table,
+            @Nullable Snapshot pinnedSnapshot,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles) {
         List<IndexFileMeta> globalIndexFiles = globalIndexFiles(indexFiles);
@@ -209,7 +235,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return Optional.of(
                 new DataEvolutionGlobalIndexScanner(
                         table,
-                        tryTravelOrLatest(table),
+                        pinnedSnapshot != null ? pinnedSnapshot : tryTravelOrLatest(table),
                         partitionFilter,
                         table.coreOptions().toConfiguration(),
                         table.rowType(),
@@ -241,6 +267,65 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
                         indexFiles));
+    }
+
+    /**
+     * Creates a scanner for a single-column TopN backed by a primary BTree index.
+     *
+     * <p>Indexes carrying the ordered field only as an extra field are not ordered by that field
+     * and cannot serve this scan.
+     */
+    public static Optional<DataEvolutionGlobalIndexScanner> createForTopN(
+            FileStoreTable table, @Nullable PartitionPredicate partitionFilter, TopN topN) {
+        if (!isSupportedTopN(topN)) {
+            return Optional.empty();
+        }
+
+        DataField indexField = table.rowType().getField(topN.orders().get(0).field().name());
+        int fieldId = indexField.id();
+        @Nullable Snapshot snapshot = tryTravelOrLatest(table);
+        List<IndexFileMeta> indexFiles =
+                table.store().newIndexFileHandler()
+                        .scan(snapshot, topNIndexFileFilter(partitionFilter, fieldId)).stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(Collectors.toList());
+        if (indexFiles.isEmpty()) {
+            return Optional.empty();
+        }
+        List<IndexFileMeta> selectedIndexFiles =
+                BTreeTopNIndexFileSelector.select(indexFiles, indexField, topN);
+        return Optional.of(
+                new DataEvolutionGlobalIndexScanner(
+                        table,
+                        snapshot,
+                        partitionFilter,
+                        table.coreOptions().toConfiguration(),
+                        table.rowType(),
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        indexFiles,
+                        selectedIndexFiles));
+    }
+
+    private static boolean isSupportedTopN(TopN topN) {
+        return topN != null
+                && topN.limit() >= 0
+                && topN.limit() <= MAX_TOP_N_LIMIT
+                && topN.orders().size() == 1;
+    }
+
+    private static Filter<IndexManifestEntry> topNIndexFileFilter(
+            @Nullable PartitionPredicate partitionFilter, int fieldId) {
+        return entry -> {
+            if (partitionFilter != null && !partitionFilter.test(entry.partition())) {
+                return false;
+            }
+            IndexFileMeta indexFile = entry.indexFile();
+            GlobalIndexMeta globalIndex = indexFile.globalIndexMeta();
+            return globalIndex != null
+                    && globalIndex.indexFieldId() == fieldId
+                    && BTreeGlobalIndexerFactory.IDENTIFIER.equals(indexFile.indexType());
+        };
     }
 
     private static Filter<IndexManifestEntry> indexFileFilter(
@@ -287,9 +372,45 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
         return globalIndexEvaluator.evaluate(predicate);
     }
 
+    public Optional<GlobalIndexEvaluator.Evaluation> scanWithCoverage(Predicate predicate) {
+        return globalIndexEvaluator.evaluateWithContributingFields(predicate);
+    }
+
+    public Optional<GlobalIndexResult> scan(TopN topN) {
+        if (!isSupportedTopN(topN)) {
+            return Optional.empty();
+        }
+        if (topN.limit() == 0) {
+            return Optional.of(GlobalIndexResult.createEmpty());
+        }
+        String fieldName = topN.orders().get(0).field().name();
+        if (!rowType.containsField(fieldName)) {
+            return Optional.empty();
+        }
+        return globalIndexEvaluator.evaluateTopN(topN);
+    }
+
     public GlobalIndexResult unindexedRows(Predicate predicate) {
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
         for (Range range : coverage.unindexedRanges(rowType, predicate)) {
+            rows.addRange(range);
+        }
+        return GlobalIndexResult.create(rows);
+    }
+
+    public GlobalIndexResult unindexedRowsForContributingFields(
+            Collection<Integer> contributingFieldIds) {
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        for (Range range : coverage.unindexedRanges(contributingFieldIds)) {
+            rows.addRange(range);
+        }
+        return GlobalIndexResult.create(rows);
+    }
+
+    public GlobalIndexResult unindexedRows(TopN topN) {
+        String fieldName = topN.orders().get(0).field().name();
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        for (Range range : coverage.unindexedRanges(rowType.getField(fieldName).id())) {
             rows.addRange(range);
         }
         return GlobalIndexResult.create(rows);
@@ -321,7 +442,10 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                 () ->
                                         new OffsetGlobalIndexReader(
                                                 globalIndexer.createReader(
-                                                        indexFileReadWrite, globalMetas, executor),
+                                                        indexFileReadWrite,
+                                                        globalMetas,
+                                                        range.count(),
+                                                        executor),
                                                 range.from,
                                                 range.to),
                                 executor));

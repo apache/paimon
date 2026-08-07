@@ -577,6 +577,33 @@ commit.close()
   same order for that shard.
 - **Parallelism**: run multiple shards by calling `new_shard_updator(shard_idx, num_shards)` for each shard.
 
+## Concurrent Compaction Recovery
+
+A partial-column update records the row-ID boundary of each data file it read.
+If compaction merges those files before `commit`, PyPaimon automatically
+rebases regular (non-BLOB and non-VECTOR) staged update files onto the latest
+file boundaries and retries the commit.
+
+The recovery is bounded by the total size of the current data files whose
+row-ID ranges are affected:
+
+```python
+options = {
+    'row-tracking.enabled': 'true',
+    'data-evolution.enabled': 'true',
+    'data-evolution.row-id-conflict-rewrite.max-size': '256 MB',
+}
+```
+
+The default is `256 MB`. Set the option to `0 B` to disable automatic
+rewriting. If the affected files exceed the configured size, or if the row IDs
+were removed by an overwrite, the commit keeps the normal
+`Row ID existence conflict` behavior. Logical concurrent updates are still
+checked and are never hidden by compaction recovery.
+
+Recovery is not attempted when deletion vectors are enabled, or when the same
+commit contains existing-row BLOB or VECTOR staged files.
+
 ## Stream Mode
 
 Data evolution also supports stream mode. The operation semantics are the same

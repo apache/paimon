@@ -37,6 +37,7 @@ from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.write.commit.conflict_detection import CommitConflictError
 from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
 
@@ -602,7 +603,7 @@ class DynamicBucketTest(unittest.TestCase):
             stale_writer.close()
             stale_commit.close()
 
-    def test_retry_then_hash_index_conflict_preserves_prepared_files(self):
+    def test_retry_then_hash_index_conflict_aborts_prepared_files(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'retry_hash_conflict')
             writer, commit, messages = self._prepare_indexed_write(table, [1])
@@ -621,7 +622,8 @@ class DynamicBucketTest(unittest.TestCase):
             original_snapshot_commit = commit.file_store_commit.snapshot_commit
             calls = 0
 
-            def lose_first_compare_and_set(snapshot, statistics):
+            def lose_first_compare_and_set(
+                    base_snapshot_uuid, snapshot, statistics):
                 nonlocal calls
                 calls += 1
                 concurrent_writer, concurrent_commit, concurrent_messages = (
@@ -641,13 +643,13 @@ class DynamicBucketTest(unittest.TestCase):
                 '_commit_retry_wait',
             ):
                 with self.assertRaisesRegex(
-                    RuntimeError, 'HASH index assignment conflict'
+                    CommitConflictError, 'HASH index assignment conflict'
                 ):
                     commit.commit(messages)
 
             self.assertEqual(1, calls)
             self.assertTrue(all(
-                table.file_io.exists(path) for path in prepared_paths
+                not table.file_io.exists(path) for path in prepared_paths
             ))
             writer.close()
             commit.close()

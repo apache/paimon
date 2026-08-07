@@ -92,12 +92,24 @@ public class SstFileReader implements Closeable {
         return new SstFileIterator(indexBlock.iterator());
     }
 
+    public SstFileReverseIterator createReverseIterator() {
+        return new SstFileReverseIterator(indexBlock.reverseIterator());
+    }
+
     private BlockIterator getNextBlock(BlockIterator indexBlockIterator) {
         // index block handle, point to the key, value position.
         MemorySlice blockHandle = indexBlockIterator.next().getValue();
         BlockReader dataBlock =
                 readBlock(BlockHandle.readBlockHandle(blockHandle.toInput()), false);
         return dataBlock.iterator();
+    }
+
+    private ReverseBlockIterator getPreviousBlock(ReverseBlockIterator indexBlockIterator) {
+        // index block handle, point to the key, value position.
+        MemorySlice blockHandle = indexBlockIterator.next().getValue();
+        BlockReader dataBlock =
+                readBlock(BlockHandle.readBlockHandle(blockHandle.toInput()), false);
+        return dataBlock.reverseIterator();
     }
 
     /**
@@ -212,6 +224,30 @@ public class SstFileReader implements Closeable {
             }
 
             return getNextBlock(indexIterator);
+        }
+    }
+
+    /** An iterator which reads an SST file from the largest key to the smallest key. */
+    public class SstFileReverseIterator {
+
+        private final ReverseBlockIterator indexIterator;
+
+        SstFileReverseIterator(ReverseBlockIterator indexIterator) {
+            this.indexIterator = indexIterator;
+        }
+
+        /**
+         * Read a batch of records from this SST File and move current record position to the
+         * previous batch.
+         *
+         * @return current batch of records, null if reaching file beginning.
+         */
+        @Nullable
+        public ReverseBlockIterator readBatch() throws IOException {
+            if (!indexIterator.hasNext()) {
+                return null;
+            }
+            return getPreviousBlock(indexIterator);
         }
     }
 }

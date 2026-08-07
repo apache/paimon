@@ -1082,6 +1082,16 @@ class RESTCatalogServer:
                     ErrorResponse("SNAPSHOT", None, "Snapshot is required for commit operation", 400), 400
                 )
 
+            table = self._get_file_table(identifier)
+            current_snapshot = table.snapshot_manager().get_latest_snapshot()
+            current_snapshot_uuid = (
+                current_snapshot.uuid if current_snapshot else None
+            )
+            if current_snapshot_uuid != commit_request.base_snapshot_uuid:
+                return self._mock_response(
+                    CommitTableResponse(success=False), 200
+                )
+
             # Write snapshot to file system
             self._write_snapshot_files(identifier, commit_request.snapshot, commit_request.statistics)
 

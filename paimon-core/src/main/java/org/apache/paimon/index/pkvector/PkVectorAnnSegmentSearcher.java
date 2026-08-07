@@ -203,6 +203,7 @@ public class PkVectorAnnSegmentSearcher {
                 indexer.createReader(
                         meta -> fileIO.newInputStream(meta.filePath()),
                         Collections.singletonList(ioMeta),
+                        segment.rowCount(),
                         executor);
         try {
             VectorSearch search = new VectorSearch(query, limit, vectorField.name(), searchOptions);
@@ -299,6 +300,7 @@ public class PkVectorAnnSegmentSearcher {
                 indexer.createReader(
                         meta -> fileIO.newInputStream(meta.filePath()),
                         Collections.singletonList(ioMeta),
+                        segment.rowCount(),
                         executor);
         try {
             BatchVectorSearch search =

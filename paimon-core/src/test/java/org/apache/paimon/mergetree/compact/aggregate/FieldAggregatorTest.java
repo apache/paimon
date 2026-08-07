@@ -27,6 +27,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolAndAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolOrAggFactory;
@@ -51,6 +52,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -64,6 +66,7 @@ import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.HllSketchUtil;
 import org.apache.paimon.utils.RoaringBitmap32;
 import org.apache.paimon.utils.RoaringBitmap64;
+import org.apache.paimon.utils.TypeCheckUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -75,8 +78,11 @@ import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -511,6 +517,103 @@ public class FieldAggregatorTest {
         Integer accumulator = 1;
         Integer inputField = 10;
         assertThat(fieldMinAgg.agg(accumulator, inputField)).isEqualTo(1);
+    }
+
+    @Test
+    public void testFieldMaxMinAggWithBooleanType() {
+        FieldMaxAgg fieldMaxAgg = new FieldMaxAggFactory().create(new BooleanType(), null, null);
+        assertThat(fieldMaxAgg.agg(null, true)).isEqualTo(true);
+        assertThat(fieldMaxAgg.agg(false, null)).isEqualTo(false);
+        assertThat(fieldMaxAgg.agg(false, false)).isEqualTo(false);
+        assertThat(fieldMaxAgg.agg(false, true)).isEqualTo(true);
+        assertThat(fieldMaxAgg.agg(true, false)).isEqualTo(true);
+        assertThat(fieldMaxAgg.agg(true, true)).isEqualTo(true);
+
+        FieldMinAgg fieldMinAgg = new FieldMinAggFactory().create(new BooleanType(), null, null);
+        assertThat(fieldMinAgg.agg(null, false)).isEqualTo(false);
+        assertThat(fieldMinAgg.agg(true, null)).isEqualTo(true);
+        assertThat(fieldMinAgg.agg(true, true)).isEqualTo(true);
+        assertThat(fieldMinAgg.agg(true, false)).isEqualTo(false);
+        assertThat(fieldMinAgg.agg(false, true)).isEqualTo(false);
+        assertThat(fieldMinAgg.agg(false, false)).isEqualTo(false);
+    }
+
+    @Test
+    public void testFieldMaxMinAggComparableTypesAreAllSupported() {
+        // The factory admits a field iff TypeCheckUtils.isComparable, so every admitted type must
+        // be one InternalRowUtils.compare can actually order. Keep the two in lockstep: a new
+        // comparable type must be added to compare() in the same change.
+        Map<DataType, Object> samples = new LinkedHashMap<>();
+        samples.put(DataTypes.BOOLEAN(), true);
+        samples.put(DataTypes.TINYINT(), (byte) 1);
+        samples.put(DataTypes.SMALLINT(), (short) 1);
+        samples.put(DataTypes.INT(), 1);
+        samples.put(DataTypes.BIGINT(), 1L);
+        samples.put(DataTypes.FLOAT(), 1.0f);
+        samples.put(DataTypes.DOUBLE(), 1.0d);
+        samples.put(DataTypes.DECIMAL(4, 2), Decimal.fromUnscaledLong(1, 4, 2));
+        samples.put(DataTypes.CHAR(1), BinaryString.fromString("a"));
+        samples.put(DataTypes.VARCHAR(1), BinaryString.fromString("a"));
+        samples.put(DataTypes.BINARY(1), new byte[] {1});
+        samples.put(DataTypes.VARBINARY(1), new byte[] {1});
+        samples.put(DataTypes.DATE(), 1);
+        samples.put(DataTypes.TIME(), 1);
+        samples.put(DataTypes.TIMESTAMP(), Timestamp.fromEpochMillis(1));
+        samples.put(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(), Timestamp.fromEpochMillis(1));
+
+        for (Map.Entry<DataType, Object> entry : samples.entrySet()) {
+            DataType type = entry.getKey();
+            Object value = entry.getValue();
+            assertThat(TypeCheckUtils.isComparable(type)).as("isComparable(%s)", type).isTrue();
+            assertThat(new FieldMaxAggFactory().create(type, null, "f").agg(value, value))
+                    .as("max on %s", type)
+                    .isEqualTo(value);
+            assertThat(new FieldMinAggFactory().create(type, null, "f").agg(value, value))
+                    .as("min on %s", type)
+                    .isEqualTo(value);
+        }
+
+        // Guard against a new comparable type root slipping in without being covered above: the
+        // sampled roots must be exactly the roots that are not excluded by isComparable.
+        Set<DataTypeRoot> sampledRoots = new HashSet<>();
+        samples.keySet().forEach(type -> sampledRoots.add(type.getTypeRoot()));
+        Set<DataTypeRoot> expectedRoots = new HashSet<>(Arrays.asList(DataTypeRoot.values()));
+        expectedRoots.removeAll(
+                Arrays.asList(
+                        DataTypeRoot.MAP,
+                        DataTypeRoot.MULTISET,
+                        DataTypeRoot.ROW,
+                        DataTypeRoot.ARRAY,
+                        DataTypeRoot.VECTOR,
+                        DataTypeRoot.VARIANT,
+                        DataTypeRoot.BLOB));
+        assertThat(sampledRoots)
+                .as("a comparable type root must be covered here and in InternalRowUtils.compare")
+                .isEqualTo(expectedRoots);
+    }
+
+    @Test
+    public void testFieldMaxMinAggWithIncomparableTypeShouldFail() {
+        // These types have no ordering, so max/min must be rejected when the aggregator is
+        // created rather than failing later during merging.
+        for (DataType incomparable :
+                Arrays.asList(
+                        DataTypes.ARRAY(DataTypes.INT()),
+                        DataTypes.MAP(DataTypes.INT(), DataTypes.INT()),
+                        DataTypes.MULTISET(DataTypes.INT()),
+                        DataTypes.ROW(DataTypes.FIELD(0, "f0", DataTypes.INT())),
+                        DataTypes.VARIANT(),
+                        DataTypes.BLOB(),
+                        DataTypes.VECTOR(3, DataTypes.FLOAT()))) {
+            assertThatThrownBy(() -> new FieldMaxAggFactory().create(incomparable, null, "label"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Data type for max column 'label' must be comparable but was");
+            assertThatThrownBy(() -> new FieldMinAggFactory().create(incomparable, null, "label"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Data type for min column 'label' must be comparable but was");
+        }
     }
 
     @Test

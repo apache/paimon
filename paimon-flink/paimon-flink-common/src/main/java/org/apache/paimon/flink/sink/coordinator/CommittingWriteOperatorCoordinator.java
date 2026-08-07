@@ -76,7 +76,6 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private final OperatorCoordinator.Context context;
     private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
     private final boolean streamingCheckpointEnabled;
-    private final boolean failoverAfterRecovery;
     private final int parallelism;
 
     private final WriterCommittables[] subtaskCommittables;
@@ -101,13 +100,11 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
             OperatorCoordinator.Context context,
             Committer.Factory<Committable, ManifestCommittable> committerFactory,
             boolean streamingCheckpointEnabled,
-            String initialCommitUser,
-            boolean failoverAfterRecovery) {
+            String initialCommitUser) {
         this.context = context;
         this.committerFactory = committerFactory;
         this.streamingCheckpointEnabled = streamingCheckpointEnabled;
         this.commitUser = initialCommitUser;
-        this.failoverAfterRecovery = failoverAfterRecovery;
         this.parallelism = context.currentParallelism();
         this.subtaskCommittables = new WriterCommittables[parallelism];
         this.committablesSerializer =
@@ -354,31 +351,15 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
 
     // replaces CommittableStateManager because committables are not stored in the committer
     private void recover(long checkpointId) throws Exception {
-        if (failoverAfterRecovery) {
-            // recommit the restored committables and trigger a failover to reinitialize all writers
-            Map<Long, Long> watermarkPerCheckpoint =
-                    alignWatermarkPerCheckpoint(
-                            checkpointId, subtaskCommittables, watermarkAligner);
-            commitUpToCheckpoint(
-                    checkpointId,
-                    pollManifestCommittablesForCheckpoint(
-                            checkpointId, subtaskCommittables, watermarkPerCheckpoint, committer),
-                    watermarkPerCheckpoint,
-                    committables -> {
-                        int numCommitted = committer.filterAndCommit(committables, true, true);
-                        if (numCommitted > 0) {
-                            throw new RuntimeException(
-                                    "This exception is intentionally thrown after committing the "
-                                            + "restored checkpoints. By restarting the job we hope "
-                                            + "that writers can start writing based on these new commits.");
-                        }
-                    });
-        } else {
-            // just abandon the restoring committables
-            for (WriterCommittables subtaskCommit : subtaskCommittables) {
-                subtaskCommit.clearCommittablesBeforeCheckpoint(checkpointId, true);
-            }
-        }
+        // Mirror RestoreCommittableStateManager: re-commit restored committables and keep running.
+        Map<Long, Long> watermarkPerCheckpoint =
+                alignWatermarkPerCheckpoint(checkpointId, subtaskCommittables, watermarkAligner);
+        commitUpToCheckpoint(
+                checkpointId,
+                pollManifestCommittablesForCheckpoint(
+                        checkpointId, subtaskCommittables, watermarkPerCheckpoint, committer),
+                watermarkPerCheckpoint,
+                committables -> committer.filterAndCommit(committables, true, true));
     }
 
     @VisibleForTesting
@@ -619,29 +600,22 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
         private final boolean streamingCheckpointEnabled;
         private final String initialCommitUser;
-        private final boolean failoverAfterRecovery;
 
         public Provider(
                 OperatorID operatorId,
                 Committer.Factory<Committable, ManifestCommittable> committerFactory,
                 boolean streamingCheckpointEnabled,
-                String initialCommitUser,
-                boolean failoverAfterRecovery) {
+                String initialCommitUser) {
             super(operatorId);
             this.committerFactory = committerFactory;
             this.streamingCheckpointEnabled = streamingCheckpointEnabled;
             this.initialCommitUser = initialCommitUser;
-            this.failoverAfterRecovery = failoverAfterRecovery;
         }
 
         @Override
         public OperatorCoordinator getCoordinator(OperatorCoordinator.Context context) {
             return new CommittingWriteOperatorCoordinator(
-                    context,
-                    committerFactory,
-                    streamingCheckpointEnabled,
-                    initialCommitUser,
-                    failoverAfterRecovery);
+                    context, committerFactory, streamingCheckpointEnabled, initialCommitUser);
         }
     }
 }

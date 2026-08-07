@@ -167,6 +167,10 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
             this.ioManager = ioManager;
         }
 
+        public MergeFunctionFactory<KeyValue> wrapped() {
+            return wrapped;
+        }
+
         @Override
         public MergeFunction<KeyValue> create(@Nullable RowType readType) {
             return new LookupMergeFunction(

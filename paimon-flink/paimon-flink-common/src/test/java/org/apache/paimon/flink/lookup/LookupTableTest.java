@@ -153,7 +153,7 @@ public class LookupTableTest extends TableTestBase {
             TableBulkLoader bulkLoader = table.createBulkLoader();
             bulkLoader.write(new byte[] {1}, new byte[] {1});
             assertThatThrownBy(() -> bulkLoader.write(new byte[] {1}, new byte[] {2}))
-                    .hasMessageContaining("Keys must be added in strict ascending order");
+                    .hasMessageContaining("strictly increasing");
         }
 
         // test bulk load 100_000 records

@@ -68,6 +68,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private final AppendBatchTableScan batchScan;
 
     private Predicate filter;
+    private TopN topN;
+    private Integer pushDownLimit;
     private RowRangeIndex pushedRowRangeIndex;
     private GlobalIndexResult globalIndexResult;
 
@@ -148,7 +150,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public InnerTableScan withTopN(TopN topN) {
-        batchScan.withTopN(topN);
+        this.topN = topN;
         return this;
     }
 
@@ -166,6 +168,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public InnerTableScan withLimit(int limit) {
+        this.pushDownLimit = limit;
         batchScan.withLimit(limit);
         return this;
     }
@@ -255,9 +258,16 @@ public class DataEvolutionBatchScan implements DataTableScan {
     public Plan plan() {
         RowRangeIndex rowRangeIndex = this.pushedRowRangeIndex;
         ScoreGetter scoreGetter = null;
+        boolean globalIndexTopNCandidatesFound = false;
 
         if (rowRangeIndex == null) {
-            Optional<GlobalIndexResult> indexResult = evalGlobalIndex();
+            Optional<GlobalIndexResult> indexResult;
+            if (canPushDownGlobalIndexTopN()) {
+                indexResult = evalGlobalIndexTopN();
+                globalIndexTopNCandidatesFound = indexResult.isPresent();
+            } else {
+                indexResult = evalGlobalIndex();
+            }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
                 rowRangeIndex = RowRangeIndex.create(result.results().toRangeList());
@@ -267,6 +277,10 @@ public class DataEvolutionBatchScan implements DataTableScan {
             } else if (filter != null) {
                 LOG.info("Scan table '{}' without global index.", table.name());
             }
+        }
+
+        if (!globalIndexTopNCandidatesFound && topN != null) {
+            batchScan.withTopN(topN);
         }
 
         if (rowRangeIndex == null) {
@@ -304,12 +318,17 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
             long lookupStart = System.nanoTime();
-            Optional<GlobalIndexResult> result = scanner.scan(globalIndexFilter);
+            Optional<GlobalIndexEvaluator.Evaluation> result =
+                    scanner.scanWithCoverage(globalIndexFilter);
             long lookupDuration = System.nanoTime() - lookupStart;
             if (result.isPresent()) {
                 long coverageStart = System.nanoTime();
                 GlobalIndexResult finalResult =
-                        result.get().or(scanner.unindexedRows(globalIndexFilter));
+                        result.get()
+                                .result()
+                                .or(
+                                        scanner.unindexedRowsForContributingFields(
+                                                result.get().contributingFieldIds()));
                 long coverageDuration = System.nanoTime() - coverageStart;
                 long totalDuration = System.nanoTime() - totalStart;
                 LOG.info(
@@ -325,6 +344,73 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return Optional.empty();
         } catch (IOException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    private Optional<GlobalIndexResult> evalGlobalIndexTopN() {
+        CoreOptions options = table.coreOptions();
+        PartitionPredicate partitionFilter =
+                batchScan.snapshotReader().manifestsReader().partitionFilter();
+        long totalStart = System.nanoTime();
+        Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
+                DataEvolutionGlobalIndexScanner.createForTopN(table, partitionFilter, topN);
+        long metadataDuration = System.nanoTime() - totalStart;
+        if (!optionalScanner.isPresent()) {
+            return Optional.empty();
+        }
+
+        try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
+            long lookupStart = System.nanoTime();
+            Optional<GlobalIndexResult> result = scanner.scan(topN);
+            long lookupDuration = System.nanoTime() - lookupStart;
+            if (!result.isPresent()) {
+                return Optional.empty();
+            }
+
+            long coverageStart = System.nanoTime();
+            GlobalIndexResult finalResult = result.get().or(scanner.unindexedRows(topN));
+            long coverageDuration = System.nanoTime() - coverageStart;
+            long totalDuration = System.nanoTime() - totalStart;
+            LOG.info(
+                    "Scan table '{}' with BTree global index TopN. searchMode='{}', topN='{}', total={} ms, metadata={} ms, lookup={} ms, coverage={} ms.",
+                    table.name(),
+                    options.scalarIndexSearchMode(),
+                    topN,
+                    totalDuration / 1_000_000,
+                    metadataDuration / 1_000_000,
+                    lookupDuration / 1_000_000,
+                    coverageDuration / 1_000_000);
+            return Optional.of(finalResult);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private boolean canPushDownGlobalIndexTopN() {
+        if (topN == null
+                || pushDownLimit != null
+                || globalIndexResult != null
+                || !table.rowType().containsField(topN.orders().get(0).field().name())) {
+            return false;
+        }
+        CoreOptions options = table.coreOptions();
+        return supportsGlobalIndexTopN(options)
+                && options.globalIndexEnabled()
+                && !options.deletionVectorsEnabled()
+                && !options.queryAuthEnabled()
+                && !batchScan.snapshotReader().hasNonPartitionFilter();
+    }
+
+    private boolean supportsGlobalIndexTopN(CoreOptions options) {
+        switch (options.startupMode()) {
+            case LATEST_FULL:
+            case LATEST:
+            case FROM_TIMESTAMP:
+            case FROM_SNAPSHOT:
+            case FROM_SNAPSHOT_FULL:
+                return true;
+            default:
+                return false;
         }
     }
 

@@ -57,6 +57,7 @@ public class FormatTableSingleFileWriter {
         this.fileIO = fileIO;
         this.path = path;
 
+        boolean opened = false;
         try {
             if (factory instanceof SupportsDirectWrite) {
                 throw new UnsupportedOperationException("Does not support SupportsDirectWrite.");
@@ -64,14 +65,24 @@ public class FormatTableSingleFileWriter {
                 out = fileIO.newTwoPhaseOutputStream(path, false);
                 writer = factory.create(out, compression);
             }
+            opened = true;
         } catch (IOException e) {
             LOG.warn(
                     "Failed to open the bulk writer, closing the output stream and throw the error.",
                     e);
-            if (out != null) {
-                abort();
-            }
             throw new UncheckedIOException(e);
+        } finally {
+            // only clean up what this writer managed to create, a failure before that (for example
+            // the file already exists) must not delete someone else's file
+            if (!opened && (out != null || writer != null)) {
+                try {
+                    abort();
+                } catch (Throwable t) {
+                    // never let the cleanup replace the failure that caused it
+                    LOG.warn(
+                            "Failed to clean up {} after the writer could not be opened.", path, t);
+                }
+            }
         }
 
         this.closed = false;
@@ -157,9 +168,13 @@ public class FormatTableSingleFileWriter {
                 committer = ((TwoPhaseOutputStream) out).closeForCommit();
                 out = null;
             }
-        } catch (IOException e) {
+        } catch (Throwable e) {
             LOG.warn("Exception occurs when closing file {}. Cleaning up.", path, e);
-            abort();
+            try {
+                abort();
+            } catch (Throwable t) {
+                e.addSuppressed(t);
+            }
             throw e;
         } finally {
             closed = true;

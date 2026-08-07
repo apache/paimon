@@ -25,7 +25,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.{ImmutableMap, 
 import org.apache.paimon.spark.SparkInternalRowWrapper
 import org.apache.paimon.spark.SparkTypeUtils.toPaimonRowType
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions._
-import org.apache.paimon.spark.function.{BlobViewUnbound, DescriptorToStringUnbound, PathToDescriptorUnbound}
+import org.apache.paimon.spark.function.{BlobViewUnbound, DescriptorToPresignedUrlUnbound, DescriptorToStringUnbound, PathToDescriptorUnbound}
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.types.{ArrayType, DataType => PaimonDataType, LocalZonedTimestampType, MapType, RowType, TimestampType}
 import org.apache.paimon.utils.ProjectedRow
@@ -48,6 +48,8 @@ object PaimonFunctions {
   val PATH_TO_DESCRIPTOR: String = "path_to_descriptor"
   val DESCRIPTOR_TO_STRING: String = "descriptor_to_string"
   val BLOB_VIEW: String = "blob_view"
+  val DESCRIPTOR_TO_PRESIGNED_URL: String = "descriptor_to_presigned_url"
+  val TRY_DESCRIPTOR_TO_PRESIGNED_URL: String = "try_descriptor_to_presigned_url"
 
   private val FUNCTIONS = ImmutableMap
     .builder[String, UnboundFunction]()
@@ -58,6 +60,8 @@ object PaimonFunctions {
     .put(PATH_TO_DESCRIPTOR, new PathToDescriptorUnbound)
     .put(DESCRIPTOR_TO_STRING, new DescriptorToStringUnbound)
     .put(BLOB_VIEW, new BlobViewUnbound)
+    .put(DESCRIPTOR_TO_PRESIGNED_URL, new DescriptorToPresignedUrlUnbound(false))
+    .put(TRY_DESCRIPTOR_TO_PRESIGNED_URL, new DescriptorToPresignedUrlUnbound(true))
     .build()
 
   /** The bucket function type to the function name mapping */
@@ -76,6 +80,17 @@ object PaimonFunctions {
 
   @Nullable
   def load(name: String): UnboundFunction = FUNCTIONS.get(name)
+
+  @Nullable
+  def load(name: String, catalogName: String): UnboundFunction = {
+    if (name.equalsIgnoreCase(DESCRIPTOR_TO_PRESIGNED_URL)) {
+      new DescriptorToPresignedUrlUnbound(false, catalogName)
+    } else if (name.equalsIgnoreCase(TRY_DESCRIPTOR_TO_PRESIGNED_URL)) {
+      new DescriptorToPresignedUrlUnbound(true, catalogName)
+    } else {
+      load(name)
+    }
+  }
 }
 
 /**

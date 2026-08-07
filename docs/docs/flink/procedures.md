@@ -136,7 +136,7 @@ All available procedures are listed below.
             including_tables => 'table_.*', 
             excluding_tables => 'ignore', 
             table_options => 'sink.parallelism=4',
-            compat_strategy => 'full')
+            compact_strategy => 'full')
       </td>
    </tr>
    <tr>
@@ -1060,7 +1060,7 @@ All available procedures are listed below.
          To create a global index on a table for accelerating queries. Arguments:
             <li>table(required): the target table identifier.</li>
             <li>index_column(required): the column name to build index on.</li>
-            <li>index_type(required): the type of global index, supported types include 'btree', 'bitmap', 'ivf-flat', 'ivf-pq', 'ivf-hnsw-flat', 'ivf-hnsw-sq', 'full-text'.</li>
+            <li>index_type(required): the type of global index, supported types include 'btree', 'bitmap', 'ivf-flat', 'ivf-pq', 'ivf-sq', 'ivf-rq', 'diskann', and 'full-text'.</li>
             <li>partitions(optional): partition filter for selective index creation.</li>
             <li>options(optional): additional dynamic options for index creation.</li>
       </td>
@@ -1164,7 +1164,7 @@ All available procedures are listed below.
          CALL sys.full_text_search(<br/>
             `table` => 'default.articles',<br/>
             `column` => 'content',<br/>
-            query => '{"match":{"column":"content","terms":"paimon lake"}}',<br/>
+            query => '{"match":{"query":"paimon lake"}}',<br/>
             top_k => 10,<br/>
             projection => 'id,content,__paimon_search_score')
       </td>
@@ -1177,8 +1177,10 @@ All available procedures are listed below.
             vector_column => 'columnName',<br/>
             query_vector => 'v1,v2,...',<br/>
             top_k => topK,<br/>
-            projection => 'col1,col2',<br/>
-            options => 'key1=value1;key2=value2')<br/>
+            projection => 'col1,col2,__paimon_search_score',<br/>
+            options => 'key1=value1;key2=value2',<br/>
+            `where` => 'predicate',<br/>
+            partitions => 'pt1=v1,pt2=v2;pt1=v3,pt2=v4')<br/>
       </td>
       <td>
          To perform vector similarity search on a table with a global vector index. Returns JSON-serialized rows. Arguments:
@@ -1188,6 +1190,8 @@ All available procedures are listed below.
             <li>top_k(required): the number of nearest neighbors to return.</li>
             <li>projection(optional): comma-separated column names to include in the result. If omitted, all columns are returned.</li>
             <li>options(optional): additional dynamic options of the table.</li>
+            <li>where(optional): a SQL predicate applied before Top-K.</li>
+            <li>partitions(optional): semicolon-separated specs for a partitioned table.</li>
       </td>
       <td>
          CALL sys.vector_search(<br/>
@@ -1200,7 +1204,9 @@ All available procedures are listed below.
             vector_column => 'embedding',<br/>
             query_vector => '1.0,2.0,3.0',<br/>
             top_k => 5,<br/>
-            projection => 'id,name')
+            projection => 'id,name,__paimon_search_score',<br/>
+            options => 'vector-search.distribute.enabled=true;ivf.nprobe=32',<br/>
+            `where` => 'status = ''active''')
       </td>
    </tr>
    </tbody>

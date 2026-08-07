@@ -51,6 +51,15 @@ _SCHEMA = pa.schema([
     pa.field('b', pa.string()),
 ])
 
+_NULLABLE_PK_SCHEMA = pa.schema([
+    pa.field('_KEY_id', pa.int64()),
+    pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
+    pa.field('_VALUE_KIND', pa.int8(), nullable=False),
+    pa.field('id', pa.int64()),
+    pa.field('a', pa.string()),
+    pa.field('b', pa.string()),
+])
+
 
 def _row(pk, seq, a, b):
     return {
@@ -120,6 +129,26 @@ class WriteMergeBufferTest(unittest.TestCase):
             [_row(1, 1, 'A', None),
              _row(2, 2, 'B', None),
              _row(3, 3, 'C', None)],
+        )
+
+    def test_dedupe_nullable_pk_uses_null_safe_equality_and_nulls_first(self):
+        writer = _Harness(DeduplicateMergeFunction())
+        writer.pending_data = pa.Table.from_pylist(
+            [_row(2, 1, 'two', None),
+             _row(None, 2, 'null-old', None),
+             _row(1, 3, 'one', None),
+             _row(None, 4, 'null-new', None)],
+            schema=_NULLABLE_PK_SCHEMA,
+        )
+
+        writer._flush_all()
+
+        self.assertEqual(len(writer.written_chunks), 1)
+        self.assertEqual(
+            writer.written_chunks[0].to_pylist(),
+            [_row(None, 4, 'null-new', None),
+             _row(1, 3, 'one', None),
+             _row(2, 1, 'two', None)],
         )
 
     # -- partial-update ---------------------------------------------------

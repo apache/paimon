@@ -419,6 +419,8 @@ public class TableScanTest extends ScannerTestBase {
         // A snapshot-bound builder must not pick up postpone files committed after its selection.
         PostponeMergePlan realOnlyPlan = realOnlyBuilder.plan();
         assertThat(realOnlyPlan.postponeSplits()).isEmpty();
+        assertThatThrownBy(() -> realOnlyPlan.bucketRouter().numBuckets(BinaryRow.singleColumn(1)))
+                .hasMessageContaining("Missing postpone bucket number");
         assertThat(realOnlyPlan.realSplits())
                 .allSatisfy(split -> assertThat(split.snapshotId()).isEqualTo(realOnlySnapshotId));
 
@@ -436,7 +438,6 @@ public class TableScanTest extends ScannerTestBase {
                         .get()
                         .withFilter(valueFilter)
                         .withReadType(postponeTable.rowType().project("b"))
-                        .withDefaultBucketNum(1)
                         .plan();
         assertThat(mergePlan.realSplits()).hasSize(3);
         assertThat(mergePlan.postponeSplits()).hasSize(1);
@@ -523,8 +524,7 @@ public class TableScanTest extends ScannerTestBase {
                 PostponeMergeReadBuilder.create(postponeTable, null)
                         .get()
                         .withFilter(partitionFilter)
-                        .withReadType(postponeTable.rowType().project("b"))
-                        .withDefaultBucketNum(1);
+                        .withReadType(postponeTable.rowType().project("b"));
         PostponeMergePlan plan = readBuilder.plan();
 
         assertThat(plan.realSplits()).hasSize(1);
@@ -574,26 +574,37 @@ public class TableScanTest extends ScannerTestBase {
         postponeCommit.close();
 
         PostponeMergeReadBuilder readBuilder =
-                PostponeMergeReadBuilder.create(postponeTable, null).get().withDefaultBucketNum(1);
+                PostponeMergeReadBuilder.create(postponeTable, null).get();
         PostponeMergePlan initialPlan = readBuilder.plan();
         assertThat(initialPlan.numPotentialBuckets()).isEqualTo(3);
+        assertThat(initialPlan.bucketRouter().numBuckets(BinaryRow.singleColumn(1))).isEqualTo(1);
+        assertThatThrownBy(() -> initialPlan.bucketRouter().numBuckets(BinaryRow.singleColumn(2)))
+                .hasMessageContaining("Missing postpone bucket number");
 
-        PostponeMergePlan plan = readBuilder.reroute(initialPlan, 4);
-
-        // Partition 1 uses its known bucket, partition 2 is real-only, and the new partition 3
-        // may route to any of the four default buckets.
-        assertThat(plan.numPotentialBuckets()).isEqualTo(6);
-
-        FileStoreTable explicitDefaultTable =
+        BinaryRow newPartition = BinaryRow.singleColumn(3);
+        long postponeFileSize =
+                initialPlan.postponeSplits().stream()
+                        .filter(split -> split.partition().equals(newPartition))
+                        .flatMap(split -> split.dataFiles().stream())
+                        .mapToLong(DataFileMeta::fileSize)
+                        .sum();
+        assertThat(postponeFileSize).isPositive();
+        FileStoreTable sizeEstimatedTable =
                 postponeTable.copy(
                         Collections.singletonMap(
-                                CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM.key(), "2"));
+                                CoreOptions.POSTPONE_TARGET_SIZE_PER_BUCKET.key(), "1 b"));
+        PostponeMergePlan sizeEstimatedPlan =
+                PostponeMergeReadBuilder.create(sizeEstimatedTable, null).get().plan();
+        assertThat(sizeEstimatedPlan.numPotentialBuckets()).isEqualTo(2L + postponeFileSize);
+
+        Map<String, String> explicitDefaultOptions = new HashMap<>();
+        explicitDefaultOptions.put(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM.key(), "2");
+        explicitDefaultOptions.put(CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET.key(), "100");
+        FileStoreTable explicitDefaultTable = postponeTable.copy(explicitDefaultOptions);
         PostponeMergeReadBuilder explicitDefaultBuilder =
                 PostponeMergeReadBuilder.create(explicitDefaultTable, null).get();
         PostponeMergePlan explicitDefaultPlan = explicitDefaultBuilder.plan();
         assertThat(explicitDefaultPlan.numPotentialBuckets()).isEqualTo(4);
-        assertThat(explicitDefaultBuilder.reroute(explicitDefaultPlan, 8).numPotentialBuckets())
-                .isEqualTo(4);
     }
 
     @Test

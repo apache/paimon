@@ -368,11 +368,8 @@ public class FlinkSinkBuilder {
                             new PostponeFixedBucketChannelComputer(table.schema(), knownNumBuckets),
                             parallelism);
 
-            FileStoreTable tableForWrite = PostponeUtils.tableForFixBucketWrite(table);
-
             return configureBlobDescriptorReaderFactory(
-                            new PostponeFixedBucketSink(
-                                    tableForWrite, overwritePartition, knownNumBuckets))
+                            new PostponeFixedBucketSink(table, overwritePartition, knownNumBuckets))
                     .sinkFrom(partitioned);
         }
     }

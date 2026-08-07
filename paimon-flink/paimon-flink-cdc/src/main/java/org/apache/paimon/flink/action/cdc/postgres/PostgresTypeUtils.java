@@ -69,7 +69,9 @@ public class PostgresTypeUtils {
     private static final String PG_CHARACTER_VARYING = "varchar";
     private static final String PG_CHARACTER_VARYING_ARRAY = "_varchar";
     private static final String PG_JSON = "json";
+    private static final String PG_JSONB = "jsonb";
     private static final String PG_ENUM = "enum";
+    private static final String PG_UUID = "uuid";
 
     public static DataType toDataType(
             String typeName,
@@ -158,7 +160,9 @@ public class PostgresTypeUtils {
                 return DataTypes.ARRAY(DataTypes.VARCHAR(precision));
             case PG_TEXT:
             case PG_JSON:
+            case PG_JSONB:
             case PG_ENUM:
+            case PG_UUID:
                 return DataTypes.STRING();
             case PG_TEXT_ARRAY:
                 return DataTypes.ARRAY(DataTypes.STRING());

@@ -184,7 +184,7 @@ public class ReverseBTreeEndsWithTest {
             Path path = new Path(new Path(tempPath.toUri()), e.fileName());
             metas.add(new GlobalIndexIOMeta(path, fileIO.getFileSize(path), e.meta()));
         }
-        return indexer.createReader(fileReader, metas, newDirectExecutorService());
+        return indexer.createReader(fileReader, metas, data.size(), newDirectExecutorService());
     }
 
     private List<Long> idsEndingWith(String suffix) {

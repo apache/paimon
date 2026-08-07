@@ -20,11 +20,13 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
@@ -237,16 +239,41 @@ public interface FileEntry {
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifestFiles,
             @Nullable Integer manifestReadParallelism) {
-        return readDeletedEntries(
-                m ->
-                        manifestFile.read(
-                                m.fileName(),
-                                m.fileSize(),
-                                deletedFilter(),
-                                Filter.alwaysTrue(),
-                                SimpleFileEntry::from),
-                manifestFiles,
-                manifestReadParallelism);
+        manifestFiles =
+                manifestFiles.stream()
+                        .filter(file -> file.numDeletedFiles() > 0)
+                        .collect(Collectors.toList());
+        Function<ManifestFileMeta, List<Identifier>> processor =
+                manifest -> {
+                    List<Identifier> identifiers =
+                            new ArrayList<>((int) Math.min(manifest.numDeletedFiles(), 1 << 20));
+                    try (CloseableIterator<BinaryManifestEntry> entries =
+                            manifestFile.scan(
+                                    manifest.fileName(),
+                                    manifest.fileSize(),
+                                    BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                        while (entries.hasNext()) {
+                            BinaryManifestEntry entry = entries.next();
+                            if (entry.isDelete()) {
+                                identifiers.add(entry.identifier());
+                            }
+                        }
+                    } catch (Exception e) {
+                        throw new RuntimeException(
+                                String.format(
+                                        "Failed to scan deleted entries from manifest file '%s'.",
+                                        manifest.fileName()),
+                                e);
+                    }
+                    return identifiers;
+                };
+        Iterator<Identifier> identifiers =
+                randomlyExecuteSequentialReturn(processor, manifestFiles, manifestReadParallelism);
+        Set<Identifier> result = ConcurrentHashMap.newKeySet();
+        while (identifiers.hasNext()) {
+            result.add(identifiers.next());
+        }
+        return result;
     }
 
     static <T extends FileEntry> Set<Identifier> readDeletedEntries(

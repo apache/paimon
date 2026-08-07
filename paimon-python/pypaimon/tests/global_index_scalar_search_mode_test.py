@@ -26,6 +26,7 @@ from pypaimon.globalindex.data_evolution_global_index_coverage import (
 from pypaimon.globalindex.data_evolution_global_index_scanner import (
     DataEvolutionGlobalIndexScanner,
 )
+from pypaimon.utils.range import Range
 
 
 def _ranges(result):
@@ -47,13 +48,21 @@ def _coverage(options):
         table, snapshot, None, [SimpleNamespace(global_index_meta=meta)])
 
 
+def _scanner(coverage):
+    scanner = DataEvolutionGlobalIndexScanner.__new__(
+        DataEvolutionGlobalIndexScanner)
+    scanner._coverage = coverage
+    scanner._fields = [1]
+    return scanner
+
+
 class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
 
     def test_default_values(self):
         options = CoreOptions(Options.from_none())
         self.assertIsNone(options.global_index_search_mode())
         self.assertEqual(
-            GlobalIndexSearchMode.FULL, options.scalar_index_search_mode())
+            GlobalIndexSearchMode.FAST, options.scalar_index_search_mode())
         self.assertEqual(
             GlobalIndexSearchMode.FAST, options.vector_index_search_mode())
         self.assertEqual(
@@ -88,21 +97,19 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
         full = coverage.unindexed_ranges(1, search_mode=GlobalIndexSearchMode.FULL)
         self.assertEqual([(100, 199)], [(r.from_, r.to) for r in full])
         self.assertEqual(
-            [(100, 199)],
+            [],
             [(r.from_, r.to) for r in coverage.unindexed_ranges(1)])
 
     def test_scanner_applies_passed_scalar_mode(self):
         coverage = _coverage(CoreOptions(Options.from_none()))
-        scanner = SimpleNamespace(_coverage=coverage, _fields=[1])
-        result = DataEvolutionGlobalIndexScanner.unindexed_rows(
-            scanner, None, search_mode=GlobalIndexSearchMode.FULL)
-        self.assertEqual([(100, 199)], _ranges(result))
+        result = _scanner(coverage).unindexed_ranges(
+            None, search_mode=GlobalIndexSearchMode.FULL)
+        self.assertEqual([Range(100, 199)], result)
 
     def test_scanner_default_is_scalar_mode(self):
         coverage = _coverage(CoreOptions(Options.from_none()))
-        scanner = SimpleNamespace(_coverage=coverage, _fields=[1])
-        result = DataEvolutionGlobalIndexScanner.unindexed_rows(scanner, None)
-        self.assertEqual([(100, 199)], _ranges(result))
+        result = _scanner(coverage).unindexed_rows(None)
+        self.assertEqual([], _ranges(result))
 
 
 if __name__ == "__main__":

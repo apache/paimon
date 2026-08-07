@@ -157,7 +157,7 @@ case class PaimonScan(
       .map(Expressions.identity)
       .map {
         sortExpr =>
-          // Primary key can not be null, the null ordering is no matter.
+          // Paimon MergeTree comparators and Spark ascending expressions both order nulls first.
           Expressions.sort(sortExpr, SortDirection.ASCENDING)
       }
       .toArray

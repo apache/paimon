@@ -239,6 +239,39 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
       })
   }
 
+  test("Count with deletion-vector merge-on-read and level-0 files") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING)
+            |TBLPROPERTIES (
+            | 'primary-key' = 'id',
+            | 'bucket' = '1',
+            | 'deletion-vectors.enabled' = 'true',
+            | 'deletion-vectors.merge-on-read' = 'true',
+            | 'write-only' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+      checkAnswer(sql("SELECT COUNT(*), MIN(level), MAX(level) FROM `T$files`"), Row(1, 0, 0))
+      // A single non-overlapping L0 file has an exact row count.
+      runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 0)
+
+      sql("DELETE FROM T WHERE id = 2")
+      checkAnswer(sql("SELECT COUNT(*), MIN(level), MAX(level) FROM `T$files`"), Row(2, 0, 0))
+      // The L0 delete record overlaps with the original file and requires MOR.
+      runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(2) :: Nil, 2)
+
+      sql("INSERT INTO T VALUES (1, 'updated'), (4, 'd')")
+      checkAnswer(sql("SELECT COUNT(*), MIN(level), MAX(level) FROM `T$files`"), Row(3, 0, 0))
+      checkAnswer(
+        sql("SELECT * FROM T ORDER BY id"),
+        Row(1, "updated") :: Row(3, "c") :: Row(4, "d") :: Nil)
+      // Overlapping L0 files require MOR again, so Spark executes the aggregate.
+      runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 2)
+    }
+  }
+
   test("Push down aggregate - table with deletion vector") {
     Seq(true, false).foreach(
       deletionVectorsEnabled => {

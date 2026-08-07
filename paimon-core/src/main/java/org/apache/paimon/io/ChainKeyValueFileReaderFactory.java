@@ -19,10 +19,14 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.ExposeDeletionKeyValueReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
@@ -30,9 +34,11 @@ import org.apache.paimon.utils.FormatReaderMapping;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** A specific implementation about {@link KeyValueFileReaderFactory} for chain read. */
 public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
@@ -99,6 +105,28 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
     @Override
     protected BinaryRow getLogicalPartition() {
         return chainReadContext.logicalPartition();
+    }
+
+    protected FileRecordReader<KeyValue> createRecordReader(
+            DataFileMeta file,
+            FileRecordReader<InternalRow> fileRecordReader,
+            boolean overrideSequenceWithSnapshotId)
+            throws IOException {
+        Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
+        KeyValueDataFileRecordReader reader =
+                new KeyValueDataFileRecordReader(
+                        fileRecordReader,
+                        keyType,
+                        valueType,
+                        file.level(),
+                        overrideSequenceWithSnapshotId,
+                        file.minSequenceNumber());
+
+        if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
+            return new ExposeDeletionKeyValueReader(reader, deletionVector.get());
+        }
+
+        return reader;
     }
 
     public static Builder newBuilder(KeyValueFileReaderFactory.Builder wrapped) {

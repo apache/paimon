@@ -66,7 +66,11 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
                                     return result;
                                 }
                             }
-                            return Long.compare(e1.kv.sequenceNumber(), e2.kv.sequenceNumber());
+                            result = Long.compare(e1.kv.sequenceNumber(), e2.kv.sequenceNumber());
+                            if (result != 0) {
+                                return result;
+                            }
+                            return Boolean.compare(e1.kv.isAdd(), e2.kv.isAdd());
                         });
         this.polled = new ArrayList<>();
     }

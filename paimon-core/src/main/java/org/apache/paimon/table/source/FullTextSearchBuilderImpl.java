@@ -78,7 +78,10 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
                 ? new PrimaryKeyFullTextScan(
                         table, definition.get(), partitionFilter, pinnedSnapshot)
                 : new DataEvolutionFullTextScan(
-                        table, partitionFilter, Collections.singletonList(textColumn));
+                        table,
+                        partitionFilter,
+                        Collections.singletonList(textColumn),
+                        pinnedSnapshot);
     }
 
     @Override

@@ -24,6 +24,10 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.read.scanner.data_evolution_split_generator import (
+    DataEvolutionSplitGenerator,
+)
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import (
@@ -97,7 +101,7 @@ class TableUpdateByRowId:
         self.commit_messages: List[CommitMessage] = []
 
     def _snapshot_files_info(self) -> _FilesInfo:
-        """Internal: return the current snapshot's file index for broadcast."""
+        """Return the already loaded snapshot file index for broadcast."""
         return _FilesInfo(
             snapshot_id=self.snapshot_id,
             first_row_ids=self.first_row_ids,
@@ -115,8 +119,27 @@ class TableUpdateByRowId:
         """
         scan = self.table.new_read_builder().new_scan()
         plan = scan.plan_for_write()
-        splits = plan.splits()
+        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        return self._files_info_from_splits(snapshot_id, plan.splits())
 
+    @classmethod
+    def _files_info_from_entries(
+            cls,
+            table,
+            snapshot_id: int,
+            entries: List[ManifestEntry],
+    ) -> _FilesInfo:
+        """Build a file index from an already resolved snapshot entry set."""
+        splits = DataEvolutionSplitGenerator(
+            table,
+            table.options.source_split_target_size(),
+            table.options.source_split_open_file_cost(),
+        ).create_splits(entries)
+        return cls._files_info_from_splits(snapshot_id, splits)
+
+    @classmethod
+    def _files_info_from_splits(
+            cls, snapshot_id: int, splits: List[DataSplit]) -> _FilesInfo:
         index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = {}
         row_id_ranges: List[Range] = []
         for split in splits:
@@ -128,14 +151,19 @@ class TableUpdateByRowId:
                 if not DataFileMeta.is_blob_file(file.file_name)
             ]
             for file in split.files:
-                if file.first_row_id is None or DataFileMeta.is_blob_file(file.file_name):
+                if (
+                        file.first_row_id is None
+                        or DataFileMeta.is_blob_file(file.file_name)
+                ):
                     continue
                 row_id_ranges.append(file.row_id_range())
             for file in data_files:
                 target_files = [
                     target_file
                     for target_file in files_with_row_id
-                    if self._overlaps(file.row_id_range(), target_file.row_id_range())
+                    if cls._overlaps(
+                        file.row_id_range(), target_file.row_id_range()
+                    )
                 ]
 
                 entry = index.get(file.first_row_id)
@@ -143,7 +171,9 @@ class TableUpdateByRowId:
                     index[file.first_row_id] = (split, target_files)
                 else:
                     existing_files = entry[1]
-                    existing_names = {existing.file_name for existing in existing_files}
+                    existing_names = {
+                        existing.file_name for existing in existing_files
+                    }
                     existing_files.extend(
                         target_file
                         for target_file in target_files
@@ -155,7 +185,6 @@ class TableUpdateByRowId:
         else:
             merged = []
 
-        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         return _FilesInfo(
             snapshot_id=snapshot_id,
             first_row_ids=sorted(index.keys()),

@@ -22,14 +22,19 @@ import org.apache.paimon.utils.LongIterator;
 
 import org.apache.parquet.column.page.PageReadStore;
 
+import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
 
 /** Generate row index for columnar batch. */
-public class RowIndexGenerator {
+public class RowIndexGenerator implements LongIterator {
 
     private LongIterator rowIndexIterator;
+    private long pendingSkips;
+    private int remainingIndexes;
 
     public void initFromPageReadStore(PageReadStore pageReadStore) {
+        pendingSkips = 0;
+        remainingIndexes = 0;
         long startingRowIdx = pageReadStore.getRowIndexOffset().orElse(0L);
         PrimitiveIterator.OfLong rowIndexes = pageReadStore.getRowIndexes().orElse(null);
         if (rowIndexes != null) {
@@ -53,6 +58,27 @@ public class RowIndexGenerator {
     }
 
     public void populateRowIndex(ColumnarBatch columnarBatch) {
-        columnarBatch.resetPositions(rowIndexIterator);
+        pendingSkips += remainingIndexes;
+        remainingIndexes = columnarBatch.numRows();
+        columnarBatch.resetPositions(this);
+    }
+
+    @Override
+    public boolean hasNext() {
+        return remainingIndexes > 0 && rowIndexIterator.hasNext();
+    }
+
+    @Override
+    public long next() {
+        if (remainingIndexes == 0) {
+            throw new NoSuchElementException();
+        }
+        while (pendingSkips > 0) {
+            rowIndexIterator.next();
+            pendingSkips--;
+        }
+        long index = rowIndexIterator.next();
+        remainingIndexes--;
+        return index;
     }
 }
