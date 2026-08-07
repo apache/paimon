@@ -46,7 +46,7 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
     private static final int FORMAT_IDENTIFIER = 1;
 
     public IndexManifestEntrySerializer() {
-        super(ManifestSchemaUtils.withFormatIdentifier(IndexManifestEntry.SCHEMA));
+        super(IndexManifestEntry.MANIFEST_ROW_TYPE);
     }
 
     @Override
