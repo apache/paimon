@@ -390,19 +390,19 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
 
         private void markIndexesToRefresh(boolean[] result) {
             // As scan sequence numbers decrease, eligible updated ranges only grow.
-            MergedRanges updatedRanges = new MergedRanges();
+            MergedRanges updatedRanges = null;
             int nextSequenceNumber = 0;
             for (IndexQuery index : indexes) {
                 while (nextSequenceNumber < sequenceNumbers.length
                         && sequenceNumbers[nextSequenceNumber] >= index.scanSnapshotId) {
                     MergedRanges ranges = updatedRangesPerSequenceNumber[nextSequenceNumber];
                     if (ranges != null) {
-                        ranges.drainTo(updatedRanges);
+                        updatedRanges = updatedRanges == null ? ranges : updatedRanges.merge(ranges);
                         updatedRangesPerSequenceNumber[nextSequenceNumber] = null;
                     }
                     nextSequenceNumber++;
                 }
-                if (updatedRanges.intersects(index.rowRange)) {
+                if (updatedRanges != null && updatedRanges.intersects(index.rowRange)) {
                     result[index.ordinal] = true;
                 }
             }
@@ -448,16 +448,19 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             ranges.put(from, to);
         }
 
-        /** Moves all ranges to the target without retaining duplicate tree nodes. */
-        private void drainTo(MergedRanges target) {
-            Iterator<Map.Entry<Long, Long>> iterator = ranges.entrySet().iterator();
-            while (iterator.hasNext()) {
-                Map.Entry<Long, Long> range = iterator.next();
-                long from = range.getKey();
-                long to = range.getValue();
-                iterator.remove();
-                target.add(from, to);
+        /** Merges the smaller range set into the larger one and clears the source. */
+        private MergedRanges merge(MergedRanges other) {
+            MergedRanges target = this;
+            MergedRanges source = other;
+            if (target.ranges.size() < source.ranges.size()) {
+                target = other;
+                source = this;
             }
+            for (Map.Entry<Long, Long> range : source.ranges.entrySet()) {
+                target.add(range.getKey(), range.getValue());
+            }
+            source.ranges.clear();
+            return target;
         }
 
         private boolean intersects(Range range) {
