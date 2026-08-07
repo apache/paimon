@@ -461,7 +461,9 @@ class ConflictDetectionTest {
                 detection.checkRowIdExistence(
                         baseEntries, deltaEntries, 100L, Snapshot.CommitKind.APPEND);
         assertThat(result).isPresent();
-        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+        assertThat(result.get())
+                .isInstanceOf(RowIdExistenceConflictException.class)
+                .hasMessageContaining("Row ID existence conflict");
     }
 
     @Test
@@ -478,7 +480,9 @@ class ConflictDetectionTest {
                 detection.checkRowIdExistence(
                         baseEntries, deltaEntries, 200L, Snapshot.CommitKind.APPEND);
         assertThat(result).isPresent();
-        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+        assertThat(result.get())
+                .isInstanceOf(RowIdExistenceConflictException.class)
+                .hasMessageContaining("Row ID existence conflict");
     }
 
     @Test

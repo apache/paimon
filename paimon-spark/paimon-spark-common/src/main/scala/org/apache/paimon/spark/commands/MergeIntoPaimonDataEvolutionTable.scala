@@ -287,9 +287,16 @@ case class MergeIntoPaimonDataEvolutionTable(
       if (readSnapshot != null) {
         writer.rowIdCheckConflict(readSnapshot.id())
       }
-      writer.commit(
-        matchedResult.commitMessages ++ deleteCommit ++ insertCommit,
-        Snapshot.Operation.MERGE)
+      DataEvolutionRowIdConflictCommitter.commit(
+        sparkSession,
+        table,
+        targetRelation,
+        writer,
+        matchedResult.commitMessages,
+        deleteCommit ++ insertCommit,
+        if (readSnapshot == null) -1L else readSnapshot.id(),
+        Snapshot.Operation.MERGE
+      )
     } finally {
       targetActionCleanup()
       if (persistSourceDss.isDefined) {

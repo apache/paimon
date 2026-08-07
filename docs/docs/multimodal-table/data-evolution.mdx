@@ -211,6 +211,15 @@ Notes:
   `spark.paimon.write.data-evolution.update-conflict-retry.max-attempts` and
   retry wait time with
   `spark.paimon.write.data-evolution.update-conflict-retry.wait-ms`.
+- If concurrent compaction changes row-ID file boundaries after Spark SQL
+  `MERGE INTO` stages regular partial-column files, Spark rebases those staged
+  files onto the latest boundaries before committing instead of rerunning the
+  MERGE source and join. Spark performs this rewrite with distributed DataFrame
+  processing, so the PyPaimon-only
+  `data-evolution.row-id-conflict-rewrite.max-size` limit does not apply.
+  Recovery does not apply when deletion vectors are enabled or when
+  existing-row BLOB or VECTOR files are staged, and it does not hide logical
+  concurrent-update conflicts.
 - In Spark SQL, `MERGE INTO` supports `WHEN NOT MATCHED BY SOURCE` for delete
   actions on Data Evolution tables.
 - The Flink `data_evolution_merge_into` procedure currently supports updating
