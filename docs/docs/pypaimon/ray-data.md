@@ -578,8 +578,9 @@ but must preserve this column in its output. Processing is lazy; fixed actor
 pools must leave resources for upstream and downstream tasks. Use
 `plan_row_id_ranges` directly when the application needs explicit range metadata
 or operations. Contexts from one plan must be updated in `sequence_number`
-order; concurrent updates are rejected. Separate plans use optimistic conflict
-detection.
+order; call `ctx.skip()` when no update is needed. The callback wrapper skips a
+range automatically when it returns without updating. Concurrent updates are
+rejected. Separate plans use optimistic conflict detection.
 
 Requires `ray >= 2.50` and a non-primary-key table with
 `data-evolution.enabled` and `row-tracking.enabled`. Concurrent append and

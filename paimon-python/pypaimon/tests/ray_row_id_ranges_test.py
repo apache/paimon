@@ -317,6 +317,36 @@ class RayRowIdRangesTest(unittest.TestCase):
             [1, 0, 0], self._read(target)["embedding"].to_pylist())
         self.assertFalse(table.list_tags())
 
+    def test_skips_range_without_a_commit(self):
+        target = self._create()
+        self._write_chunks(target, ([1], [2]))
+
+        def process(context):
+            if context.sequence_number == 0:
+                return
+            source = context.read(["id"])
+            context.update_by_row_id(
+                source.map_batches(
+                    lambda batch: pa.table({
+                        "_ROW_ID": batch["_ROW_ID"],
+                        "embedding": batch["id"],
+                    }),
+                    batch_format="pyarrow",
+                ),
+                ["embedding"],
+            )
+
+        result = process_row_id_ranges(
+            target,
+            self.catalog_options,
+            target_rows_per_range=1,
+            processor=process,
+        )
+
+        self.assertEqual({"num_ranges": 2, "num_updated": 1}, result)
+        self.assertEqual(
+            [0, 2], self._read(target)["embedding"].to_pylist())
+
     def test_rejects_out_of_order_and_concurrent_updates(self):
         target = self._create()
         self._write_chunks(target, ([1], [2]))

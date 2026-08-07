@@ -291,6 +291,14 @@ class RowIdRangeContext:
             return self._update_by_row_id(
                 updates, update_cols, num_partitions, ray_remote_args)
 
+    def skip(self) -> None:
+        """Complete this range without writing a snapshot."""
+        if self._updated:
+            raise RuntimeError("a row-id range can be completed only once.")
+        with self._owner._update_guard(self.sequence_number):
+            self._owner._check_open()
+            self._updated = True
+
     def _update_by_row_id(
         self, updates, update_cols, num_partitions, ray_remote_args,
     ):
@@ -591,6 +599,8 @@ def process_row_id_ranges(
     ) as ranges:
         for context in ranges:
             processor(context)
+            if not context._updated:
+                context.skip()
             processed += 1
         return {
             "num_ranges": processed,
