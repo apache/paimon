@@ -201,6 +201,41 @@ class RayRowIdRangesTest(unittest.TestCase):
         self.assertEqual(["updated"] * rows,
                          actual["text"].to_pylist())
 
+    def test_reads_existing_parquet_delta(self):
+        from pypaimon.ray import update_by_row_id
+
+        target = self._create()
+        self._write_chunks(target, (list(range(10)),))
+        row_ids = self._row_ids(target)
+        update_by_row_id(
+            target,
+            pa.table({
+                "_ROW_ID": row_ids[3:6],
+                "text": ["new"] * 3,
+            }, schema=pa.schema([
+                ("_ROW_ID", pa.int64()),
+                ("text", pa.string()),
+            ])),
+            self.catalog_options,
+            update_cols=["text"],
+        )
+
+        with plan_row_id_ranges(
+            target,
+            self.catalog_options,
+            target_rows_per_range=100,
+        ) as ranges:
+            context = next(iter(ranges))
+            rows = sorted(
+                context.read(["id", "text"]).take_all(),
+                key=lambda row: row["id"],
+            )
+
+        self.assertEqual(
+            ["x"] * 3 + ["new"] * 3 + ["x"] * 4,
+            [row["text"] for row in rows],
+        )
+
     def test_reads_current_schema_from_pinned_snapshot(self):
         from pypaimon.schema.data_types import AtomicType
         from pypaimon.schema.schema_change import SchemaChange

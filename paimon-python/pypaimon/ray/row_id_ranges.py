@@ -188,7 +188,6 @@ class RowIdRangeContext:
             extract_fields_from_where,
             parse_where_clause,
         )
-        from pypaimon.read.split import DataSplit
         from pypaimon.table.special_fields import SpecialFields
 
         self._owner._check_open()
@@ -236,12 +235,14 @@ class RowIdRangeContext:
             results = []
             for first_row_id in routes.column("_FIRST_ROW_ID").to_pylist():
                 owning_split, target_files = info.first_row_id_index[first_row_id]
-                split = DataSplit(
-                    files=target_files,
-                    partition=owning_split.partition,
-                    bucket=owning_split.bucket,
-                    raw_convertible=True,
+                target_names = {file.file_name for file in target_files}
+                split = owning_split.filter_file(
+                    lambda file: file.file_name in target_names,
                 )
+                if split is None or len(split.files) != len(target_files):
+                    raise RuntimeError(
+                        "Cannot rebuild file group {} from its planned split."
+                        .format(first_row_id))
                 builder = read_table.new_read_builder()
                 if predicate is not None:
                     builder = builder.with_filter(predicate)
