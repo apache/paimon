@@ -31,6 +31,7 @@ import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
+import org.apache.spark.Partition
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, SubstituteUnresolvedOrdinals}
@@ -48,7 +49,7 @@ import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, ResolveDe
 import org.apache.spark.sql.connector.catalog.{Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.catalog.CatalogV2Util.structTypeToV2Columns
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.connector.read.Scan
+import org.apache.spark.sql.connector.read.{InputPartition, Scan}
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.{SparkFormatTable, SparkPlan}
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
@@ -63,6 +64,9 @@ import java.util.{Map => JMap}
 class Spark3Shim extends SparkShim {
 
   override def classicApi: ClassicApi = new Classic3Api
+
+  override def dataSourceInputPartitions(partition: Partition): Seq[InputPartition] =
+    MinorVersionShim.dataSourceInputPartitions(partition)
 
   override def createSparkParser(delegate: ParserInterface): ParserInterface = {
     new PaimonSpark3SqlExtensionsParser(delegate)
