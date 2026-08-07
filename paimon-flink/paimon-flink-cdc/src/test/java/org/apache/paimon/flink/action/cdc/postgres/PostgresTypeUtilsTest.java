@@ -93,4 +93,10 @@ public class PostgresTypeUtilsTest {
         assertThat(PostgresTypeUtils.toDataType("uuid", null, null, EMPTY))
                 .isEqualTo(DataTypes.STRING());
     }
+
+    @Test
+    public void testJsonbMapsToString() {
+        assertThat(PostgresTypeUtils.toDataType("jsonb", null, null, EMPTY))
+                .isEqualTo(DataTypes.STRING());
+    }
 }
