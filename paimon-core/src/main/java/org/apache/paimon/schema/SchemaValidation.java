@@ -120,7 +120,8 @@ public class SchemaValidation {
                     ArrayType.class,
                     RowType.class,
                     MultisetType.class,
-                    VectorType.class);
+                    VectorType.class,
+                    VariantType.class);
 
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
