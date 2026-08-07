@@ -61,13 +61,6 @@ class TableCommit:
         """Register a callback to be invoked after each successful commit."""
         self._commit_callbacks.append(callback)
 
-    def protect_from_external_rewrites(
-            self, checkpoint_snapshot, commit_user, schema_id,
-            protected_columns=None):
-        self.file_store_commit.protect_from_external_rewrites(
-            checkpoint_snapshot, commit_user, schema_id, protected_columns)
-        return self
-
     def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
 
@@ -80,7 +73,7 @@ class TableCommit:
                     "Committing overwrite to table %s, %d non-empty messages",
                     self.table.identifier, len(non_empty_messages)
                 )
-                return self.file_store_commit.overwrite(
+                self.file_store_commit.overwrite(
                     overwrite_partition=self.overwrite_partition,
                     commit_messages=non_empty_messages,
                     commit_identifier=commit_identifier
@@ -92,7 +85,7 @@ class TableCommit:
                     "Committing table %s, %d non-empty messages",
                     self.table.identifier, len(non_empty_messages)
                 )
-                return self.file_store_commit.commit(
+                self.file_store_commit.commit(
                     commit_messages=non_empty_messages,
                     commit_identifier=commit_identifier
                 )
@@ -125,7 +118,7 @@ class BatchTableCommit(TableCommit):
 
     def commit(self, commit_messages: List[CommitMessage]):
         self._check_committed()
-        return self._commit(commit_messages, BATCH_COMMIT_IDENTIFIER)
+        self._commit(commit_messages, BATCH_COMMIT_IDENTIFIER)
 
     def truncate_table(self) -> None:
         """Truncate the entire table, deleting all data."""
@@ -151,4 +144,4 @@ class StreamTableCommit(TableCommit):
     """
 
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
-        return self._commit(commit_messages, commit_identifier)
+        self._commit(commit_messages, commit_identifier)

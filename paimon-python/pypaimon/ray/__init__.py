@@ -30,9 +30,11 @@ from pypaimon.ray.data_evolution_merge_transform import (
 )
 from pypaimon.ray.update_by_row_id import update_by_row_id
 from pypaimon.ray.row_id_ranges import (
-    RowIdRangeContext,
+    RowIdRange,
     plan_row_id_ranges,
     process_row_id_ranges,
+    read_row_id_range,
+    update_by_row_id_from_plan,
 )
 from pypaimon.ray.read_by_row_id import read_by_row_id
 
@@ -46,7 +48,9 @@ __all__ = [
     "update_by_row_id",
     "plan_row_id_ranges",
     "process_row_id_ranges",
-    "RowIdRangeContext",
+    "read_row_id_range",
+    "update_by_row_id_from_plan",
+    "RowIdRange",
     "read_by_row_id",
     "WhenMatched",
     "WhenNotMatched",

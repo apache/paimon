@@ -91,29 +91,6 @@ class CommitCallbackTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
-    def test_commit_returns_snapshot_after_uncertain_retry(self):
-        table = self._create_table('test_uncertain_commit_result')
-        builder = table.new_batch_write_builder()
-        table_write = builder.new_write()
-        table_commit = builder.new_commit()
-        table_write.write_arrow(pa.Table.from_pydict({
-            'id': [1], 'name': ['a'], 'dt': ['p1'],
-        }, schema=self.pa_schema))
-        real_commit = table_commit.file_store_commit.snapshot_commit.commit
-
-        def commit_then_lose_response(*args):
-            self.assertTrue(real_commit(*args))
-            raise TimeoutError('lost commit response')
-
-        table_commit.file_store_commit.snapshot_commit.commit = (
-            commit_then_lose_response)
-        table_commit.file_store_commit._commit_retry_wait = lambda _: None
-        snapshot = table_commit.commit(table_write.prepare_commit())
-
-        self.assertEqual(1, snapshot.id)
-        table_write.close()
-        table_commit.close()
-
     def test_callback_receives_correct_snapshot_data(self):
         table = self._create_table('test_callback_snapshot_data', partition_keys=['dt'])
         write_builder = table.new_batch_write_builder()

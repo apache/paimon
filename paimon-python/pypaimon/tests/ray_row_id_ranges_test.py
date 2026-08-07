@@ -18,7 +18,6 @@
 import os
 import shutil
 import tempfile
-import threading
 import unittest
 import uuid
 
@@ -29,7 +28,13 @@ pytest.importorskip("pypaimon")
 ray = pytest.importorskip("ray")
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.ray import plan_row_id_ranges, process_row_id_ranges
+from pypaimon.ray import (
+    plan_row_id_ranges,
+    process_row_id_ranges,
+    read_row_id_range,
+    update_by_row_id,
+    update_by_row_id_from_plan,
+)
 
 
 class RayRowIdRangesTest(unittest.TestCase):
@@ -80,6 +85,14 @@ class RayRowIdRangesTest(unittest.TestCase):
         builder.new_commit().commit(writer.prepare_commit())
         writer.close()
 
+    def _write_chunks(self, target, chunks):
+        for chunk in chunks:
+            self._write(target, pa.table({
+                "id": chunk,
+                "text": ["x"] * len(chunk),
+                "embedding": pa.array([0] * len(chunk), pa.int32()),
+            }, schema=self.schema))
+
     def _read(self, target):
         table = self.catalog.get_table(target)
         read = table.new_read_builder()
@@ -89,17 +102,19 @@ class RayRowIdRangesTest(unittest.TestCase):
     def _row_ids(self, target):
         table = self.catalog.get_table(target)
         read = table.new_read_builder().with_projection(["id", "_ROW_ID"])
-        rows = read.new_read().to_arrow(
-            read.new_scan().plan().splits()).sort_by("id")
-        return rows["_ROW_ID"].to_pylist()
+        return read.new_read().to_arrow(
+            read.new_scan().plan().splits()).sort_by("id")["_ROW_ID"].to_pylist()
 
-    def _write_chunks(self, target, chunks):
-        for chunk in chunks:
-            self._write(target, pa.table({
-                "id": chunk,
-                "text": ["x"] * len(chunk),
-                "embedding": pa.array([0] * len(chunk), pa.int32()),
-            }, schema=self.schema))
+    @staticmethod
+    def _embedding_updates(row_range):
+        source = read_row_id_range(row_range, ["id"], num_partitions=2)
+        return source.map_batches(
+            lambda batch: pa.table({
+                "_ROW_ID": batch["_ROW_ID"],
+                "embedding": batch["id"],
+            }),
+            batch_format="pyarrow",
+        )
 
     def test_processes_file_group_aligned_ranges_with_actors(self):
         target = self._create()
@@ -113,22 +128,23 @@ class RayRowIdRangesTest(unittest.TestCase):
                     "embedding": batch["id"],
                 })
 
-        def process(context):
+        def process(row_range):
             seen.append((
-                context.sequence_number,
-                context.range_start,
-                context.range_end,
-                context.estimated_rows,
+                row_range.sequence_number,
+                row_range.range_start,
+                row_range.range_end,
+                row_range.estimated_rows,
             ))
-            source = context.read(["id"], num_partitions=2)
+            source = read_row_id_range(
+                row_range, ["id"], num_partitions=2)
             updates = source.map_batches(
                 Infer,
                 concurrency=1,
                 num_cpus=0.5,
                 batch_format="pyarrow",
             )
-            context.update_by_row_id(
-                updates, ["embedding"], num_partitions=2)
+            update_by_row_id_from_plan(
+                row_range, updates, ["embedding"], num_partitions=2)
 
         result = process_row_id_ranges(
             target,
@@ -137,10 +153,8 @@ class RayRowIdRangesTest(unittest.TestCase):
             processor=process,
         )
 
-        self.assertEqual(
-            [(0, 0, 3, 4), (1, 4, 6, 3)], seen)
-        self.assertEqual(
-            {"num_ranges": 2, "num_updated": 7}, result)
+        self.assertEqual([(0, 0, 3, 4), (1, 4, 6, 3)], seen)
+        self.assertEqual({"num_ranges": 2}, result)
         self.assertEqual(
             [1, 2, 3, 4, 5, 6, 7],
             self._read(target)["embedding"].to_pylist(),
@@ -177,8 +191,14 @@ class RayRowIdRangesTest(unittest.TestCase):
         self.assertGreater(sum(
             DataFileMeta.is_vector_file(file.file_name) for file in files), 1)
 
-        def process(context):
-            source = context.read(["id"])
+        with plan_row_id_ranges(
+            target,
+            self.catalog_options,
+            target_rows_per_range=64,
+        ) as plan:
+            ranges = list(plan)
+            self.assertEqual(1, len(ranges))
+            source = read_row_id_range(ranges[0], ["id"])
             updates = source.map_batches(
                 lambda batch: pa.table({
                     "_ROW_ID": batch["_ROW_ID"],
@@ -186,24 +206,16 @@ class RayRowIdRangesTest(unittest.TestCase):
                 }),
                 batch_format="pyarrow",
             )
-            context.update_by_row_id(updates, ["text"])
+            result = update_by_row_id_from_plan(
+                ranges[0], updates, ["text"])
 
-        result = process_row_id_ranges(
-            target,
-            self.catalog_options,
-            target_rows_per_range=64,
-            processor=process,
-        )
-        self.assertEqual({"num_ranges": 1, "num_updated": rows}, result)
+        self.assertEqual({"num_updated": rows}, result)
         read = table.new_read_builder().with_projection(["id", "text"])
         actual = read.new_read().to_arrow(
             read.new_scan().plan().splits()).sort_by("id")
-        self.assertEqual(["updated"] * rows,
-                         actual["text"].to_pylist())
+        self.assertEqual(["updated"] * rows, actual["text"].to_pylist())
 
     def test_reads_existing_parquet_delta(self):
-        from pypaimon.ray import update_by_row_id
-
         target = self._create()
         self._write_chunks(target, (list(range(10)),))
         row_ids = self._row_ids(target)
@@ -224,10 +236,9 @@ class RayRowIdRangesTest(unittest.TestCase):
             target,
             self.catalog_options,
             target_rows_per_range=100,
-        ) as ranges:
-            context = next(iter(ranges))
+        ) as plan:
             rows = sorted(
-                context.read(["id", "text"]).take_all(),
+                read_row_id_range(next(iter(plan)), ["id", "text"]).take_all(),
                 key=lambda row: row["id"],
             )
 
@@ -255,9 +266,9 @@ class RayRowIdRangesTest(unittest.TestCase):
             False,
         )
 
-        def process(context):
-            source = context.read(
-                ["text"], filter="id >= 2")
+        def process(row_range):
+            source = read_row_id_range(
+                row_range, ["text"], filter="id >= 2")
 
             def transform(batch):
                 return pa.table({
@@ -267,7 +278,8 @@ class RayRowIdRangesTest(unittest.TestCase):
                     ],
                 })
 
-            context.update_by_row_id(
+            update_by_row_id_from_plan(
+                row_range,
                 source.map_batches(transform, batch_format="pyarrow"),
                 ["embedding"],
             )
@@ -279,9 +291,7 @@ class RayRowIdRangesTest(unittest.TestCase):
             processor=process,
         )
         self.assertEqual(
-            [None, 2, 3],
-            self._read(target)["embedding"].to_pylist(),
-        )
+            [None, 2, 3], self._read(target)["embedding"].to_pylist())
 
     def test_failure_keeps_only_earlier_ranges(self):
         target = self._create()
@@ -289,18 +299,14 @@ class RayRowIdRangesTest(unittest.TestCase):
         table = self.catalog.get_table(target)
         base = table.snapshot_manager().get_latest_snapshot().id
 
-        def process(context):
-            if context.sequence_number == 1:
+        def process(row_range):
+            if row_range.sequence_number == 1:
                 raise RuntimeError("stop after first range")
-            source = context.read(["id"])
-            updates = source.map_batches(
-                lambda batch: pa.table({
-                    "_ROW_ID": batch["_ROW_ID"],
-                    "embedding": batch["id"],
-                }),
-                batch_format="pyarrow",
+            update_by_row_id_from_plan(
+                row_range,
+                self._embedding_updates(row_range),
+                ["embedding"],
             )
-            context.update_by_row_id(updates, ["embedding"])
 
         with self.assertRaisesRegex(
                 RuntimeError, "stop after first range"):
@@ -317,22 +323,16 @@ class RayRowIdRangesTest(unittest.TestCase):
             [1, 0, 0], self._read(target)["embedding"].to_pylist())
         self.assertFalse(table.list_tags())
 
-    def test_skips_range_without_a_commit(self):
+    def test_processor_can_ignore_a_range(self):
         target = self._create()
         self._write_chunks(target, ([1], [2]))
 
-        def process(context):
-            if context.sequence_number == 0:
+        def process(row_range):
+            if row_range.sequence_number == 0:
                 return
-            source = context.read(["id"])
-            context.update_by_row_id(
-                source.map_batches(
-                    lambda batch: pa.table({
-                        "_ROW_ID": batch["_ROW_ID"],
-                        "embedding": batch["id"],
-                    }),
-                    batch_format="pyarrow",
-                ),
+            update_by_row_id_from_plan(
+                row_range,
+                self._embedding_updates(row_range),
                 ["embedding"],
             )
 
@@ -343,128 +343,35 @@ class RayRowIdRangesTest(unittest.TestCase):
             processor=process,
         )
 
-        self.assertEqual({"num_ranges": 2, "num_updated": 1}, result)
+        self.assertEqual({"num_ranges": 2}, result)
         self.assertEqual(
             [0, 2], self._read(target)["embedding"].to_pylist())
 
-    def test_rejects_out_of_order_and_concurrent_updates(self):
-        target = self._create()
-        self._write_chunks(target, ([1], [2]))
-
-        with plan_row_id_ranges(
-            target,
-            self.catalog_options,
-            target_rows_per_range=1,
-        ) as ranges:
-            first, second = list(ranges)
-            second._update_by_row_id = lambda *args: {"num_updated": 0}
-            with self.assertRaisesRegex(RuntimeError, "sequence order"):
-                second.update_by_row_id(None, [])
-
-            started = threading.Event()
-            release = threading.Event()
-            errors = []
-
-            def block_first(*args):
-                started.set()
-                release.wait(10)
-                return {"num_updated": 0}
-
-            first._update_by_row_id = block_first
-
-            def update_first():
-                try:
-                    first.update_by_row_id(None, [])
-                except Exception as error:
-                    errors.append(error)
-
-            thread = threading.Thread(target=update_first, daemon=True)
-            thread.start()
-            try:
-                self.assertTrue(started.wait(10))
-                with self.assertRaisesRegex(RuntimeError, "concurrently"):
-                    second.update_by_row_id(None, [])
-            finally:
-                release.set()
-                thread.join(10)
-
-            self.assertFalse(thread.is_alive())
-            self.assertFalse(errors)
-            self.assertEqual(
-                {"num_updated": 0}, second.update_by_row_id(None, []))
-
-    def test_rejects_concurrent_changes_to_read_columns(self):
-        from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
-        from pypaimon.write.commit.conflict_detection import (
-            CommitConflictError,
-        )
-        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-
-        target = self._create()
-        self._write_chunks(target, ([1], [2]))
-        table = self.catalog.get_table(target)
-
-        with plan_row_id_ranges(
-            target,
-            self.catalog_options,
-            target_rows_per_range=1,
-        ) as ranges:
-            context = next(iter(ranges))
-            source = context.read(["text"])
-            row_id = source.take(1)[0]["_ROW_ID"]
-
-            external = TableUpdateByRowId(
-                table, "external", BATCH_COMMIT_IDENTIFIER)
-            messages = external.update_columns(pa.table({
-                "_ROW_ID": [row_id],
-                "text": ["new"],
-            }), ["text"])
-            table.new_batch_write_builder().new_commit().commit(messages)
-
-            updates = source.map_batches(
-                lambda batch: pa.table({
-                    "_ROW_ID": batch["_ROW_ID"],
-                    "embedding": [len(value.as_py()) for value in batch["text"]],
-                }),
-                batch_format="pyarrow",
-            )
-            with self.assertRaisesRegex(
-                    CommitConflictError, "conflict"):
-                context.update_by_row_id(updates, ["embedding"])
-
-    def test_rejects_concurrent_schema_change(self):
-        from pypaimon.schema.data_types import AtomicType
-        from pypaimon.schema.schema_change import SchemaChange
-        from pypaimon.write.commit.conflict_detection import (
-            CommitConflictError,
-        )
-
+    def test_uses_normal_write_column_conflicts(self):
         target = self._create()
         self._write_chunks(target, ([1],))
+
         with plan_row_id_ranges(
             target,
             self.catalog_options,
             target_rows_per_range=1,
-        ) as ranges:
-            context = next(iter(ranges))
-            source = context.read(["id"])
-            self.catalog.alter_table(
+        ) as plan:
+            row_range = next(iter(plan))
+            stale_updates = self._embedding_updates(row_range)
+            update_by_row_id(
                 target,
-                [SchemaChange.add_column("extra", AtomicType("INT"))],
-                False,
+                pa.table({
+                    "_ROW_ID": self._row_ids(target),
+                    "embedding": pa.array([10], pa.int32()),
+                }),
+                self.catalog_options,
+                update_cols=["embedding"],
             )
-            with self.assertRaisesRegex(
-                    CommitConflictError, "schema changed"):
-                context.update_by_row_id(
-                    source.map_batches(
-                        lambda batch: pa.table({
-                            "_ROW_ID": batch["_ROW_ID"],
-                            "embedding": batch["id"],
-                        }),
-                        batch_format="pyarrow",
-                    ),
-                    ["embedding"],
-                )
+            with self.assertRaisesRegex(Exception, "conflict"):
+                update_by_row_id_from_plan(
+                    row_range, stale_updates, ["embedding"])
+
+        self.assertEqual([10], self._read(target)["embedding"].to_pylist())
 
     def test_rejects_row_ids_from_another_range(self):
         target = self._create()
@@ -475,14 +382,17 @@ class RayRowIdRangesTest(unittest.TestCase):
             target,
             self.catalog_options,
             target_rows_per_range=1,
-        ) as ranges:
-            first = next(iter(ranges))
-            updates = pa.table({
-                "_ROW_ID": [row_ids[1]],
-                "embedding": pa.array([2], pa.int32()),
-            })
+        ) as plan:
+            first = next(iter(plan))
             with self.assertRaises(Exception):
-                first.update_by_row_id(updates, ["embedding"])
+                update_by_row_id_from_plan(
+                    first,
+                    pa.table({
+                        "_ROW_ID": [row_ids[1]],
+                        "embedding": pa.array([2], pa.int32()),
+                    }),
+                    ["embedding"],
+                )
 
 
 if __name__ == "__main__":

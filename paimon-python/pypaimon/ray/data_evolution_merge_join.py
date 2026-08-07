@@ -471,12 +471,12 @@ def distributed_update_apply(
     # commit-time conflict check agree even if a concurrent commit lands (mirrors
     # the delete path).
     from pypaimon.common.options.core_options import CoreOptions
-    scan_table = (
-        table.copy_without_time_travel({
-            CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
-        if base_snapshot_id is not None else table
-    )
     if precomputed_files_info is None:
+        scan_table = (
+            table.copy({
+                CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
+            if base_snapshot_id is not None else table
+        )
         planner = TableUpdateByRowId(
             scan_table,
             "_merge_into_planner_" + uuid.uuid4().hex[:8],
@@ -489,6 +489,8 @@ def distributed_update_apply(
                          else planner.snapshot_id),
         )
     else:
+        # The caller read this pinned file layout, so do not re-plan against
+        # a newer snapshot before writing its row ids.
         files_info = precomputed_files_info
 
     sorted_first_row_ids = list(files_info.first_row_ids)

@@ -543,17 +543,21 @@ For an end-to-end feature update workflow on Blob tables, see
 
 ## Process Row-Id Ranges
 
-Use `process_row_id_ranges` to run a large backfill in bounded batches. Provide
-the target row count and processing callback; PyPaimon plans file-group-aligned
-ranges and handles `read -> process -> update -> commit` for each one. Completed
-ranges remain visible if a later range fails.
+Use `process_row_id_ranges` to split a large backfill into file-group-aligned
+ranges. Each update is committed independently, so completed ranges remain
+visible if a later range fails.
 
 ```python
 import pyarrow as pa
-from pypaimon.ray import process_row_id_ranges
+from pypaimon.ray import (
+    process_row_id_ranges,
+    read_row_id_range,
+    update_by_row_id_from_plan,
+)
 
-def process(ctx):
-    source = ctx.read(["text"], filter="language = 'en'")
+def process(row_range):
+    source = read_row_id_range(
+        row_range, ["text"], filter="language = 'en'")
 
     def embed(batch):
         return pa.table({
@@ -562,7 +566,8 @@ def process(ctx):
         })
 
     updates = source.map_batches(embed, batch_format="pyarrow")
-    ctx.update_by_row_id(updates, ["text_embedding"])
+    update_by_row_id_from_plan(
+        row_range, updates, ["text_embedding"])
 
 process_row_id_ranges(
     target="database_name.documents",
@@ -572,22 +577,18 @@ process_row_id_ranges(
 )
 ```
 
-The row count is approximate because boundaries never split a logical file
-group. `ctx.read()` includes `_ROW_ID`; distributed processing may reorder rows
-but must preserve this column in its output. Processing is lazy; fixed actor
-pools must leave resources for upstream and downstream tasks. Use
-`plan_row_id_ranges` directly when the application needs explicit range metadata
-or operations. Contexts from one plan must be updated in `sequence_number`
-order; call `ctx.skip()` when no update is needed. The callback wrapper skips a
-range automatically when it returns without updating. Concurrent updates are
-rejected. Separate plans use optimistic conflict detection.
+The row count is approximate because a logical file group is never split.
+`read_row_id_range` includes `_ROW_ID`; distributed processing may reorder rows
+but must preserve this column. `RowIdRange` is immutable planning metadata, and
+`plan_row_id_ranges` exposes the ranges directly when the application needs its
+own execution loop.
 
 Requires `ray >= 2.50` and a non-primary-key table with
-`data-evolution.enabled` and `row-tracking.enabled`. Concurrent append and
-compaction are allowed; conflicting rewrites, column updates, and schema changes
-fail. Retry may replay completed ranges. A temporary `pypaimon-row-id-range-*`
-tag protects the planned snapshot; it is removed on normal exit and expires
-after 30 days following a hard driver failure.
+`data-evolution.enabled` and `row-tracking.enabled`. Updates use the normal
+row-id conflict rules: overlapping writes to the same columns fail, while read
+columns are not implicit dependencies. Retry may replay completed ranges. A
+temporary `pypaimon-row-id-range-*` tag protects the planned snapshot and is
+removed when the plan closes.
 
 ## Update By Row Id
 
