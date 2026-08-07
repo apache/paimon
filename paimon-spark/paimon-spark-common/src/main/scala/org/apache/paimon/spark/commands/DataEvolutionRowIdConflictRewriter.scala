@@ -36,6 +36,7 @@ import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.slf4j.LoggerFactory
 
 import scala.collection.JavaConverters._
@@ -171,7 +172,11 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
 
     val rowIdAttribute = attribute(ROW_ID_NAME)
     val readOutput = columnNames.map(attribute) :+ rowIdAttribute
-    val readPlan = createNewScanPlan(stagedSplits, targetRelation).copy(output = readOutput)
+    val stagedRelation = createNewScanPlan(stagedSplits, targetRelation)
+    val readPlan = SparkShimLoader.shim.copyDataSourceV2Relation(
+      stagedRelation,
+      stagedRelation.table,
+      readOutput)
     val firstRowIdUdf = udf((rowId: Long) => floorBinarySearch(firstRowIds, rowId))
     val rewrittenRows = createDataset(sparkSession, readPlan)
       .select((columnNames.map(quotedColumn) :+ quotedColumn(ROW_ID_NAME)): _*)
