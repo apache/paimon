@@ -43,6 +43,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
 
     @Override
     public InternalRow toRow(DataFileMeta meta) {
+        long[] columnMaxSequenceNumbers = meta.columnMaxSequenceNumbers();
         return GenericRow.of(
                 BinaryString.fromString(meta.fileName()),
                 meta.fileSize(),
@@ -64,9 +65,9 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 meta.externalPath().map(BinaryString::fromString).orElse(null),
                 meta.firstRowId(),
                 meta.writeCols() == null ? null : toStringArrayData(meta.writeCols()),
-                meta.columnMaxSequenceNumbers() == null
+                columnMaxSequenceNumbers == null
                         ? null
-                        : new GenericArray(meta.columnMaxSequenceNumbers()));
+                        : new GenericArray(columnMaxSequenceNumbers));
     }
 
     @Override

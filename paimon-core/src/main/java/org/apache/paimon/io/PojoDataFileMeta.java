@@ -292,7 +292,7 @@ public class PojoDataFileMeta implements DataFileMeta {
     @Nullable
     @Override
     public long[] columnMaxSequenceNumbers() {
-        return columnMaxSequenceNumbers;
+        return columnMaxSequenceNumbers == null ? null : columnMaxSequenceNumbers.clone();
     }
 
     @Override

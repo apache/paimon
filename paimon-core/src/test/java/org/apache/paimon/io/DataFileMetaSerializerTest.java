@@ -66,6 +66,19 @@ public class DataFileMetaSerializerTest extends ObjectSerializerTestBase<DataFil
         assertThat(file.columnMaxSequenceNumbers()).isNull();
     }
 
+    @Test
+    void testColumnSequencesAreDefensivelyCopied() {
+        long[] sequences = {3L, 42L};
+        DataFileMeta file = gen.next().meta.withColumnMaxSequenceNumbers(sequences);
+
+        sequences[0] = 100L;
+        assertColumnSequences(file);
+
+        long[] returned = file.columnMaxSequenceNumbers();
+        returned[1] = 100L;
+        assertColumnSequences(file);
+    }
+
     private void assertColumnSequences(DataFileMeta file) {
         assertThat(file.columnMaxSequenceNumbers()).containsExactly(3L, 42L);
     }

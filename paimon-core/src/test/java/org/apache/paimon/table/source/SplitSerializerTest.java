@@ -28,6 +28,7 @@ import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
+import org.apache.paimon.utils.CompatibilityUtils;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
@@ -50,11 +51,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link SplitSerializer}. */
 public class SplitSerializerTest {
 
+    private static final String GENERATE_GOLDEN_FILES_PROPERTY = "generateSplitGoldenFiles";
     private static final String RESOURCE_PREFIX = "compatibility/";
 
     @Test
     public void testRoundTrip() throws IOException {
-        for (GoldenCase goldenCase : goldenCases()) {
+        for (GoldenCase goldenCase : goldenCases(2)) {
             Split actual = SplitSerializer.deserialize(SplitSerializer.serialize(goldenCase.split));
             assertSplitEquals(goldenCase.split, actual);
         }
@@ -62,7 +64,7 @@ public class SplitSerializerTest {
 
     @Test
     public void testVersion1GoldenFiles() throws IOException {
-        for (GoldenCase goldenCase : goldenCases()) {
+        for (GoldenCase goldenCase : goldenCases(1)) {
             assertSplitEquals(
                     goldenCase.split,
                     SplitSerializer.deserialize(readGoldenFile(goldenCase.fileName)));
@@ -70,8 +72,26 @@ public class SplitSerializerTest {
     }
 
     @Test
+    public void testVersion2GoldenFiles() throws IOException {
+        boolean generateGoldenFiles =
+                Boolean.parseBoolean(
+                        System.getProperties().getProperty(GENERATE_GOLDEN_FILES_PROPERTY));
+        for (GoldenCase goldenCase : goldenCases(2)) {
+            byte[] current = SplitSerializer.serialize(goldenCase.split);
+            byte[] serialized;
+            if (generateGoldenFiles) {
+                CompatibilityUtils.writeCompatibilityFile(goldenCase.fileName, current);
+                serialized = current;
+            } else {
+                serialized = readGoldenFile(goldenCase.fileName);
+            }
+            assertSplitEquals(goldenCase.split, SplitSerializer.deserialize(serialized));
+        }
+    }
+
+    @Test
     public void testFallbackSplitImplSerializeAndDeserialize() throws IOException {
-        FallbackReadFileStoreTable.FallbackSplitImpl split = fallbackSplit();
+        FallbackReadFileStoreTable.FallbackSplitImpl split = fallbackSplit(true);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         split.serialize(new DataOutputViewStreamWrapper(out));
@@ -84,7 +104,7 @@ public class SplitSerializerTest {
 
     @Test
     public void testFallbackSplitImplJavaSerializeAndDeserialize() throws Exception {
-        FallbackReadFileStoreTable.FallbackSplitImpl split = fallbackSplit();
+        FallbackReadFileStoreTable.FallbackSplitImpl split = fallbackSplit(true);
 
         byte[] bytes = InstantiationUtil.serializeObject(split);
         FallbackReadFileStoreTable.FallbackSplitImpl deserialized =
@@ -102,32 +122,36 @@ public class SplitSerializerTest {
         }
     }
 
-    private static List<GoldenCase> goldenCases() {
+    private static List<GoldenCase> goldenCases(int version) {
+        boolean withColumnSequences = version >= 2;
         List<GoldenCase> cases = new ArrayList<>();
-        DataSplit dataSplit = dataSplit();
-        IncrementalSplit incrementalSplit = incrementalSplit();
+        DataSplit dataSplit = dataSplit(withColumnSequences);
+        IncrementalSplit incrementalSplit = incrementalSplit(withColumnSequences);
         IndexedSplit indexedSplit = indexedSplit(dataSplit);
-        ChainSplit chainSplit = chainSplit();
+        ChainSplit chainSplit = chainSplit(withColumnSequences);
         QueryAuthSplit queryAuthSplit = queryAuthSplit(dataSplit);
         FallbackReadFileStoreTable.FallbackDataSplit fallbackDataSplit =
                 (FallbackReadFileStoreTable.FallbackDataSplit)
                         FallbackReadFileStoreTable.toFallbackSplit(dataSplit, true);
-        FallbackReadFileStoreTable.FallbackSplitImpl fallbackSplit = fallbackSplit();
+        FallbackReadFileStoreTable.FallbackSplitImpl fallbackSplit =
+                fallbackSplit(withColumnSequences);
 
-        cases.add(new GoldenCase("split-v1-data", dataSplit));
-        cases.add(new GoldenCase("split-v1-incremental", incrementalSplit));
-        cases.add(new GoldenCase("split-v1-indexed", indexedSplit));
-        cases.add(new GoldenCase("split-v1-chain", chainSplit));
-        cases.add(new GoldenCase("split-v1-query-auth", queryAuthSplit));
-        cases.add(new GoldenCase("split-v1-fallback-data", fallbackDataSplit));
-        cases.add(new GoldenCase("split-v1-fallback", fallbackSplit));
+        String prefix = "split-v" + version + "-";
+        cases.add(new GoldenCase(prefix + "data", dataSplit));
+        cases.add(new GoldenCase(prefix + "incremental", incrementalSplit));
+        cases.add(new GoldenCase(prefix + "indexed", indexedSplit));
+        cases.add(new GoldenCase(prefix + "chain", chainSplit));
+        cases.add(new GoldenCase(prefix + "query-auth", queryAuthSplit));
+        cases.add(new GoldenCase(prefix + "fallback-data", fallbackDataSplit));
+        cases.add(new GoldenCase(prefix + "fallback", fallbackSplit));
         return cases;
     }
 
-    private static DataSplit dataSplit() {
+    private static DataSplit dataSplit(boolean withColumnSequences) {
         List<DataFileMeta> files =
                 Arrays.asList(
-                        dataFile("file-a", 0, 1, 10, 100L), dataFile("file-b", 1, 11, 20, 200L));
+                        dataFile("file-a", 0, 1, 10, 100L, withColumnSequences),
+                        dataFile("file-b", 1, 11, 20, 200L, withColumnSequences));
         List<DeletionFile> deletionFiles =
                 Arrays.asList(null, new DeletionFile("dv/file-b", 2L, 10L, 3L));
         return DataSplit.builder()
@@ -142,10 +166,13 @@ public class SplitSerializerTest {
                 .build();
     }
 
-    private static IncrementalSplit incrementalSplit() {
+    private static IncrementalSplit incrementalSplit(boolean withColumnSequences) {
         List<DataFileMeta> before =
-                Collections.singletonList(dataFile("before-file", 0, 1, 5, 10L));
-        List<DataFileMeta> after = Collections.singletonList(dataFile("after-file", 0, 6, 12, 20L));
+                Collections.singletonList(
+                        dataFile("before-file", 0, 1, 5, 10L, withColumnSequences));
+        List<DataFileMeta> after =
+                Collections.singletonList(
+                        dataFile("after-file", 0, 6, 12, 20L, withColumnSequences));
         return new IncrementalSplit(
                 43L,
                 DataFileTestUtils.row(2026, 8),
@@ -165,8 +192,8 @@ public class SplitSerializerTest {
                 new float[] {0.5f, 0.25f, 0.125f});
     }
 
-    private static ChainSplit chainSplit() {
-        DataSplit left = dataSplit();
+    private static ChainSplit chainSplit(boolean withColumnSequences) {
+        DataSplit left = dataSplit(withColumnSequences);
         DataSplit right =
                 DataSplit.builder()
                         .withSnapshot(44L)
@@ -175,7 +202,14 @@ public class SplitSerializerTest {
                         .withTotalBuckets(8)
                         .withBucketPath("dt=20260707/bucket-5")
                         .withDataFiles(
-                                Collections.singletonList(dataFile("chain-file", 0, 21, 30, 300L)))
+                                Collections.singletonList(
+                                        dataFile(
+                                                "chain-file",
+                                                0,
+                                                21,
+                                                30,
+                                                300L,
+                                                withColumnSequences)))
                         .withDataDeletionFiles(
                                 Collections.singletonList(
                                         new DeletionFile("deletion_file", 100, 22, null)))
@@ -215,33 +249,44 @@ public class SplitSerializerTest {
                         Arrays.asList("filter-json-1", "filter-json-2"), columnMasking));
     }
 
-    private static FallbackReadFileStoreTable.FallbackSplitImpl fallbackSplit() {
-        return new FallbackReadFileStoreTable.FallbackSplitImpl(chainSplit(), true);
+    private static FallbackReadFileStoreTable.FallbackSplitImpl fallbackSplit(
+            boolean withColumnSequences) {
+        return new FallbackReadFileStoreTable.FallbackSplitImpl(
+                chainSplit(withColumnSequences), true);
     }
 
     private static DataFileMeta dataFile(
-            String name, int level, int minKey, int maxKey, long maxSequence) {
-        return DataFileMeta.create(
-                name,
-                maxKey - minKey + 1,
-                maxKey - minKey + 1,
-                DataFileTestUtils.row(minKey),
-                DataFileTestUtils.row(maxKey),
-                SimpleStats.EMPTY_STATS,
-                SimpleStats.EMPTY_STATS,
-                0L,
-                maxSequence,
-                0L,
-                level,
-                Collections.emptyList(),
-                Timestamp.fromEpochMillis(100),
-                0L,
-                null,
-                FileSource.APPEND,
-                null,
-                null,
-                null,
-                null);
+            String name,
+            int level,
+            int minKey,
+            int maxKey,
+            long maxSequence,
+            boolean withColumnSequences) {
+        DataFileMeta file =
+                DataFileMeta.create(
+                        name,
+                        maxKey - minKey + 1,
+                        maxKey - minKey + 1,
+                        DataFileTestUtils.row(minKey),
+                        DataFileTestUtils.row(maxKey),
+                        SimpleStats.EMPTY_STATS,
+                        SimpleStats.EMPTY_STATS,
+                        0L,
+                        maxSequence,
+                        0L,
+                        level,
+                        Collections.emptyList(),
+                        Timestamp.fromEpochMillis(100),
+                        0L,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        null,
+                        null);
+        return withColumnSequences
+                ? file.withColumnMaxSequenceNumbers(new long[] {maxSequence})
+                : file;
     }
 
     private static void assertSplitEquals(Split expected, Split actual) {
