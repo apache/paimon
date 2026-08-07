@@ -123,11 +123,7 @@ public class JdbcCatalog extends AbstractCatalog {
         this.options = context.options();
         this.warehouse = warehouse;
         Preconditions.checkNotNull(options, "Invalid catalog properties: null");
-        this.connections =
-                new JdbcClientPool(
-                        options.get(CatalogOptions.CLIENT_POOL_SIZE),
-                        options.get(CatalogOptions.URI.key()),
-                        options.toMap());
+        this.connections = new CachedJdbcClientPool(options, options.toMap()).get();
         try {
             initializeCatalogTablesIfNeed();
         } catch (SQLException e) {
@@ -931,7 +927,8 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     public void close() throws Exception {
-        connections.close();
+        // Do not close the connection pool here — it is shared across catalog instances
+        // via CachedJdbcClientPool and will be evicted/closed by the cache when idle.
     }
 
     private boolean syncTableProperties() {
