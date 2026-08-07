@@ -144,14 +144,6 @@ public class SchemaValidation {
 
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
         validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
-        validateOnlyContainPrimitiveType(schema.fields(), options.upsertKey(), "upsert key");
-
-        if (!options.upsertKey().isEmpty() && !schema.primaryKeys().isEmpty()) {
-            throw new RuntimeException(
-                    String.format(
-                            "Cannot define 'upsert-key' %s with 'primary-key' %s.",
-                            options.upsertKey(), schema.primaryKeys()));
-        }
 
         validateBucket(schema, options);
 

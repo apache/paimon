@@ -595,13 +595,6 @@ public class CoreOptions implements Serializable {
                                     + " skipped. Set to a larger value to allow more aggressive"
                                     + " sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.");
 
-    public static final ConfigOption<String> UPSERT_KEY =
-            key("upsert-key")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Define upsert key to do MERGE INTO when executing INSERT INTO, cannot be defined with primary key.");
-
     public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
             key("partition.default-name")
                     .stringType()
@@ -3150,14 +3143,6 @@ public class CoreOptions implements Serializable {
 
     public String fieldsDefaultFunc() {
         return options.get(FIELDS_DEFAULT_AGG_FUNC);
-    }
-
-    public List<String> upsertKey() {
-        String upsertKey = options.get(UPSERT_KEY);
-        if (StringUtils.isEmpty(upsertKey)) {
-            return Collections.emptyList();
-        }
-        return Arrays.asList(upsertKey.split(","));
     }
 
     public static String createCommitUser(Options options) {

@@ -175,7 +175,6 @@ const sidebars = {
       "spark/auxiliary",
       "spark/default-value",
       "spark/dataframe",
-      "spark/sql-upsert",
       "spark/structured-streaming",
       "spark/procedures"
     ]

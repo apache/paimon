@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.extensions
 
-import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonFunctionResolver, PaimonIncompatibleResolutionRules, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable, PaimonViewResolver, ReplacePaimonFunctions, RewriteUpsertTable}
+import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonFunctionResolver, PaimonIncompatibleResolutionRules, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable, PaimonViewResolver, ReplacePaimonFunctions}
 import org.apache.paimon.spark.catalyst.optimizer.{MergePaimonScalarSubqueries, OptimizeMetadataOnlyDeleteFromPaimonTable, PushDownLateralVectorSearchFilter, RepartitionLateralVectorSearchInput}
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.paimon.spark.commands.BucketExpression
@@ -44,8 +44,6 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     extensions.injectResolutionRule(spark => PaimonFunctionResolver(spark))
     extensions.injectResolutionRule(spark => SparkShimLoader.shim.createCustomResolution(spark))
     extensions.injectResolutionRule(spark => PaimonIncompatibleResolutionRules(spark))
-    extensions.injectResolutionRule(spark => RewriteUpsertTable(spark))
-
     extensions.injectPostHocResolutionRule(spark => ReplacePaimonFunctions(spark))
     extensions.injectPostHocResolutionRule(spark => PaimonPostHocResolutionRules(spark))
 

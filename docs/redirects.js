@@ -477,10 +477,6 @@ module.exports = [
     "to": "/spark/sql-query"
   },
   {
-    "from": "/spark/sql-upsert.html",
-    "to": "/spark/sql-upsert"
-  },
-  {
     "from": "/spark/sql-write.html",
     "to": "/spark/sql-write"
   },
