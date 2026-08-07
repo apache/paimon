@@ -264,8 +264,9 @@ class DLFTokenLoaderFactory:
             return DLFLocalFileTokenLoader(
                 options.get(CatalogOptions.DLF_TOKEN_PATH)
             )
-        if loader is None:
-            token_path = options.get(CatalogOptions.DLF_TOKEN_PATH)
-            if token_path is not None:
-                return DLFLocalFileTokenLoader(token_path)
+        if loader is not None:
+            raise ValueError("Unknown DLF token loader: {}".format(loader))
+        token_path = options.get(CatalogOptions.DLF_TOKEN_PATH)
+        if token_path is not None:
+            return DLFLocalFileTokenLoader(token_path)
         return None

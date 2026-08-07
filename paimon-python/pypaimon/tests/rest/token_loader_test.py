@@ -73,6 +73,47 @@ class DLFLocalFileTokenLoaderTest(unittest.TestCase):
             self.assertIsInstance(provider.token_loader, DLFLocalFileTokenLoader)
             self.assertEqual("access-key-id", provider.get_token().access_key_id)
 
+    def test_token_loader_takes_precedence_over_static_credentials(self):
+        file_token = DLFToken("file-ak", "file-sk", "file-sts")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_path = Path(temp_dir) / "token.json"
+            token_path.write_text(JSON.to_json(file_token), encoding="utf-8")
+
+            for loader_name in (None, "local_file"):
+                with self.subTest(loader_name=loader_name):
+                    option_values = {
+                        CatalogOptions.URI.key():
+                            "https://cn-hangzhou-vpc.dlf.aliyuncs.com",
+                        CatalogOptions.TOKEN_PROVIDER.key(): "dlf",
+                        CatalogOptions.DLF_TOKEN_PATH.key(): str(token_path),
+                        CatalogOptions.DLF_ACCESS_KEY_ID.key(): "static-ak",
+                        CatalogOptions.DLF_ACCESS_KEY_SECRET.key(): "static-sk",
+                    }
+                    if loader_name is not None:
+                        option_values[
+                            CatalogOptions.DLF_TOKEN_LOADER.key()
+                        ] = loader_name
+
+                    provider = AuthProviderFactory.create_auth_provider(
+                        Options(option_values)
+                    )
+
+                    self.assertEqual("file-ak", provider.get_token().access_key_id)
+
+    def test_unknown_token_loader_does_not_fallback_to_static_credentials(self):
+        options = Options({
+            CatalogOptions.URI.key():
+                "https://cn-hangzhou-vpc.dlf.aliyuncs.com",
+            CatalogOptions.TOKEN_PROVIDER.key(): "dlf",
+            CatalogOptions.DLF_TOKEN_LOADER.key(): "unknown",
+            CatalogOptions.DLF_ACCESS_KEY_ID.key(): "static-ak",
+            CatalogOptions.DLF_ACCESS_KEY_SECRET.key(): "static-sk",
+        })
+
+        with self.assertRaisesRegex(ValueError, "Unknown DLF token loader: unknown"):
+            AuthProviderFactory.create_auth_provider(options)
+
     def test_loader_reads_rotated_token(self):
         first_token = DLFToken("first-ak", "first-sk", "first-sts")
         second_token = DLFToken("second-ak", "second-sk", "second-sts")
