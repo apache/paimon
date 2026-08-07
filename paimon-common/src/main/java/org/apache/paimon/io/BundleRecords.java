@@ -32,6 +32,16 @@ import org.apache.paimon.data.InternalRow;
 public interface BundleRecords extends Iterable<InternalRow> {
 
     /**
+     * Whether this bundle can be passed directly to a matching format writer.
+     *
+     * <p>The writer must consume the bundle synchronously. The producer retains ownership of any
+     * borrowed native buffers and may release them as soon as {@code writeBundle} returns.
+     */
+    default boolean isDirectWriteBundle() {
+        return false;
+    }
+
+    /**
      * The total row count of this batch.
      *
      * @return the number of row count.

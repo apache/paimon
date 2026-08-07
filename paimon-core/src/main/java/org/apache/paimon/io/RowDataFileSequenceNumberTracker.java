@@ -26,6 +26,9 @@ import org.apache.paimon.utils.LongCounter;
 
 import java.util.function.Supplier;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
+
 /**
  * Tracks sequence number range for rows written to a data file.
  *
@@ -98,5 +101,17 @@ public class RowDataFileSequenceNumberTracker {
             // Manifest will calculate the correct max based on snapshot id
             hasNullSeqNumber = true;
         }
+    }
+
+    boolean supportsRowCountUpdate() {
+        return seqNumberFieldIndex == -1;
+    }
+
+    void updateByRowCount(long rowCount) {
+        checkArgument(rowCount >= 0, "Row count must not be negative.");
+        checkState(
+                supportsRowCountUpdate(),
+                "Cannot update sequence numbers by row count when row tracking is enabled.");
+        seqNumCounter.add(rowCount);
     }
 }

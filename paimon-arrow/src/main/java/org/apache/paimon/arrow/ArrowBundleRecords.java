@@ -45,6 +45,10 @@ public class ArrowBundleRecords implements BundleRecords {
         return vectorSchemaRoot;
     }
 
+    public RowType getRowType() {
+        return rowType;
+    }
+
     @Override
     public long rowCount() {
         return vectorSchemaRoot.getRowCount();

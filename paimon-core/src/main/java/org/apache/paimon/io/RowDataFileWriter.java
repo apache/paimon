@@ -146,6 +146,15 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
 
     @Override
     public void writeBundle(BundleRecords bundle) throws IOException {
+        if (bundle.isDirectWriteBundle()
+                && auxiliaryFileWriters.isEmpty()
+                && sequenceNumberTracker.supportsRowCountUpdate()
+                && !requiresPerRecordStats()) {
+            super.writeBundle(bundle);
+            sequenceNumberTracker.updateByRowCount(bundle.rowCount());
+            return;
+        }
+
         for (InternalRow row : bundle) {
             write(row);
         }
