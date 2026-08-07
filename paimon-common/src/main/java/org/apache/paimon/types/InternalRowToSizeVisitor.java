@@ -18,6 +18,8 @@
 
 package org.apache.paimon.types;
 
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -229,7 +231,13 @@ public class InternalRowToSizeVisitor
             if (row.isNullAt(index)) {
                 return NULL_SIZE;
             } else {
-                return Math.toIntExact(row.getVariant(index).sizeInBytes());
+                Blob blob = row.getBlob(index);
+                if (blob instanceof BlobData) {
+                    return ((BlobData) blob).toData().length;
+                } else {
+                    // BlobRef and BlobView
+                    return Math.toIntExact(blob.toDescriptor().length());
+                }
             }
         };
     }

@@ -19,6 +19,7 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -191,5 +192,19 @@ public class InternalRowToSizeVisitorTest {
         Assertions.assertThat(feildSizeCalculator.get(22).apply(row, 22)).isEqualTo(6);
 
         Assertions.assertThat(feildSizeCalculator.get(23).apply(row, 23)).isEqualTo(0);
+    }
+
+    @Test
+    void testBlobSize() {
+        RowType rowType = RowType.builder().field("b", DataTypes.BLOB()).build();
+        InternalRowToSizeVisitor visitor = new InternalRowToSizeVisitor();
+        BiFunction<DataGetters, Integer, Integer> calculator =
+                rowType.getFieldTypes().get(0).accept(visitor);
+
+        GenericRow row = GenericRow.of(Blob.fromData(new byte[] {1, 2, 3}));
+        Assertions.assertThat(calculator.apply(row, 0)).isEqualTo(3);
+
+        GenericRow nullRow = GenericRow.of(new Object[] {null});
+        Assertions.assertThat(calculator.apply(nullRow, 0)).isEqualTo(0);
     }
 }
