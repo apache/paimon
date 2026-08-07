@@ -18,8 +18,11 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
@@ -107,53 +110,55 @@ public class SparkFilterConverter {
             return PredicateBuilder.alwaysFalse();
         } else if (filter instanceof EqualTo) {
             EqualTo eq = (EqualTo) filter;
-            int index = fieldIndex(eq.attribute());
+            FieldInfo fieldInfo = resolveField(eq.attribute());
             if (isNaN(eq.value())) {
-                return builder.isNaN(index);
+                return builder.isNaN(fieldInfo.transform());
             }
-            Object literal = convertLiteral(index, eq.value());
-            return builder.equal(index, literal);
+            Object literal = convertLiteral(fieldInfo.type(), eq.value());
+            return builder.equal(fieldInfo.transform(), literal);
         } else if (filter instanceof EqualNullSafe) {
             EqualNullSafe eq = (EqualNullSafe) filter;
-            int index = fieldIndex(eq.attribute());
+            FieldInfo fieldInfo = resolveField(eq.attribute());
             if (eq.value() == null) {
-                return builder.isNull(index);
+                return builder.isNull(fieldInfo.transform());
             } else {
-                Object literal = convertLiteral(index, eq.value());
-                return builder.equal(index, literal);
+                Object literal = convertLiteral(fieldInfo.type(), eq.value());
+                return builder.equal(fieldInfo.transform(), literal);
             }
         } else if (filter instanceof GreaterThan) {
             GreaterThan gt = (GreaterThan) filter;
-            int index = fieldIndex(gt.attribute());
-            Object literal = convertLiteral(index, gt.value());
-            return builder.greaterThan(index, literal);
+            FieldInfo fieldInfo = resolveField(gt.attribute());
+            Object literal = convertLiteral(fieldInfo.type(), gt.value());
+            return builder.greaterThan(fieldInfo.transform(), literal);
         } else if (filter instanceof GreaterThanOrEqual) {
             GreaterThanOrEqual gt = (GreaterThanOrEqual) filter;
-            int index = fieldIndex(gt.attribute());
-            Object literal = convertLiteral(index, gt.value());
-            return builder.greaterOrEqual(index, literal);
+            FieldInfo fieldInfo = resolveField(gt.attribute());
+            Object literal = convertLiteral(fieldInfo.type(), gt.value());
+            return builder.greaterOrEqual(fieldInfo.transform(), literal);
         } else if (filter instanceof LessThan) {
             LessThan lt = (LessThan) filter;
-            int index = fieldIndex(lt.attribute());
-            Object literal = convertLiteral(index, lt.value());
-            return builder.lessThan(index, literal);
+            FieldInfo fieldInfo = resolveField(lt.attribute());
+            Object literal = convertLiteral(fieldInfo.type(), lt.value());
+            return builder.lessThan(fieldInfo.transform(), literal);
         } else if (filter instanceof LessThanOrEqual) {
             LessThanOrEqual lt = (LessThanOrEqual) filter;
-            int index = fieldIndex(lt.attribute());
-            Object literal = convertLiteral(index, lt.value());
-            return builder.lessOrEqual(index, literal);
+            FieldInfo fieldInfo = resolveField(lt.attribute());
+            Object literal = convertLiteral(fieldInfo.type(), lt.value());
+            return builder.lessOrEqual(fieldInfo.transform(), literal);
         } else if (filter instanceof In) {
             In in = (In) filter;
-            int index = fieldIndex(in.attribute());
+            FieldInfo fieldInfo = resolveField(in.attribute());
             return builder.in(
-                    index,
+                    fieldInfo.transform(),
                     Arrays.stream(in.values())
-                            .map(v -> convertLiteral(index, v))
+                            .map(v -> convertLiteral(fieldInfo.type(), v))
                             .collect(Collectors.toList()));
         } else if (filter instanceof IsNull) {
-            return builder.isNull(fieldIndex(((IsNull) filter).attribute()));
+            FieldInfo fieldInfo = resolveField(((IsNull) filter).attribute());
+            return builder.isNull(fieldInfo.transform());
         } else if (filter instanceof IsNotNull) {
-            return builder.isNotNull(fieldIndex(((IsNotNull) filter).attribute()));
+            FieldInfo fieldInfo = resolveField(((IsNotNull) filter).attribute());
+            return builder.isNotNull(fieldInfo.transform());
         } else if (filter instanceof And) {
             And and = (And) filter;
             return PredicateBuilder.and(convert(and.left()), convert(and.right()));
@@ -168,19 +173,19 @@ public class SparkFilterConverter {
             }
         } else if (filter instanceof StringStartsWith) {
             StringStartsWith startsWith = (StringStartsWith) filter;
-            int index = fieldIndex(startsWith.attribute());
-            Object literal = convertLiteral(index, startsWith.value());
-            return builder.startsWith(index, literal);
+            FieldInfo fieldInfo = resolveField(startsWith.attribute());
+            Object literal = convertLiteral(fieldInfo.type(), startsWith.value());
+            return builder.startsWith(fieldInfo.transform(), literal);
         } else if (filter instanceof StringEndsWith) {
             StringEndsWith endsWith = (StringEndsWith) filter;
-            int index = fieldIndex(endsWith.attribute());
-            Object literal = convertLiteral(index, endsWith.value());
-            return builder.endsWith(index, literal);
+            FieldInfo fieldInfo = resolveField(endsWith.attribute());
+            Object literal = convertLiteral(fieldInfo.type(), endsWith.value());
+            return builder.endsWith(fieldInfo.transform(), literal);
         } else if (filter instanceof StringContains) {
             StringContains contains = (StringContains) filter;
-            int index = fieldIndex(contains.attribute());
-            Object literal = convertLiteral(index, contains.value());
-            return builder.contains(index, literal);
+            FieldInfo fieldInfo = resolveField(contains.attribute());
+            Object literal = convertLiteral(fieldInfo.type(), contains.value());
+            return builder.contains(fieldInfo.transform(), literal);
         }
 
         throw new UnsupportedOperationException(
@@ -198,7 +203,8 @@ public class SparkFilterConverter {
     }
 
     public Object convertLiteral(String field, Object value) {
-        return convertLiteral(fieldIndex(field), value);
+        FieldInfo fieldInfo = resolveField(field);
+        return convertLiteral(fieldInfo.type(), value);
     }
 
     public String convertString(String field, Object value) {
@@ -206,18 +212,89 @@ public class SparkFilterConverter {
         return literal == null ? null : literal.toString();
     }
 
-    private int fieldIndex(String field) {
-        int index = rowType.getFieldIndex(field);
-        // TODO: support nested field
-        if (index == -1) {
+    private static class FieldInfo {
+        private final Transform transform;
+        private final DataType type;
+
+        public FieldInfo(Transform transform, DataType type) {
+            this.transform = transform;
+            this.type = type;
+        }
+
+        public Transform transform() {
+            return transform;
+        }
+
+        public DataType type() {
+            return type;
+        }
+    }
+
+    private FieldInfo resolveField(String field) {
+        // Paimon schema does not forbid top-level column names containing '.', so always try an
+        // exact top-level lookup first and only fall back to nested path resolution when no such
+        // field exists.
+        int exactIndex = rowType.getFieldIndex(field);
+        if (exactIndex != -1) {
+            DataType fieldType = rowType.getTypeAt(exactIndex);
+            Transform transform = new FieldTransform(new FieldRef(exactIndex, field, fieldType));
+            return new FieldInfo(transform, fieldType);
+        }
+
+        String[] parts = field.split("\\.");
+        if (parts.length == 1) {
+            throw new UnsupportedOperationException(
+                    String.format("Field '%s' is not found in table schema.", field));
+        }
+
+        int topLevelIndex = rowType.getFieldIndex(parts[0]);
+        if (topLevelIndex == -1) {
+            throw new UnsupportedOperationException(
+                    String.format("Field '%s' is not found in table schema.", field));
+        }
+
+        DataType fieldType = getNestedFieldType(rowType, parts);
+        if (fieldType == null) {
             throw new UnsupportedOperationException(
                     String.format("Nested field '%s' is unsupported.", field));
         }
-        return index;
+        int[] nestedIndexes = new int[parts.length - 1];
+        int[] nestedArities = new int[parts.length - 1];
+        DataType currentType = rowType.getTypeAt(topLevelIndex);
+        for (int i = 0; i < parts.length - 1; i++) {
+            RowType currentSelection = (RowType) currentType;
+            nestedArities[i] = currentSelection.getFieldCount();
+            String nextPart = parts[i + 1];
+            int nextIndex = currentSelection.getFieldIndex(nextPart);
+            nestedIndexes[i] = nextIndex;
+            currentType = currentSelection.getTypeAt(nextIndex);
+        }
+
+        Transform transform =
+                new FieldTransform(
+                        new FieldRef(
+                                topLevelIndex, field, fieldType, nestedIndexes, nestedArities));
+        return new FieldInfo(transform, fieldType);
     }
 
-    private Object convertLiteral(int index, Object value) {
-        DataType type = rowType.getTypeAt(index);
+    private DataType getNestedFieldType(RowType rowType, String[] path) {
+        DataType currentType = rowType;
+        for (String part : path) {
+            if (currentType instanceof RowType) {
+                RowType currentSelection = (RowType) currentType;
+                int idx = currentSelection.getFieldIndex(part);
+                if (idx == -1) {
+                    return null;
+                }
+                currentType = currentSelection.getTypeAt(idx);
+            } else {
+                return null;
+            }
+        }
+        return currentType;
+    }
+
+    private Object convertLiteral(DataType type, Object value) {
         return convertJavaObject(type, value);
     }
 }
