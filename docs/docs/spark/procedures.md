@@ -324,6 +324,17 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>repair_earliest_snapshot</td>
+      <td>
+         Repair the earliest snapshot hint for a table. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>snapshot_id: the snapshot ID to set as the earliest snapshot.</li>
+      </td>
+      <td>
+          CALL sys.repair_earliest_snapshot(table => 'test_db.T', snapshot_id => 10)
+      </td>
+    </tr>
+    <tr>
       <td>create_branch</td>
       <td>
          To merge a branch to main branch. Arguments:
