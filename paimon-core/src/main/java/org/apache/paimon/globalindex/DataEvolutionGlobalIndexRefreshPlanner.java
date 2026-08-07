@@ -48,7 +48,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -62,22 +61,13 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
 
     private DataEvolutionGlobalIndexRefreshPlanner() {}
 
-    public static List<IndexManifestEntry> findIndexesToRefresh(
-            SchemaManager schemaManager,
-            List<ManifestEntry> dataEntries,
-            List<IndexManifestEntry> indexEntries,
-            List<DataField> indexedFields) {
-        return findIndexesToRefresh(
-                schemaManager, dataEntries.iterator(), indexEntries, indexedFields);
-    }
-
     /**
-     * Streaming variant which consumes data entries one by one. Entries are never retained; only
-     * merged row ranges bucketed by distinct scan sequence numbers are kept in memory.
+     * Consumes data entries one by one. Entries are never retained; only merged row ranges bucketed
+     * by distinct scan sequence numbers are kept in memory.
      */
     public static List<IndexManifestEntry> findIndexesToRefresh(
             SchemaManager schemaManager,
-            Iterator<ManifestEntry> dataEntries,
+            Iterable<ManifestEntry> dataEntries,
             List<IndexManifestEntry> indexEntries,
             List<DataField> indexedFields) {
         Map<Pair<BinaryRow, Integer>, RefreshGroup> groups =
@@ -88,8 +78,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
 
         Set<Integer> indexedFieldIds = indexedFieldIds(indexedFields);
         Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache = new HashMap<>();
-        while (dataEntries.hasNext()) {
-            ManifestEntry dataEntry = dataEntries.next();
+        for (ManifestEntry dataEntry : dataEntries) {
             DataFileMeta file = dataEntry.file();
             if (dataEntry.kind() != FileKind.ADD || file.firstRowId() == null) {
                 continue;
