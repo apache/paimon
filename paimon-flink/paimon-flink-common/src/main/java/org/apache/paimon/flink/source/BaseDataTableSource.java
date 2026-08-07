@@ -144,8 +144,9 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         }
 
         Options options = Options.fromMap(table.options());
+        CoreOptions coreOptions = new CoreOptions(options);
 
-        if (new CoreOptions(options).mergeEngine() == FIRST_ROW) {
+        if (coreOptions.mergeEngine() == FIRST_ROW) {
             return ChangelogMode.insertOnly();
         }
 
@@ -155,6 +156,12 @@ public abstract class BaseDataTableSource extends FlinkTableSource
 
         if (options.get(CHANGELOG_PRODUCER) != CoreOptions.ChangelogProducer.NONE) {
             return ChangelogMode.all();
+        }
+
+        if (coreOptions.primaryKeyNullable()) {
+            throw new UnsupportedOperationException(
+                    "Flink streaming reads with nullable primary keys require a full changelog. "
+                            + "Configure 'changelog-producer' to a value other than 'none'.");
         }
 
         return ChangelogMode.upsert();

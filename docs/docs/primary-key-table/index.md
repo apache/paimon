@@ -53,6 +53,13 @@ In Flink, define a nullable Paimon primary key with the `primary-key` table opti
 The standard SQL `PRIMARY KEY` constraint implies `NOT NULL`, so Paimon does not expose a nullable
 key as a Flink SQL primary-key constraint.
 
+Flink streaming reads that emit updates or deletes require a full changelog producer, for example
+`changelog-producer=input`. The default `changelog-producer=none` produces an upsert changelog,
+which Flink can normalize only when the table exposes a SQL primary-key constraint. Because a
+nullable key cannot be exposed as that constraint, Paimon rejects this streaming-read combination
+instead of producing an invalid Flink plan. Insert-only streaming reads, such as tables using the
+`first-row` merge engine, are not affected.
+
 ## Bucket
 
 Unpartitioned tables, or partitions in partitioned tables, are sub-divided into buckets, to provide extra structure to the data that may be used for more efficient querying.

@@ -43,7 +43,9 @@ import java.util.Collections;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.INPUT;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
+import static org.apache.paimon.CoreOptions.PRIMARY_KEY_NULLABLE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for changelog mode with flink source and sink. */
 public class ChangelogModeTest {
@@ -59,8 +61,7 @@ public class ChangelogModeTest {
         path = new Path(temp.toUri().toString());
     }
 
-    private void test(Options options, ChangelogMode expectSource, ChangelogMode expectSink)
-            throws Exception {
+    private FileStoreTable createTable(Options options) throws Exception {
         new SchemaManager(LocalFileIO.create(), path)
                 .createTable(
                         new Schema(
@@ -69,13 +70,30 @@ public class ChangelogModeTest {
                                 Collections.singletonList("f0"),
                                 options.toMap(),
                                 ""));
-        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        return FileStoreTableFactory.create(LocalFileIO.create(), path);
+    }
+
+    private void test(Options options, ChangelogMode expectSource, ChangelogMode expectSink)
+            throws Exception {
+        FileStoreTable table = createTable(options);
 
         DataTableSource source = new DataTableSource(identifier, table, true, null);
         assertThat(source.getChangelogMode()).isEqualTo(expectSource);
 
         FlinkTableSink sink = new FlinkTableSink(identifier, table, null);
         assertThat(sink.getChangelogMode(ChangelogMode.all())).isEqualTo(expectSink);
+    }
+
+    @Test
+    public void testNullablePrimaryKey() throws Exception {
+        Options options = new Options();
+        options.set(PRIMARY_KEY_NULLABLE, true);
+        FileStoreTable table = createTable(options);
+
+        DataTableSource source = new DataTableSource(identifier, table, true, null);
+        assertThatThrownBy(source::getChangelogMode)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("nullable primary keys require a full changelog");
     }
 
     @Test
