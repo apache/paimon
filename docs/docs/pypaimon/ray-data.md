@@ -543,10 +543,10 @@ For an end-to-end feature update workflow on Blob tables, see
 
 ## Process Row-Id Ranges
 
-`process_row_id_ranges` splits a long backfill into file-group-aligned ranges.
-Each range follows `read -> process -> update -> commit`; completed ranges are
-visible even if a later range fails. The application configures only the target
-row count and processing callback.
+Use `process_row_id_ranges` to run a large backfill in bounded batches. Provide
+the target row count and processing callback; PyPaimon plans file-group-aligned
+ranges and handles `read -> process -> update -> commit` for each one. Completed
+ranges remain visible if a later range fails.
 
 ```python
 import pyarrow as pa
