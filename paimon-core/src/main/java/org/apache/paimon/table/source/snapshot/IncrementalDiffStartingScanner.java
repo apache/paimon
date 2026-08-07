@@ -31,6 +31,8 @@ import org.apache.paimon.utils.TagManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -110,19 +112,62 @@ public class IncrementalDiffStartingScanner extends AbstractStartingScanner {
         return new IncrementalDiffStartingScanner(snapshotManager, start, end);
     }
 
-    public static IncrementalDiffStartingScanner betweenTimestamps(
-            long startTimestamp, long endTimestamp, SnapshotManager snapshotManager) {
-        Snapshot startSnapshot = snapshotManager.earlierOrEqualTimeMills(startTimestamp);
-        if (startSnapshot == null) {
-            startSnapshot = snapshotManager.earliestSnapshot();
-        }
+    public static AbstractStartingScanner betweenTimestamps(
+            long startTimestamp,
+            long endTimestamp,
+            SnapshotManager snapshotManager,
+            CoreOptions options) {
+        Snapshot startSnapshot = getStartSnapshot(snapshotManager, startTimestamp, options);
 
         Snapshot endSnapshot = snapshotManager.earlierOrEqualTimeMills(endTimestamp);
         if (endSnapshot == null) {
             endSnapshot = snapshotManager.latestSnapshot();
         }
 
+        if (startSnapshot == null
+                || endSnapshot == null
+                || startTimestamp > endSnapshot.timeMillis()
+                || endTimestamp < startSnapshot.timeMillis()) {
+            return new EmptyResultStartingScanner(snapshotManager);
+        }
+
         return new IncrementalDiffStartingScanner(snapshotManager, startSnapshot, endSnapshot);
+    }
+
+    @Nullable
+    private static Snapshot getStartSnapshot(
+            SnapshotManager snapshotManager, long startTimestamp, CoreOptions options) {
+        Snapshot startSnapshot = snapshotManager.earlierOrEqualTimeMills(startTimestamp);
+        // TODO: Validate incremental-between-boundary-mode value
+        if (startSnapshot != null) {
+            LOG.info(
+                    "startTimestamp {} is converted to snapshot #{}.",
+                    startTimestamp,
+                    startSnapshot.id());
+            return startSnapshot;
+        } else if (options.incrementalBetweenBoundaryMode().equals("snapshot-or-tag")) {
+            TagManager tagManager =
+                    new TagManager(
+                            snapshotManager.fileIO(),
+                            snapshotManager.tablePath(),
+                            snapshotManager.branch());
+            Snapshot result =
+                    tagManager
+                            .earlierOrEqualTimeMillis(
+                                    startTimestamp, TagPeriodHandler.create(options))
+                            .orElse(null);
+            if (result == null) {
+                LOG.info("Cannot find auto tag for startTimestamp {}.", startTimestamp);
+            } else {
+                LOG.info(
+                        "startTimestamp {} is converted to tag with snapshotId #{}.",
+                        startTimestamp,
+                        result.id());
+            }
+            return result;
+        } else {
+            return snapshotManager.earliestSnapshot();
+        }
     }
 
     public static AbstractStartingScanner toEndAutoTag(

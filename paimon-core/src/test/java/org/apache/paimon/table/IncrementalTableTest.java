@@ -45,6 +45,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_SCAN_MODE;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
 import static org.apache.paimon.data.BinaryString.fromString;
@@ -568,6 +569,15 @@ public class IncrementalTableTest extends TableTestBase {
                                                 "%s,%s",
                                                 latestTimestamp + 1, latestTimestamp + 2))))
                 .isEmpty();
+        assertThat(
+                        read(
+                                table,
+                                Pair.of(
+                                        INCREMENTAL_BETWEEN_TIMESTAMP,
+                                        String.format(
+                                                "%s,%s", latestTimestamp + 1, latestTimestamp + 2)),
+                                Pair.of(INCREMENTAL_BETWEEN_SCAN_MODE, "delta")))
+                .isEmpty();
 
         // endTimestamp < earliestSnapshot.timeMillis()
         assertThat(
@@ -578,6 +588,16 @@ public class IncrementalTableTest extends TableTestBase {
                                         String.format(
                                                 "%s,%s",
                                                 earliestTimestamp - 2, earliestTimestamp - 1))))
+                .isEmpty();
+        assertThat(
+                        read(
+                                table,
+                                Pair.of(
+                                        INCREMENTAL_BETWEEN_TIMESTAMP,
+                                        String.format(
+                                                "%s,%s",
+                                                earliestTimestamp - 2, earliestTimestamp - 1)),
+                                Pair.of(INCREMENTAL_BETWEEN_SCAN_MODE, "delta")))
                 .isEmpty();
     }
 
