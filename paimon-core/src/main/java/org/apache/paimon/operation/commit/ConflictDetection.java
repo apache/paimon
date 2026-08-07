@@ -814,12 +814,16 @@ public class ConflictDetection {
     private RuntimeException rowIdExistenceConflict(SimpleFileEntry entry) {
         return new RuntimeException(
                 String.format(
-                        "Row ID existence conflict: file '%s' references "
+                        ErrorMessages.DATA_EVOLUTION_ROW_ID_EXISTENCE_CONFLICT_MESSAGE
+                                + ": file '%s' references "
                                 + "firstRowId=%d, rowCount=%d in bucket %d, "
                                 + "but no matching file exists in the current snapshot. "
                                 + "The referenced file may have been rewritten by a "
                                 + "concurrent compaction or removed by an overwrite.",
-                        entry.fileName(), entry.firstRowId(), entry.rowCount(), entry.bucket()));
+                        entry.fileName(),
+                        entry.firstRowId(),
+                        entry.rowCount(),
+                        entry.bucket()));
     }
 
     private static boolean dedicatedStorageFile(String fileName) {

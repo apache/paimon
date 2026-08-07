@@ -25,5 +25,8 @@ public class ErrorMessages {
             "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts,"
                     + " updating the same file, which can render some updates ineffective.";
 
+    public static final String DATA_EVOLUTION_ROW_ID_EXISTENCE_CONFLICT_MESSAGE =
+            "Row ID existence conflict";
+
     private ErrorMessages() {}
 }
