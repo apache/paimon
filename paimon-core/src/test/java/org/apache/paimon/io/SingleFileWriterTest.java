@@ -26,7 +26,9 @@ import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -146,6 +148,65 @@ public class SingleFileWriterTest {
     }
 
     @Test
+    public void testRuntimeExceptionWhileClosingDeletesFile() throws IOException {
+        // several format writers wrap IO failures in unchecked exceptions on the close path
+        TestSingleFileWriter writer =
+                newWriter(
+                        (out, compression) ->
+                                new ThrowingCloseWriter(new IllegalStateException("cannot close")));
+
+        assertThatThrownBy(writer::close)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("cannot close");
+
+        assertThat(fileIO.exists(path)).isFalse();
+    }
+
+    @Test
+    public void testIOExceptionWhileClosingDeletesFile() throws IOException {
+        TestSingleFileWriter writer =
+                newWriter((out, compression) -> new ThrowingCloseWriter(new IOException("boom")));
+
+        // the checked failure must still reach the caller unwrapped
+        assertThatThrownBy(writer::close).isInstanceOf(IOException.class).hasMessage("boom");
+
+        assertThat(fileIO.exists(path)).isFalse();
+    }
+
+    @Test
+    public void testRuntimeExceptionWhileFlushingClosesStream() throws IOException {
+        // the output stream can fail with an unchecked exception too, for example
+        // AsyncPositionOutputStream when the writing thread is interrupted
+        FileIO trackedFileIO = new FlushFailingFileIO();
+        TestSingleFileWriter writer =
+                new TestSingleFileWriter(
+                        trackedFileIO, (out, compression) -> new NoOpFormatWriter(), path, false);
+
+        assertThatThrownBy(writer::close)
+                .isExactlyInstanceOf(RuntimeException.class)
+                .hasMessage("cannot flush");
+
+        assertThat(TraceableFileIO.openOutputStreams(path::equals)).isEmpty();
+        assertThat(trackedFileIO.exists(path)).isFalse();
+    }
+
+    @Test
+    public void testCleanupFailureDoesNotReplaceOriginalException() {
+        TestSingleFileWriter writer =
+                new TestSingleFileWriter(
+                        new DeleteFailingFileIO(),
+                        (out, compression) ->
+                                new ThrowingCloseWriter(new IllegalStateException("cannot close")),
+                        path,
+                        false);
+
+        assertThatThrownBy(writer::close)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("cannot close")
+                .hasSuppressedException(new RuntimeException("cannot delete"));
+    }
+
+    @Test
     public void testSuccessfulOpenKeepsFile() throws IOException {
         NoOpFormatWriter formatWriter = new NoOpFormatWriter();
         TestSingleFileWriter writer = newWriter((out, compression) -> formatWriter);
@@ -223,6 +284,52 @@ public class SingleFileWriterTest {
         @Override
         public void close() {
             closed = true;
+        }
+    }
+
+    private static class ThrowingCloseWriter implements FormatWriter {
+
+        private final Throwable failure;
+
+        private ThrowingCloseWriter(Throwable failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public void addElement(InternalRow element) {}
+
+        @Override
+        public boolean reachTargetSize(boolean suggestedCheck, long targetSize) {
+            return false;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (failure instanceof IOException) {
+                throw (IOException) failure;
+            }
+            throw (RuntimeException) failure;
+        }
+    }
+
+    private static class DeleteFailingFileIO extends LocalFileIO {
+
+        @Override
+        public boolean delete(Path f, boolean recursive) {
+            throw new RuntimeException("cannot delete");
+        }
+    }
+
+    private static class FlushFailingFileIO extends TraceableFileIO {
+
+        @Override
+        public PositionOutputStream newOutputStream(Path f, boolean overwrite) throws IOException {
+            return new PositionOutputStreamWrapper(super.newOutputStream(f, overwrite)) {
+                @Override
+                public void flush() {
+                    throw new RuntimeException("cannot flush");
+                }
+            };
         }
     }
 

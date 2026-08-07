@@ -88,6 +88,48 @@ public class FormatTableSingleFileWriterTest {
         assertThat(fileIO.readFileUtf8(path)).isEqualTo("keep me");
     }
 
+    @Test
+    public void testRuntimeExceptionWhileClosingLeavesNoFileBehind() throws IOException {
+        // several format writers wrap IO failures in unchecked exceptions on the close path
+        FormatTableSingleFileWriter writer =
+                newWriter(
+                        (out, compression) ->
+                                new ThrowingCloseWriter(new IllegalStateException("cannot close")));
+
+        assertThatThrownBy(writer::close)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("cannot close");
+
+        assertThat(fileIO.listFiles(new Path(tempDir.toString()), true)).isEmpty();
+    }
+
+    @Test
+    public void testIOExceptionWhileClosingLeavesNoFileBehind() throws IOException {
+        FormatTableSingleFileWriter writer =
+                newWriter((out, compression) -> new ThrowingCloseWriter(new IOException("boom")));
+
+        // the checked failure must still reach the caller unwrapped
+        assertThatThrownBy(writer::close).isInstanceOf(IOException.class).hasMessage("boom");
+
+        assertThat(fileIO.listFiles(new Path(tempDir.toString()), true)).isEmpty();
+    }
+
+    @Test
+    public void testCleanupFailureDoesNotReplaceOriginalException() {
+        FormatTableSingleFileWriter writer =
+                new FormatTableSingleFileWriter(
+                        new DeleteFailingFileIO(),
+                        (out, compression) ->
+                                new ThrowingCloseWriter(new IllegalStateException("cannot close")),
+                        path,
+                        "zstd");
+
+        assertThatThrownBy(writer::close)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("cannot close")
+                .hasSuppressedException(new RuntimeException("cannot delete"));
+    }
+
     private FormatTableSingleFileWriter newWriter(FormatWriterFactory factory) {
         return new FormatTableSingleFileWriter(fileIO, factory, path, "zstd");
     }
@@ -104,5 +146,38 @@ public class FormatTableSingleFileWriterTest {
 
         @Override
         public void close() {}
+    }
+
+    private static class DeleteFailingFileIO extends LocalFileIO {
+
+        @Override
+        public boolean delete(Path f, boolean recursive) {
+            throw new RuntimeException("cannot delete");
+        }
+    }
+
+    private static class ThrowingCloseWriter implements FormatWriter {
+
+        private final Throwable failure;
+
+        private ThrowingCloseWriter(Throwable failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public void addElement(InternalRow element) {}
+
+        @Override
+        public boolean reachTargetSize(boolean suggestedCheck, long targetSize) {
+            return false;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (failure instanceof IOException) {
+                throw (IOException) failure;
+            }
+            throw (RuntimeException) failure;
+        }
     }
 }
