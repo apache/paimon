@@ -3004,7 +3004,28 @@ class BlobEndToEndTest(unittest.TestCase):
             placeholder_reader.read_arrow_batch()
         placeholder_reader.close()
 
-    def test_duplicate_map_blob_key_last_wins(self):
+    def test_reject_duplicate_map_blob_key_on_write(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        fields = [DataField(
+            0,
+            "blob_map",
+            MapType(True, AtomicType("STRING"), AtomicType("BLOB")),
+        )]
+        output = io.BytesIO()
+        writer = BlobFormatWriter(output)
+        with self.assertRaisesRegex(ValueError, "MAP<X, BLOB> keys must be unique"):
+            writer.add_element(GenericRow(
+                [[
+                    ("duplicate", BlobData(b"first")),
+                    ("duplicate", BlobData(b"second")),
+                ]],
+                fields,
+                RowKind.INSERT,
+            ))
+        self.assertEqual(output.getvalue(), b"")
+
+    def test_reject_duplicate_map_blob_key_payload(self):
         from pypaimon.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
@@ -3018,7 +3039,7 @@ class BlobEndToEndTest(unittest.TestCase):
         writer.add_element(GenericRow(
             [[
                 ("duplicate", BlobData(b"first")),
-                ("duplicate", BlobData(b"second")),
+                ("duplicatE", BlobData(b"second")),
                 ("tail", BlobData(b"third")),
             ]],
             fields,
@@ -3026,6 +3047,17 @@ class BlobEndToEndTest(unittest.TestCase):
         ))
         record_length = writer.lengths[0]
         writer.close()
+
+        with open(blob_file_path, 'r+b') as blob_file:
+            second_key_position = (
+                BlobRecordIterator.MAGIC_NUMBER_SIZE
+                + BlobRecordIterator.MAP_HEADER_SIZE
+                + len("duplicate")
+            )
+            bytes_data = bytearray(blob_file.read())
+            bytes_data[second_key_position + len("duplicatE") - 1] = ord("e")
+            blob_file.seek(0)
+            blob_file.write(bytes_data)
 
         for blob_as_descriptor in (False, True):
             iterator = BlobRecordIterator(
@@ -3036,10 +3068,11 @@ class BlobEndToEndTest(unittest.TestCase):
                 fields[0],
                 blob_as_descriptor=blob_as_descriptor,
             )
-            result = next(iterator).values[0]
-            self.assertEqual(list(result), ["duplicate", "tail"])
-            self.assertEqual(result["duplicate"].to_data(), b"second")
-            self.assertEqual(result["tail"].to_data(), b"third")
+            with self.subTest(blob_as_descriptor=blob_as_descriptor):
+                with self.assertRaisesRegex(
+                    ValueError, "Invalid MAP<X, BLOB> payload: duplicate key"
+                ):
+                    next(iterator)
 
     def test_map_blob_key_types_and_rejections(self):
         from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer

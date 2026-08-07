@@ -44,8 +44,10 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 import static org.apache.paimon.utils.StreamUtils.intToLittleEndian;
 import static org.apache.paimon.utils.StreamUtils.longToLittleEndian;
@@ -176,25 +178,41 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                         "MAP<X, BLOB> key/value array size does not match map size.");
             }
 
+            // 1. Serialize and validate the key array before writing the record.
+            long[] keyLengths = new long[map.size()];
+            byte[][] keyBytes = new byte[map.size()][];
+            Set<ByteBuffer> seenKeys = new HashSet<>();
+            for (int i = 0; i < map.size(); i++) {
+                if (keys.isNullAt(i)) {
+                    keyLengths[i] = NULL_KEY_LENGTH;
+                    if (!seenKeys.add(null)) {
+                        throw new IllegalArgumentException("MAP<X, BLOB> keys must be unique.");
+                    }
+                } else {
+                    byte[] serializedKey =
+                            keySerializer.serialize(keyGetter.getElementOrNull(keys, i));
+                    keyLengths[i] = serializedKey.length;
+                    keyBytes[i] = serializedKey;
+                    if (!seenKeys.add(ByteBuffer.wrap(serializedKey))) {
+                        throw new IllegalArgumentException("MAP<X, BLOB> keys must be unique.");
+                    }
+                }
+            }
+
             long recordPosition = startRecord();
-            // 1. Write meta
+            // 2. Write meta
             write(MAGIC_NUMBER_BYTES);
             write(new byte[] {VERSION});
             write(intToLittleEndian(map.size()));
 
-            // 2. Write key array
-            long[] keyLengths = new long[map.size()];
-            for (int i = 0; i < map.size(); i++) {
-                if (keys.isNullAt(i)) {
-                    keyLengths[i] = NULL_KEY_LENGTH;
-                } else {
-                    byte[] keyBytes = keySerializer.serialize(keyGetter.getElementOrNull(keys, i));
-                    keyLengths[i] = keyBytes.length;
-                    write(keyBytes);
+            // 3. Write key array
+            for (byte[] serializedKey : keyBytes) {
+                if (serializedKey != null) {
+                    write(serializedKey);
                 }
             }
 
-            // 3. Write values(blobs) array, same as ArrayBlobElementWriter
+            // 4. Write values(blobs) array, same as ArrayBlobElementWriter
             long[] valueLengths = new long[map.size()];
             boolean flush = false;
             for (int i = 0; i < map.size(); i++) {
@@ -364,7 +382,13 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                     }
                     map.put(keys[i], value);
                 }
-                return binaryKey ? GenericMap.fromBinaryKeyMap(map) : new GenericMap(map);
+                GenericMap result =
+                        binaryKey ? GenericMap.fromBinaryKeyMap(map) : new GenericMap(map);
+                if (result.size() != entryCount) {
+                    throw new IllegalArgumentException(
+                            "Invalid MAP<X, BLOB> payload: duplicate key.");
+                }
+                return result;
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }

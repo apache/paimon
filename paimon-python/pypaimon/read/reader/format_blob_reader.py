@@ -655,6 +655,8 @@ class BlobRecordIterator:
                     value_offset += value_length
                     value_data_offset += value_length
                 result[key] = value
+            if len(result) != entry_count:
+                raise ValueError("Invalid MAP<X, BLOB> payload: duplicate key.")
             return result
         finally:
             if close_stream:
