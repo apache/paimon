@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexFormat;
@@ -178,7 +179,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
         } else {
             sql("CALL sys.rewrite_file_index('default.T')");
         }
-        assertFileIndexTypes(paimonTable("T"), "bloom-filter");
+        assertFileIndexTypes("T", "bloom-filter");
 
         sql("ALTER TABLE T RESET ('file-index.bloom-filter.columns')");
         sql("ALTER TABLE T SET ('file-index.bitmap.columns' = 'k')");
@@ -187,11 +188,14 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
         } else {
             sql("CALL sys.rewrite_file_index('default.T')");
         }
-        assertFileIndexTypes(paimonTable("T"), "bitmap");
+        assertFileIndexTypes("T", "bitmap");
     }
 
-    private void assertFileIndexTypes(FileStoreTable table, String expectedIndexType)
-            throws Exception {
+    private void assertFileIndexTypes(String tableName, String expectedIndexType) throws Exception {
+        flinkCatalog()
+                .catalog()
+                .invalidateTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
+        FileStoreTable table = paimonTable(tableName);
         for (ManifestEntry entry : table.store().newScan().plan().files()) {
             String indexFile =
                     entry.file().extraFiles().stream()
