@@ -1164,7 +1164,7 @@ All available procedures are listed below.
          CALL sys.full_text_search(<br/>
             `table` => 'default.articles',<br/>
             `column` => 'content',<br/>
-            query => '{"match":{"column":"content","terms":"paimon lake"}}',<br/>
+            query => '{"match":{"query":"paimon lake"}}',<br/>
             top_k => 10,<br/>
             projection => 'id,content,__paimon_search_score')
       </td>
