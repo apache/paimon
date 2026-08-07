@@ -120,6 +120,11 @@ public class InternalRowUtilsTest {
 
     @Test
     public void testCompare() {
+        // test BOOLEAN data type
+        assertThat(InternalRowUtils.compare(false, true, DataTypeRoot.BOOLEAN)).isLessThan(0);
+        assertThat(InternalRowUtils.compare(true, false, DataTypeRoot.BOOLEAN)).isGreaterThan(0);
+        assertThat(InternalRowUtils.compare(true, true, DataTypeRoot.BOOLEAN)).isEqualTo(0);
+
         // test DECIMAL data type
         Decimal xDecimalData = Decimal.fromBigDecimal(new BigDecimal("12.34"), 4, 2);
         Decimal yDecimalData = Decimal.fromBigDecimal(new BigDecimal("13.14"), 4, 2);
