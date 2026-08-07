@@ -19,7 +19,9 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
@@ -41,6 +43,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
 
     @Override
     public InternalRow toRow(DataFileMeta meta) {
+        long[] columnMaxSequenceNumbers = meta.columnMaxSequenceNumbers();
         return GenericRow.of(
                 BinaryString.fromString(meta.fileName()),
                 meta.fileSize(),
@@ -61,7 +64,10 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 toStringArrayData(meta.valueStatsCols()),
                 meta.externalPath().map(BinaryString::fromString).orElse(null),
                 meta.firstRowId(),
-                meta.writeCols() == null ? null : toStringArrayData(meta.writeCols()));
+                meta.writeCols() == null ? null : toStringArrayData(meta.writeCols()),
+                columnMaxSequenceNumbers == null
+                        ? null
+                        : new GenericArray(columnMaxSequenceNumbers));
     }
 
     @Override
@@ -86,6 +92,15 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
                 row.isNullAt(17) ? null : row.getString(17).toString(),
                 row.isNullAt(18) ? null : row.getLong(18),
-                row.isNullAt(19) ? null : fromStringArrayData(row.getArray(19)));
+                row.isNullAt(19) ? null : fromStringArrayData(row.getArray(19)),
+                row.isNullAt(20) ? null : fromLongArray(row.getArray(20)));
+    }
+
+    private static long[] fromLongArray(InternalArray array) {
+        long[] result = new long[array.size()];
+        for (int i = 0; i < array.size(); i++) {
+            result[i] = array.getLong(i);
+        }
+        return result;
     }
 }

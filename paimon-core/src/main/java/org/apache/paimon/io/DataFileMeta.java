@@ -80,6 +80,7 @@ public interface DataFileMeta {
     String EXTERNAL_PATH = "_EXTERNAL_PATH";
     String FIRST_ROW_ID = "_FIRST_ROW_ID";
     String WRITE_COLS = "_WRITE_COLS";
+    String COLUMN_MAX_SEQUENCE_NUMBERS = "_COLUMN_MAX_SEQUENCE_NUMBERS";
 
     RowType SCHEMA =
             new RowType(
@@ -109,7 +110,11 @@ public interface DataFileMeta {
                             new DataField(17, EXTERNAL_PATH, newStringType(true)),
                             new DataField(18, FIRST_ROW_ID, new BigIntType(true)),
                             new DataField(
-                                    19, WRITE_COLS, new ArrayType(true, newStringType(false)))));
+                                    19, WRITE_COLS, new ArrayType(true, newStringType(false))),
+                            new DataField(
+                                    20,
+                                    COLUMN_MAX_SEQUENCE_NUMBERS,
+                                    new ArrayType(true, new BigIntType(false)))));
 
     BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
@@ -173,7 +178,7 @@ public interface DataFileMeta {
             @Nullable String externalPath,
             @Nullable Long firstRowId,
             @Nullable List<String> writeCols) {
-        return new PojoDataFileMeta(
+        return create(
                 fileName,
                 fileSize,
                 rowCount,
@@ -193,7 +198,54 @@ public interface DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                null);
+    }
+
+    static DataFileMeta create(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            BinaryRow minKey,
+            BinaryRow maxKey,
+            SimpleStats keyStats,
+            SimpleStats valueStats,
+            long minSequenceNumber,
+            long maxSequenceNumber,
+            long schemaId,
+            int level,
+            List<String> extraFiles,
+            Timestamp creationTime,
+            @Nullable Long deleteRowCount,
+            @Nullable byte[] embeddedIndex,
+            @Nullable FileSource fileSource,
+            @Nullable List<String> valueStatsCols,
+            @Nullable String externalPath,
+            @Nullable Long firstRowId,
+            @Nullable List<String> writeCols,
+            @Nullable long[] columnMaxSequenceNumbers) {
+        return new PojoDataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath,
+                firstRowId,
+                writeCols,
+                columnMaxSequenceNumbers);
     }
 
     static DataFileMeta create(
@@ -354,6 +406,18 @@ public interface DataFileMeta {
     @Nullable
     List<String> writeCols();
 
+    /**
+     * Maximum sequence number per physical table field after data-evolution compaction.
+     *
+     * <p>Values follow the table-field order selected by {@link #writeCols()} when it is non-null
+     * (system fields are ignored), or the file schema field order otherwise. A null value means
+     * that only the file-level sequence range is available.
+     */
+    @Nullable
+    default long[] columnMaxSequenceNumbers() {
+        return null;
+    }
+
     DataFileMeta upgrade(int newLevel);
 
     DataFileMeta rename(String newFileName);
@@ -361,6 +425,11 @@ public interface DataFileMeta {
     DataFileMeta copyWithoutStats();
 
     DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber);
+
+    default DataFileMeta withColumnMaxSequenceNumbers(long[] columnMaxSequenceNumbers) {
+        throw new UnsupportedOperationException(
+                "This DataFileMeta implementation does not support column sequence numbers.");
+    }
 
     DataFileMeta assignFirstRowId(long firstRowId);
 

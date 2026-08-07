@@ -22,10 +22,12 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -43,17 +45,43 @@ public class DataEvolutionUtils {
      */
     public static Set<Integer> fileFieldIds(
             Function<Long, TableSchema> scanTableSchema, DataFileMeta file) {
+        return fileFields(scanTableSchema, file).stream()
+                .map(DataField::id)
+                .collect(Collectors.toSet());
+    }
+
+    /** Table fields physically present in a file, in their physical write order. */
+    public static List<DataField> fileFields(
+            Function<Long, TableSchema> scanTableSchema, DataFileMeta file) {
         TableSchema schema = scanTableSchema.apply(file.schemaId());
         List<String> writeCols = file.writeCols();
-        Set<String> writeColNames = writeCols == null ? null : new HashSet<>(writeCols);
-        Set<Integer> ids = new HashSet<>();
+        if (writeCols == null) {
+            return schema.fields();
+        }
+
+        Map<String, DataField> fieldsByName = new HashMap<>();
         for (DataField field : schema.fields()) {
+            fieldsByName.put(field.name(), field);
+        }
+        List<DataField> fields = new ArrayList<>();
+        for (String writeCol : writeCols) {
             // writeCols may also contain physical row-tracking fields outside the table schema.
-            if (writeColNames == null || writeColNames.contains(field.name())) {
-                ids.add(field.id());
+            DataField field = fieldsByName.get(writeCol);
+            if (field != null) {
+                fields.add(field);
             }
         }
-        return ids;
+        return fields;
+    }
+
+    /** Returns the latest sequence known for a physical field position in the file. */
+    public static long fieldMaxSequenceNumber(
+            DataFileMeta file, int fieldPosition, int physicalFieldCount) {
+        long[] columnSequences = file.columnMaxSequenceNumbers();
+        if (columnSequences == null || columnSequences.length != physicalFieldCount) {
+            return file.maxSequenceNumber();
+        }
+        return columnSequences[fieldPosition];
     }
 
     /**

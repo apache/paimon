@@ -42,20 +42,21 @@ public class BinaryDataFileMetaTest {
     void testImplementsProjectedDataFileMeta() {
         DataFileMeta expected =
                 DataFileMeta.forAppend(
-                        "data.parquet",
-                        123L,
-                        5L,
-                        SimpleStats.EMPTY_STATS,
-                        2L,
-                        3L,
-                        4L,
-                        Arrays.asList("extra-1", "extra-2"),
-                        new byte[] {1, 2},
-                        FileSource.COMPACT,
-                        Collections.singletonList("value_col"),
-                        "external/dir/data.parquet",
-                        10L,
-                        Collections.singletonList("write_col"));
+                                "data.parquet",
+                                123L,
+                                5L,
+                                SimpleStats.EMPTY_STATS,
+                                2L,
+                                3L,
+                                4L,
+                                Arrays.asList("extra-1", "extra-2"),
+                                new byte[] {1, 2},
+                                FileSource.COMPACT,
+                                Collections.singletonList("value_col"),
+                                "external/dir/data.parquet",
+                                10L,
+                                Collections.singletonList("write_col"))
+                        .withColumnMaxSequenceNumbers(new long[] {11L});
         BinaryDataFileMeta actual =
                 BinaryDataFileMeta.Projection.create(DataFileMeta.SCHEMA)
                         .createDataFile()
@@ -91,6 +92,7 @@ public class BinaryDataFileMetaTest {
         assertThat(actual.firstRowId()).isEqualTo(10L);
         assertThat(actual.nonNullFirstRowId()).isEqualTo(10L);
         assertThat(actual.writeCols()).containsExactly("write_col");
+        assertThat(actual.columnMaxSequenceNumbers()).containsExactly(11L);
         assertThat(actual.containsWriteColumn(BinaryString.fromString("write_col"))).isTrue();
         assertThat(actual.containsWriteColumn(BinaryString.fromString("other"))).isFalse();
         assertThat(actual.toFileSelection(Collections.singletonList(new Range(11L, 12L))))
@@ -101,6 +103,9 @@ public class BinaryDataFileMetaTest {
         assertUnsupported(actual::copyWithoutStats, "copyWithoutStats()");
         assertUnsupported(
                 () -> actual.assignSequenceNumber(4L, 5L), "assignSequenceNumber(long, long)");
+        assertUnsupported(
+                () -> actual.withColumnMaxSequenceNumbers(new long[] {2L}),
+                "withColumnMaxSequenceNumbers(long[])");
         assertUnsupported(() -> actual.assignFirstRowId(20L), "assignFirstRowId(long)");
         assertUnsupported(() -> actual.newFirstRowId(20L), "newFirstRowId(Long)");
         assertUnsupported(() -> actual.copy(Collections.emptyList()), "copy(List)");

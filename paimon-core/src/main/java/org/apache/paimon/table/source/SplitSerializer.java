@@ -23,12 +23,14 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.utils.FunctionWithIOException;
+import org.apache.paimon.utils.ObjectSerializer;
 
 import javax.annotation.Nullable;
 
@@ -54,7 +56,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 public class SplitSerializer {
 
     private static final long MAGIC = 0x53504C49545F5631L; // "SPLIT_V1"
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
     private static final int DATA_SPLIT = 1;
     private static final int INCREMENTAL_SPLIT = 2;
@@ -113,7 +115,7 @@ public class SplitSerializer {
         }
 
         int version = in.readInt();
-        if (version != VERSION) {
+        if (version < 1 || version > VERSION) {
             throw new IOException("Unsupported split serializer version: " + version);
         }
 
@@ -122,7 +124,7 @@ public class SplitSerializer {
             case DATA_SPLIT:
                 return DataSplit.deserialize(in);
             case INCREMENTAL_SPLIT:
-                return readIncrementalSplit(in);
+                return readIncrementalSplit(in, version);
             case INDEXED_SPLIT:
                 return IndexedSplit.deserialize(in);
             case CHAIN_SPLIT:
@@ -151,17 +153,18 @@ public class SplitSerializer {
         out.writeBoolean(split.isStreaming());
     }
 
-    private static IncrementalSplit readIncrementalSplit(DataInputView in) throws IOException {
+    private static IncrementalSplit readIncrementalSplit(DataInputView in, int version)
+            throws IOException {
         long snapshotId = in.readLong();
         BinaryRow partition = deserializeBinaryRow(in);
         int bucket = in.readInt();
         int totalBuckets = in.readInt();
-        List<DataFileMeta> beforeFiles = readDataFiles(in);
+        List<DataFileMeta> beforeFiles = readDataFiles(in, version);
         FunctionWithIOException<DataInputView, DeletionFile> deletionFileSerializer =
                 DeletionFile::deserialize;
         List<DeletionFile> beforeDeletionFiles =
                 DeletionFile.deserializeList(in, deletionFileSerializer);
-        List<DataFileMeta> afterFiles = readDataFiles(in);
+        List<DataFileMeta> afterFiles = readDataFiles(in, version);
         List<DeletionFile> afterDeletionFiles =
                 DeletionFile.deserializeList(in, deletionFileSerializer);
         boolean isStreaming = in.readBoolean();
@@ -232,10 +235,14 @@ public class SplitSerializer {
         }
     }
 
-    private static List<DataFileMeta> readDataFiles(DataInputView in) throws IOException {
+    private static List<DataFileMeta> readDataFiles(DataInputView in, int version)
+            throws IOException {
         int size = in.readInt();
         List<DataFileMeta> files = new ArrayList<>(size);
-        DataFileMetaSerializer serializer = new DataFileMetaSerializer();
+        ObjectSerializer<DataFileMeta> serializer =
+                version == 1
+                        ? new DataFileMetaWriteColsLegacySerializer()
+                        : new DataFileMetaSerializer();
         for (int i = 0; i < size; i++) {
             files.add(serializer.deserialize(in));
         }

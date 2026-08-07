@@ -28,6 +28,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
@@ -36,13 +37,17 @@ import org.apache.paimon.utils.SetUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.fieldMaxSequenceNumber;
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compacts normal structured files of a data evolution table. */
@@ -122,8 +127,35 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         dataFileMeta =
                 dataFileMeta.assignSequenceNumber(
                         minSequenceId(compactBefore), maxSequenceId(compactBefore));
+        dataFileMeta =
+                dataFileMeta.withColumnMaxSequenceNumbers(
+                        compactedColumnMaxSequenceNumbers(table, dataFileMeta));
         compactAfter.add(dataFileMeta);
 
         return commitMessage(compactBefore, compactAfter);
+    }
+
+    private long[] compactedColumnMaxSequenceNumbers(
+            FileStoreTable table, DataFileMeta outputFile) {
+        Map<Integer, Long> fieldMaxSequences = new HashMap<>();
+        for (DataFileMeta input : compactBefore) {
+            List<DataField> inputFields = fileFields(table.schemaManager()::schema, input);
+            for (int inputPosition = 0; inputPosition < inputFields.size(); inputPosition++) {
+                fieldMaxSequences.merge(
+                        inputFields.get(inputPosition).id(),
+                        fieldMaxSequenceNumber(input, inputPosition, inputFields.size()),
+                        (left, right) -> Math.max(left, right));
+            }
+        }
+
+        long fallbackSequence = maxSequenceId(compactBefore);
+        List<DataField> outputFields = fileFields(table.schemaManager()::schema, outputFile);
+        long[] result = new long[outputFields.size()];
+        for (int outputPosition = 0; outputPosition < outputFields.size(); outputPosition++) {
+            result[outputPosition] =
+                    fieldMaxSequences.getOrDefault(
+                            outputFields.get(outputPosition).id(), fallbackSequence);
+        }
+        return result;
     }
 }
