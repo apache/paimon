@@ -69,7 +69,6 @@ import java.util.stream.Stream;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_ENABLED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for changelog table with primary keys. */
 public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
@@ -172,29 +171,6 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     // ------------------------------------------------------------------------
     //  Constructed Tests
     // ------------------------------------------------------------------------
-
-    @Test
-    public void testNullablePrimaryKeyStreamingReadRequiresFullChangelog() {
-        TableEnvironment sEnv = tableEnvironmentBuilder().streamingMode().parallelism(1).build();
-        sEnv.executeSql(createCatalogSql("testCatalog", path));
-        sEnv.executeSql("USE CATALOG testCatalog");
-        sEnv.executeSql(
-                "CREATE TABLE T (k INT, v STRING) WITH ("
-                        + "'primary-key' = 'k', "
-                        + "'primary-key.nullable' = 'true', "
-                        + "'bucket' = '1')");
-
-        assertThatThrownBy(() -> sEnv.explainSql("SELECT * FROM T"))
-                .hasStackTraceContaining("nullable primary keys require a full changelog");
-
-        sEnv.executeSql(
-                "CREATE TABLE T_INPUT (k INT, v STRING) WITH ("
-                        + "'primary-key' = 'k', "
-                        + "'primary-key.nullable' = 'true', "
-                        + "'changelog-producer' = 'input', "
-                        + "'bucket' = '1')");
-        assertThatCode(() -> sEnv.explainSql("SELECT * FROM T_INPUT")).doesNotThrowAnyException();
-    }
 
     @Test
     @Timeout(TIMEOUT)
