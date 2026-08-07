@@ -93,7 +93,7 @@ public class Schema {
                         fields,
                         this.primaryKeys,
                         this.partitionKeys,
-                        new CoreOptions(this.options).primaryKeyNullable());
+                        CoreOptions.primaryKeyNullable(this.options));
         this.comment = comment;
     }
 

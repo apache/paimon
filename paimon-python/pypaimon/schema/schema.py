@@ -48,7 +48,7 @@ class Schema:
         self.options = options if options is not None else {}
         self.comment = comment
 
-        primary_key_nullable = CoreOptions.from_dict(self.options).primary_key_nullable()
+        primary_key_nullable = CoreOptions.primary_key_nullable_from_dict(self.options)
         if primary_key_nullable and not self.primary_keys:
             raise ValueError(
                 "Option 'primary-key.nullable' can only be enabled for a table "

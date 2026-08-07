@@ -1093,6 +1093,10 @@ class CoreOptions:
     def from_dict(options: dict) -> 'CoreOptions':
         return CoreOptions(Options(options))
 
+    @staticmethod
+    def primary_key_nullable_from_dict(options: dict) -> bool:
+        return Options(options).get(CoreOptions.PRIMARY_KEY_NULLABLE)
+
     def path(self, default=None):
         return self.options.get(CoreOptions.PATH, default)
 

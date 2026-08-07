@@ -1020,7 +1020,7 @@ public class FlinkCatalog extends AbstractCatalog {
         // Flink primary-key constraints imply NOT NULL. For a nullable Paimon primary key, expose
         // the key through the Paimon table option instead so Flink preserves the physical column
         // nullability while the underlying table remains a primary-key table.
-        boolean nullablePrimaryKey = new CoreOptions(newOptions).primaryKeyNullable();
+        boolean nullablePrimaryKey = CoreOptions.primaryKeyNullable(newOptions);
         if (!table.primaryKeys().isEmpty() && !nullablePrimaryKey) {
             builder.primaryKey(table.primaryKeys());
         } else if (!table.primaryKeys().isEmpty()) {

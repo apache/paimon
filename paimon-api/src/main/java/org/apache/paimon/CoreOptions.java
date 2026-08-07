@@ -3157,6 +3157,11 @@ public class CoreOptions implements Serializable {
         return options.get(PRIMARY_KEY_NULLABLE);
     }
 
+    public static boolean primaryKeyNullable(Map<String, String> options) {
+        return Options.fromMap(options)
+                .getBoolean(PRIMARY_KEY_NULLABLE.key(), PRIMARY_KEY_NULLABLE.defaultValue());
+    }
+
     public static String createCommitUser(Options options) {
         String commitUserPrefix = options.get(COMMIT_USER_PREFIX);
         return commitUserPrefix == null
