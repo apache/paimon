@@ -851,7 +851,9 @@ class FileStoreCommit:
             )
         )
         if non_compaction_conflict is not None:
-            return None
+            raise CommitConflictError(
+                str(non_compaction_conflict)
+            ) from non_compaction_conflict
 
         try:
             return RowIdConflictRewriter(

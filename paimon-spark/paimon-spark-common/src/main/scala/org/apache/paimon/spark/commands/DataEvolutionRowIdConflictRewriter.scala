@@ -106,30 +106,12 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
       return None
     }
 
-    val affectedSplits = currentSplits.flatMap(
-      split => {
-        val filtered = split.filterDataFile(
-          file =>
-            isNormalRowIdFile(file) && candidates.exists(
-              candidate =>
-                sameBucket(split, candidate.message) &&
-                  file.nonNullRowIdRange().hasIntersection(candidate.file.nonNullRowIdRange())))
-        if (filtered.isPresent) Some(filtered.get()) else None
-      })
-    val firstRowIds: immutable.IndexedSeq[Long] = affectedSplits
-      .flatMap(_.dataFiles().asScala)
-      .filter(isNormalRowIdFile)
-      .map(_.firstRowId().longValue())
-      .distinct
-      .sorted
-      .toIndexedSeq
-
     val rewrittenMessages = candidates
       .groupBy(staged => staged.file.writeCols().asScala.toSeq)
       .toSeq
       .flatMap {
         case (columnNames, files) =>
-          rewriteFiles(sparkSession, columnNames, files, affectedSplits, firstRowIds)
+          rewriteFiles(sparkSession, columnNames, files, currentSplits)
       }
 
     val candidateKeys = candidates.map(staged => fileKey(staged.message, staged.file)).toSet
@@ -142,8 +124,7 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
       sparkSession: SparkSession,
       columnNames: Seq[String],
       stagedFiles: Seq[StagedFile],
-      affectedSplits: Seq[DataSplit],
-      firstRowIds: immutable.IndexedSeq[Long]): Seq[CommitMessage] = {
+      currentSplits: Seq[DataSplit]): Seq[CommitMessage] = {
     val stagedSplits = stagedFiles.map(
       staged =>
         DataSplit
@@ -160,6 +141,23 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
           .withDataFiles(java.util.Collections.singletonList(staged.file))
           .rawConvertible(true)
           .build())
+    val affectedSplits = currentSplits.flatMap(
+      split => {
+        val filtered = split.filterDataFile(
+          file =>
+            isNormalRowIdFile(file) && stagedFiles.exists(
+              staged =>
+                sameBucket(split, staged.message) &&
+                  file.nonNullRowIdRange().hasIntersection(staged.file.nonNullRowIdRange())))
+        if (filtered.isPresent) Some(filtered.get()) else None
+      })
+    val firstRowIds: immutable.IndexedSeq[Long] = affectedSplits
+      .flatMap(_.dataFiles().asScala)
+      .filter(isNormalRowIdFile)
+      .map(_.firstRowId().longValue())
+      .distinct
+      .sorted
+      .toIndexedSeq
 
     val relationAttributes = (targetRelation.output ++ targetRelation.metadataOutput).collect {
       case attribute: AttributeReference => attribute
@@ -172,14 +170,24 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
 
     val rowIdAttribute = attribute(ROW_ID_NAME)
     val readOutput = columnNames.map(attribute) :+ rowIdAttribute
-    val stagedRelation = createNewScanPlan(stagedSplits, targetRelation)
-    val readPlan = SparkShimLoader.shim.copyDataSourceV2Relation(
-      stagedRelation,
-      stagedRelation.table,
-      readOutput)
-    val firstRowIdUdf = udf((rowId: Long) => floorBinarySearch(firstRowIds, rowId))
-    val rewrittenRows = createDataset(sparkSession, readPlan)
+    def readRows(splits: Seq[DataSplit]) = {
+      val relation = createNewScanPlan(splits, targetRelation)
+      val readPlan =
+        SparkShimLoader.shim.copyDataSourceV2Relation(relation, relation.table, readOutput)
+      createDataset(sparkSession, readPlan)
+        .select((columnNames.map(quotedColumn) :+ quotedColumn(ROW_ID_NAME)): _*)
+    }
+
+    val stagedRows = readRows(stagedSplits)
+    val currentRows = readRows(affectedSplits)
+    // A new compacted row-id range may contain rows outside the staged file. Preserve their
+    // latest values and only replace rows for which the staged update has a value.
+    val mergedRows = currentRows
+      .join(stagedRows.select(quotedColumn(ROW_ID_NAME)), Seq(ROW_ID_NAME), "left_anti")
+      .unionByName(stagedRows)
       .select((columnNames.map(quotedColumn) :+ quotedColumn(ROW_ID_NAME)): _*)
+    val firstRowIdUdf = udf((rowId: Long) => floorBinarySearch(firstRowIds, rowId))
+    val rewrittenRows = mergedRows
       .withColumn(FIRST_ROW_ID_NAME, firstRowIdUdf(quotedColumn(ROW_ID_NAME)))
       .repartition(col(FIRST_ROW_ID_NAME))
       .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
