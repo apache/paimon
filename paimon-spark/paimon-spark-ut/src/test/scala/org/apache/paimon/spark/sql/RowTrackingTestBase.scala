@@ -163,7 +163,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
         .map(_.firstRowId().longValue())
         .sorted
       val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
-      val stagedRows = sql("SELECT b + 1 AS b, _ROW_ID FROM t")
+      val stagedRows = sql("SELECT b + 1 AS b, _ROW_ID FROM t WHERE id = 1")
         .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
         .select("b", "_FIRST_ROW_ID", "_ROW_ID")
       val stagedUpdates =
@@ -185,7 +185,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
         readSnapshot.id(),
         Operation.MERGE)
 
-      checkAnswer(sql("SELECT id, b FROM t ORDER BY id"), Seq(Row(1, 11), Row(2, 21)))
+      checkAnswer(sql("SELECT id, b FROM t ORDER BY id"), Seq(Row(1, 11), Row(2, 20)))
     }
   }
 
