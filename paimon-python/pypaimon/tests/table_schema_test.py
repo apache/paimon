@@ -17,7 +17,11 @@
 
 import unittest
 
+import pyarrow as pa
+
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
 
 
@@ -86,6 +90,30 @@ class TableSchemaBucketKeysTest(unittest.TestCase):
             options={'bucket-key': '   '},
         )
         self.assertEqual(schema.bucket_keys, ['id'])
+
+
+class SchemaPrimaryKeyNullabilityTest(unittest.TestCase):
+
+    def test_primary_key_is_not_nullable_by_default(self):
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([pa.field('id', pa.int64())]), primary_keys=['id'])
+        self.assertFalse(schema.fields[0].type.nullable)
+
+    def test_primary_key_nullable_option_overrides_not_null_input(self):
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([pa.field('id', pa.int64(), nullable=False)]),
+            primary_keys=['id'],
+            options={CoreOptions.PRIMARY_KEY_NULLABLE.key(): 'true'},
+        )
+        self.assertTrue(schema.fields[0].type.nullable)
+
+    def test_primary_key_nullable_requires_primary_key_table(self):
+        with self.assertRaisesRegex(
+                ValueError, "can only be enabled for a table with primary keys"):
+            Schema.from_pyarrow_schema(
+                pa.schema([pa.field('id', pa.int64())]),
+                options={CoreOptions.PRIMARY_KEY_NULLABLE.key(): 'true'},
+            )
 
 
 if __name__ == '__main__':

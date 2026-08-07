@@ -1345,6 +1345,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>Define primary key by table options, cannot define primary key on DDL and table options at the same time.</td>
         </tr>
         <tr>
+            <td><h5>primary-key.nullable</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether primary key fields can contain null values. Null values use null-safe equality when records are merged.</td>
+        </tr>
+        <tr>
             <td><h5>query-auth.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
