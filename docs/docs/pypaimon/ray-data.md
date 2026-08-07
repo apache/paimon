@@ -574,10 +574,12 @@ process_row_id_ranges(
 
 The row count is approximate because boundaries never split a logical file
 group. `ctx.read()` includes `_ROW_ID`; distributed processing may reorder rows
-but must preserve this column in its output. Use `plan_row_id_ranges` directly
-when the application needs explicit range metadata or operations. Contexts from
-one plan must be updated in `sequence_number` order; concurrent updates are
-rejected. Separate plans use optimistic conflict detection.
+but must preserve this column in its output. Processing is lazy; fixed actor
+pools must leave resources for upstream and downstream tasks. Use
+`plan_row_id_ranges` directly when the application needs explicit range metadata
+or operations. Contexts from one plan must be updated in `sequence_number`
+order; concurrent updates are rejected. Separate plans use optimistic conflict
+detection.
 
 Requires `ray >= 2.50` and a non-primary-key table with
 `data-evolution.enabled` and `row-tracking.enabled`. Concurrent append and

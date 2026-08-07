@@ -471,12 +471,10 @@ def distributed_update_apply(
     # commit-time conflict check agree even if a concurrent commit lands (mirrors
     # the delete path).
     from pypaimon.common.options.core_options import CoreOptions
-    scan_options = {}
-    if base_snapshot_id is not None:
-        scan_options[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(base_snapshot_id)
     scan_table = (
-        table.copy_without_time_travel(scan_options)
-        if scan_options else table
+        table.copy_without_time_travel({
+            CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
+        if base_snapshot_id is not None else table
     )
     if precomputed_files_info is None:
         planner = TableUpdateByRowId(
@@ -519,8 +517,8 @@ def distributed_update_apply(
         rids = rid_col.to_numpy(zero_copy_only=False)
         # Check each row_id belongs to a valid range (vectorized).
         in_range = np.zeros(len(rids), dtype=bool)
-        for start, end in zip(range_starts, range_ends):
-            in_range |= (rids >= start) & (rids <= end)
+        for s, e in zip(range_starts, range_ends):
+            in_range |= (rids >= s) & (rids <= e)
         if not in_range.all():
             bad = rids[~in_range][0]
             raise ValueError(
@@ -529,12 +527,12 @@ def distributed_update_apply(
                 f"planner snapshot is stale or matched rows come "
                 f"from a different table."
             )
-        indexes = np.searchsorted(
+        idx = np.searchsorted(
             captured_sorted_arr, rids, side="right"
         ) - 1
+        frids = captured_sorted_arr[idx]
         return batch.append_column(
-            frid_col,
-            pa.array(captured_sorted_arr[indexes], type=pa.int64())
+            frid_col, pa.array(frids, type=pa.int64())
         )
 
     map_kwargs = _map_kwargs(ray_remote_args)
@@ -572,9 +570,9 @@ def distributed_update_apply(
             BATCH_COMMIT_IDENTIFIER,
             _precomputed_files_info=ray.get(precomputed_info_ref),
         )
-        messages = worker.update_columns(for_update, list(captured_cols))
+        msgs = worker.update_columns(for_update, list(captured_cols))
         return pa.Table.from_pydict({
-            "msgs_blob": [pickle.dumps(messages)],
+            "msgs_blob": [pickle.dumps(msgs)],
             "n_updated": pa.array(
                 [for_update.num_rows], type=pa.int64()
             ),

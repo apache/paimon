@@ -62,14 +62,6 @@ def _partitions(value):
     return _resolve_num_partitions(value)
 
 
-def _materialize(dataset):
-    try:
-        return dataset.materialize()
-    except Exception as error:
-        _reraise_inner(error)
-        raise
-
-
 def _validate_table(table, target):
     if table.is_primary_key_table:
         raise ValueError(
@@ -281,10 +273,7 @@ class RowIdRangeContext:
             self._spec.files_info.first_row_ids, num_partitions))
         result = routes.map_batches(
             read_groups, **_map_kwargs(ray_remote_args))
-        # A range is the bounded hand-off between Paimon reads and the user's
-        # Ray DAG. Materialize it so downstream actors cannot reserve all CPUs
-        # while the read tasks are still waiting to run.
-        return _materialize(result.union(ray.data.from_arrow(empty)))
+        return result.union(ray.data.from_arrow(empty))
 
     def update_by_row_id(
         self,
@@ -334,15 +323,16 @@ class RowIdRangeContext:
             raise ValueError(
                 "updates must carry row ids returned by this range; "
                 "a table-name source is not accepted.")
-        source = _materialize(_normalize_source(
-            updates, self._owner.catalog_options))
-        missing = [
-            column for column in [row_id] + update_cols
-            if column not in set(source.schema().names)
-        ]
-        if missing:
-            raise ValueError(
-                "updates are missing columns {}.".format(missing))
+        source = _normalize_source(updates, self._owner.catalog_options)
+        source_schema = source.schema(fetch_if_missing=False)
+        if source_schema is not None:
+            missing = [
+                column for column in [row_id] + update_cols
+                if column not in set(source_schema.names)
+            ]
+            if missing:
+                raise ValueError(
+                    "updates are missing columns {}.".format(missing))
 
         target_schema = PyarrowFieldParser.from_paimon_schema(
             table.table_schema.fields)
@@ -358,6 +348,13 @@ class RowIdRangeContext:
         range_end = self.range_end
 
         def project_and_validate(batch):
+            missing = [
+                column for column in [row_id] + update_cols
+                if column not in set(batch.column_names)
+            ]
+            if missing:
+                raise ValueError(
+                    "updates are missing columns {}.".format(missing))
             projected = batch.select([row_id] + update_cols).cast(update_schema)
             row_ids = projected.column(row_id)
             if row_ids.null_count:
@@ -378,8 +375,8 @@ class RowIdRangeContext:
                     ))
             return projected
 
-        source = _materialize(source.map_batches(
-            project_and_validate, batch_format="pyarrow"))
+        source = source.map_batches(
+            project_and_validate, batch_format="pyarrow")
         num_partitions = _partitions(num_partitions)
         self._owner._check_schema()
         try:

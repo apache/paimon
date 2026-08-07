@@ -123,7 +123,8 @@ class RayRowIdRangesTest(unittest.TestCase):
             source = context.read(["id"], num_partitions=2)
             updates = source.map_batches(
                 Infer,
-                concurrency=2,
+                concurrency=1,
+                num_cpus=0.5,
                 batch_format="pyarrow",
             )
             context.update_by_row_id(
