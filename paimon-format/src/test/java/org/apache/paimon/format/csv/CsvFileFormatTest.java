@@ -392,6 +392,44 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
     }
 
     @Test
+    public void testHeaderSkippedOnlyInFirstSplit() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
+
+        List<InternalRow> testData = new ArrayList<>();
+        for (int i = 0; i < 50; i++) {
+            testData.add(GenericRow.of(i, BinaryString.fromString("name" + i)));
+        }
+
+        for (boolean includeHeader : new boolean[] {true, false}) {
+            Options options = new Options();
+            options.set(CsvOptions.INCLUDE_HEADER, includeHeader);
+            FileFormat format =
+                    new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
+            Path testFile = write(format, rowType, testData, "test_header_split_" + includeHeader);
+
+            // a single split still skips the header exactly once
+            assertThat(read(format, rowType, rowType, testFile)).hasSize(testData.size());
+
+            long fileSize = fileIO.getFileSize(testFile);
+            long splitPoint = fileSize / 2;
+            List<InternalRow> firstSplit = readSplit(format, rowType, testFile, 0, splitPoint);
+            List<InternalRow> secondSplit =
+                    readSplit(format, rowType, testFile, splitPoint, fileSize - splitPoint);
+
+            // both splits carry data, and together they lose no row and duplicate none
+            assertThat(firstSplit).isNotEmpty();
+            assertThat(secondSplit).isNotEmpty();
+            List<InternalRow> allRows = new ArrayList<>(firstSplit);
+            allRows.addAll(secondSplit);
+            assertThat(allRows).hasSize(testData.size());
+            for (int i = 0; i < testData.size(); i++) {
+                assertThat(allRows.get(i).getInt(0)).isEqualTo(i);
+                assertThat(allRows.get(i).getString(1).toString()).isEqualTo("name" + i);
+            }
+        }
+    }
+
+    @Test
     public void testCsvNullLiteralWriteRead() throws IOException {
         RowType rowType =
                 DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.INT());
@@ -621,6 +659,24 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         }
     }
 
+    private List<InternalRow> readSplit(
+            FileFormat format, RowType rowType, Path testFile, long offset, long length)
+            throws IOException {
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, testFile, fileIO.getFileSize(testFile)),
+                                offset,
+                                length)) {
+
+            InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+            List<InternalRow> result = new ArrayList<>();
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+            return result;
+        }
+    }
+
     @Override
     protected RowType rowTypeForFullTypesTest() {
         RowType.Builder builder =
@@ -749,15 +805,23 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             throws IOException {
         FileFormat format =
                 new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
+        Path testFile = write(format, fullRowType, testData, testPrefix);
+        return read(format, fullRowType, rowType, testFile);
+    }
+
+    /** Writes the given data to a new CSV file and returns its path. */
+    private Path write(
+            FileFormat format, RowType rowType, List<InternalRow> testData, String testPrefix)
+            throws IOException {
         Path testFile = new Path(parent, testPrefix + "_" + UUID.randomUUID() + ".csv");
 
-        FormatWriterFactory writerFactory = format.createWriterFactory(fullRowType);
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         try (PositionOutputStream out = fileIO.newOutputStream(testFile, false);
                 FormatWriter writer = writerFactory.create(out, "none")) {
             for (InternalRow row : testData) {
                 writer.addElement(row);
             }
         }
-        return read(format, fullRowType, rowType, testFile);
+        return testFile;
     }
 }
