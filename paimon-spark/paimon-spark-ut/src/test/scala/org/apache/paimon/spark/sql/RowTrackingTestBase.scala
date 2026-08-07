@@ -189,6 +189,63 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: rebase rejects same-column update after concurrent compact") {
+    withTable("t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, b INT) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'compaction.min.file-num' = '2',
+             |  'commit.max-retries' = '0',
+             |  'data-evolution.enabled' = 'true')
+             |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 10)")
+      sql("INSERT INTO t VALUES (2, 20)")
+
+      val table = loadTable("t")
+      val readSnapshot = table.latestSnapshot().get()
+      val dataSplits = table
+        .newSnapshotReader()
+        .withSnapshot(readSnapshot)
+        .read()
+        .splits()
+        .asScala
+        .collect { case split: DataSplit => split }
+        .toSeq
+      val firstRowIds = dataSplits
+        .flatMap(_.dataFiles().asScala)
+        .map(_.firstRowId().longValue())
+        .sorted
+      val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+      val stagedRows = sql("SELECT b + 1 AS b, _ROW_ID FROM t WHERE id = 1")
+        .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+        .select("b", "_FIRST_ROW_ID", "_ROW_ID")
+      val stagedUpdates =
+        DataEvolutionPaimonWriter(table, dataSplits).writePartialFields(stagedRows, Seq("b"))
+
+      sql("CALL sys.compact(table => 't')").collect()
+      sql("UPDATE t SET b = 99 WHERE id = 1").collect()
+
+      val writer = PaimonSparkWriter(table)
+      writer.rowIdCheckConflict(readSnapshot.id())
+      val targetRelation =
+        PaimonRelation.getPaimonRelation(spark.table("t").queryExecution.analyzed)
+      val exception = intercept[RuntimeException] {
+        DataEvolutionRowIdConflictCommitter.commit(
+          spark,
+          table,
+          targetRelation,
+          writer,
+          stagedUpdates,
+          Nil,
+          readSnapshot.id(),
+          Operation.MERGE)
+      }
+
+      assert(hasMessage(exception, ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE))
+      checkAnswer(sql("SELECT id, b FROM t ORDER BY id"), Seq(Row(1, 99), Row(2, 20)))
+    }
+  }
+
   test("Data Evolution: concurrent merge and merge") {
     withTable("s", "t") {
       sql(s"""
