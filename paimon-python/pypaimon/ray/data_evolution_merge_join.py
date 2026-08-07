@@ -471,37 +471,43 @@ def distributed_update_apply(
     # commit-time conflict check agree even if a concurrent commit lands (mirrors
     # the delete path).
     from pypaimon.common.options.core_options import CoreOptions
-    if precomputed_files_info is None:
-        scan_table = (
-            table.copy({
-                CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
-            if base_snapshot_id is not None else table
-        )
-        planner = TableUpdateByRowId(
-            scan_table,
-            "_merge_into_planner_" + uuid.uuid4().hex[:8],
-            BATCH_COMMIT_IDENTIFIER,
-        )
-        from dataclasses import replace
-        files_info = replace(
-            planner._snapshot_files_info(),
-            snapshot_id=(base_snapshot_id if base_snapshot_id is not None
-                         else planner.snapshot_id),
-        )
-    else:
-        # The caller read this pinned file layout, so do not re-plan against
-        # a newer snapshot before writing its row ids.
-        files_info = precomputed_files_info
-
-    sorted_first_row_ids = list(files_info.first_row_ids)
+    scan_table = (
+        table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
+        if base_snapshot_id is not None else table
+    )
+    planner = TableUpdateByRowId(
+        scan_table,
+        "_merge_into_planner_" + uuid.uuid4().hex[:8],
+        BATCH_COMMIT_IDENTIFIER,
+        _precomputed_files_info=precomputed_files_info,
+    )
+    sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return [], 0, []
+
+    # Pin commit-time conflict check to the snapshot the join was built on,
+    # so concurrent commits between read and planner are detected.
+    check_from_snapshot = (
+        base_snapshot_id if base_snapshot_id is not None
+        else planner.snapshot_id
+    )
+
+    # Put file metadata into Ray's object store and pass a single ref to
+    # workers. Avoids per-task manifest re-scans (Jingsong review #6) and
+    # avoids serializing the metadata into every task's closure. Override
+    # snapshot_id with the join's base snapshot so commit-time conflict
+    # detection covers the read→planner window.
+    from dataclasses import replace
+    files_info = replace(
+        planner._snapshot_files_info(),
+        snapshot_id=check_from_snapshot,
+    )
     precomputed_info_ref = ray.put(files_info)
 
     frid_col = "_FIRST_ROW_ID"
     captured_sorted = sorted_first_row_ids
     captured_sorted_arr = np.asarray(captured_sorted, dtype=np.int64)
-    valid_ranges = files_info.valid_row_id_ranges
+    valid_ranges = planner.valid_row_id_ranges
     range_starts = np.asarray([r.from_ for r in valid_ranges], dtype=np.int64)
     range_ends = np.asarray([r.to for r in valid_ranges], dtype=np.int64)
 
