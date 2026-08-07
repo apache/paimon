@@ -211,7 +211,7 @@ public class ManifestEntryExternalSort {
                             : config.ioManager;
             this.ownedIOManager = config.ioManager == null;
             this.sortBuffer =
-                    BinaryExternalSortBuffer.create(
+                    BinaryExternalSortBuffer.createWithRadixSort(
                             ioManager,
                             sortKey.externalSortRowType(),
                             sortKey.externalSortKeyFields(),

@@ -175,6 +175,23 @@ public abstract class BinaryIndexedSortable implements IndexedSortable {
         return compareRecords(pointerI, pointerJ);
     }
 
+    int normalizedKeyBytes() {
+        return numKeyBytes;
+    }
+
+    boolean normalizedKeyFullyDetermines() {
+        return normalizedKeyFullyDetermines;
+    }
+
+    int normalizedKeyByte(int index, int physicalKeyOffset) {
+        final int segmentNumber = index / this.indexEntriesPerSegment;
+        final int segmentOffset = (index % this.indexEntriesPerSegment) * this.indexEntrySize;
+        int value =
+                sortIndex.get(segmentNumber).get(segmentOffset + OFFSET_LEN + physicalKeyOffset)
+                        & 0xFF;
+        return useNormKeyUninverted ? value : 0xFF - value;
+    }
+
     private int compareRecords(long pointer1, long pointer2) {
         this.recordBuffer.setReadPosition(pointer1);
         this.recordBufferForComparison.setReadPosition(pointer2);
