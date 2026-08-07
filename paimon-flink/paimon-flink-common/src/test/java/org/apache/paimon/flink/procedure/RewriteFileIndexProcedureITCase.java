@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -197,24 +198,33 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
                 .invalidateTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
         FileStoreTable table = paimonTable(tableName);
         for (ManifestEntry entry : table.store().newScan().plan().files()) {
-            String indexFile =
-                    entry.file().extraFiles().stream()
-                            .filter(s -> s.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
-                            .findFirst()
-                            .orElseThrow(
-                                    () ->
-                                            new AssertionError(
-                                                    "Missing file index for "
-                                                            + entry.file().fileName()));
-            Path indexFilePath =
-                    table.store()
-                            .pathFactory()
-                            .createDataFilePathFactory(entry.partition(), entry.bucket())
-                            .toAlignedPath(indexFile, entry.file());
-            try (FileIndexFormat.Reader reader =
-                    FileIndexFormat.createReader(
-                            table.fileIO().newInputStream(indexFilePath), table.rowType())) {
-                Map<String, Map<String, byte[]>> indexes = reader.readAll();
+            byte[] embeddedIndex = entry.file().embeddedIndex();
+            FileIndexFormat.Reader reader;
+            if (embeddedIndex != null) {
+                reader =
+                        FileIndexFormat.createReader(
+                                new ByteArraySeekableStream(embeddedIndex), table.rowType());
+            } else {
+                String indexFile =
+                        entry.file().extraFiles().stream()
+                                .filter(s -> s.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
+                                .findFirst()
+                                .orElseThrow(
+                                        () ->
+                                                new AssertionError(
+                                                        "Missing file index for "
+                                                                + entry.file().fileName()));
+                Path indexFilePath =
+                        table.store()
+                                .pathFactory()
+                                .createDataFilePathFactory(entry.partition(), entry.bucket())
+                                .toAlignedPath(indexFile, entry.file());
+                reader =
+                        FileIndexFormat.createReader(
+                                table.fileIO().newInputStream(indexFilePath), table.rowType());
+            }
+            try (FileIndexFormat.Reader indexReader = reader) {
+                Map<String, Map<String, byte[]>> indexes = indexReader.readAll();
                 Assertions.assertThat(indexes).containsKey("k");
                 Assertions.assertThat(indexes.get("k").keySet()).containsExactly(expectedIndexType);
             }

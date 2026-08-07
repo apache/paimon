@@ -180,7 +180,7 @@ public class FileIndexProcessor {
         } else if (baos.size() == 0) {
             return dataFileMeta.copy(extras);
         } else {
-            return dataFileMeta.copy(baos.toByteArray());
+            return dataFileMeta.copy(extras).copy(baos.toByteArray());
         }
     }
 
