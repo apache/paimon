@@ -37,16 +37,13 @@ from pypaimon.ray.data_evolution_merge_join import (
 )
 from pypaimon.ray.data_evolution_merge_transform import build_update_schema
 from pypaimon.ray.update_by_row_id import (
+    _abort_pending_update_messages,
     _blob_col_names,
     _commit_update_messages,
 )
 
 __all__ = [
-    "RowIdRange",
-    "plan_row_id_ranges",
     "process_row_id_ranges",
-    "read_row_id_range",
-    "update_by_row_id_from_plan",
 ]
 
 logger = logging.getLogger(__name__)
@@ -100,6 +97,12 @@ def _file_group_range(files_info, first_row_id):
     return Range(first_row_id, max(ends))
 
 
+@dataclass
+class _PlanState:
+    schema_id: Optional[int]
+    closed: bool = False
+
+
 @dataclass(frozen=True)
 class _RangeToken:
     target: str
@@ -107,10 +110,11 @@ class _RangeToken:
     table: Any
     read_table: Any
     files_info: Any
+    state: _PlanState
 
 
 @dataclass(frozen=True)
-class RowIdRange:
+class _RowIdRange:
     """Immutable metadata for one complete set of logical file groups."""
 
     snapshot_id: int
@@ -128,6 +132,7 @@ def _pack_ranges(
     catalog_options,
     table,
     read_table,
+    state,
 ):
     from pypaimon.utils.range import Range
     from pypaimon.write.table_update_by_row_id import _FilesInfo
@@ -150,7 +155,7 @@ def _pack_ranges(
             valid_row_id_ranges=Range.sort_and_merge_overlap(
                 list(group_ranges), True, True),
         )
-        ranges.append(RowIdRange(
+        ranges.append(_RowIdRange(
             snapshot_id=files_info.snapshot_id,
             range_start=first_row_ids[0],
             range_end=group_ranges[-1].to,
@@ -162,6 +167,7 @@ def _pack_ranges(
                 table=table,
                 read_table=read_table,
                 files_info=subset,
+                state=state,
             ),
         ))
 
@@ -191,33 +197,32 @@ def _route_blocks(first_row_ids, num_partitions):
 
 class _RowIdRangePlan:
 
-    def __init__(self, snapshot_id, ranges, table=None, tag_name=None):
+    def __init__(
+            self, snapshot_id, ranges, table=None, tag_name=None, state=None):
         self.snapshot_id = snapshot_id
         self._ranges = ranges
         self._table = table
         self._tag_name = tag_name
-        self._closed = False
+        self._state = state or _PlanState(None)
 
     def __enter__(self):
-        if self._closed:
-            raise RuntimeError("row-id range plan is closed.")
+        _ensure_open(self._state)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def __iter__(self) -> Iterator[RowIdRange]:
-        if self._closed:
-            raise RuntimeError("row-id range plan is closed.")
+    def __iter__(self) -> Iterator[_RowIdRange]:
+        _ensure_open(self._state)
         return iter(self._ranges)
 
     def __len__(self):
         return len(self._ranges)
 
     def close(self):
-        if self._closed:
+        if self._state.closed:
             return
-        self._closed = True
+        self._state.closed = True
         if self._tag_name is not None:
             try:
                 self._table.delete_tag(self._tag_name)
@@ -229,7 +234,21 @@ class _RowIdRangePlan:
                 )
 
 
-def plan_row_id_ranges(
+def _ensure_open(state):
+    if state.closed:
+        raise RuntimeError("row-id range plan is closed.")
+
+
+def _ensure_schema_unchanged(token):
+    from pypaimon.write.commit.conflict_detection import CommitConflictError
+
+    latest = token.table.schema_manager.latest()
+    if latest is None or latest.id != token.state.schema_id:
+        raise CommitConflictError(
+            "Target schema changed after row-id ranges were planned.")
+
+
+def _plan_row_id_ranges(
     target: str,
     catalog_options: Dict[str, str],
     *,
@@ -261,6 +280,7 @@ def plan_row_id_ranges(
     )
     files_info = replace(
         planner._snapshot_files_info(), snapshot_id=base.id)
+    state = _PlanState(table.table_schema.id)
     ranges = _pack_ranges(
         files_info,
         target_rows_per_range,
@@ -268,14 +288,15 @@ def plan_row_id_ranges(
         catalog_options,
         table,
         read_table,
+        state,
     )
     tag_name = "pypaimon-row-id-range-{}".format(uuid.uuid4().hex)
     table.create_tag(tag_name, snapshot_id=base.id, time_retained="30d")
-    return _RowIdRangePlan(base.id, ranges, table, tag_name)
+    return _RowIdRangePlan(base.id, ranges, table, tag_name, state)
 
 
-def read_row_id_range(
-    row_range: RowIdRange,
+def _read_row_id_range(
+    row_range: _RowIdRange,
     projection: List[str],
     filter: Optional[Union[str, Callable]] = None,
     *,
@@ -288,12 +309,13 @@ def read_row_id_range(
     )
     from pypaimon.table.special_fields import SpecialFields
 
-    if not isinstance(row_range, RowIdRange):
-        raise ValueError("row_range must come from plan_row_id_ranges.")
+    if not isinstance(row_range, _RowIdRange):
+        raise ValueError("invalid row-id range.")
     if not projection:
         raise ValueError("projection must be non-empty.")
     projection = list(dict.fromkeys(projection))
     token = row_range._token
+    _ensure_open(token.state)
     table = token.table
     unknown = [col for col in projection if col not in table.field_names]
     if unknown:
@@ -318,9 +340,11 @@ def read_row_id_range(
 
     info_ref = ray.put(token.files_info)
     read_table = token.read_table
+    state = token.state
     callable_filter = filter if callable(filter) else None
 
     def read_groups(routes):
+        _ensure_open(state)
         info = ray.get(info_ref)
         results = []
         for first_row_id in routes.column("_FIRST_ROW_ID").to_pylist():
@@ -367,8 +391,8 @@ def read_row_id_range(
     return result.union(ray.data.from_arrow(empty))
 
 
-def update_by_row_id_from_plan(
-    row_range: RowIdRange,
+def _update_by_row_id_from_plan(
+    row_range: _RowIdRange,
     updates: Any,
     update_cols: List[str],
     *,
@@ -379,12 +403,14 @@ def update_by_row_id_from_plan(
     from pypaimon.schema.data_types import PyarrowFieldParser
     from pypaimon.table.special_fields import SpecialFields
 
-    if not isinstance(row_range, RowIdRange):
-        raise ValueError("row_range must come from plan_row_id_ranges.")
+    if not isinstance(row_range, _RowIdRange):
+        raise ValueError("invalid row-id range.")
     if not update_cols:
         raise ValueError("update_cols must be non-empty.")
     update_cols = list(dict.fromkeys(update_cols))
     token = row_range._token
+    _ensure_open(token.state)
+    _ensure_schema_unchanged(token)
     table = token.table
     blob_columns = _blob_col_names(table)
     partition_keys = set(table.partition_keys or [])
@@ -405,7 +431,7 @@ def update_by_row_id_from_plan(
     row_id = SpecialFields.ROW_ID.name
     if isinstance(updates, str):
         raise ValueError(
-            "updates must carry row ids returned by read_row_id_range; "
+            "updates must carry row ids from the range input; "
             "a table-name source is not accepted.")
     source = _normalize_source(updates, token.catalog_options)
     source_schema = source.schema(fetch_if_missing=False)
@@ -472,6 +498,12 @@ def update_by_row_id_from_plan(
         _reraise_inner(error)
         raise
     if messages:
+        try:
+            _ensure_open(token.state)
+            _ensure_schema_unchanged(token)
+        except Exception:
+            _abort_pending_update_messages(table, messages)
+            raise
         _commit_update_messages(table, messages)
     return {"num_updated": num_updated}
 
@@ -481,18 +513,44 @@ def process_row_id_ranges(
     catalog_options: Dict[str, str],
     *,
     target_rows_per_range: int,
-    processor: Callable[[RowIdRange], Any],
+    read_projection: List[str],
+    update_cols: List[str],
+    processor: Callable[[Any], Any],
+    filter: Optional[Union[str, Callable]] = None,
+    num_partitions: Optional[int] = None,
+    ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, int]:
-    """Invoke ``processor`` once for every planned range."""
+    """Read, process, update, and commit file-group-aligned ranges."""
     if not callable(processor):
         raise ValueError("processor must be callable.")
+    if not read_projection:
+        raise ValueError("read_projection must be non-empty.")
+    if not update_cols:
+        raise ValueError("update_cols must be non-empty.")
     processed = 0
-    with plan_row_id_ranges(
+    updated = 0
+    with _plan_row_id_ranges(
         target,
         catalog_options,
         target_rows_per_range=target_rows_per_range,
     ) as plan:
         for row_range in plan:
-            processor(row_range)
+            source = _read_row_id_range(
+                row_range,
+                read_projection,
+                filter,
+                num_partitions=num_partitions,
+                ray_remote_args=ray_remote_args,
+            )
+            updates = processor(source)
+            if updates is not None:
+                result = _update_by_row_id_from_plan(
+                    row_range,
+                    updates,
+                    update_cols,
+                    num_partitions=num_partitions,
+                    ray_remote_args=ray_remote_args,
+                )
+                updated += result["num_updated"]
             processed += 1
-    return {"num_ranges": processed}
+    return {"num_ranges": processed, "num_updated": updated}

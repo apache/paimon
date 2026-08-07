@@ -549,39 +549,31 @@ visible if a later range fails.
 
 ```python
 import pyarrow as pa
-from pypaimon.ray import (
-    process_row_id_ranges,
-    read_row_id_range,
-    update_by_row_id_from_plan,
-)
+from pypaimon.ray import process_row_id_ranges
 
-def process(row_range):
-    source = read_row_id_range(
-        row_range, ["text"], filter="language = 'en'")
-
+def process(source):
     def embed(batch):
         return pa.table({
             "_ROW_ID": batch["_ROW_ID"],
             "text_embedding": model(batch["text"]),
         })
 
-    updates = source.map_batches(embed, batch_format="pyarrow")
-    update_by_row_id_from_plan(
-        row_range, updates, ["text_embedding"])
+    return source.map_batches(embed, batch_format="pyarrow")
 
 process_row_id_ranges(
     target="database_name.documents",
     catalog_options={"warehouse": "/path/to/warehouse"},
     target_rows_per_range=1_000_000,
+    read_projection=["text"],
+    update_cols=["text_embedding"],
+    filter="language = 'en'",
     processor=process,
 )
 ```
 
 The row count is approximate because a logical file group is never split.
-`read_row_id_range` includes `_ROW_ID`; distributed processing may reorder rows
-but must preserve this column. `RowIdRange` is immutable planning metadata, and
-`plan_row_id_ranges` exposes the ranges directly when the application needs its
-own execution loop.
+The processor may build any Ray Dataset pipeline, but its result must preserve
+the input `_ROW_ID` column.
 
 Requires `ray >= 2.50` and a non-primary-key table with
 `data-evolution.enabled` and `row-tracking.enabled`. Updates use the normal
