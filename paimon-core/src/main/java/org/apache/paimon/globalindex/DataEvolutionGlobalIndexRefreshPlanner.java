@@ -365,15 +365,15 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
 
         private void addUpdatedFile(long maxSequenceNumber, Range rowRange) {
             // Merge the range eagerly instead of retaining the file metadata.
-            int position = firstSequenceNumberBelow(maxSequenceNumber);
-            if (updatedRangesPerSequenceNumber[position] == null) {
-                updatedRangesPerSequenceNumber[position] = new MergedRanges();
+            int sequenceNumberIndex = firstIndexWithSequenceNumberBelow(maxSequenceNumber);
+            if (updatedRangesPerSequenceNumber[sequenceNumberIndex] == null) {
+                updatedRangesPerSequenceNumber[sequenceNumberIndex] = new MergedRanges();
             }
-            updatedRangesPerSequenceNumber[position].add(rowRange);
+            updatedRangesPerSequenceNumber[sequenceNumberIndex].add(rowRange);
         }
 
         /** Returns the first position whose scan sequence number is below the maximum sequence. */
-        private int firstSequenceNumberBelow(long maxSequenceNumber) {
+        private int firstIndexWithSequenceNumberBelow(long maxSequenceNumber) {
             // mayContainUpdate guarantees the last sequence number qualifies.
             int low = 0;
             int high = sequenceNumbers.length - 1;
@@ -391,16 +391,17 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
         private void markIndexesToRefresh(boolean[] result) {
             // As scan sequence numbers decrease, eligible updated ranges only grow.
             MergedRanges updatedRanges = null;
-            int nextSequenceNumber = 0;
+            int nextSequenceNumberIndex = 0;
             for (IndexQuery index : indexes) {
-                while (nextSequenceNumber < sequenceNumbers.length
-                        && sequenceNumbers[nextSequenceNumber] >= index.scanSnapshotId) {
-                    MergedRanges ranges = updatedRangesPerSequenceNumber[nextSequenceNumber];
+                while (nextSequenceNumberIndex < sequenceNumbers.length
+                        && sequenceNumbers[nextSequenceNumberIndex] >= index.scanSnapshotId) {
+                    MergedRanges ranges = updatedRangesPerSequenceNumber[nextSequenceNumberIndex];
                     if (ranges != null) {
-                        updatedRanges = updatedRanges == null ? ranges : updatedRanges.merge(ranges);
-                        updatedRangesPerSequenceNumber[nextSequenceNumber] = null;
+                        updatedRanges =
+                                updatedRanges == null ? ranges : updatedRanges.merge(ranges);
+                        updatedRangesPerSequenceNumber[nextSequenceNumberIndex] = null;
                     }
-                    nextSequenceNumber++;
+                    nextSequenceNumberIndex++;
                 }
                 if (updatedRanges != null && updatedRanges.intersects(index.rowRange)) {
                     result[index.ordinal] = true;
