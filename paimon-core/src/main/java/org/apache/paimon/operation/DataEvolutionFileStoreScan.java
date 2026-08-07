@@ -127,14 +127,14 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     @Override
     public FileStoreScan withReadType(RowType readType) {
-        if (readType != null) {
-            List<DataField> nonSystemFields =
-                    readType.getFields().stream()
-                            .filter(f -> !SpecialFields.isSystemField(f.id()))
-                            .collect(Collectors.toList());
-            if (!nonSystemFields.isEmpty()) {
-                this.readType = readType;
-            }
+        // a type without user columns prunes nothing; assign unconditionally, this method
+        // may be recalled
+        if (readType != null
+                && readType.getFields().stream()
+                        .anyMatch(f -> !SpecialFields.isSystemField(f.id()))) {
+            this.readType = readType;
+        } else {
+            this.readType = null;
         }
         return this;
     }

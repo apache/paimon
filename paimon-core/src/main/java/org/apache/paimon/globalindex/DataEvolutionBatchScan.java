@@ -90,12 +90,25 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return this;
         }
 
-        Optional<List<Range>> rowRanges = predicate.visit(new RowIdPredicateVisitor());
-        if (rowRanges.isPresent()) {
-            withRowRanges(rowRanges.get());
+        // a mask on _ROW_ID makes the predicate's ids the masked ones, so they must not become
+        // a raw row range; the rules are not known yet, so skip the extraction altogether
+        if (!queryAuthEnabled()) {
+            Optional<List<Range>> rowRanges = predicate.visit(new RowIdPredicateVisitor());
+            if (rowRanges.isPresent()) {
+                withRowRanges(rowRanges.get());
+            }
         }
         this.filter = predicate;
 
+        if (queryAuthEnabled()) {
+            // the wrapped scan defers the filter but strips only masked columns; row ids must
+            // go here, since data-evolution statistics carry logical columns only
+            Predicate residual = rowIdSafeResidualFilter(predicate);
+            if (residual != null) {
+                batchScan.withFilter(residual);
+            }
+            return this;
+        }
         batchScan.snapshotReader().withFilter(predicate, rowIdSafeResidualFilter(predicate));
         return this;
     }
@@ -291,11 +304,21 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
     }
 
+    private boolean queryAuthEnabled() {
+        // the table is absent in tests that exercise withFilter in isolation
+        CoreOptions options = table == null ? null : table.coreOptions();
+        return options != null && options.queryAuthEnabled();
+    }
+
     private Optional<GlobalIndexResult> evalGlobalIndex() {
         if (this.globalIndexResult != null) {
             return Optional.of(globalIndexResult);
         }
         if (filter == null) {
+            return Optional.empty();
+        }
+        if (queryAuthEnabled()) {
+            // the index ranks raw values, which a mask may invalidate; fall back to a full scan
             return Optional.empty();
         }
         CoreOptions options = table.coreOptions();

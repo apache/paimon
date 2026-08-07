@@ -106,8 +106,8 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                         mergeRead.mergeSorter(),
                         forceKeepDelete);
         if (readType != null) {
-            ProjectedRow projectedRow =
-                    ProjectedRow.from(readType, mergeRead.tableSchema().logicalRowType());
+            // project from the merge read's actual output, which may itself be projected
+            ProjectedRow projectedRow = ProjectedRow.from(readType, mergeRead.actualReadType());
             reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
         }
         return KeyValueTableRead.unwrap(reader, mergeRead.tableSchema().options());
