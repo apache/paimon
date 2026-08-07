@@ -20,15 +20,15 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.Snapshot
 import org.apache.paimon.data.BinaryRow
-import org.apache.paimon.errors.ErrorMessages
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.io.{DataFileMeta, DataIncrement}
+import org.apache.paimon.operation.commit.RowIdExistenceConflictException
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.VectorType.isVectorStoreFile
-import org.apache.paimon.utils.{Range, RetryWaiter}
+import org.apache.paimon.utils.{ExceptionUtils, Range, RetryWaiter}
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -378,18 +378,7 @@ private[spark] object DataEvolutionRowIdConflictCommitter {
   }
 
   private def isRowIdExistenceConflict(error: Throwable): Boolean = {
-    var current = error
-    while (current != null) {
-      val message = current.getMessage
-      if (
-        message != null &&
-        message.contains(ErrorMessages.DATA_EVOLUTION_ROW_ID_EXISTENCE_CONFLICT_MESSAGE)
-      ) {
-        return true
-      }
-      current = current.getCause
-    }
-    false
+    ExceptionUtils.findThrowable(error, classOf[RowIdExistenceConflictException]).isPresent
   }
 
   private def logRewrite(
