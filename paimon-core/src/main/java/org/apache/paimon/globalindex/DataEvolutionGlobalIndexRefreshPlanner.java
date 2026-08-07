@@ -73,7 +73,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
 
     /**
      * Streaming variant which consumes data entries one by one. Entries are never retained; only
-     * merged row ranges bucketed by distinct scan watermarks are kept in memory.
+     * merged row ranges bucketed by distinct scan sequence numbers are kept in memory.
      */
     public static List<IndexManifestEntry> findIndexesToRefresh(
             SchemaManager schemaManager,
@@ -333,10 +333,11 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
         private final MergedRanges indexedRanges = new MergedRanges();
         private long minScanSnapshotId = Long.MAX_VALUE;
 
-        // Distinct scan watermarks in descending order. Bucket i merges row ranges of updated
-        // data files whose max sequence number lies in (watermarks[i], watermarks[i - 1]].
-        private long[] watermarks;
-        private MergedRanges[] updatedRangesPerWatermark;
+        // Distinct scan sequence numbers in descending order. Bucket i merges row ranges of updated
+        // data files whose max sequence number lies in
+        // (sequenceNumbers[i], sequenceNumbers[i - 1]].
+        private long[] sequenceNumbers;
+        private MergedRanges[] updatedRangesPerSequenceNumber;
 
         private void addIndex(int ordinal, Range rowRange, long scanSnapshotId) {
             indexes.add(new IndexQuery(ordinal, rowRange, scanSnapshotId));
@@ -353,8 +354,8 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
                     distinct[size++] = index.scanSnapshotId;
                 }
             }
-            this.watermarks = Arrays.copyOf(distinct, size);
-            this.updatedRangesPerWatermark = new MergedRanges[size];
+            this.sequenceNumbers = Arrays.copyOf(distinct, size);
+            this.updatedRangesPerSequenceNumber = new MergedRanges[size];
         }
 
         private boolean mayContainUpdate(DataFileMeta file) {
@@ -363,23 +364,22 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
         }
 
         private void addUpdatedFile(long maxSequenceNumber, Range rowRange) {
-            // Merge the range eagerly instead of retaining the file, so memory stays bounded
-            // by the number of distinct watermarks rather than the number of updated files.
-            int position = firstWatermarkBelow(maxSequenceNumber);
-            if (updatedRangesPerWatermark[position] == null) {
-                updatedRangesPerWatermark[position] = new MergedRanges();
+            // Merge the range eagerly instead of retaining the file metadata.
+            int position = firstSequenceNumberBelow(maxSequenceNumber);
+            if (updatedRangesPerSequenceNumber[position] == null) {
+                updatedRangesPerSequenceNumber[position] = new MergedRanges();
             }
-            updatedRangesPerWatermark[position].add(rowRange);
+            updatedRangesPerSequenceNumber[position].add(rowRange);
         }
 
-        /** Returns the first position whose watermark is below the given sequence number. */
-        private int firstWatermarkBelow(long maxSequenceNumber) {
-            // mayContainUpdate guarantees the last watermark qualifies.
+        /** Returns the first position whose scan sequence number is below the maximum sequence. */
+        private int firstSequenceNumberBelow(long maxSequenceNumber) {
+            // mayContainUpdate guarantees the last sequence number qualifies.
             int low = 0;
-            int high = watermarks.length - 1;
+            int high = sequenceNumbers.length - 1;
             while (low < high) {
                 int mid = (low + high) >>> 1;
-                if (watermarks[mid] < maxSequenceNumber) {
+                if (sequenceNumbers[mid] < maxSequenceNumber) {
                     high = mid;
                 } else {
                     low = mid + 1;
@@ -389,16 +389,18 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
         }
 
         private void markIndexesToRefresh(boolean[] result) {
-            // As scan watermarks decrease, eligible updated ranges only grow.
+            // As scan sequence numbers decrease, eligible updated ranges only grow.
             MergedRanges updatedRanges = new MergedRanges();
-            int nextWatermark = 0;
+            int nextSequenceNumber = 0;
             for (IndexQuery index : indexes) {
-                while (nextWatermark < watermarks.length
-                        && watermarks[nextWatermark] >= index.scanSnapshotId) {
-                    if (updatedRangesPerWatermark[nextWatermark] != null) {
-                        updatedRanges.addAll(updatedRangesPerWatermark[nextWatermark]);
+                while (nextSequenceNumber < sequenceNumbers.length
+                        && sequenceNumbers[nextSequenceNumber] >= index.scanSnapshotId) {
+                    MergedRanges ranges = updatedRangesPerSequenceNumber[nextSequenceNumber];
+                    if (ranges != null) {
+                        ranges.drainTo(updatedRanges);
+                        updatedRangesPerSequenceNumber[nextSequenceNumber] = null;
                     }
-                    nextWatermark++;
+                    nextSequenceNumber++;
                 }
                 if (updatedRanges.intersects(index.rowRange)) {
                     result[index.ordinal] = true;
@@ -446,9 +448,15 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             ranges.put(from, to);
         }
 
-        private void addAll(MergedRanges other) {
-            for (Map.Entry<Long, Long> range : other.ranges.entrySet()) {
-                add(range.getKey(), range.getValue());
+        /** Moves all ranges to the target without retaining duplicate tree nodes. */
+        private void drainTo(MergedRanges target) {
+            Iterator<Map.Entry<Long, Long>> iterator = ranges.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<Long, Long> range = iterator.next();
+                long from = range.getKey();
+                long to = range.getValue();
+                iterator.remove();
+                target.add(from, to);
             }
         }
 
