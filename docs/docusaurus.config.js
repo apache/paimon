@@ -7,7 +7,7 @@ const config = {
   favicon: 'favicon.png',
 
   url: 'https://paimon.apache.org',
-  baseUrl: '/docs/master/',
+  baseUrl: '/docs/2.0/',
 
   organizationName: 'apache',
   projectName: 'paimon',
@@ -30,20 +30,21 @@ const config = {
   },
 
   customFields: {
-    version: '1.5-SNAPSHOT',
-    versionTitle: '1.5-SNAPSHOT',
-    branch: 'master',
+    version: '2.0.0',
+    versionTitle: '2.0',
+    branch: 'release-2.0',
     flinkVersion: '1.20',
-    isStable: false,
+    isStable: true,
     showOutDatedWarning: false,
     githubRepo: 'https://github.com/apache/paimon.git',
     trinoGithubRepo: 'https://github.com/apache/paimon-trino.git',
     prestoGithubRepo: 'https://github.com/apache/paimon-presto.git',
     scalaVersion: '_2.12',
-    stableDocs: 'https://paimon.apache.org/docs/1.4',
+    stableDocs: 'https://paimon.apache.org/docs/2.0',
     previousDocs: [
       {label: 'master', href: 'https://paimon.apache.org/docs/master'},
-      {label: 'stable (1.4)', href: 'https://paimon.apache.org/docs/1.4'},
+      {label: 'stable (2.0)', href: 'https://paimon.apache.org/docs/2.0'},
+      {label: '1.4', href: 'https://paimon.apache.org/docs/1.4'},
       {label: '1.3', href: 'https://paimon.apache.org/docs/1.3'},
       {label: '1.2', href: 'https://paimon.apache.org/docs/1.2'},
       {label: '1.1', href: 'https://paimon.apache.org/docs/1.1'},
@@ -58,7 +59,7 @@ const config = {
         docs: {
           routeBasePath: '/',
           sidebarPath: './sidebars.js',
-          editUrl: 'https://github.com/apache/paimon/edit/master/docs/',
+          editUrl: 'https://github.com/apache/paimon/edit/release-2.0/docs/',
           beforeDefaultRemarkPlugins: [
             require('./src/plugins/remark-variable-interpolation'),
           ],
@@ -122,11 +123,12 @@ const config = {
         items: [
           {
             type: 'dropdown',
-            label: '1.5-SNAPSHOT',
+            label: '2.0',
             position: 'right',
             items: [
-              {label: 'master (1.5-SNAPSHOT)', href: 'https://paimon.apache.org/docs/master'},
-              {label: '1.4 (stable)', href: 'https://paimon.apache.org/docs/1.4'},
+              {label: 'master (2.1-SNAPSHOT)', href: 'https://paimon.apache.org/docs/master'},
+              {label: '2.0 (stable)', href: 'https://paimon.apache.org/docs/2.0'},
+              {label: '1.4', href: 'https://paimon.apache.org/docs/1.4'},
               {label: '1.3', href: 'https://paimon.apache.org/docs/1.3'},
               {label: '1.2', href: 'https://paimon.apache.org/docs/1.2'},
               {label: '1.1', href: 'https://paimon.apache.org/docs/1.1'},
