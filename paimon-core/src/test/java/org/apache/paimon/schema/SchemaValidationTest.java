@@ -1251,7 +1251,7 @@ class SchemaValidationTest {
         assertThatThrownBy(
                         () ->
                                 validateTableSchema(
-                                        vectorTypeSchema(emptyList(), singletonList("f1"), null)))
+                                        vectorTypeSchema(emptyList(), singletonList("f1"))))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage(
                         "The type %s in primary key field %s is unsupported", "VectorType", "f1");
@@ -1259,18 +1259,9 @@ class SchemaValidationTest {
         assertThatThrownBy(
                         () ->
                                 validateTableSchema(
-                                        vectorTypeSchema(singletonList("f1"), emptyList(), null)))
+                                        vectorTypeSchema(singletonList("f1"), emptyList())))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("The type %s in partition field %s is unsupported", "VectorType", "f1");
-
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        vectorTypeSchema(
-                                                emptyList(), emptyList(), singletonList("f1"))))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(
-                        "The type %s in upsert key field %s is unsupported", "VectorType", "f1");
     }
 
     @Test
@@ -1881,17 +1872,13 @@ class SchemaValidationTest {
                 new DataField(2, "payload", payloadType));
     }
 
-    private TableSchema vectorTypeSchema(
-            List<String> partitionKeys, List<String> primaryKeys, List<String> upsertKeys) {
+    private TableSchema vectorTypeSchema(List<String> partitionKeys, List<String> primaryKeys) {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
                         new DataField(1, "f1", DataTypes.VECTOR(3, DataTypes.FLOAT())));
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET.key(), String.valueOf(-1));
-        if (upsertKeys != null) {
-            options.put(CoreOptions.UPSERT_KEY.key(), String.join(",", upsertKeys));
-        }
         return new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
     }
 }
