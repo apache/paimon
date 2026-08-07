@@ -18,23 +18,37 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.io.BinaryDataFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.BinaryManifestEntry;
+import org.apache.paimon.manifest.DeletedIdentifierSet;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -53,11 +67,96 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             List<ManifestEntry> dataEntries,
             List<IndexManifestEntry> indexEntries,
             List<DataField> indexedFields) {
-        Set<Integer> indexedFieldIds = new HashSet<>();
-        for (DataField field : indexedFields) {
-            indexedFieldIds.add(field.id());
+        return findIndexesToRefresh(
+                schemaManager, dataEntries.iterator(), indexEntries, indexedFields);
+    }
+
+    /**
+     * Streaming variant which consumes data entries one by one. Entries are never retained; only
+     * merged row ranges bucketed by distinct scan watermarks are kept in memory.
+     */
+    public static List<IndexManifestEntry> findIndexesToRefresh(
+            SchemaManager schemaManager,
+            Iterator<ManifestEntry> dataEntries,
+            List<IndexManifestEntry> indexEntries,
+            List<DataField> indexedFields) {
+        Map<Pair<BinaryRow, Integer>, RefreshGroup> groups =
+                collectRefreshGroups(indexEntries, indexedFields);
+        if (groups.isEmpty()) {
+            return Collections.emptyList();
         }
 
+        Set<Integer> indexedFieldIds = indexedFieldIds(indexedFields);
+        Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache = new HashMap<>();
+        while (dataEntries.hasNext()) {
+            ManifestEntry dataEntry = dataEntries.next();
+            DataFileMeta file = dataEntry.file();
+            if (dataEntry.kind() != FileKind.ADD || file.firstRowId() == null) {
+                continue;
+            }
+
+            RefreshGroup group = groups.get(Pair.of(dataEntry.partition(), dataEntry.bucket()));
+            if (group == null || !group.mayContainUpdate(file)) {
+                continue;
+            }
+
+            addIfUpdatesIndexedFields(
+                    schemaManager, fileFieldIdsCache, indexedFieldIds, group, file);
+        }
+
+        return collectMarkedIndexes(groups, indexEntries);
+    }
+
+    /**
+     * Scans data manifests through reusable {@link BinaryManifestEntry} views and plans indexes to
+     * refresh. Neither {@link ManifestEntry} nor {@link DataFileMeta} POJOs are materialized: one
+     * narrow DELETE pass tracks removed files in a primitive identifier set, then one projected ADD
+     * pass merges updated row ranges directly into the refresh groups.
+     */
+    public static List<IndexManifestEntry> findIndexesToRefresh(
+            FileStoreTable table,
+            Snapshot snapshot,
+            @Nullable PartitionPredicate partitionPredicate,
+            List<IndexManifestEntry> indexEntries,
+            List<DataField> indexedFields) {
+        Map<Pair<BinaryRow, Integer>, RefreshGroup> groups =
+                collectRefreshGroups(indexEntries, indexedFields);
+        if (groups.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<ManifestFileMeta> manifests =
+                table.store()
+                        .newScan()
+                        .withPartitionFilter(partitionPredicate)
+                        .manifestsReader()
+                        .read(snapshot, ScanMode.ALL)
+                        .filteredManifests;
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+        Set<BinaryRow> groupPartitions = new HashSet<>();
+        for (Pair<BinaryRow, Integer> key : groups.keySet()) {
+            groupPartitions.add(key.getLeft());
+        }
+
+        DeletedIdentifierSet deleted = new DeletedIdentifierSet();
+        try {
+            collectDeletedIdentifiers(manifestFile, manifests, groupPartitions, deleted);
+            collectUpdatedRanges(
+                    table.schemaManager(),
+                    manifestFile,
+                    manifests,
+                    deleted,
+                    groups,
+                    indexedFieldIds(indexedFields));
+        } finally {
+            deleted.release();
+        }
+
+        return collectMarkedIndexes(groups, indexEntries);
+    }
+
+    private static Map<Pair<BinaryRow, Integer>, RefreshGroup> collectRefreshGroups(
+            List<IndexManifestEntry> indexEntries, List<DataField> indexedFields) {
         Map<Pair<BinaryRow, Integer>, RefreshGroup> groups = new HashMap<>();
         for (int i = 0; i < indexEntries.size(); i++) {
             IndexManifestEntry indexEntry = indexEntries.get(i);
@@ -80,28 +179,135 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
                             key -> new RefreshGroup())
                     .addIndex(i, indexMeta.rowRange(), scanSnapshotId);
         }
+        for (RefreshGroup group : groups.values()) {
+            group.finishAddingIndexes();
+        }
+        return groups;
+    }
 
-        Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache = new HashMap<>();
-        for (ManifestEntry dataEntry : dataEntries) {
-            DataFileMeta file = dataEntry.file();
-            if (dataEntry.kind() != FileKind.ADD || file.firstRowId() == null) {
+    private static void collectDeletedIdentifiers(
+            ManifestFile manifestFile,
+            List<ManifestFileMeta> manifests,
+            Set<BinaryRow> groupPartitions,
+            DeletedIdentifierSet deleted) {
+        for (ManifestFileMeta manifest : manifests) {
+            if (manifest.numDeletedFiles() <= 0) {
                 continue;
             }
-
-            RefreshGroup group = groups.get(Pair.of(dataEntry.partition(), dataEntry.bucket()));
-            if (group == null || !group.mayContainUpdate(file)) {
-                continue;
-            }
-
-            Set<Integer> physicalFieldIds =
-                    fileFieldIdsCache.computeIfAbsent(
-                            Pair.of(file.schemaId(), file.writeCols()),
-                            key -> fileFieldIds(schemaManager::schema, file));
-            if (!disjoint(indexedFieldIds, physicalFieldIds)) {
-                group.addDataFile(file);
+            try (CloseableIterator<BinaryManifestEntry> entries =
+                    manifestFile.scan(
+                            manifest.fileName(),
+                            manifest.fileSize(),
+                            BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                while (entries.hasNext()) {
+                    BinaryManifestEntry entry = entries.next();
+                    if (entry.isDelete() && groupPartitions.contains(entry.partition())) {
+                        deleted.add(entry);
+                    }
+                }
+            } catch (Exception e) {
+                throw manifestScanException(manifest, e);
             }
         }
+    }
 
+    private static void collectUpdatedRanges(
+            SchemaManager schemaManager,
+            ManifestFile manifestFile,
+            List<ManifestFileMeta> manifests,
+            DeletedIdentifierSet deleted,
+            Map<Pair<BinaryRow, Integer>, RefreshGroup> groups,
+            Set<Integer> indexedFieldIds) {
+        Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache = new HashMap<>();
+        BinaryManifestEntry.Projection projection = addedEntryProjection(!deleted.isEmpty());
+        for (ManifestFileMeta manifest : manifests) {
+            if (manifest.numAddedFiles() <= 0) {
+                continue;
+            }
+            try (CloseableIterator<BinaryManifestEntry> entries =
+                    manifestFile.scan(manifest.fileName(), manifest.fileSize(), projection)) {
+                while (entries.hasNext()) {
+                    BinaryManifestEntry entry = entries.next();
+                    if (!entry.isAdd()) {
+                        continue;
+                    }
+                    BinaryDataFileMeta file = entry.file();
+                    if (!file.hasFirstRowId()) {
+                        continue;
+                    }
+                    RefreshGroup group = groups.get(Pair.of(entry.partition(), entry.bucket()));
+                    if (group == null || !group.mayContainUpdate(file)) {
+                        continue;
+                    }
+                    if (!deleted.isEmpty() && deleted.contains(entry)) {
+                        continue;
+                    }
+                    addIfUpdatesIndexedFields(
+                            schemaManager, fileFieldIdsCache, indexedFieldIds, group, file);
+                }
+            } catch (Exception e) {
+                throw manifestScanException(manifest, e);
+            }
+        }
+    }
+
+    private static void addIfUpdatesIndexedFields(
+            SchemaManager schemaManager,
+            Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache,
+            Set<Integer> indexedFieldIds,
+            RefreshGroup group,
+            DataFileMeta file) {
+        Set<Integer> physicalFieldIds =
+                fileFieldIdsCache.computeIfAbsent(
+                        Pair.of(file.schemaId(), file.writeCols()),
+                        key -> fileFieldIds(schemaManager::schema, file));
+        if (!disjoint(indexedFieldIds, physicalFieldIds)) {
+            group.addUpdatedFile(file.maxSequenceNumber(), file.nonNullRowIdRange());
+        }
+    }
+
+    /**
+     * Projects only the fields the refresh planner consumes; identifier fields are included only
+     * when deleted files must be recognized.
+     */
+    private static BinaryManifestEntry.Projection addedEntryProjection(
+            boolean includeIdentifierFields) {
+        List<DataField> fileFields = new ArrayList<>();
+        fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.ROW_COUNT));
+        fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.MAX_SEQUENCE_NUMBER));
+        fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.SCHEMA_ID));
+        fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.FIRST_ROW_ID));
+        fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.WRITE_COLS));
+        if (includeIdentifierFields) {
+            fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.FILE_NAME));
+            fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.LEVEL));
+            fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.EXTRA_FILES));
+            fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.EMBEDDED_FILE_INDEX));
+            fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.EXTERNAL_PATH));
+        }
+
+        List<DataField> fields = new ArrayList<>();
+        fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.KIND));
+        fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.PARTITION));
+        fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.BUCKET));
+        fields.add(
+                ManifestEntry.MANIFEST_ROW_TYPE
+                        .getField(ManifestEntry.FILE)
+                        .newType(new RowType(false, fileFields)));
+        return BinaryManifestEntry.Projection.create(new RowType(false, fields));
+    }
+
+    private static Set<Integer> indexedFieldIds(List<DataField> indexedFields) {
+        Set<Integer> indexedFieldIds = new HashSet<>();
+        for (DataField field : indexedFields) {
+            indexedFieldIds.add(field.id());
+        }
+        return indexedFieldIds;
+    }
+
+    private static List<IndexManifestEntry> collectMarkedIndexes(
+            Map<Pair<BinaryRow, Integer>, RefreshGroup> groups,
+            List<IndexManifestEntry> indexEntries) {
         boolean[] indexesToRefresh = new boolean[indexEntries.size()];
         for (RefreshGroup group : groups.values()) {
             group.markIndexesToRefresh(indexesToRefresh);
@@ -116,12 +322,21 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
         return result;
     }
 
+    private static RuntimeException manifestScanException(
+            ManifestFileMeta manifest, Exception cause) {
+        return new RuntimeException("Failed to scan manifest " + manifest.fileName(), cause);
+    }
+
     private static final class RefreshGroup {
 
         private final List<IndexQuery> indexes = new ArrayList<>();
-        private final List<DataFileMeta> dataFiles = new ArrayList<>();
         private final MergedRanges indexedRanges = new MergedRanges();
         private long minScanSnapshotId = Long.MAX_VALUE;
+
+        // Distinct scan watermarks in descending order. Bucket i merges row ranges of updated
+        // data files whose max sequence number lies in (watermarks[i], watermarks[i - 1]].
+        private long[] watermarks;
+        private MergedRanges[] updatedRangesPerWatermark;
 
         private void addIndex(int ordinal, Range rowRange, long scanSnapshotId) {
             indexes.add(new IndexQuery(ordinal, rowRange, scanSnapshotId));
@@ -129,27 +344,61 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             minScanSnapshotId = Math.min(minScanSnapshotId, scanSnapshotId);
         }
 
+        private void finishAddingIndexes() {
+            indexes.sort((left, right) -> Long.compare(right.scanSnapshotId, left.scanSnapshotId));
+            long[] distinct = new long[indexes.size()];
+            int size = 0;
+            for (IndexQuery index : indexes) {
+                if (size == 0 || distinct[size - 1] != index.scanSnapshotId) {
+                    distinct[size++] = index.scanSnapshotId;
+                }
+            }
+            this.watermarks = Arrays.copyOf(distinct, size);
+            this.updatedRangesPerWatermark = new MergedRanges[size];
+        }
+
         private boolean mayContainUpdate(DataFileMeta file) {
             return file.maxSequenceNumber() > minScanSnapshotId
                     && indexedRanges.intersects(file.nonNullRowIdRange());
         }
 
-        private void addDataFile(DataFileMeta file) {
-            dataFiles.add(file);
+        private void addUpdatedFile(long maxSequenceNumber, Range rowRange) {
+            // Merge the range eagerly instead of retaining the file, so memory stays bounded
+            // by the number of distinct watermarks rather than the number of updated files.
+            int position = firstWatermarkBelow(maxSequenceNumber);
+            if (updatedRangesPerWatermark[position] == null) {
+                updatedRangesPerWatermark[position] = new MergedRanges();
+            }
+            updatedRangesPerWatermark[position].add(rowRange);
+        }
+
+        /** Returns the first position whose watermark is below the given sequence number. */
+        private int firstWatermarkBelow(long maxSequenceNumber) {
+            // mayContainUpdate guarantees the last watermark qualifies.
+            int low = 0;
+            int high = watermarks.length - 1;
+            while (low < high) {
+                int mid = (low + high) >>> 1;
+                if (watermarks[mid] < maxSequenceNumber) {
+                    high = mid;
+                } else {
+                    low = mid + 1;
+                }
+            }
+            return low;
         }
 
         private void markIndexesToRefresh(boolean[] result) {
-            // As scan watermarks decrease, eligible data files only grow.
-            dataFiles.sort(Comparator.comparingLong(DataFileMeta::maxSequenceNumber).reversed());
-            indexes.sort((left, right) -> Long.compare(right.scanSnapshotId, left.scanSnapshotId));
-
+            // As scan watermarks decrease, eligible updated ranges only grow.
             MergedRanges updatedRanges = new MergedRanges();
-            int nextFile = 0;
+            int nextWatermark = 0;
             for (IndexQuery index : indexes) {
-                while (nextFile < dataFiles.size()
-                        && dataFiles.get(nextFile).maxSequenceNumber() > index.scanSnapshotId) {
-                    updatedRanges.add(dataFiles.get(nextFile).nonNullRowIdRange());
-                    nextFile++;
+                while (nextWatermark < watermarks.length
+                        && watermarks[nextWatermark] >= index.scanSnapshotId) {
+                    if (updatedRangesPerWatermark[nextWatermark] != null) {
+                        updatedRanges.addAll(updatedRangesPerWatermark[nextWatermark]);
+                    }
+                    nextWatermark++;
                 }
                 if (updatedRanges.intersects(index.rowRange)) {
                     result[index.ordinal] = true;
@@ -177,9 +426,10 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
         private final NavigableMap<Long, Long> ranges = new TreeMap<>();
 
         private void add(Range range) {
-            long from = range.from;
-            long to = range.to;
+            add(range.from, range.to);
+        }
 
+        private void add(long from, long to) {
             Map.Entry<Long, Long> floor = ranges.floorEntry(from);
             if (floor != null && floor.getValue() >= from) {
                 from = floor.getKey();
@@ -194,6 +444,12 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
                 next = ranges.ceilingEntry(from);
             }
             ranges.put(from, to);
+        }
+
+        private void addAll(MergedRanges other) {
+            for (Map.Entry<Long, Long> range : other.ranges.entrySet()) {
+                add(range.getKey(), range.getValue());
+            }
         }
 
         private boolean intersects(Range range) {
