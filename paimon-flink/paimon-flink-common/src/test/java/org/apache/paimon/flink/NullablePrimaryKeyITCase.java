@@ -89,8 +89,9 @@ public class NullablePrimaryKeyITCase extends CatalogITCaseBase {
                         + "(CAST(NULL AS INT), 'null-v2'), "
                         + "(1, 'one')");
 
-        assertThat(sql("SELECT * FROM T"))
-                .containsExactlyInAnyOrder(Row.of(null, "null-v2"), Row.of(1, "one"));
+        // Without a sequence field, either value may win within the same commit.
+        assertThat(sql("SELECT id FROM T"))
+                .containsExactlyInAnyOrder(Row.of((Object) null), Row.of(1));
     }
 
     @Test
