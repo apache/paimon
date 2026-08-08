@@ -54,7 +54,6 @@ public class BinaryExternalSortBuffer implements SortBuffer {
     private final BlockCompressionFactory compressionCodecFactory;
     private final int compressionBlockSize;
     private final BinaryExternalMerger merger;
-    private final IndexedSorter inMemorySorter;
 
     private final FileIOChannel.Enumerator enumerator;
     private final List<ChannelWithMeta> spillChannelIDs;
@@ -79,7 +78,6 @@ public class BinaryExternalSortBuffer implements SortBuffer {
         this.compressionCodecFactory = BlockCompressionFactory.create(compression);
         this.compressionBlockSize = (int) MemorySize.parse("64 kb").getBytes();
         this.maxDiskSize = maxDiskSize;
-        this.inMemorySorter = new NormalizedKeyRadixSort();
         this.merger =
                 new BinaryExternalMerger(
                         ioManager,
@@ -211,7 +209,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
     @Override
     public final MutableObjectIterator<BinaryRow> sortedIterator() throws IOException {
         if (spillChannelIDs.isEmpty()) {
-            return inMemorySortBuffer.sortedIterator(inMemorySorter);
+            return inMemorySortBuffer.sortedIterator();
         }
         return spilledIterator();
     }
@@ -256,7 +254,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             output =
                     FileChannelUtil.createOutputView(
                             ioManager, channel, compressionCodecFactory, compressionBlockSize);
-            inMemorySorter.sort(inMemorySortBuffer);
+            inMemorySortBuffer.sort();
             inMemorySortBuffer.writeToOutput(output);
             output.close();
             blockCount = output.getBlockCount();

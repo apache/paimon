@@ -24,9 +24,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.BigIntType;
@@ -62,7 +60,6 @@ import java.util.Random;
 import java.util.function.IntFunction;
 import java.util.stream.Stream;
 
-import static org.apache.paimon.codegen.CodeGenUtils.newNormalizedKeyComputer;
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -75,40 +72,27 @@ class NormalizedKeyRadixSortTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("typeCases")
-    void testMatchesQuickSort(TypeCase typeCase) throws Exception {
+    void testMatchesComparisonSort(TypeCase typeCase) throws Exception {
         List<GenericRow> rows = rows(typeCase, RECORD_COUNT);
-        List<Integer> quickSortResult = sortInMemory(typeCase, rows, new QuickSort(), 32L << 20);
-        assertThat(sortInMemory(typeCase, rows, new NormalizedKeyRadixSort(), 32L << 20))
-                .containsExactlyElementsOf(quickSortResult);
+        assertThat(sortExternal(typeCase, rows, 32L << 20))
+                .containsExactlyElementsOf(sortWithComparator(typeCase, rows));
     }
 
     @Test
-    void testSpilledRunsMatchQuickSort() throws Exception {
+    void testSpilledRunsMatchComparisonSort() throws Exception {
         TypeCase typeCase = stringCase();
         List<GenericRow> rows = rows(typeCase, 20_000);
-        List<Integer> quickSortResult = sortInMemory(typeCase, rows, new QuickSort(), 32L << 20);
         assertThat(sortExternal(typeCase, rows, 256L << 10))
-                .containsExactlyElementsOf(quickSortResult);
+                .containsExactlyElementsOf(sortWithComparator(typeCase, rows));
     }
 
-    private List<Integer> sortInMemory(
-            TypeCase typeCase, List<GenericRow> rows, IndexedSorter sorter, long memorySize)
-            throws Exception {
+    private static List<Integer> sortWithComparator(TypeCase typeCase, List<GenericRow> rows) {
         RowType rowType = RowType.of(typeCase.dataType, new IntType());
-        BinaryInMemorySortBuffer sortBuffer =
-                BinaryInMemorySortBuffer.createBuffer(
-                        newNormalizedKeyComputer(rowType.getFieldTypes(), new int[] {0, 1}),
-                        new InternalRowSerializer(rowType),
-                        newRecordComparator(rowType.getFieldTypes(), new int[] {0, 1}),
-                        new HeapMemorySegmentPool(memorySize, MemorySegmentPool.DEFAULT_PAGE_SIZE));
-        try {
-            for (GenericRow row : rows) {
-                assertThat(sortBuffer.write(row)).isTrue();
-            }
-            return collectIds(sortBuffer.sortedIterator(sorter), rows.size());
-        } finally {
-            sortBuffer.clear();
-        }
+        List<GenericRow> expected = new ArrayList<>(rows);
+        expected.sort(newRecordComparator(rowType.getFieldTypes(), new int[] {0, 1})::compare);
+        List<Integer> result = new ArrayList<>(expected.size());
+        expected.forEach(row -> result.add(row.getInt(1)));
+        return result;
     }
 
     private List<Integer> sortExternal(TypeCase typeCase, List<GenericRow> rows, long memorySize)

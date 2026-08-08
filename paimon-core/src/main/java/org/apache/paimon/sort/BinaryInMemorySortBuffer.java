@@ -46,6 +46,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements SortBuffer {
 
     private static final int MIN_REQUIRED_BUFFERS = 3;
+    private static final IndexedSorter SORTER = new NormalizedKeyRadixSort();
 
     private final AbstractRowDataSerializer<InternalRow> inputSerializer;
     private final ArrayList<MemorySegment> recordBufferSegments;
@@ -245,13 +246,13 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements S
 
     @Override
     public final MutableObjectIterator<BinaryRow> sortedIterator() {
-        return sortedIterator(new QuickSort());
+        sort();
+        return iterator();
     }
 
-    final MutableObjectIterator<BinaryRow> sortedIterator(IndexedSorter sorter) {
+    void sort() {
         if (numRecords > 0) {
-            sorter.sort(this);
+            SORTER.sort(this);
         }
-        return iterator();
     }
 }
