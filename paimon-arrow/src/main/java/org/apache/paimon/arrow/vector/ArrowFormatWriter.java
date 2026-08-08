@@ -18,6 +18,7 @@
 
 package org.apache.paimon.arrow.vector;
 
+import org.apache.paimon.arrow.ArrowBundleRecords;
 import org.apache.paimon.arrow.ArrowFieldTypeConversion;
 import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
@@ -51,6 +52,7 @@ public class ArrowFormatWriter implements AutoCloseable {
 
     private final VectorSchemaRoot vectorSchemaRoot;
     private final ArrowFieldWriter[] fieldWriters;
+    private final RowType rowType;
     private final int batchSize;
     private final BufferAllocator allocator;
     @Nullable private final Long memoryUsedMaxInBytes;
@@ -171,6 +173,7 @@ public class ArrowFormatWriter implements AutoCloseable {
             boolean closeAllocatorOnClose) {
         this.allocator = allocator;
         this.closeAllocatorOnClose = closeAllocatorOnClose;
+        this.rowType = rowType;
 
         RowType outputRowType = replaceWithShreddingType(rowType, shreddingSchemas);
         vectorSchemaRoot =
@@ -301,6 +304,14 @@ public class ArrowFormatWriter implements AutoCloseable {
 
     public BufferAllocator getAllocator() {
         return allocator;
+    }
+
+    /** Returns whether direct Arrow consumption preserves this writer's row schema. */
+    public boolean isArrowBundleSchemaCompatible(ArrowBundleRecords bundle) {
+        return !bundle.getVectorSchemaRoot().getFieldVectors().isEmpty()
+                && bundle.hasIdentityMapping()
+                && rowType.equals(bundle.getRowType())
+                && vectorSchemaRoot.getSchema().equals(bundle.getVectorSchemaRoot().getSchema());
     }
 
     private static RowType replaceWithShreddingType(

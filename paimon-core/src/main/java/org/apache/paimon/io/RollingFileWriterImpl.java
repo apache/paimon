@@ -110,9 +110,11 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
                 openCurrentWriter();
             }
 
+            long previousRecordCount = currentWriter.recordCount();
             currentWriter.writeBundle(bundle);
-            recordCount += bundle.rowCount();
-            currentFileRecordCount += bundle.rowCount();
+            long writtenRecordCount = currentWriter.recordCount() - previousRecordCount;
+            recordCount += writtenRecordCount;
+            currentFileRecordCount += writtenRecordCount;
 
             if (rollingFile(true)) {
                 closeCurrentWriter();

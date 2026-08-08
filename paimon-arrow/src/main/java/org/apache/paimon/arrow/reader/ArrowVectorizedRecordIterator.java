@@ -16,22 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.arrow.writer;
+package org.apache.paimon.arrow.reader;
 
-/** Native writer definition. */
-public abstract class NativeWriter {
+import org.apache.paimon.arrow.ArrowBundleRecords;
+import org.apache.paimon.reader.VectorizedRecordIterator;
 
-    private long nativeWriterPtr;
-
-    public abstract long nativeMemoryUsed();
+/** A {@link VectorizedRecordIterator} which can expose its Arrow batch for direct bundle writes. */
+public interface ArrowVectorizedRecordIterator extends VectorizedRecordIterator {
 
     /**
-     * Writes an Arrow batch represented by C Data Interface addresses.
+     * Returns a borrowed view of the Arrow vectors backing {@link #batch()}.
      *
-     * <p>The implementation must consume the batch synchronously or acquire independent ownership
-     * before returning. Both addresses become invalid immediately after this method returns.
+     * <p>The caller does not own the batch and must not retain or close it. Its row order, count,
+     * and values correspond to {@link #batch()}, and it is valid only until {@link
+     * #releaseBatch()}.
      */
-    public abstract void writeIpcBytes(long arrayAddress, long schemaAddress);
-
-    public abstract void close();
+    ArrowBundleRecords arrowBundle();
 }
