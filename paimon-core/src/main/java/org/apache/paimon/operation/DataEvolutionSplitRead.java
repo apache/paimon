@@ -69,7 +69,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -311,90 +310,76 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
 
-        // Init all we need to create a compound reader
+        // Init all we need to create a compound reader: resolve each bunch's physically-provided
+        // (row-tracked) row type, then delegate the no-IO layout planning (leaf-level matching and
+        // nested sub-field assembly) to DataEvolutionReadPlanner; this class only builds readers.
         List<DataField> allReadFields = readRowType.getFields();
-        RecordReader<InternalRow>[] fileRecordReaders = new RecordReader[fieldsFiles.size()];
-        int[] readFieldIndex = allReadFields.stream().mapToInt(DataField::id).toArray();
-        // which row the read field index belongs to
-        int[] rowOffsets = new int[allReadFields.size()];
-        // which field index in the reading row
-        int[] fieldOffsets = new int[allReadFields.size()];
-        Arrays.fill(rowOffsets, -1);
-        Arrays.fill(fieldOffsets, -1);
+        int numBunches = fieldsFiles.size();
+        RecordReader<InternalRow>[] fileRecordReaders = new RecordReader[numBunches];
 
-        for (int i = 0; i < fieldsFiles.size(); i++) {
+        TableSchema[] bunchDataSchemas = new TableSchema[numBunches];
+        List<RowType> bunchAvailTypes = new ArrayList<>(numBunches);
+        for (int i = 0; i < numBunches; i++) {
+            DataFileMeta first = fieldsFiles.get(i).files().get(0);
+            bunchDataSchemas[i] = schemaFetcher.apply(first.schemaId()).project(first.writeCols());
+            bunchAvailTypes.add(rowTypeWithRowTracking(bunchDataSchemas[i].logicalRowType()));
+        }
+        DataEvolutionReadPlanner.DataEvolutionReadPlan plan =
+                new DataEvolutionReadPlanner(readRowType, bunchAvailTypes).plan();
+
+        // Build the per-bunch readers from the planned partial read row types.
+        for (int i = 0; i < numBunches; i++) {
+            List<DataField> readFields = plan.bunchReadFields.get(i);
+            if (readFields.isEmpty()) {
+                fileRecordReaders[i] = null;
+                continue;
+            }
             FieldBunch bunch = fieldsFiles.get(i);
             DataFileMeta firstFile = bunch.files().get(0);
             FileReadTarget readTarget = readTarget(firstFile, dataFilePathFactory, rowRanges);
             String formatIdentifier = readTarget.formatIdentifier;
             long schemaId = firstFile.schemaId();
-            TableSchema dataSchema = schemaFetcher.apply(schemaId).project(firstFile.writeCols());
-            int[] fieldIds =
-                    SpecialFields.rowTypeWithRowTracking(dataSchema.logicalRowType()).getFields()
-                            .stream()
-                            .mapToInt(DataField::id)
-                            .toArray();
-            List<DataField> readFields = new ArrayList<>();
-            for (int j = 0; j < readFieldIndex.length; j++) {
-                for (int fieldId : fieldIds) {
-                    // Check if the read field index matches the file field
-                    // index
-                    if (readFieldIndex[j] == fieldId) {
-                        // If the row offset is not set, set it to the current
-                        // file reader
-                        if (rowOffsets[j] == -1) {
-                            // "i" is the reader index, and "readFields.size()"
-                            // is the offset the that row
-                            rowOffsets[j] = i;
-                            fieldOffsets[j] = readFields.size();
-                            readFields.add(allReadFields.get(j));
-                        }
-                        break;
-                    }
-                }
-            }
-
-            if (readFields.isEmpty()) {
-                fileRecordReaders[i] = null;
-            } else {
-                // create new FormatReaderMapping for read partial fields
-                List<String> readFieldNames =
-                        readFields.stream().map(DataField::name).collect(Collectors.toList());
-                FormatReaderMapping formatReaderMapping =
-                        formatReaderMappings.computeIfAbsent(
-                                new FormatKey(schemaId, formatIdentifier, readFieldNames),
-                                key ->
-                                        formatBuilder.build(
-                                                formatIdentifier,
-                                                schema,
-                                                dataSchema,
-                                                readFields,
-                                                false));
-                RowType partialReadRowType = new RowType(readFields);
-                fileRecordReaders[i] =
-                        new ForceSingleBatchReader(
-                                createFieldBunchReader(
-                                        partition,
-                                        bunch,
-                                        dataFilePathFactory,
-                                        formatReaderMapping,
-                                        rowRanges,
-                                        partialReadRowType,
-                                        deletionVector));
-            }
+            TableSchema dataSchema = bunchDataSchemas[i];
+            RowType partialReadRowType = new RowType(readFields);
+            // cache key must use paths relative to the full schema so that two files reading
+            // different sub-fields of the same struct (e.g. nest.a vs nest.b) do not collide
+            RowType fullRef =
+                    rowTypeWithRowTracking(schemaFetcher.apply(schemaId).logicalRowType());
+            List<String> readFieldNames = partialReadRowType.leafPaths(fullRef);
+            FormatReaderMapping formatReaderMapping =
+                    formatReaderMappings.computeIfAbsent(
+                            new FormatKey(schemaId, formatIdentifier, readFieldNames),
+                            key ->
+                                    formatBuilder.build(
+                                            formatIdentifier,
+                                            schema,
+                                            dataSchema,
+                                            readFields,
+                                            false));
+            fileRecordReaders[i] =
+                    new ForceSingleBatchReader(
+                            createFieldBunchReader(
+                                    partition,
+                                    bunch,
+                                    dataFilePathFactory,
+                                    formatReaderMapping,
+                                    rowRanges,
+                                    partialReadRowType,
+                                    deletionVector));
         }
 
-        for (int i = 0; i < rowOffsets.length; i++) {
-            if (rowOffsets[i] == -1) {
+        for (int j = 0; j < allReadFields.size(); j++) {
+            if (plan.rowOffsets[j] == -1 && plan.nested[j] == null) {
                 checkArgument(
-                        allReadFields.get(i).type().isNullable(),
+                        allReadFields.get(j).type().isNullable(),
                         format(
                                 "Field %s is not null but can't find any file contains it.",
-                                allReadFields.get(i)));
+                                allReadFields.get(j)));
             }
         }
 
-        return new DataEvolutionFileReader(rowOffsets, fieldOffsets, fileRecordReaders);
+        return new DataEvolutionFileReader(
+                plan.rowOffsets, plan.fieldOffsets, fileRecordReaders, plan.nested);
     }
 
     private RecordReader<InternalRow> createFieldBunchReader(

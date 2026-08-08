@@ -24,8 +24,10 @@ import org.apache.paimon.types.DataField;
 
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -45,11 +47,32 @@ public class DataEvolutionUtils {
             Function<Long, TableSchema> scanTableSchema, DataFileMeta file) {
         TableSchema schema = scanTableSchema.apply(file.schemaId());
         List<String> writeCols = file.writeCols();
-        Set<String> writeColNames = writeCols == null ? null : new HashSet<>(writeCols);
         Set<Integer> ids = new HashSet<>();
+        if (writeCols == null) {
+            for (DataField field : schema.fields()) {
+                ids.add(field.id());
+            }
+            return ids;
+        }
+
+        Map<String, DataField> byName = new HashMap<>();
         for (DataField field : schema.fields()) {
+            byName.put(field.name(), field);
+        }
+        for (String writeCol : writeCols) {
+            // A write column is either a plain top-level name or, for sub-field-level data
+            // evolution, a dotted path into a nested column such as "nest.a"; both identify the
+            // same top-level field. Try the exact name first so a column whose own name contains a
+            // dot is not split, matching RowType#projectByPaths.
+            DataField field = byName.get(writeCol);
+            if (field == null) {
+                int dot = writeCol.indexOf('.');
+                if (dot > 0) {
+                    field = byName.get(writeCol.substring(0, dot));
+                }
+            }
             // writeCols may also contain physical row-tracking fields outside the table schema.
-            if (writeColNames == null || writeColNames.contains(field.name())) {
+            if (field != null) {
                 ids.add(field.id());
             }
         }
