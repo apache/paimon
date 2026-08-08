@@ -299,7 +299,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         } finally {
             for (DataFileMeta file : toDelete) {
                 // Interrupt-tolerant: close runs after speculative task kill.
-                fileIO.deleteQuietlyIgnoringInterrupt(pathFactory.toPath(file));
+                file.collectFiles(pathFactory).forEach(fileIO::deleteQuietlyIgnoringInterrupt);
             }
             if (compactDeletionFile != null) {
                 compactDeletionFile.clean();
