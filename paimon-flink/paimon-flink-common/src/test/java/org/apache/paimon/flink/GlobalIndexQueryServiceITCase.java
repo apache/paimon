@@ -134,7 +134,12 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
         assertThat(initialBlobFiles).isGreaterThan(1L);
 
         GlobalIndexQueryServiceDescriptor compactedDescriptor;
-        JobClient initialJob = startQueryService(table, 2);
+        // A restarted source attempt deliberately retains its per-attempt lease until consumer
+        // expiration, so minNextSnapshot cannot identify the lease owned by the active publisher.
+        // Keep this lifecycle check on one dedicated attempt; automatic recovery is covered by
+        // testAutomaticAttemptFailover.
+        String initialConsumerId = CONSUMER_ID + "-initial";
+        JobClient initialJob = startQueryService(table, 2, initialConsumerId, false);
         try {
             GlobalIndexQueryServiceDescriptor initialDescriptor =
                     waitForDescriptor(
@@ -196,8 +201,9 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
                 expected.put(secondUnindexedKey, secondUnindexedValue);
                 long secondUnindexedSnapshotId = table.snapshotManager().latestSnapshot().id();
                 assertThat(secondUnindexedSnapshotId).isGreaterThan(uncoveredSnapshotId);
-                waitForConsumerSnapshot(
+                waitForSingleConsumerSnapshot(
                         table,
+                        initialConsumerId,
                         secondUnindexedSnapshotId,
                         initialJob,
                         "continuous NOT_READY lease advancement");
@@ -278,8 +284,9 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
 
             // Once the exact replacement generation has been acknowledged for the full grace,
             // its lease may advance and ordinary expiry can reclaim the old Blob file.
-            waitForConsumerSnapshot(
+            waitForSingleConsumerSnapshot(
                     table,
+                    initialConsumerId,
                     postCompactionSnapshotId,
                     initialJob,
                     "post-compaction Blob handover grace");
@@ -671,24 +678,6 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
         }
         fail("Timed out waiting for %s. Last descriptor: %s", description, last);
         return null;
-    }
-
-    private void waitForConsumerSnapshot(
-            FileStoreTable table, long expectedSnapshotId, JobClient jobClient, String description)
-            throws Exception {
-        long deadline = System.nanoTime() + WAIT_TIMEOUT.toNanos();
-        while (System.nanoTime() < deadline) {
-            java.util.OptionalLong nextSnapshot = table.consumerManager().minNextSnapshot();
-            if (nextSnapshot.isPresent() && nextSnapshot.getAsLong() == expectedSnapshotId) {
-                return;
-            }
-            JobStatus status = jobClient.getJobStatus().get(10, TimeUnit.SECONDS);
-            if (status.isTerminalState()) {
-                throw jobFailure(jobClient, status, description, null);
-            }
-            Thread.sleep(50L);
-        }
-        fail("Timed out waiting for %s.", description);
     }
 
     private static void waitForJobStatus(
