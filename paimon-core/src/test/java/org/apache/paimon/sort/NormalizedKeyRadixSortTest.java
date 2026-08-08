@@ -20,126 +20,246 @@ package org.apache.paimon.sort;
 
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BooleanType;
+import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DateType;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TimeType;
+import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.MutableObjectIterator;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
+import java.util.function.IntFunction;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link NormalizedKeyRadixSort}. */
 class NormalizedKeyRadixSortTest {
 
+    private static final int RECORD_COUNT = 4_096;
+
     @TempDir Path tempDir;
 
-    @Test
-    void testFullyDeterminedKey() throws Exception {
-        List<TestRecord> records = records(10_000, false, false);
-        assertSorted(
-                records, new int[] {0}, Comparator.comparingInt(record -> record.key), 32L << 20);
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("typeCases")
+    void testMatchesQuickSort(TypeCase typeCase) throws Exception {
+        List<GenericRow> rows = rows(typeCase, RECORD_COUNT);
+        List<Integer> quickSortResult = sort(typeCase, rows, false, 32L << 20);
+        assertThat(sort(typeCase, rows, true, 32L << 20))
+                .containsExactlyElementsOf(quickSortResult);
     }
 
     @Test
-    void testPartialKeyAndNulls() throws Exception {
-        List<TestRecord> records = records(10_000, true, true);
-        assertSorted(records, new int[] {0, 1}, recordComparator(), 32L << 20);
+    void testSpilledRunsMatchQuickSort() throws Exception {
+        TypeCase typeCase = stringCase();
+        List<GenericRow> rows = rows(typeCase, 20_000);
+        List<Integer> quickSortResult = sort(typeCase, rows, false, 256L << 10);
+        assertThat(sort(typeCase, rows, true, 256L << 10))
+                .containsExactlyElementsOf(quickSortResult);
     }
 
-    @Test
-    void testSpilledRuns() throws Exception {
-        List<TestRecord> records = records(20_000, true, false);
-        assertSorted(records, new int[] {0, 1}, recordComparator(), 256L << 10);
-    }
-
-    private void assertSorted(
-            List<TestRecord> records,
-            int[] keyFields,
-            Comparator<TestRecord> expectedComparator,
-            long memorySize)
+    private List<Integer> sort(
+            TypeCase typeCase, List<GenericRow> rows, boolean radix, long memorySize)
             throws Exception {
-        List<TestRecord> expected = new ArrayList<>(records);
-        expected.sort(expectedComparator);
-        Collections.shuffle(records, new Random(42));
-
-        IOManager ioManager = IOManager.create(tempDir.toString());
+        java.nio.file.Path ioPath = tempDir.resolve(typeCase.name + '-' + radix + '-' + memorySize);
+        java.nio.file.Files.createDirectories(ioPath);
+        IOManager ioManager = IOManager.create(ioPath.toString());
         BinaryExternalSortBuffer sorter =
-                BinaryExternalSortBuffer.createWithRadixSort(
-                        ioManager,
-                        RowType.of(new IntType(), new VarCharType()),
-                        keyFields,
-                        memorySize,
-                        MemorySegmentPool.DEFAULT_PAGE_SIZE,
-                        128,
-                        CompressOptions.defaultOptions(),
-                        MemorySize.MAX_VALUE);
+                radix
+                        ? BinaryExternalSortBuffer.createWithRadixSort(
+                                ioManager,
+                                RowType.of(typeCase.dataType, new IntType()),
+                                new int[] {0, 1},
+                                memorySize,
+                                MemorySegmentPool.DEFAULT_PAGE_SIZE,
+                                128,
+                                CompressOptions.defaultOptions(),
+                                MemorySize.MAX_VALUE)
+                        : BinaryExternalSortBuffer.create(
+                                ioManager,
+                                RowType.of(typeCase.dataType, new IntType()),
+                                new int[] {0, 1},
+                                memorySize,
+                                MemorySegmentPool.DEFAULT_PAGE_SIZE,
+                                128,
+                                CompressOptions.defaultOptions(),
+                                MemorySize.MAX_VALUE);
         try {
-            BinaryRow row = new BinaryRow(2);
-            BinaryRowWriter writer = new BinaryRowWriter(row);
-            for (TestRecord record : records) {
-                writer.reset();
-                writer.writeInt(0, record.key);
-                if (record.value == null) {
-                    writer.setNullAt(1);
-                } else {
-                    writer.writeString(1, BinaryString.fromString(record.value));
-                }
-                writer.complete();
+            for (GenericRow row : rows) {
                 sorter.write(row);
             }
 
+            List<Integer> result = new ArrayList<>(rows.size());
             MutableObjectIterator<BinaryRow> iterator = sorter.sortedIterator();
             BinaryRow reuse = new BinaryRow(2);
-            for (TestRecord record : expected) {
-                reuse = iterator.next(reuse);
-                assertThat(reuse.getInt(0)).isEqualTo(record.key);
-                assertThat(reuse.isNullAt(1) ? null : reuse.getString(1).toString())
-                        .isEqualTo(record.value);
+            while ((reuse = iterator.next(reuse)) != null) {
+                result.add(reuse.getInt(1));
             }
-            assertThat(iterator.next(reuse)).isNull();
+            return result;
         } finally {
             sorter.clear();
             ioManager.close();
         }
     }
 
-    private static Comparator<TestRecord> recordComparator() {
-        return Comparator.comparingInt((TestRecord record) -> record.key)
-                .thenComparing(
-                        record -> record.value, Comparator.nullsFirst(Comparator.naturalOrder()));
-    }
-
-    private static List<TestRecord> records(int size, boolean repeatedKeys, boolean withNulls) {
-        List<TestRecord> records = new ArrayList<>(size);
-        for (int i = 0; i < size; i++) {
-            int key = repeatedKeys ? i % 37 : i - size / 2;
-            String value = withNulls && i % 17 == 0 ? null : String.format("value-%08d", size - i);
-            records.add(new TestRecord(key, value));
+    private static List<GenericRow> rows(TypeCase typeCase, int count) {
+        List<Integer> ids = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            ids.add(i);
         }
-        return records;
+        Collections.shuffle(ids, new Random(42));
+
+        List<GenericRow> rows = new ArrayList<>(count);
+        for (int id : ids) {
+            rows.add(GenericRow.of(typeCase.value(id), id));
+        }
+        return rows;
     }
 
-    private static class TestRecord {
-        private final int key;
-        private final String value;
+    private static Stream<TypeCase> typeCases() {
+        return Stream.of(
+                new TypeCase("boolean", new BooleanType(), i -> (i & 1) == 0),
+                new TypeCase("tinyint", new TinyIntType(), i -> (byte) (i * 31)),
+                new TypeCase("smallint", new SmallIntType(), i -> (short) (i * 257)),
+                new TypeCase("int", new IntType(), i -> (i - 2_048) * 104_729),
+                new TypeCase("bigint", new BigIntType(), i -> (i - 2_048L) * 10_000_019L),
+                new TypeCase("float", new FloatType(), NormalizedKeyRadixSortTest::floatValue),
+                new TypeCase("double", new DoubleType(), NormalizedKeyRadixSortTest::doubleValue),
+                new TypeCase(
+                        "decimal",
+                        new DecimalType(18, 4),
+                        i -> Decimal.fromUnscaledLong((i - 2_048L) * 100_003L, 18, 4)),
+                new TypeCase("date", new DateType(), i -> i - 2_048),
+                new TypeCase("time", new TimeType(3), i -> (i * 104_729) % 86_400_000),
+                new TypeCase(
+                        "timestamp-compact",
+                        new TimestampType(3),
+                        i -> Timestamp.fromEpochMillis((i - 2_048L) * 100_003L)),
+                new TypeCase(
+                        "timestamp",
+                        new TimestampType(9),
+                        i ->
+                                Timestamp.fromEpochMillis(
+                                        (i - 2_048L) * 100_003L, (i * 257) % 1_000_000)),
+                new TypeCase(
+                        "local-zoned-timestamp",
+                        new LocalZonedTimestampType(9),
+                        i ->
+                                Timestamp.fromEpochMillis(
+                                        (i - 2_048L) * 100_003L, (i * 509) % 1_000_000)),
+                new TypeCase(
+                        "char",
+                        new CharType(32),
+                        i -> BinaryString.fromString(String.format("char-prefix-%08d", i))),
+                stringCase(),
+                new TypeCase("binary", new BinaryType(8), NormalizedKeyRadixSortTest::binaryValue),
+                new TypeCase(
+                        "varbinary",
+                        new VarBinaryType(16),
+                        NormalizedKeyRadixSortTest::binaryValue));
+    }
 
-        private TestRecord(int key, String value) {
-            this.key = key;
-            this.value = value;
+    private static Float floatValue(int i) {
+        switch (i % 257) {
+            case 0:
+                return Float.NEGATIVE_INFINITY;
+            case 1:
+                return -0.0f;
+            case 2:
+                return 0.0f;
+            case 3:
+                return Float.POSITIVE_INFINITY;
+            case 4:
+                return Float.NaN;
+            default:
+                return (i - 2_048) / 7.0f;
+        }
+    }
+
+    private static Double doubleValue(int i) {
+        switch (i % 257) {
+            case 0:
+                return Double.NEGATIVE_INFINITY;
+            case 1:
+                return -0.0d;
+            case 2:
+                return 0.0d;
+            case 3:
+                return Double.POSITIVE_INFINITY;
+            case 4:
+                return Double.NaN;
+            default:
+                return (i - 2_048) / 11.0d;
+        }
+    }
+
+    private static byte[] binaryValue(int i) {
+        return new byte[] {
+            (byte) (i * 193),
+            (byte) (i >>> 1),
+            (byte) 0x80,
+            (byte) 0xff,
+            (byte) (i >>> 24),
+            (byte) (i >>> 16),
+            (byte) (i >>> 8),
+            (byte) i
+        };
+    }
+
+    private static TypeCase stringCase() {
+        return new TypeCase(
+                "string",
+                VarCharType.STRING_TYPE,
+                i -> BinaryString.fromString(String.format("共同-prefix-%08d", i * 104_729)));
+    }
+
+    private static class TypeCase {
+        private final String name;
+        private final DataType dataType;
+        private final IntFunction<Object> values;
+
+        private TypeCase(String name, DataType dataType, IntFunction<Object> values) {
+            this.name = name;
+            this.dataType = dataType;
+            this.values = values;
+        }
+
+        private Object value(int id) {
+            return id % 31 == 0 ? null : values.apply(id);
+        }
+
+        @Override
+        public String toString() {
+            return name;
         }
     }
 }

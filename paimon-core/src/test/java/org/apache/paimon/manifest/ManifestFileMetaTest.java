@@ -1210,6 +1210,67 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
+    public void testLargeManifestSortEliminatesDeletesAndPreservesOrder() {
+        int addCount = 4_096;
+        int inputManifestCount = 8;
+        List<ManifestFileMeta> input = new ArrayList<>();
+        Set<String> expectedFileNames = new HashSet<>();
+
+        for (int manifest = 0; manifest < inputManifestCount; manifest++) {
+            List<ManifestEntry> entries = new ArrayList<>();
+            for (int id = manifest; id < addCount; id += inputManifestCount) {
+                String fileName = String.format("large-manifest-entry-%08d.parquet", id);
+                entries.add(makeEntry(true, fileName, Math.floorMod(id * 104_729, 97)));
+                expectedFileNames.add(fileName);
+            }
+            input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
+        }
+
+        List<ManifestEntry> deletes = new ArrayList<>();
+        for (int id = 0; id < addCount; id += 7) {
+            String fileName = String.format("large-manifest-entry-%08d.parquet", id);
+            deletes.add(makeEntry(false, fileName, Math.floorMod(id * 104_729, 97)));
+            expectedFileNames.remove(fileName);
+        }
+        input.add(makeManifest(deletes.toArray(new ManifestEntry[0])));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("manifest.target-file-size", "64kb");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+        testOptions.set("manifest-sort.max-rewrite-size", Long.MAX_VALUE + "B");
+        testOptions.set("sort-spill-buffer-size", "64mb");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+        List<ManifestEntry> outputEntries = readEntries(merged);
+        assertThat(outputEntries).hasSize(expectedFileNames.size());
+        assertThat(outputEntries).allMatch(entry -> entry.kind() == FileKind.ADD);
+        assertThat(
+                        outputEntries.stream()
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toSet()))
+                .isEqualTo(expectedFileNames);
+
+        for (int i = 1; i < outputEntries.size(); i++) {
+            ManifestEntry previous = outputEntries.get(i - 1);
+            ManifestEntry current = outputEntries.get(i);
+            int comparison =
+                    Integer.compare(previous.partition().getInt(0), current.partition().getInt(0));
+            if (comparison == 0) {
+                comparison = previous.file().fileName().compareTo(current.file().fileName());
+            }
+            assertThat(comparison).isLessThanOrEqualTo(0);
+        }
+    }
+
+    @Test
     public void testDataEvolutionManifestSortByPartitionAndRowId() {
         List<ManifestFileMeta> input = new ArrayList<>();
 
