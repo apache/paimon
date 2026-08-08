@@ -169,8 +169,9 @@ public class SparkConnectorOptions {
                     .intType()
                     .defaultValue(8)
                     .withDescription(
-                            "How many Format Table partitions MSCK REPAIR TABLE measures at once, so that a "
-                                    + "table with many partitions does not burst listing requests at storage.");
+                            "How many requests MSCK REPAIR TABLE and ANALYZE TABLE use at once to "
+                                    + "measure Format Table partitions, so that a large table does not burst "
+                                    + "them at storage.");
 
     public static final ConfigOption<Boolean> SOURCE_SPLIT_TARGET_SIZE_WITH_COLUMN_PRUNING =
             key("source.split.target-size-with-column-pruning")

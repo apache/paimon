@@ -20,6 +20,10 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -286,14 +290,162 @@ class FormatTablePartitionStatsCollectorTest {
                 .hasMessageContaining("month");
     }
 
+    @Test
+    void testAStagedPlaceholderDoesNotEraseTheRowCount() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        writeParquet(fileIO, tablePath, PARTITION_DIR + "/data-0.parquet", 3);
+        // The magic committer's zero-byte placeholder, under a data file name. Reading it as a
+        // data file fails, and a failed read turns the whole partition's row count into an
+        // unknown, so pruning the staging tree is what keeps the count exact.
+        write(
+                fileIO,
+                tablePath,
+                PARTITION_DIR + "/__magic_job-1/tasks/attempt_1/__base/part-1.parquet",
+                0);
+
+        PartitionStatistics measured =
+                new FormatTablePartitionStatsCollector(parquetTable(fileIO, tablePath), true, 1)
+                        .collect(Collections.singletonList(spec("2025", "10")))
+                        .get(0);
+
+        assertThat(measured.recordCount()).isEqualTo(3);
+        assertThat(measured.fileCount()).isEqualTo(1);
+    }
+
+    @Test
+    void testParquetRowCountsAreMeasuredExactly() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        writeParquet(fileIO, tablePath, PARTITION_DIR + "/data-0.parquet", 3);
+        writeParquet(fileIO, tablePath, PARTITION_DIR + "/data-1.parquet", 5);
+
+        PartitionStatistics measured =
+                new FormatTablePartitionStatsCollector(parquetTable(fileIO, tablePath), true, 1)
+                        .collect(Collections.singletonList(spec("2025", "10")))
+                        .get(0);
+
+        assertThat(measured.recordCount()).isEqualTo(8);
+        assertThat(measured.fileCount()).isEqualTo(2);
+        assertThat(measured.fileSizeInBytes()).isPositive();
+        assertThat(PartitionStatistics.isKnown(measured.lastFileCreationTime())).isTrue();
+    }
+
+    @Test
+    void testAnUnreadableFooterLeavesTheWholePartitionRowCountUnknown() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        writeParquet(fileIO, tablePath, PARTITION_DIR + "/data-0.parquet", 3);
+        // Real bytes, no readable footer: the shape a truncated upload leaves behind.
+        write(fileIO, tablePath, PARTITION_DIR + "/data-1.parquet", 16);
+
+        PartitionStatistics measured =
+                new FormatTablePartitionStatsCollector(parquetTable(fileIO, tablePath), true, 1)
+                        .collect(Collections.singletonList(spec("2025", "10")))
+                        .get(0);
+
+        // One unreadable footer poisons the whole partition row count: a sum missing a file,
+        // reported as exact, is worse than no number at all. The other fields stay measured.
+        assertThat(PartitionStatistics.isKnown(measured.recordCount())).isFalse();
+        assertThat(measured.fileCount()).isEqualTo(2);
+        assertThat(measured.fileSizeInBytes()).isPositive();
+    }
+
+    @Test
+    void testRowCountsStayWithTheirPartitionWhenMeasuredInParallel() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        writeParquet(fileIO, tablePath, PARTITION_DIR + "/data-0.parquet", 3);
+        writeParquet(fileIO, tablePath, "year=2025/month=11/data-0.parquet", 5);
+
+        List<PartitionStatistics> measured =
+                new FormatTablePartitionStatsCollector(parquetTable(fileIO, tablePath), true, 2)
+                        .collect(Arrays.asList(spec("2025", "10"), spec("2025", "11")));
+
+        // The listing and the footer reads run on a shared pool; each count still lands on the
+        // partition its file came from.
+        assertThat(measured.get(0).recordCount()).isEqualTo(3);
+        assertThat(measured.get(1).recordCount()).isEqualTo(5);
+    }
+
+    @Test
+    void testCountingAnEmptyPartitionMeasuresAnExactZero() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        // Registered and never written to, holding only a staging tree, and gone from storage.
+        fileIO.mkdirs(new Path(tablePath, PARTITION_DIR));
+        write(fileIO, tablePath, "year=2025/month=11/_temporary/attempt/part-0.parquet", 16);
+
+        List<PartitionStatistics> measured =
+                new FormatTablePartitionStatsCollector(parquetTable(fileIO, tablePath), true, 1)
+                        .collect(
+                                Arrays.asList(
+                                        spec("2025", "10"),
+                                        spec("2025", "11"),
+                                        spec("2025", "12")));
+
+        // A measurement that counts rows has learned that the partition holds none, so it writes
+        // an exact zero; an unknown would leave the last count standing.
+        assertThat(measured)
+                .allSatisfy(
+                        statistics -> {
+                            assertThat(statistics.recordCount()).isZero();
+                            assertThat(statistics.fileCount()).isZero();
+                            assertThat(
+                                            PartitionStatistics.isKnown(
+                                                    statistics.lastFileCreationTime()))
+                                    .isFalse();
+                        });
+    }
+
+    @Test
+    void testCsvKeepsAnUnknownRowCountEvenWhenAsked() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        write(fileIO, tablePath, PARTITION_DIR + "/data-0.csv", 100);
+
+        PartitionStatistics measured = measure(fileIO, tablePath, true);
+
+        assertThat(measured.fileCount()).isEqualTo(1);
+        // CSV carries no footer: an unknown row count beats a guessed one.
+        assertThat(PartitionStatistics.isKnown(measured.recordCount())).isFalse();
+    }
+
     private PartitionStatistics measure(FileIO fileIO, Path tablePath) {
-        return new FormatTablePartitionStatsCollector(table(fileIO, tablePath), 1)
+        return measure(fileIO, tablePath, false);
+    }
+
+    private PartitionStatistics measure(FileIO fileIO, Path tablePath, boolean withRecordCount) {
+        return new FormatTablePartitionStatsCollector(table(fileIO, tablePath), withRecordCount, 1)
                 .collect(Collections.singletonList(spec("2025", "10")))
                 .get(0);
     }
 
     private FormatTable table(FileIO fileIO, Path tablePath) {
         return table(fileIO, tablePath, FormatTable.Format.CSV, "csv");
+    }
+
+    private FormatTable parquetTable(FileIO fileIO, Path tablePath) {
+        return table(fileIO, tablePath, FormatTable.Format.PARQUET, "parquet");
+    }
+
+    private static void writeParquet(FileIO fileIO, Path tablePath, String relativePath, int rows)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        FormatWriterFactory factory =
+                FileFormat.fileFormat(new CoreOptions(options))
+                        .createWriterFactory(
+                                RowType.builder().field("id", DataTypes.INT()).build());
+        Path path = new Path(tablePath, relativePath);
+        fileIO.mkdirs(path.getParent());
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
+            FormatWriter writer = factory.create(out, "zstd");
+            for (int i = 0; i < rows; i++) {
+                writer.addElement(GenericRow.of(i));
+            }
+            writer.close();
+        }
     }
 
     private FormatTable table(FileIO fileIO, Path tablePath, Map<String, String> options) {

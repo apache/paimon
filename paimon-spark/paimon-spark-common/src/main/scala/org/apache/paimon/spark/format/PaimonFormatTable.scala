@@ -180,6 +180,15 @@ case class PaimonFormatTable(table: FormatTable)
   }
 
   /**
+   * The catalog spec of a resolved partition identifier, with each value written the way Paimon
+   * writes it into a partition directory - a null becomes the default partition name.
+   */
+  private[spark] def toCatalogPartition(
+      ident: InternalRow,
+      partitionNames: Seq[String]): JMap[String, String] =
+    toPaimonPartition(ident, partitionNames)
+
+  /**
    * Resolves, with a single catalog list-by-names lookup, which of the given complete partition
    * specs are registered. The result is aligned with the input arrays.
    */

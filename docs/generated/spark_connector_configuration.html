@@ -36,7 +36,7 @@ under the License.
             <td><h5>format-table.statistics.parallelism</h5></td>
             <td style="word-wrap: break-word;">8</td>
             <td>Integer</td>
-            <td>How many Format Table partitions MSCK REPAIR TABLE measures at once, so that a table with many partitions does not burst listing requests at storage.</td>
+            <td>How many requests MSCK REPAIR TABLE and ANALYZE TABLE use at once to measure Format Table partitions, so that a large table does not burst them at storage.</td>
         </tr>
         <tr>
             <td><h5>legacy-timestamp-mapping.enabled</h5></td>
