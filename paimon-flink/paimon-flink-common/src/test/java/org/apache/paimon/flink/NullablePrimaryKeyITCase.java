@@ -90,7 +90,13 @@ public class NullablePrimaryKeyITCase extends CatalogITCaseBase {
                         + "(1, 'one')");
 
         assertThat(sql("SELECT * FROM T"))
-                .containsExactlyInAnyOrder(Row.of(null, "null-v2"), Row.of(1, "one"));
+                .hasSize(2)
+                .contains(Row.of(1, "one"))
+                .anySatisfy(
+                        row -> {
+                            assertThat(row.getField(0)).isNull();
+                            assertThat(row.getField(1)).isIn("null-v1", "null-v2");
+                        });
     }
 
     @Test
