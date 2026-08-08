@@ -17,23 +17,59 @@
 
 import logging
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
-
-logger = logging.getLogger(__name__)
-
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.schema.data_types import is_blob_file_field
+from pypaimon.schema.data_types import field_names_in_blob_file, is_blob_file_field
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.row_utils import row_values_to_arrow_table
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
 from pypaimon.write.writer.data_vector_writer import DataVectorWriter
-from pypaimon.write.writer.data_writer import DataWriter
+from pypaimon.write.writer.data_writer import DataWriter, DataWriterPrepareTransaction
 from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
 from pypaimon.table.bucket_mode import BucketMode
+
+
+logger = logging.getLogger(__name__)
+
+
+class PreparedFileStoreCommit:
+    """All bucket writers staged successfully, but still own their files."""
+
+    def __init__(
+            self,
+            owner: "FileStoreWrite",
+            messages: List[CommitMessage],
+            transaction: DataWriterPrepareTransaction):
+        self.owner = owner
+        self.messages = messages
+        self.transaction = transaction
+        self._finished = False
+
+    def complete(self) -> List[CommitMessage]:
+        if self._finished:
+            raise RuntimeError("Prepared file-store commit is already finished.")
+        self.transaction.complete()
+        self._finished = True
+        self.owner._active_prepared_commit = None
+        return self.messages
+
+    def validate(self) -> None:
+        if self._finished:
+            raise RuntimeError("Prepared file-store commit is already finished.")
+        self.transaction.validate()
+
+    def abort(self) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        try:
+            self.transaction.abort()
+        finally:
+            self.owner._active_prepared_commit = None
 
 
 class FileStoreWrite:
@@ -51,6 +87,7 @@ class FileStoreWrite:
         self.commit_identifier = 0
         self.options = CoreOptions.copy(table.options)
         self.changelog_producer = self.options.changelog_producer()
+        self._active_prepared_commit: Optional[PreparedFileStoreCommit] = None
         self._configure_data_file_prefix(commit_user)
 
     def _configure_data_file_prefix(self, commit_user):
@@ -163,8 +200,13 @@ class FileStoreWrite:
         def max_seq_number():
             return self._seq_number_stats(partition).get(bucket, 1)
 
+        managed_blob_fields = field_names_in_blob_file(
+            self.table.table_schema.fields,
+            self.options.blob_inline_fields(),
+        )
+
         # Check if table has blob columns
-        if self._has_blob_columns():
+        if self._has_blob_columns() and not self.table.is_primary_key_table:
             return DedicatedFormatWriter(
                 table=self.table,
                 partition=partition,
@@ -192,7 +234,8 @@ class FileStoreWrite:
                 max_seq_number=max_seq_number(),
                 options=options,
                 merge_function=self._build_pk_merge_function(),
-                changelog_producer=self.changelog_producer)
+                changelog_producer=self.changelog_producer,
+                managed_blob_fields=managed_blob_fields)
         else:
             seq_number = 0 if self.table.bucket_mode() == BucketMode.BUCKET_UNAWARE else max_seq_number()
             return AppendOnlyDataWriter(
@@ -318,25 +361,45 @@ class FileStoreWrite:
         from pypaimon.schema.data_types import VectorType
         return any(isinstance(f.type, VectorType) for f in self.table.table_schema.fields)
 
-    def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
+    def stage_commit(self, commit_identifier) -> PreparedFileStoreCommit:
+        if self._active_prepared_commit is not None:
+            raise RuntimeError("A file-store commit is already staged.")
         self.commit_identifier = commit_identifier
         commit_messages = []
-        for (partition, bucket), writer in self.data_writers.items():
-            committed_files = writer.prepare_commit()
-            changelog_files = writer.prepare_changelog_commit()
-            if committed_files or changelog_files:
-                commit_message = CommitMessage(
-                    partition=partition,
-                    bucket=bucket,
-                    new_files=committed_files,
-                    changelog_files=changelog_files,
-                    total_buckets=self._runtime_total_buckets.get(partition),
-                )
-                commit_messages.append(commit_message)
-        return commit_messages
+        transaction = DataWriterPrepareTransaction()
+        preserve_blob_files = getattr(self, "blob_consumer", None) is not None
+        try:
+            for (partition, bucket), writer in self.data_writers.items():
+                stage = transaction.stage(writer)
+                if stage.data_files or stage.changelog_files:
+                    commit_messages.append(CommitMessage(
+                        partition=partition,
+                        bucket=bucket,
+                        new_files=stage.data_files,
+                        changelog_files=stage.changelog_files,
+                        total_buckets=getattr(
+                            self, "_runtime_total_buckets", {}).get(partition),
+                        preserve_blob_files_on_abort=preserve_blob_files,
+                    ))
+        except Exception:
+            transaction.abort()
+            raise
+        prepared = PreparedFileStoreCommit(self, commit_messages, transaction)
+        self._active_prepared_commit = prepared
+        return prepared
+
+    def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
+        prepared = self.stage_commit(commit_identifier)
+        try:
+            return prepared.complete()
+        except Exception:
+            prepared.abort()
+            raise
 
     def close(self):
         """Close all data writers and clean up resources."""
+        if self._active_prepared_commit is not None:
+            self._active_prepared_commit.abort()
         for writer in self.data_writers.values():
             writer.close()
         self.data_writers.clear()
@@ -344,6 +407,8 @@ class FileStoreWrite:
 
     def abort(self):
         """Abort all data writers and clean up files produced by this write."""
+        if self._active_prepared_commit is not None:
+            self._active_prepared_commit.abort()
         for writer in self.data_writers.values():
             try:
                 writer.abort()

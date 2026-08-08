@@ -15,11 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import pyarrow as pa
-import pyarrow.compute as pc
+import logging
 import uuid
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+import pyarrow as pa
+import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.common.external_path_provider import ExternalPathProvider
@@ -30,6 +32,83 @@ from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
+
+logger = logging.getLogger(__name__)
+
+
+class PreparedDataWriterCommit:
+    """A writer-owned commit stage which has not crossed the ownership boundary yet."""
+
+    def __init__(
+            self,
+            writer: "DataWriter",
+            data_files: List[DataFileMeta],
+            changelog_files: List[DataFileMeta],
+            extra: Any = None):
+        self.writer = writer
+        self.data_files = data_files
+        self.changelog_files = changelog_files
+        self.extra = extra
+        self._finished = False
+
+    def complete(self, include_changelog: bool = True) -> Tuple[
+            List[DataFileMeta], List[DataFileMeta]]:
+        if self._finished:
+            raise RuntimeError("Prepared writer commit is already finished.")
+        result = self.writer._complete_prepared_commit(self, include_changelog)
+        self._finished = True
+        return result
+
+    def abort(self) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        self.writer._abort_prepared_commit(self)
+
+
+class DataWriterPrepareTransaction:
+    """Stages several writers and atomically completes or aborts the whole group."""
+
+    def __init__(self):
+        self._stages: List[PreparedDataWriterCommit] = []
+        self._finished = False
+
+    def stage(self, writer: "DataWriter") -> PreparedDataWriterCommit:
+        if self._finished:
+            raise RuntimeError("Writer prepare transaction is already finished.")
+        try:
+            stage = writer.stage_commit()
+        except Exception:
+            self.abort()
+            raise
+        self._stages.append(stage)
+        return stage
+
+    def complete(self) -> None:
+        if self._finished:
+            raise RuntimeError("Writer prepare transaction is already finished.")
+        # Completion only clears already validated in-memory ownership and invokes
+        # non-throwing acknowledgement hooks. All fallible work belongs in stage().
+        self.validate()
+        for stage in self._stages:
+            stage.complete()
+        self._finished = True
+
+    def validate(self) -> None:
+        if self._finished:
+            raise RuntimeError("Writer prepare transaction is already finished.")
+        for stage in self._stages:
+            stage.writer._validate_prepared_commit(stage, True)
+
+    def abort(self) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        for stage in reversed(self._stages):
+            try:
+                stage.abort()
+            except Exception:
+                logger.warning("Failed to abort staged data writer.", exc_info=True)
 
 
 class DataWriter(ABC):
@@ -75,6 +154,7 @@ class DataWriter(ABC):
         self.pending_data: Optional[pa.Table] = None
         self.committed_files: List[DataFileMeta] = []
         self.committed_changelog_files: List[DataFileMeta] = []
+        self._active_prepared_commit: Optional[PreparedDataWriterCommit] = None
         self.changelog_producer = changelog_producer
         self.changelog_file_format = (
             self.options.changelog_file_format()
@@ -121,15 +201,42 @@ class DataWriter(ABC):
             self.abort()
             raise e
 
-    def prepare_commit(self) -> List[DataFileMeta]:
+    def _prepare_commit_data(self) -> Any:
         if self.pending_data is not None and self.pending_data.num_rows > 0:
             self._write_data_to_file(self.pending_data)
             self.pending_data = None
 
-        return self.committed_files.copy()
+        return None
+
+    def stage_commit(self) -> PreparedDataWriterCommit:
+        """Flush fallible work while retaining ownership of every produced file."""
+        if getattr(self, "_active_prepared_commit", None) is not None:
+            raise RuntimeError("A writer commit is already staged.")
+        try:
+            extra = self._prepare_commit_data()
+            stage = PreparedDataWriterCommit(
+                self,
+                self.committed_files.copy(),
+                self.committed_changelog_files.copy(),
+                extra,
+            )
+            self._active_prepared_commit = stage
+            return stage
+        except Exception:
+            self.abort()
+            raise
+
+    def prepare_commit(self) -> List[DataFileMeta]:
+        stage = self.stage_commit()
+        try:
+            data_files, _ = stage.complete(include_changelog=False)
+            return data_files
+        except Exception:
+            stage.abort()
+            raise
 
     def prepare_changelog_commit(self) -> List[DataFileMeta]:
-        return self.committed_changelog_files.copy()
+        return self._drain_committed_files(self.committed_changelog_files)
 
     def close(self):
         try:
@@ -143,7 +250,10 @@ class DataWriter(ABC):
             raise e
         finally:
             self.pending_data = None
-            # Note: Don't clear committed_files in close() - they should be returned by prepare_commit()
+        # Files which have not been drained by prepare_commit are still owned
+        # by this writer. Closing without handing them to a committer must not
+        # leave unreachable data or aligned extra files behind.
+        self.abort()
 
     def abort(self):
         """
@@ -156,6 +266,45 @@ class DataWriter(ABC):
         self.pending_data = None
         self.committed_files.clear()
         self.committed_changelog_files.clear()
+        self._active_prepared_commit = None
+
+    def _complete_prepared_commit(
+            self,
+            stage: PreparedDataWriterCommit,
+            include_changelog: bool) -> Tuple[List[DataFileMeta], List[DataFileMeta]]:
+        self._validate_prepared_commit(stage, include_changelog)
+
+        self.committed_files.clear()
+        changelog_files = []
+        if include_changelog:
+            self.committed_changelog_files.clear()
+            changelog_files = stage.changelog_files
+        self._complete_prepared_commit_extra(stage.extra)
+        self._active_prepared_commit = None
+        return stage.data_files, changelog_files
+
+    def _validate_prepared_commit(
+            self,
+            stage: PreparedDataWriterCommit,
+            include_changelog: bool) -> None:
+        if getattr(self, "_active_prepared_commit", None) is not stage:
+            raise RuntimeError("Prepared writer commit is not active.")
+        if self.committed_files != stage.data_files:
+            raise RuntimeError("Writer data files changed while commit was staged.")
+        if include_changelog and self.committed_changelog_files != stage.changelog_files:
+            raise RuntimeError("Writer changelog files changed while commit was staged.")
+        self._validate_prepared_commit_extra(stage.extra)
+
+    def _validate_prepared_commit_extra(self, extra: Any) -> None:
+        """Validate non-file resources without changing their ownership."""
+
+    def _complete_prepared_commit_extra(self, extra: Any) -> None:
+        """Acknowledge non-file resources captured by ``_prepare_commit_data``."""
+
+    def _abort_prepared_commit(self, stage: PreparedDataWriterCommit) -> None:
+        if getattr(self, "_active_prepared_commit", None) is not stage:
+            return
+        self.abort()
 
     def _delete_committed_files(self, file_metas: List[DataFileMeta]):
         for file_meta in file_metas:
@@ -171,6 +320,13 @@ class DataWriter(ABC):
                 logger = logging.getLogger(__name__)
                 path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
                 logger.warning(f"Failed to delete file {path_to_delete} during abort: {e}")
+
+    @staticmethod
+    def _drain_committed_files(file_metas: List[DataFileMeta]) -> List[DataFileMeta]:
+        """Transfer ownership of all current files to the commit caller."""
+        drained = file_metas.copy()
+        file_metas.clear()
+        return drained
 
     @abstractmethod
     def _process_data(self, data: pa.RecordBatch) -> pa.RecordBatch:
@@ -255,67 +411,75 @@ class DataWriter(ABC):
                     fields=self._row_sidecar_fields(logical_data),
                     zstd_level=self.zstd_level)
                 extra_files.append(row_sidecar_name)
+            extra_files.extend(self._write_managed_blob_extra_files(
+                logical_data, file_name, file_path))
         except Exception:
             self.file_io.delete_quietly(file_path)
             if row_sidecar_path is not None:
                 self.file_io.delete_quietly(row_sidecar_path)
             raise
 
-        # min key & max key
+        try:
+            selected_table = data.select(self.trimmed_primary_keys)
+            key_columns_batch = selected_table.to_batches()[0]
+            min_key_row_batch = key_columns_batch.slice(0, 1)
+            max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
+            min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
+            max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
 
-        selected_table = data.select(self.trimmed_primary_keys)
-        key_columns_batch = selected_table.to_batches()[0]
-        min_key_row_batch = key_columns_batch.slice(0, 1)
-        max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
-        min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
-        max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
+            value_stats_enabled = self.options.metadata_stats_enabled()
+            if value_stats_enabled:
+                stats_fields = self.table.fields if self.table.is_primary_key_table \
+                    else PyarrowFieldParser.to_paimon_schema(data.schema)
+            else:
+                stats_fields = self.table.trimmed_primary_keys_fields
+            column_stats = {
+                field.name: self._get_column_stats(data, field.name)
+                for field in stats_fields
+            }
+            key_fields = self.trimmed_primary_keys_fields
+            key_stats = self._collect_value_stats(data, key_fields, column_stats)
+            if not self.options.primary_key_nullable() and not all(
+                    count == 0 for count in key_stats.null_counts):
+                raise RuntimeError("Primary key should not be null")
 
-        # key stats & value stats
-        value_stats_enabled = self.options.metadata_stats_enabled()
-        if value_stats_enabled:
-            stats_fields = self.table.fields if self.table.is_primary_key_table \
-                else PyarrowFieldParser.to_paimon_schema(data.schema)
-        else:
-            stats_fields = self.table.trimmed_primary_keys_fields
-        column_stats = {
-            field.name: self._get_column_stats(data, field.name)
-            for field in stats_fields
-        }
-        key_fields = self.trimmed_primary_keys_fields
-        key_stats = self._collect_value_stats(data, key_fields, column_stats)
-        if not self.options.primary_key_nullable() and not all(
-                count == 0 for count in key_stats.null_counts):
-            raise RuntimeError("Primary key should not be null")
+            value_fields = stats_fields if value_stats_enabled else []
+            value_stats = self._collect_value_stats(data, value_fields, column_stats)
 
-        value_fields = stats_fields if value_stats_enabled else []
-        value_stats = self._collect_value_stats(data, value_fields, column_stats)
+            min_seq = self.sequence_generator.start
+            max_seq = self.sequence_generator.current
+            creation_time = Timestamp.now()
+            file_meta = DataFileMeta.create(
+                file_name=file_name,
+                file_size=self.file_io.get_file_size(file_path),
+                row_count=data.num_rows,
+                min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
+                max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
+                key_stats=key_stats,
+                value_stats=value_stats,
+                min_sequence_number=min_seq,
+                max_sequence_number=max_seq,
+                schema_id=self.table.table_schema.id,
+                level=0,
+                extra_files=extra_files,
+                creation_time=creation_time,
+                delete_row_count=0,
+                file_source=0,
+                value_stats_cols=None if value_stats_enabled else [],
+                external_path=external_path_str,
+                first_row_id=None,
+                write_cols=self.write_cols,
+                file_path=file_path,
+            )
+        except Exception:
+            self.file_io.delete_quietly(file_path)
+            for extra_file in extra_files:
+                self.file_io.delete_quietly(
+                    self._aligned_extra_file_path_from_path(file_path, extra_file))
+            raise
 
-        min_seq = self.sequence_generator.start
-        max_seq = self.sequence_generator.current
+        self.committed_files.append(file_meta)
         self.sequence_generator.start = self.sequence_generator.current
-        creation_time = Timestamp.now()
-        self.committed_files.append(DataFileMeta.create(
-            file_name=file_name,
-            file_size=self.file_io.get_file_size(file_path),
-            row_count=data.num_rows,
-            min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
-            max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
-            key_stats=key_stats,
-            value_stats=value_stats,
-            min_sequence_number=min_seq,
-            max_sequence_number=max_seq,
-            schema_id=self.table.table_schema.id,
-            level=0,
-            extra_files=extra_files,
-            creation_time=creation_time,
-            delete_row_count=0,
-            file_source=0,
-            value_stats_cols=None if value_stats_enabled else [],
-            external_path=external_path_str,
-            first_row_id=None,
-            write_cols=self.write_cols,
-            file_path=file_path,
-        ))
 
         if self.changelog_producer == ChangelogProducer.INPUT:
             self._write_changelog_file(
@@ -401,6 +565,10 @@ class DataWriter(ABC):
         bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
         return f"{bucket_path.rstrip('/')}/{file_name}"
 
+    def _write_managed_blob_extra_files(
+            self, data: pa.Table, file_name: str, file_path: str) -> List[str]:
+        return []
+
     def _should_write_row_sidecar(self) -> bool:
         return (
             self.options.data_evolution_enabled(False)
@@ -415,9 +583,13 @@ class DataWriter(ABC):
 
     @staticmethod
     def _aligned_extra_file_path(file_meta: DataFileMeta, extra_file: str) -> str:
+        file_path = file_meta.external_path if file_meta.external_path else file_meta.file_path
+        return DataWriter._aligned_extra_file_path_from_path(file_path, extra_file)
+
+    @staticmethod
+    def _aligned_extra_file_path_from_path(file_path: str, extra_file: str) -> str:
         if "://" in extra_file or extra_file.startswith("/"):
             return extra_file
-        file_path = file_meta.external_path if file_meta.external_path else file_meta.file_path
         if not file_path or "/" not in file_path:
             return extra_file
         return f"{file_path.rsplit('/', 1)[0]}/{extra_file}"

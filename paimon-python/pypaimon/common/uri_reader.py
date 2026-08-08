@@ -110,6 +110,7 @@ class UriReaderFactory:
     def __init__(self, catalog_options: Union[Options, dict]) -> None:
         self.catalog_options = catalog_options if isinstance(catalog_options, Options) else Options(catalog_options)
         self._readers = LRUCache(CatalogOptions.BLOB_FILE_IO_DEFAULT_CACHE_SIZE)
+        self._owned_file_ios = []
         self._readers_lock = rwlock.RWLockFair()
 
     def create(self, input_uri: str) -> UriReader:
@@ -148,12 +149,32 @@ class UriReaderFactory:
             from pypaimon.common.file_io import FileIO
             uri_string = parsed_uri.geturl()
             file_io = FileIO.get(uri_string, self.catalog_options)
+            self._owned_file_ios.append(file_io)
             return UriReader.from_file(file_io)
         except Exception as e:
             raise RuntimeError(f"Failed to create reader for URI {parsed_uri.geturl()}") from e
 
     def clear_cache(self) -> None:
-        self._readers.clear()
+        wlock = self._readers_lock.gen_wlock()
+        wlock.acquire()
+        try:
+            file_ios = self._owned_file_ios
+            self._owned_file_ios = []
+            self._readers.clear()
+        finally:
+            wlock.release()
+        first_error = None
+        for file_io in file_ios:
+            try:
+                file_io.close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
+
+    def close(self) -> None:
+        self.clear_cache()
 
     def get_cache_size(self) -> int:
         return len(self._readers)
@@ -165,4 +186,6 @@ class UriReaderFactory:
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        if not hasattr(self, '_owned_file_ios'):
+            self._owned_file_ios = []
         self._readers_lock = rwlock.RWLockFair()

@@ -698,12 +698,39 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
         return partition
 
     def release_prepared(self) -> None:
+        release_assigner = getattr(self._assigner, "release_prepared", None)
+        if release_assigner is not None:
+            release_assigner()
         if self._index_maintainer is not None:
             self._index_maintainer.release_prepared()
+
+    def refresh_hash_index_snapshot(self, snapshot=None) -> None:
+        if self._table is None:
+            return
+        if snapshot is None:
+            snapshot = self._table.snapshot_manager().get_latest_snapshot()
+        self.base_snapshot_id = snapshot.id if snapshot is not None else 0
+        refresh_assigner = getattr(self._assigner, "refresh_snapshot", None)
+        if refresh_assigner is not None:
+            refresh_assigner(snapshot)
+        if self._index_maintainer is not None:
+            self._index_maintainer.refresh_snapshot(snapshot)
+
+    def create_hash_index_refresh_callback(self):
+        if self._table is None or self._index_maintainer is None:
+            return None
+        from pypaimon.write.hash_index_commit_callback import (
+            HashIndexSnapshotRefreshCallback,
+        )
+
+        return HashIndexSnapshotRefreshCallback(self)
 
     def abort(self) -> None:
         if self._index_maintainer is not None:
             self._index_maintainer.abort()
+        abort_assigner = getattr(self._assigner, "abort", None)
+        if abort_assigner is not None:
+            abort_assigner()
 
 
 class PostponeBucketRowKeyExtractor(RowKeyExtractor):

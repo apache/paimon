@@ -1041,16 +1041,29 @@ class FileStoreCommit:
 
     def abort(self, commit_messages: List[CommitMessage]):
         """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
+        blob_suffix = ".%s" % CoreOptions.FILE_FORMAT_BLOB
         for message in commit_messages:
+            preserve_blob_files = message.preserve_blob_files_on_abort
             for file in list(message.new_files) + list(message.changelog_files):
-                try:
-                    path_to_delete = file.external_path if file.external_path else file.file_path
-                    if path_to_delete:
-                        path_str = str(path_to_delete)
-                        self.table.file_io.delete_quietly(path_str)
-                except Exception as e:
-                    path_to_delete = file.external_path if file.external_path else file.file_path
-                    logger.warning(f"Failed to clean up file {path_to_delete} during abort: {e}")
+                file_path = file.external_path if file.external_path else file.file_path
+                paths_to_delete = []
+                if file_path:
+                    if not (
+                            preserve_blob_files
+                            and str(file_path).endswith(blob_suffix)
+                    ):
+                        paths_to_delete.append(file_path)
+                for extra_file in (file.extra_files or []):
+                    extra_path = self._aligned_extra_file_path(file, extra_file)
+                    if preserve_blob_files and extra_path.endswith(blob_suffix):
+                        continue
+                    paths_to_delete.append(extra_path)
+                for path_to_delete in paths_to_delete:
+                    try:
+                        self.table.file_io.delete_quietly(str(path_to_delete))
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to clean up file {path_to_delete} during abort: {e}")
             for entry in message.index_adds:
                 try:
                     file_name = entry.index_file.file_name
@@ -1064,6 +1077,15 @@ class FileStoreCommit:
                 except Exception as e:
                     logger.warning(
                         f"Failed to clean up index file {entry.index_file.file_name} during abort: {e}")
+
+    @staticmethod
+    def _aligned_extra_file_path(file: DataFileMeta, extra_file: str) -> str:
+        if "://" in extra_file or extra_file.startswith("/"):
+            return extra_file
+        file_path = file.external_path if file.external_path else file.file_path
+        if not file_path or "/" not in file_path:
+            return extra_file
+        return f"{str(file_path).rsplit('/', 1)[0]}/{extra_file}"
 
     def close(self):
         """Close the FileStoreCommit and release resources."""

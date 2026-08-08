@@ -117,6 +117,9 @@ class PaimonDatasink(_DatasinkBase):
     ) -> List["CommitMessage"]:
         commit_messages_list: List["CommitMessage"] = []
         table_write = None
+        writer_builder = None
+        table_commit = None
+        commit_messages = None
 
         try:
             writer_builder = (
@@ -154,12 +157,24 @@ class PaimonDatasink(_DatasinkBase):
         except Exception:
             if table_write is not None:
                 try:
+                    if commit_messages is not None and writer_builder is not None:
+                        table_commit = writer_builder.new_commit()
+                        table_commit.abort(commit_messages)
                     table_write.abort()
                 except Exception as abort_error:
                     logger.warning(
                         f"Error aborting worker-side table_write: {abort_error}",
                         exc_info=abort_error
                     )
+                finally:
+                    if table_commit is not None:
+                        try:
+                            table_commit.close()
+                        except Exception as close_error:
+                            logger.warning(
+                                f"Error closing worker-side table_commit: {close_error}",
+                                exc_info=close_error,
+                            )
             raise
 
     @staticmethod

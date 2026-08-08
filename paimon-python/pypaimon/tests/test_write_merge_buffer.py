@@ -90,6 +90,7 @@ class _Harness(KeyValueDataWriter):
         self.pending_data = None
         self.committed_files = []
         self.written_chunks = []
+        self._blob_externalizer = None
 
     def _write_data_to_file(self, data):
         # Record each chunk instead of writing to disk; mirrors the

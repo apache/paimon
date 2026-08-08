@@ -29,6 +29,7 @@ from pypaimon.schema.column_directive_utils import (
 from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
                                         DataType, MapType, MultisetType, RowType,
+                                        field_names_in_blob_file,
                                         is_array_blob_type, is_blob_file_field,
                                         is_blob_file_type, is_blob_type,
                                         is_map_blob_type, reassign_field_id)
@@ -422,34 +423,101 @@ def _validate_blob_fields(
         )
 
     if blob_field_names:
-        required_options = {
-            CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
-            CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
-        }
-
-        missing_options = []
-        for key, expected_value in required_options.items():
-            if key not in options or options[key] != expected_value:
-                missing_options.append(f"{key}='{expected_value}'")
-
-        if missing_options:
-            raise ValueError(
-                f"Schema contains BLOB, ARRAY<BLOB> or MAP<X, BLOB> type but is "
-                f"missing required options: "
-                f"{', '.join(missing_options)}. "
-                f"Please add these options to the schema."
-            )
-
         if primary_keys:
-            raise ValueError(
-                "BLOB, ARRAY<BLOB> or MAP<X, BLOB> type is not supported with primary key."
-            )
+            _validate_primary_key_blob_configuration(
+                fields, options, primary_keys, partition_keys)
+        else:
+            required_options = {
+                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
+            }
+
+            missing_options = []
+            for key, expected_value in required_options.items():
+                if key not in options or options[key] != expected_value:
+                    missing_options.append(f"{key}='{expected_value}'")
+
+            if missing_options:
+                raise ValueError(
+                    f"Schema contains BLOB, ARRAY<BLOB> or MAP<X, BLOB> type but is "
+                    f"missing required options: "
+                    f"{', '.join(missing_options)}. "
+                    f"Please add these options to the schema."
+                )
 
         if blob_field_names.intersection(partition_keys):
             raise ValueError(
                 "The BLOB, ARRAY<BLOB> or MAP<X, BLOB> type column can not be "
                 "part of partition keys."
             )
+
+
+def _validate_primary_key_blob_configuration(
+        fields: List[DataField],
+        options: dict,
+        primary_keys: List[str],
+        partition_keys: List[str]) -> None:
+    core_options = CoreOptions(Options(options))
+    managed_blob_fields = field_names_in_blob_file(
+        fields, core_options.blob_inline_fields())
+    if not managed_blob_fields:
+        return
+
+    from pypaimon.common.options.core_options import ChangelogProducer, MergeEngine
+    from pypaimon.schema.schema import Schema
+    from pypaimon.schema.table_schema import TableSchema
+
+    table_schema = TableSchema.from_schema(
+        schema_id=0,
+        schema=Schema(
+            fields=fields,
+            primary_keys=primary_keys,
+            partition_keys=partition_keys,
+            options=options,
+        ),
+    )
+    bucket_keys = table_schema.bucket_keys
+    sequence_fields = core_options.sequence_field()
+
+    pk_blob = sorted(managed_blob_fields.intersection(primary_keys))
+    if pk_blob:
+        raise ValueError(
+            "Managed BLOB fields cannot be primary keys: %s." % pk_blob)
+
+    bucket_blob = sorted(managed_blob_fields.intersection(bucket_keys))
+    if bucket_blob:
+        raise ValueError(
+            "Managed BLOB fields cannot be bucket keys: %s." % bucket_blob)
+
+    sequence_blob = sorted(
+        name for name in managed_blob_fields if name in sequence_fields)
+    if sequence_blob:
+        raise ValueError(
+            "Managed BLOB fields cannot be sequence fields: %s." % sequence_blob)
+
+    if core_options.merge_engine() != MergeEngine.DEDUPLICATE:
+        raise ValueError(
+            "Primary-key managed BLOB tables only support the deduplicate "
+            "merge engine.")
+
+    if core_options.changelog_producer() != ChangelogProducer.NONE:
+        raise ValueError(
+            "Primary-key managed BLOB tables only support changelog-producer "
+            "'none'.")
+
+    if core_options.data_file_external_paths() is not None:
+        raise ValueError(
+            "Primary-key managed BLOB tables do not support '%s'."
+            % CoreOptions.DATA_FILE_EXTERNAL_PATHS.key())
+
+    if core_options.options.contains_key("pk-clustering-override"):
+        from pypaimon.common.options.options_utils import OptionsUtils
+
+        override = core_options.options.data.get("pk-clustering-override")
+        if override is not None and OptionsUtils.convert_value(override, bool):
+            raise ValueError(
+                "Primary-key managed BLOB tables do not support "
+                "'pk-clustering-override'.")
 
 
 def _validate_options(options: dict):

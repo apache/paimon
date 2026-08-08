@@ -107,6 +107,16 @@ class _PartitionIndex:
         self.total_bucket_list = list(bucket_information)
         self.target_bucket_row_number = target_bucket_row_number
 
+    def copy(self) -> "_PartitionIndex":
+        copied = _PartitionIndex(
+            dict(self.hash_to_bucket),
+            dict(self.non_full_bucket_information),
+            self.target_bucket_row_number,
+        )
+        copied.total_bucket_set = set(self.total_bucket_set)
+        copied.total_bucket_list = list(self.total_bucket_list)
+        return copied
+
     def assign(
         self,
         key_hash: int,
@@ -194,6 +204,10 @@ class HashBucketAssigner:
         )
         self.max_bucket_id = 0
         self._partition_indexes: Dict[Tuple, _PartitionIndex] = {}
+        self._round_original_partition_indexes: Dict[
+            Tuple, Optional[_PartitionIndex]
+        ] = {}
+        self._round_original_max_bucket_id: Optional[int] = None
 
     def assign(self, partition: Tuple, partition_hash: int, key_hash: int) -> int:
         return self.assign_with_status(partition, partition_hash, key_hash)[0]
@@ -226,6 +240,15 @@ class HashBucketAssigner:
             self._validate_assigner(partition_hash, key_hash)
             requested_by_partition.setdefault(partition, set()).add(key_hash)
 
+        if requested_by_partition and self._round_original_max_bucket_id is None:
+            self._round_original_max_bucket_id = self.max_bucket_id
+        for partition in requested_by_partition:
+            if partition not in self._round_original_partition_indexes:
+                index = self._partition_indexes.get(partition)
+                self._round_original_partition_indexes[partition] = (
+                    index.copy() if index is not None else None
+                )
+
         for partition, requested in requested_by_partition.items():
             index = self._partition_indexes.get(partition)
             if index is None:
@@ -257,6 +280,26 @@ class HashBucketAssigner:
             self.max_bucket_id = max(self.max_bucket_id, bucket)
             results.append((bucket, is_new))
         return results
+
+    def release_prepared(self) -> None:
+        self._round_original_partition_indexes.clear()
+        self._round_original_max_bucket_id = None
+
+    def refresh_snapshot(self, snapshot=None) -> None:
+        if snapshot is None:
+            snapshot = self.table.snapshot_manager().get_latest_snapshot()
+        self.snapshot = snapshot
+
+    def abort(self) -> None:
+        for partition, index in self._round_original_partition_indexes.items():
+            if index is None:
+                self._partition_indexes.pop(partition, None)
+            else:
+                self._partition_indexes[partition] = index
+        if self._round_original_max_bucket_id is not None:
+            self.max_bucket_id = self._round_original_max_bucket_id
+        self._round_original_partition_indexes.clear()
+        self._round_original_max_bucket_id = None
 
     def _validate_assigner(self, partition_hash: int, key_hash: int) -> None:
         expected_assigner = compute_assigner(
@@ -409,6 +452,9 @@ class DynamicBucketIndexMaintainer:
             Tuple[Tuple, int], Tuple[Set[int], Optional[IndexManifestEntry], bool]
         ] = {}
         self._new_paths: List[str] = []
+        self._round_original_states: Dict[
+            Tuple[Tuple, int], Tuple[Set[int], Optional[IndexManifestEntry], bool]
+        ] = {}
 
     def notify_new_record(
         self, partition: Tuple, bucket: int, key_hash: int
@@ -419,6 +465,9 @@ class DynamicBucketIndexMaintainer:
             hashes, old_entry = self._load_bucket(partition, bucket)
             state = (hashes, old_entry, False)
         hashes, old_entry, modified = state
+        if key not in self._round_original_states:
+            self._round_original_states[key] = (
+                set(hashes), old_entry, modified)
         previous_size = len(hashes)
         hashes.add(to_signed_int32(key_hash))
         self._states[key] = (hashes, old_entry, modified or len(hashes) != previous_size)
@@ -447,11 +496,21 @@ class DynamicBucketIndexMaintainer:
     def release_prepared(self) -> None:
         """Release files after their commit messages leave writer ownership."""
         self._new_paths.clear()
+        self._round_original_states.clear()
+
+    def refresh_snapshot(self, snapshot=None) -> None:
+        if snapshot is None:
+            snapshot = self.table.snapshot_manager().get_latest_snapshot()
+        self.snapshot = snapshot
+        self.base_snapshot_id = snapshot.id if snapshot is not None else 0
 
     def abort(self) -> None:
         for path in self._new_paths:
             self.table.file_io.delete_quietly(path)
         self._new_paths.clear()
+        for key, (hashes, old_entry, modified) in self._round_original_states.items():
+            self._states[key] = (set(hashes), old_entry, modified)
+        self._round_original_states.clear()
 
     def _load_bucket(
         self, partition: Tuple, bucket: int

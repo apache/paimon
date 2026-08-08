@@ -1323,6 +1323,16 @@ class BlobTest(unittest.TestCase):
         )
         random_bytes = b"not-a-descriptor"
         fake_v1_prefix = b"\x01not-a-descriptor"
+        # v1-shaped inline payload: passes len/version/uri-length checks but fails
+        # exact total-length match, so it must not be parsed as a descriptor.
+        v1_shaped_inline = (
+            bytes([1])
+            + struct.pack('<I', 5)
+            + b"hello"
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 5)
+            + b"\xff"
+        )
         v2_magic_only = bytes([2]) + struct.pack('<Q', BlobDescriptor.MAGIC)
 
         self.assertTrue(BlobDescriptor.is_blob_descriptor(descriptor_v2.serialize()))
@@ -1332,6 +1342,13 @@ class BlobTest(unittest.TestCase):
         self.assertFalse(BlobDescriptor.is_blob_descriptor(random_bytes))
         self.assertFalse(BlobDescriptor.is_blob_descriptor(fake_v1_prefix))
         self.assertFalse(BlobDescriptor.is_blob_descriptor(b"tiny"))
+
+        self.assertIsNotNone(BlobDescriptor.parse_if_serialized(descriptor_v1_bytes))
+        self.assertIsNotNone(BlobDescriptor.parse_if_serialized(descriptor_v2.serialize()))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(random_bytes))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(fake_v1_prefix))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(v1_shaped_inline))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(b"tiny"))
 
 
 class BlobEndToEndTest(unittest.TestCase):

@@ -70,13 +70,51 @@ class BatchWriteBuilder(WriteBuilder):
 
 
 class StreamWriteBuilder(WriteBuilder):
+    """Streaming write/commit factory for coordinated multi-commit workflows.
+
+    Writers and commits created from the same builder are linked automatically
+    once :meth:`~pypaimon.write.table_write.TableWrite.with_dynamic_bucket_index`
+    is enabled, so HASH-index snapshot refresh callbacks stay registered
+    regardless of whether ``new_write()`` or ``new_commit()`` is called first.  Creating
+    writers or commits from separate builders (or constructing
+    ``StreamTableCommit`` directly) skips this wiring and can break dynamic
+    bucket index maintenance across successive commits.
+    """
+
+    def __init__(self, table):
+        super().__init__(table)
+        self._stream_writers = []
+        self._stream_commits = []
 
     def new_write(self) -> StreamTableWrite:
-        return StreamTableWrite(self.table, self.commit_user, self.static_partition)
+        writer = StreamTableWrite(self.table, self.commit_user, self.static_partition)
+        writer._stream_write_builder = self
+        self._stream_writers.append(writer)
+        for commit in self._stream_commits:
+            writer.register_hash_index_commit_callbacks(commit)
+        return writer
 
     def new_update(self) -> StreamTableUpdate:
         return StreamTableUpdate(self.table, self.commit_user)
 
     def new_commit(self) -> StreamTableCommit:
         commit = StreamTableCommit(self.table, self.commit_user, self.static_partition)
+        commit._stream_write_builder = self
+        self._stream_commits.append(commit)
+        for writer in self._stream_writers:
+            writer.register_hash_index_commit_callbacks(commit)
         return commit
+
+    def _detach_writer(self, writer: StreamTableWrite) -> None:
+        try:
+            self._stream_writers.remove(writer)
+        except ValueError:
+            pass
+
+    def _detach_commit(self, commit: StreamTableCommit) -> None:
+        try:
+            self._stream_commits.remove(commit)
+        except ValueError:
+            pass
+        for writer in self._stream_writers:
+            writer._unregister_hash_index_commit_callback(commit)

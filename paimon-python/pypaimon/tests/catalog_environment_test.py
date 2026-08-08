@@ -158,6 +158,7 @@ class CatalogEnvironmentTest(unittest.TestCase):
         self.assertTrue(
             dependency_context.options.contains_key(self._READ_VIA_OPTION))
         dependency_catalog.get_table.assert_called_once_with(target)
+        dependency_catalog.close.assert_called_once_with()
         self.assertIs(result, dependency_table)
 
     def test_blob_view_lookup_preserves_custom_rest_catalog(self):
@@ -166,6 +167,7 @@ class CatalogEnvironmentTest(unittest.TestCase):
 
         class CustomRESTCatalog:
             context = None
+            closed = False
 
             def __init__(self, context):
                 CustomRESTCatalog.context = context
@@ -173,6 +175,9 @@ class CatalogEnvironmentTest(unittest.TestCase):
             def get_table(self, identifier):
                 self.identifier = identifier
                 return dependency_table
+
+            def close(self):
+                CustomRESTCatalog.closed = True
 
         context = CatalogContext.create_from_options(Options({
             CatalogOptions.METASTORE.key(): "custom-rest",
@@ -196,6 +201,52 @@ class CatalogEnvironmentTest(unittest.TestCase):
         self.assertTrue(
             dependency_context.options.contains_key(self._READ_VIA_OPTION))
         self.assertIs(result, dependency_table)
+        self.assertTrue(CustomRESTCatalog.closed)
+
+    def test_blob_view_uri_reader_catalog_lives_until_lookup_close(self):
+        target = Identifier.create("db", "target", branch="rt")
+        context = CatalogContext.create_from_options(Options({}))
+        catalogs = []
+
+        class TrackingCatalog:
+            def __init__(self):
+                self.closed = False
+                self.file_io = mock.Mock()
+
+            def get_table(self, identifier):
+                self.identifier = identifier
+                return SimpleNamespace(file_io=self.file_io)
+
+            def close(self):
+                self.closed = True
+
+        class TrackingLoader:
+            def context(self):
+                return context
+
+            def load(self):
+                catalog = TrackingCatalog()
+                catalogs.append(catalog)
+                return catalog
+
+        environment = CatalogEnvironment(
+            identifier=Identifier.create("db", "root"),
+            catalog_loader=TrackingLoader(),
+        )
+        lookup = BlobViewLookup(
+            SimpleNamespace(catalog_environment=environment))
+        view = mock.Mock(identifier=target)
+
+        uri_reader = lookup.resolve_uri_reader(view)
+
+        self.assertIs(uri_reader._file_io, catalogs[0].file_io)
+        self.assertEqual(target, catalogs[0].identifier)
+        self.assertFalse(catalogs[0].closed)
+
+        lookup.close()
+        self.assertTrue(catalogs[0].closed)
+        catalogs[0].file_io.close.assert_called_once_with()
+        lookup.close()
 
 
 if __name__ == "__main__":
