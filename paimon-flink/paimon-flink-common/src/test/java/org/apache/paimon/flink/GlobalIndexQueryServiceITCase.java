@@ -373,8 +373,10 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
                             .filter(id -> id.startsWith(CONSUMER_ID + '-'))
                             .filter(id -> !leasesBeforeRescale.contains(id))
                             .collect(Collectors.toList());
-            assertThat(rescaledLeaseIds).hasSize(1);
-            String rescaledLeaseId = rescaledLeaseIds.get(0);
+            // Each restarted source attempt owns a distinct UUID lease. Stopped attempts are
+            // deliberately retained until consumer expiration, so a healthy rescale may create
+            // more than one lease even though only one replacement attempt remains live.
+            assertThat(rescaledLeaseIds).isNotEmpty();
             assertThat(
                             expected.keySet().stream()
                                     .map(GlobalIndexQueryServiceITCase::key)
@@ -402,9 +404,9 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
                                     && descriptor.reason().toLowerCase().contains("duplicate"),
                     rescaledJob,
                     "covered duplicate bootstrap rejection");
-            waitForConsumerSnapshot(
+            waitForAnyNewConsumerSnapshot(
                     table,
-                    rescaledLeaseId,
+                    leasesBeforeRescale,
                     duplicateSnapshotId,
                     rescaledJob,
                     "bootstrap-invalid lease advancement");
@@ -646,19 +648,29 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
         fail("Timed out waiting for %s.", description);
     }
 
-    private void waitForConsumerSnapshot(
+    private void waitForAnyNewConsumerSnapshot(
             FileStoreTable table,
-            String consumerId,
+            Set<String> previousConsumerIds,
             long expectedSnapshotId,
             JobClient jobClient,
             String description)
             throws Exception {
         long deadline = System.nanoTime() + WAIT_TIMEOUT.toNanos();
         while (System.nanoTime() < deadline) {
-            if (table.consumerManager()
-                    .consumer(consumerId)
-                    .map(consumer -> consumer.nextSnapshot() == expectedSnapshotId)
-                    .orElse(false)) {
+            boolean advanced =
+                    table.consumerManager().listAllIds().stream()
+                            .filter(id -> id.startsWith(CONSUMER_ID + '-'))
+                            .filter(id -> !previousConsumerIds.contains(id))
+                            .anyMatch(
+                                    id ->
+                                            table.consumerManager()
+                                                    .consumer(id)
+                                                    .map(
+                                                            consumer ->
+                                                                    consumer.nextSnapshot()
+                                                                            == expectedSnapshotId)
+                                                    .orElse(false));
+            if (advanced) {
                 return;
             }
             JobStatus status = jobClient.getJobStatus().get(10, TimeUnit.SECONDS);
