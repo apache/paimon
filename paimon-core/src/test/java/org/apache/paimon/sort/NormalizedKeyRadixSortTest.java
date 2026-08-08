@@ -49,8 +49,6 @@ import org.apache.paimon.utils.MutableObjectIterator;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.MethodSource;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -58,7 +56,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.function.IntFunction;
-import java.util.stream.Stream;
 
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -70,20 +67,20 @@ class NormalizedKeyRadixSortTest {
 
     @TempDir Path tempDir;
 
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("typeCases")
-    void testMatchesComparisonSort(TypeCase typeCase) throws Exception {
-        List<GenericRow> rows = rows(typeCase, RECORD_COUNT);
-        assertThat(sortExternal(typeCase, rows, 32L << 20))
-                .containsExactlyElementsOf(sortWithComparator(typeCase, rows));
-    }
-
     @Test
-    void testSpilledRunsMatchComparisonSort() throws Exception {
-        TypeCase typeCase = stringCase();
-        List<GenericRow> rows = rows(typeCase, 20_000);
-        assertThat(sortExternal(typeCase, rows, 256L << 10))
-                .containsExactlyElementsOf(sortWithComparator(typeCase, rows));
+    void testMatchesComparisonSort() throws Exception {
+        for (TypeCase typeCase : typeCases()) {
+            List<GenericRow> rows = rows(typeCase, RECORD_COUNT);
+            assertThat(sortExternal(typeCase, rows, 32L << 20))
+                    .as(typeCase.name)
+                    .containsExactlyElementsOf(sortWithComparator(typeCase, rows));
+        }
+
+        TypeCase string = stringCase();
+        List<GenericRow> spilledRows = rows(string, 20_000);
+        assertThat(sortExternal(string, spilledRows, 256L << 10))
+                .as("spilled runs")
+                .containsExactlyElementsOf(sortWithComparator(string, spilledRows));
     }
 
     private static List<Integer> sortWithComparator(TypeCase typeCase, List<GenericRow> rows) {
@@ -145,47 +142,42 @@ class NormalizedKeyRadixSortTest {
         return rows;
     }
 
-    private static Stream<TypeCase> typeCases() {
-        return Stream.of(
-                new TypeCase("boolean", new BooleanType(), i -> (i & 1) == 0),
-                new TypeCase("tinyint", new TinyIntType(), i -> (byte) (i * 31)),
-                new TypeCase("smallint", new SmallIntType(), i -> (short) (i * 257)),
-                new TypeCase("int", new IntType(), i -> (i - 2_048) * 104_729),
-                new TypeCase("bigint", new BigIntType(), i -> (i - 2_048L) * 10_000_019L),
-                new TypeCase("float", new FloatType(), NormalizedKeyRadixSortTest::floatValue),
-                new TypeCase("double", new DoubleType(), NormalizedKeyRadixSortTest::doubleValue),
-                new TypeCase(
-                        "decimal",
-                        new DecimalType(18, 4),
-                        i -> Decimal.fromUnscaledLong((i - 2_048L) * 100_003L, 18, 4)),
-                new TypeCase("date", new DateType(), i -> i - 2_048),
-                new TypeCase("time", new TimeType(3), i -> (i * 104_729) % 86_400_000),
-                new TypeCase(
-                        "timestamp-compact",
-                        new TimestampType(3),
-                        i -> Timestamp.fromEpochMillis((i - 2_048L) * 100_003L)),
-                new TypeCase(
-                        "timestamp",
-                        new TimestampType(9),
-                        i ->
-                                Timestamp.fromEpochMillis(
-                                        (i - 2_048L) * 100_003L, (i * 257) % 1_000_000)),
-                new TypeCase(
-                        "local-zoned-timestamp",
-                        new LocalZonedTimestampType(9),
-                        i ->
-                                Timestamp.fromEpochMillis(
-                                        (i - 2_048L) * 100_003L, (i * 509) % 1_000_000)),
-                new TypeCase(
-                        "char",
-                        new CharType(32),
-                        i -> BinaryString.fromString(String.format("char-prefix-%08d", i))),
-                stringCase(),
-                new TypeCase("binary", new BinaryType(8), NormalizedKeyRadixSortTest::binaryValue),
-                new TypeCase(
-                        "varbinary",
-                        new VarBinaryType(16),
-                        NormalizedKeyRadixSortTest::binaryValue));
+    private static TypeCase[] typeCases() {
+        return new TypeCase[] {
+            new TypeCase("boolean", new BooleanType(), i -> (i & 1) == 0),
+            new TypeCase("tinyint", new TinyIntType(), i -> (byte) (i * 31)),
+            new TypeCase("smallint", new SmallIntType(), i -> (short) (i * 257)),
+            new TypeCase("int", new IntType(), i -> (i - 2_048) * 104_729),
+            new TypeCase("bigint", new BigIntType(), i -> (i - 2_048L) * 10_000_019L),
+            new TypeCase("float", new FloatType(), NormalizedKeyRadixSortTest::floatValue),
+            new TypeCase("double", new DoubleType(), NormalizedKeyRadixSortTest::doubleValue),
+            new TypeCase(
+                    "decimal",
+                    new DecimalType(18, 4),
+                    i -> Decimal.fromUnscaledLong((i - 2_048L) * 100_003L, 18, 4)),
+            new TypeCase("date", new DateType(), i -> i - 2_048),
+            new TypeCase("time", new TimeType(3), i -> (i * 104_729) % 86_400_000),
+            new TypeCase(
+                    "timestamp-compact",
+                    new TimestampType(3),
+                    i -> Timestamp.fromEpochMillis((i - 2_048L) * 100_003L)),
+            new TypeCase(
+                    "timestamp",
+                    new TimestampType(9),
+                    i -> Timestamp.fromEpochMillis((i - 2_048L) * 100_003L, (i * 257) % 1_000_000)),
+            new TypeCase(
+                    "local-zoned-timestamp",
+                    new LocalZonedTimestampType(9),
+                    i -> Timestamp.fromEpochMillis((i - 2_048L) * 100_003L, (i * 509) % 1_000_000)),
+            new TypeCase(
+                    "char",
+                    new CharType(32),
+                    i -> BinaryString.fromString(String.format("char-prefix-%08d", i))),
+            stringCase(),
+            new TypeCase("binary", new BinaryType(8), NormalizedKeyRadixSortTest::binaryValue),
+            new TypeCase(
+                    "varbinary", new VarBinaryType(16), NormalizedKeyRadixSortTest::binaryValue)
+        };
     }
 
     private static Float floatValue(int i) {
@@ -255,11 +247,6 @@ class NormalizedKeyRadixSortTest {
 
         private Object value(int id) {
             return id % 31 == 0 ? null : values.apply(id);
-        }
-
-        @Override
-        public String toString() {
-            return name;
         }
     }
 }
