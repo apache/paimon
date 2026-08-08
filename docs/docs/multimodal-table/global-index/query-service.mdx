@@ -1,0 +1,201 @@
+---
+title: "Append Global-Index Query Service"
+sidebar_position: 6
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Append Global-Index Query Service
+
+The append global-index query service provides remote exact-key lookup for an unpartitioned
+data-evolution append table on the main branch. It is intended for a table that has no primary key
+but whose application contract makes one non-null column unique. A request returns only the value
+fields selected when the service starts.
+
+The service does not turn the lookup column into a primary key and does not change table
+metadata. It validates uniqueness while building each served snapshot. A duplicate non-null key
+invalidates the complete snapshot generation; it is never resolved with first-wins or last-wins
+behavior. Null table keys are outside the lookup domain and are skipped, while null request keys
+are rejected.
+
+## Start the service
+
+Build a BTree global index for the lookup column before starting the service. The table must use
+`bucket = -1`, `row-tracking.enabled = true`, and `data-evolution.enabled = true`, and it must not
+have primary or partition keys. Configure a persistent `consumer.expiration-time` on the table so
+abandoned per-attempt snapshot leases are eventually cleaned up.
+
+```shell
+flink run paimon-flink-action.jar query_service \
+  --warehouse <warehouse-path> \
+  --database my_database \
+  --table my_append_table \
+  --parallelism 8 \
+  --lookup-key url \
+  --value-fields descriptor \
+  --consumer-id my-append-query-service \
+  --lease-grace-period '10 min'
+```
+
+The equivalent Flink procedure is:
+
+```sql
+CALL sys.query_service(
+  'my_database.my_append_table',
+  8,
+  'url',
+  'descriptor',
+  'my-append-query-service',
+  '10 min');
+```
+
+`--lookup-key` is an exact table value. Paimon does not parse or normalize application URLs. For
+example, an application may choose to remove a URL path prefix in its gateway before it serializes
+the remaining object name as a lookup key. Binary row kind is not part of key identity; the client,
+router, and materialized state canonicalize every key to `INSERT` before hashing or comparison.
+
+Value fields are returned in the configured order. A selected top-level raw blob-file `BLOB` field
+is automatically read in descriptor mode and cached as `BlobDescriptor.serialize()` bytes; its
+payload is never fetched into query-service state. Non-BLOB binary fields remain unchanged.
+Nested BLOB, inline descriptor, and BlobView value fields are rejected in v1 so the wire contract is
+unambiguous. Clients can deserialize returned raw-BLOB bytes with `BlobDescriptor.deserialize()`
+and use the descriptor for range reads. A BLOB lookup key is not supported.
+
+The service rejects configurations that could turn incomplete data into a false miss, including
+`query-auth.enabled = true`, `scan.ignore-corrupt-files = true`,
+`scan.ignore-lost-files = true`, and `global-index.column-update-action = ignore`.
+
+## Snapshot and readiness semantics
+
+The BTree files are an exact coverage gate. They prove that every live data-file row range in one
+pinned snapshot is indexed. Requests do not perform point reads against BTree files. After the
+coverage check, the service reads the pinned snapshot once, projects the lookup and value fields,
+and shuffles each non-null key to one key-hash executor. The monitor plans all snapshot splits
+centrally, so every data split is read by one bootstrap subtask rather than once per executor.
+Hash layout version 1 routes the single-field Paimon `BinaryRow` with
+`floorMod(BinaryRow.hashCode(), parallelism)`; changing parallelism therefore requires a complete
+new generation.
+
+Only an empty snapshot or a fully indexed non-empty snapshot can become ready. An append tail
+without BTree coverage remains `NOT_READY`; the absence of a materialized key is not reported as a
+miss for that snapshot. A new fully indexed snapshot causes a full shadow-state rebuild. As soon as
+an executor observes the newer generation it stops accepting requests for the retained old state;
+this also fences clients which cached the old descriptor before discovery was withdrawn. Discovery
+is republished only after every executor has swapped to the same snapshot. This creates a refresh
+availability gap, but prevents false misses and mixed-generation results.
+
+The contract is exact for the snapshot advertised in discovery and converges to newer snapshots as
+the monitor observes them. It is not an implicit read-after-write API: immediately after a writer
+commits, discovery may still advertise the previous complete snapshot. Use
+`GlobalIndexQueryClient.getValuesWithMetadata` to receive the values together with their
+`servedGeneration`, `servedSnapshotId`, and snapshot UUID. The existing `getValues` method is a
+convenience projection of the same call. A gateway which requires a minimum committed snapshot must
+force-refresh its location and compare the returned `servedSnapshotId` before it accepts a MISS; if
+the advertised snapshot is older, it must treat the service as unavailable and retry later. The
+current API does not perform catalog I/O or enforce a caller-supplied minimum snapshot for each
+batch.
+
+The discovery descriptor includes the table UUID and branch, protocol and key-hash versions, schema
+fingerprint, served snapshot ID, optional snapshot UUID, generation, and one address and server
+epoch per shard. Modern snapshots publish their UUID; historical snapshots without one are
+additionally fenced by table UUID, branch, owner, generation, and server epoch. The client includes
+the expected server epoch and generation in each request and validates the snapshot fence on every
+response. Protocol version 2 carries expected failures as normal, versioned response frames with a
+stable error code, retryable flag, and bounded message; clients do not deserialize Java exceptions
+for these business outcomes. The global-index client also rejects legacy Java-serialized Throwable
+failure frames without deserializing their payload, and a malformed frame closes the connection.
+It refreshes discovery at most once for a stale generation, unknown shard, overload, request
+timeout, or connection failure. Other structured failures are not retried.
+
+To verify readiness, inspect the service descriptor under the table's `service` directory or make
+a client lookup. A descriptor is ready only when `ready` is `true`, all endpoint slots are present,
+and the schema, protocol, layout, generation, and snapshot fields match the client. A missing or
+`NOT_READY` descriptor must be treated as unavailable, not as an empty lookup result.
+
+## Refresh, compaction, and recovery
+
+Ordinary and Blob compaction are handled as new snapshots: once the new snapshot has complete
+BTree coverage, the service rebuilds and publishes a new fenced generation. For an initial
+deployment, keeping `blob-compaction.enabled = false` (the default) is recommended to reduce
+descriptor churn, but it is not a correctness requirement of the generation protocol. Row-ID
+reassignment may drop incompatible global indexes; the affected snapshot stays unavailable until
+its BTree coverage is rebuilt.
+
+The monitor creates a per-attempt consumer lease before it plans a snapshot. A replacement attempt
+first inherits the oldest live consumer pin; during refresh its `nextSnapshot` is the minimum active
+or building snapshot. It advances to the newly published snapshot only after
+`--lease-grace-period` elapses, which keeps in-flight Blob descriptors readable during handover. For
+an unavailable snapshot, that grace clock starts only after discovery has acknowledged the exact
+withdrawn generation and snapshot, not when the upstream monitor first emits the event. The
+supplied `--consumer-id` is a readable prefix; a random attempt token is
+appended so attempts never overwrite each other's lease. The lease is heartbeated while its task
+is alive. Task close performs one final lease write and then stops the heartbeat, but does not
+delete the lease, because Flink uses the same callback for failover and terminal cancellation;
+retaining it preserves the complete expiration window before a replacement attempt pins the
+snapshot. `consumer.expiration-time` cleans up all stopped-attempt leases, including a cleanly
+cancelled job, and must be configured on the persisted table so writer maintenance observes it.
+
+The consumer prefix is limited to one alphanumeric path segment (up to 128 characters, with `.`,
+`_`, and `-` allowed after the first character). Safety and retention options are validated from
+persisted schema options as well as dynamic options, so `table_conf` cannot disable persisted
+`query-auth.enabled`, `consumer.changelog-only`, corrupt/lost-file checks, or lease expiration
+requirements. Persisted `consumer.expiration-time` must be at least 10 seconds, and service startup
+also requires it to be at least `lease-grace-period + 1 minute` for failover recovery. The persisted
+value is used to schedule heartbeats. If coverage remains `NOT_READY`, the old accepted generation
+is fenced immediately and its snapshot is released after the acknowledged handover grace; the lease
+then follows the latest unavailable snapshot instead of pinning the historical minimum forever.
+
+Executor state is local and is rebuilt after task or job restart. A new publisher attempt first
+writes a `NOT_READY` descriptor and each server receives a new random epoch. This is deliberately
+fail-closed: recovery does not restore a partially built cache and never interprets missing local
+state as a table miss.
+
+Publisher attempts write owner-scoped descriptor files. Discovery selects the highest persisted
+owner sequence and Flink attempt number. The highest owner leaves a `NOT_READY` tombstone on clean
+shutdown, so a delayed old attempt cannot overwrite, delete, or revive an older ready descriptor.
+Start only one logical query-service job for a lookup projection: sequence allocation is not a
+cross-job compare-and-set protocol, and concurrent independent submissions are unsupported. A
+later, non-concurrent submission intentionally takes ownership from an earlier one.
+
+Owner fencing also requires the table `FileIO` to provide read-after-write visibility and a
+consistent listing of the service directory. A filesystem which can omit an existing owner file
+from a listing is not supported by this v1 discovery layout.
+
+## Resource and protocol limits
+
+Each ready generation stores one copied projected value per non-null lookup key on local executor
+disk, plus lookup cache overhead. Refresh performs one full projected snapshot scan across all
+bootstrap subtasks. Lookup access to the current local KV implementation is serialized per
+executor because its codecs reuse mutable buffers. Increase parallelism to distribute keys and
+request load, while accounting for the full-scan shuffle and local state size.
+
+Servers bind an ephemeral port on each executor and publish the resolved addresses. All clients
+must have network reachability to those TaskManager ports. One request accepts at most 10,000 keys
+and 16 MiB of serialized key data; one response accepts at most 64 MiB of serialized value data.
+The dedicated server uses one query thread and a bounded queue of 16 requests per shard; excess
+requests receive the structured retryable `OVERLOADED` status instead of growing an unbounded
+executor queue. `GlobalIndexQueryClient` applies a 30-second request timeout by default, has a
+constructor overload for a caller-selected positive timeout, cancels timed-out network requests,
+and still performs at most one discovery refresh retry for the complete batch.
+The service does not implement end-user authentication and rejects tables with
+`query-auth.enabled=true`; expose executor ports only on a trusted internal network and put an
+authenticated Gateway in front of external callers. The append protocol is consumed explicitly via
+`GlobalIndexQueryClient` or `RemoteGlobalIndexTableQuery`; it does not replace the existing
+primary-key query-service selection path.
