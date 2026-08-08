@@ -331,6 +331,12 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                     continue;
                 }
                 DataType fileType = fileFieldStats.type();
+                // A sub-field-level data evolution file may store only part of a nested struct
+                // (e.g. nest<a> of nest<a,b>); its file type then does not equal the full target
+                // struct and lands here. Skipping stats for such a field is intentional: it is
+                // left as "no stats" so no file is wrongly pruned, rather than composing
+                // partial-struct stats across files. Struct columns rarely carry useful min/max
+                // and data evolution does not push predicates down, so little is lost.
                 if (!fileType.equalsIgnoreFieldId(targetTypes[j])) {
                     typeMismatchedFieldIds.add(targetFieldId);
                     continue;
