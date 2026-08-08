@@ -88,21 +88,20 @@ class DataEvolutionGroupStatsFilter:
         states = []
         evolved_stats = {}
         for field_index, field in enumerate(self.table_fields):
-            if field.id in special_field_ids:
-                self._append_unknown(
-                    min_values, max_values, null_counts, states)
-                continue
-
             providers = [
                 (file, layout)
                 for file, layout in normal_files
                 if field.id in layout.data_fields
             ]
             if not providers:
-                min_values.append(None)
-                max_values.append(None)
-                null_counts.append(row_count)
-                states.append(_MISSING)
+                if field.id in special_field_ids:
+                    self._append_unknown(
+                        min_values, max_values, null_counts, states)
+                else:
+                    min_values.append(None)
+                    max_values.append(None)
+                    null_counts.append(row_count)
+                    states.append(_MISSING)
                 continue
 
             file, layout = providers[0]

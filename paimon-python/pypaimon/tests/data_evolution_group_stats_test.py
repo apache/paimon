@@ -204,6 +204,26 @@ class DataEvolutionGroupStatsFilterTest(unittest.TestCase):
                     {0: fields}, 0)
                 self.assertTrue(stats_filter.may_match([base, special]))
 
+    def test_special_file_does_not_hide_normal_file_stats(self):
+        fields = [
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('BYTES')),
+        ]
+        base = _file(
+            'base.parquet', 0, 10, fields, [0], [9],
+            write_cols=['id'])
+        vector = _file(
+            'data.vector.parquet', 0, 10, fields,
+            [100, b'a'], [109, b'z'], sequence=1)
+        builder = PredicateBuilder(fields)
+
+        self.assertFalse(self._filter(
+            builder.equal('id', 50), {0: fields}, 0
+        ).may_match([base, vector]))
+        self.assertTrue(self._filter(
+            builder.equal('payload', b'not-present'), {0: fields}, 0
+        ).may_match([base, vector]))
+
     def test_partial_newer_file_fails_open(self):
         fields = [DataField(0, 'value', AtomicType('INT'))]
         base = _file('base.parquet', 0, 10, fields, [0], [9])
