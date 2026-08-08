@@ -16,9 +16,10 @@
 # under the License.
 
 import os
+import shutil
 import tempfile
 import unittest
-import shutil
+from unittest import mock
 
 import pyarrow as pa
 import pyarrow.types as pa_types
@@ -131,6 +132,34 @@ class RayDataTest(unittest.TestCase):
             ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
             "Name column should match"
         )
+
+    def test_ray_task_reads_splits_serially(self):
+        from pypaimon.read.datasource.ray_datasource import RayDatasource
+
+        splits = [mock.Mock(file_size=1, row_count=1, file_paths=[])
+                  for _ in range(2)]
+        for split in splits:
+            split.merged_row_count.return_value = None
+        provider = mock.Mock()
+        provider.table.return_value.is_primary_key_table = False
+        provider.predicate.return_value = None
+        provider.read_type.return_value = []
+        provider.nested_name_paths.return_value = None
+        provider.splits.return_value = splits
+        provider.limit.return_value = None
+
+        worker_read = mock.Mock()
+        worker_read.to_arrow_batch_reader.return_value = (
+            pa.ipc.RecordBatchReader.from_batches(pa.schema([]), iter(())))
+        with mock.patch(
+            'pypaimon.read.table_read.TableRead', return_value=worker_read
+        ):
+            task = RayDatasource(provider).get_read_tasks(1)[0]
+            list(task())
+
+        self.assertEqual(
+            1,
+            worker_read.to_arrow_batch_reader.call_args[1]['parallelism'])
 
     def test_basic_ray_data_write(self):
         """Test basic Ray Data write from PyPaimon table."""

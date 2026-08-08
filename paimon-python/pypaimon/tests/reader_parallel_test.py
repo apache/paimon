@@ -179,15 +179,24 @@ class PipelinePolicyTest(unittest.TestCase):
         from pypaimon.filesystem.local_file_io import FuseLocalFileIO
         from pypaimon.utils.file_type import FileType
 
-        file_ios = [
-            FuseLocalFileIO('oss://bucket/table', '/tmp/fuse/table'),
-            CachingFileIO(object(), object(), {FileType.DATA}),
+        fuse_file_io = FuseLocalFileIO(
+            'oss://bucket/table', '/tmp/fuse/table')
+        local_file_ios = [
+            fuse_file_io,
+            CachingFileIO(fuse_file_io, object(), {FileType.DATA}),
         ]
-        for file_io in file_ios:
+        for file_io in local_file_ios:
             with self.subTest(file_io=type(file_io).__name__):
                 self.assertEqual(1, self._workers(
                     'oss://bucket/table', [64 * mb] * 2,
                     file_io=file_io))
+
+        remote_cache = CachingFileIO(
+            object(), object(), {FileType.DATA})
+        for sizes in ([0] * 8, [4 * mb] * 8):
+            with self.subTest(cached_file_size=sizes[0]):
+                self.assertEqual(4, self._workers(
+                    'oss://bucket/table', sizes, file_io=remote_cache))
 
     def test_estimate_accounts_for_range_and_projection(self):
         read = TableRead.__new__(TableRead)

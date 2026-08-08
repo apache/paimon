@@ -175,12 +175,10 @@ class TableRead:
         blob_parallelism: Optional[int] = None,
         parallelism: Optional[int] = None,
     ) -> pyarrow.ipc.RecordBatchReader:
-        """Stream Arrow batches while reading multiple splits concurrently.
+        """Stream batches in split order with explicit or adaptive parallelism.
 
-        Batches preserve input split order. Parallel reads are enabled only by
-        explicit configuration or the size- and storage-aware default.
-        PyArrow runtimes without ``RecordBatchReader.close`` and
-        ``from_stream`` fall back to serial reads.
+        PyArrow runtimes without ``RecordBatchReader.close`` or ``from_stream``
+        fall back to serial reads.
         """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         effective = self._resolve_parallelism(parallelism, len(splits))
@@ -199,9 +197,8 @@ class TableRead:
                 and self._should_run_parallel(splits, workers)
                 and cancellable):
             effective_bp = self._cap_blob_parallelism(workers, effective_bp)
-            cancel = threading.Event()
             batch_iterator = self._pipelined_arrow_batch_generator(
-                splits, schema, effective_bp, workers, cancel)
+                splits, schema, effective_bp, workers)
             return _create_cancellable_arrow_batch_reader(
                 schema, batch_iterator)
         batch_iterator = self._arrow_batch_generator(
@@ -215,9 +212,8 @@ class TableRead:
         schema: pyarrow.Schema,
         blob_parallelism: int,
         workers: int,
-        cancel: Optional[threading.Event] = None,
     ) -> Iterator[pyarrow.RecordBatch]:
-        cancel = cancel or threading.Event()
+        cancel = threading.Event()
         workers = min(workers, len(splits))
         if workers < 2:
             yield from self._arrow_batch_generator(
@@ -277,12 +273,8 @@ class TableRead:
 
         threads = []
         try:
-            for index in range(workers):
-                thread = threading.Thread(
-                    target=worker,
-                    name="pypaimon-stream-read-%d" % index,
-                    daemon=True,
-                )
+            for _ in range(workers):
+                thread = threading.Thread(target=worker, daemon=True)
                 thread.start()
                 threads.append(thread)
 
@@ -609,14 +601,9 @@ class TableRead:
     def _runtime_file_io_is_local(self) -> Optional[bool]:
         from pypaimon.filesystem.caching_file_io import CachingFileIO
         from pypaimon.filesystem.local_file_io import LocalFileIO
-        from pypaimon.utils.file_type import FileType
 
         file_io = getattr(self.table, "file_io", None)
         while isinstance(file_io, CachingFileIO):
-            if (getattr(file_io, "_cache", None) is not None
-                    and FileType.DATA in getattr(
-                        file_io, "_whitelist", set())):
-                return True
             file_io = getattr(file_io, "_delegate", None)
         if isinstance(file_io, LocalFileIO):
             return True
