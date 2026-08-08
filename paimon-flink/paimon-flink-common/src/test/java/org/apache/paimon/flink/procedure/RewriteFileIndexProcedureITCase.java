@@ -18,11 +18,13 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -37,6 +39,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -154,6 +157,78 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
 
         // only partition 20221208 is filtered.
         Assertions.assertThat(count.get()).isEqualTo(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFileIndexProcedureSwitchIndexType(boolean isNamedArgument) throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k INT,"
+                        + " v STRING,"
+                        + " dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'file-index.bloom-filter.columns' = 'k',"
+                        + " 'bucket' = '-1'"
+                        + ")");
+        sql("INSERT INTO T VALUES (1, '100', '20221208')");
+
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        if (isNamedArgument) {
+            sql("CALL sys.rewrite_file_index(`table` => 'default.T')");
+        } else {
+            sql("CALL sys.rewrite_file_index('default.T')");
+        }
+        assertFileIndexTypes("T", "bloom-filter");
+
+        sql("ALTER TABLE T RESET ('file-index.bloom-filter.columns')");
+        sql("ALTER TABLE T SET ('file-index.bitmap.columns' = 'k')");
+        if (isNamedArgument) {
+            sql("CALL sys.rewrite_file_index(`table` => 'default.T')");
+        } else {
+            sql("CALL sys.rewrite_file_index('default.T')");
+        }
+        assertFileIndexTypes("T", "bitmap");
+    }
+
+    private void assertFileIndexTypes(String tableName, String expectedIndexType) throws Exception {
+        flinkCatalog()
+                .catalog()
+                .invalidateTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
+        FileStoreTable table = paimonTable(tableName);
+        for (ManifestEntry entry : table.store().newScan().plan().files()) {
+            byte[] embeddedIndex = entry.file().embeddedIndex();
+            FileIndexFormat.Reader reader;
+            if (embeddedIndex != null) {
+                reader =
+                        FileIndexFormat.createReader(
+                                new ByteArraySeekableStream(embeddedIndex), table.rowType());
+            } else {
+                String indexFile =
+                        entry.file().extraFiles().stream()
+                                .filter(s -> s.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
+                                .findFirst()
+                                .orElseThrow(
+                                        () ->
+                                                new AssertionError(
+                                                        "Missing file index for "
+                                                                + entry.file().fileName()));
+                Path indexFilePath =
+                        table.store()
+                                .pathFactory()
+                                .createDataFilePathFactory(entry.partition(), entry.bucket())
+                                .toAlignedPath(indexFile, entry.file());
+                reader =
+                        FileIndexFormat.createReader(
+                                table.fileIO().newInputStream(indexFilePath), table.rowType());
+            }
+            try (FileIndexFormat.Reader indexReader = reader) {
+                Map<String, Map<String, byte[]>> indexes = indexReader.readAll();
+                Assertions.assertThat(indexes).containsKey("k");
+                Assertions.assertThat(indexes.get("k").keySet()).containsExactly(expectedIndexType);
+            }
+        }
     }
 
     @ParameterizedTest
