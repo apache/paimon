@@ -71,28 +71,6 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             int maxNumFileHandles,
             CompressOptions compression,
             MemorySize maxDiskSize) {
-        this(
-                serializer,
-                comparator,
-                pageSize,
-                inMemorySortBuffer,
-                ioManager,
-                maxNumFileHandles,
-                compression,
-                maxDiskSize,
-                new QuickSort());
-    }
-
-    BinaryExternalSortBuffer(
-            BinaryRowSerializer serializer,
-            RecordComparator comparator,
-            int pageSize,
-            BinaryInMemorySortBuffer inMemorySortBuffer,
-            IOManager ioManager,
-            int maxNumFileHandles,
-            CompressOptions compression,
-            MemorySize maxDiskSize,
-            IndexedSorter inMemorySorter) {
         this.serializer = serializer;
         this.inMemorySortBuffer = inMemorySortBuffer;
         this.ioManager = ioManager;
@@ -101,7 +79,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
         this.compressionCodecFactory = BlockCompressionFactory.create(compression);
         this.compressionBlockSize = (int) MemorySize.parse("64 kb").getBytes();
         this.maxDiskSize = maxDiskSize;
-        this.inMemorySorter = inMemorySorter;
+        this.inMemorySorter = new NormalizedKeyRadixSort();
         this.merger =
                 new BinaryExternalMerger(
                         ioManager,
@@ -125,50 +103,6 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             int maxNumFileHandles,
             CompressOptions compression,
             MemorySize maxDiskSize) {
-        return create(
-                ioManager,
-                rowType,
-                keyFields,
-                bufferSize,
-                pageSize,
-                maxNumFileHandles,
-                compression,
-                maxDiskSize,
-                new QuickSort());
-    }
-
-    /** Creates a buffer which radix sorts each in-memory run by its generated normalized key. */
-    public static BinaryExternalSortBuffer createWithRadixSort(
-            IOManager ioManager,
-            RowType rowType,
-            int[] keyFields,
-            long bufferSize,
-            int pageSize,
-            int maxNumFileHandles,
-            CompressOptions compression,
-            MemorySize maxDiskSize) {
-        return create(
-                ioManager,
-                rowType,
-                keyFields,
-                bufferSize,
-                pageSize,
-                maxNumFileHandles,
-                compression,
-                maxDiskSize,
-                new NormalizedKeyRadixSort());
-    }
-
-    private static BinaryExternalSortBuffer create(
-            IOManager ioManager,
-            RowType rowType,
-            int[] keyFields,
-            long bufferSize,
-            int pageSize,
-            int maxNumFileHandles,
-            CompressOptions compression,
-            MemorySize maxDiskSize,
-            IndexedSorter inMemorySorter) {
         RecordComparator comparator = newRecordComparator(rowType.getFieldTypes(), keyFields);
         HeapMemorySegmentPool pool = new HeapMemorySegmentPool(bufferSize, pageSize);
         BinaryInMemorySortBuffer sortBuffer =
@@ -185,8 +119,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
                 ioManager,
                 maxNumFileHandles,
                 compression,
-                maxDiskSize,
-                inMemorySorter);
+                maxDiskSize);
     }
 
     @Override

@@ -24,7 +24,9 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.BigIntType;
@@ -60,6 +62,8 @@ import java.util.Random;
 import java.util.function.IntFunction;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.codegen.CodeGenUtils.newNormalizedKeyComputer;
+import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link NormalizedKeyRadixSort}. */
@@ -73,8 +77,8 @@ class NormalizedKeyRadixSortTest {
     @MethodSource("typeCases")
     void testMatchesQuickSort(TypeCase typeCase) throws Exception {
         List<GenericRow> rows = rows(typeCase, RECORD_COUNT);
-        List<Integer> quickSortResult = sort(typeCase, rows, false, 32L << 20);
-        assertThat(sort(typeCase, rows, true, 32L << 20))
+        List<Integer> quickSortResult = sortInMemory(typeCase, rows, new QuickSort(), 32L << 20);
+        assertThat(sortInMemory(typeCase, rows, new NormalizedKeyRadixSort(), 32L << 20))
                 .containsExactlyElementsOf(quickSortResult);
     }
 
@@ -82,53 +86,65 @@ class NormalizedKeyRadixSortTest {
     void testSpilledRunsMatchQuickSort() throws Exception {
         TypeCase typeCase = stringCase();
         List<GenericRow> rows = rows(typeCase, 20_000);
-        List<Integer> quickSortResult = sort(typeCase, rows, false, 256L << 10);
-        assertThat(sort(typeCase, rows, true, 256L << 10))
+        List<Integer> quickSortResult = sortInMemory(typeCase, rows, new QuickSort(), 32L << 20);
+        assertThat(sortExternal(typeCase, rows, 256L << 10))
                 .containsExactlyElementsOf(quickSortResult);
     }
 
-    private List<Integer> sort(
-            TypeCase typeCase, List<GenericRow> rows, boolean radix, long memorySize)
+    private List<Integer> sortInMemory(
+            TypeCase typeCase, List<GenericRow> rows, IndexedSorter sorter, long memorySize)
             throws Exception {
-        java.nio.file.Path ioPath = tempDir.resolve(typeCase.name + '-' + radix + '-' + memorySize);
+        RowType rowType = RowType.of(typeCase.dataType, new IntType());
+        BinaryInMemorySortBuffer sortBuffer =
+                BinaryInMemorySortBuffer.createBuffer(
+                        newNormalizedKeyComputer(rowType.getFieldTypes(), new int[] {0, 1}),
+                        new InternalRowSerializer(rowType),
+                        newRecordComparator(rowType.getFieldTypes(), new int[] {0, 1}),
+                        new HeapMemorySegmentPool(memorySize, MemorySegmentPool.DEFAULT_PAGE_SIZE));
+        try {
+            for (GenericRow row : rows) {
+                assertThat(sortBuffer.write(row)).isTrue();
+            }
+            return collectIds(sortBuffer.sortedIterator(sorter), rows.size());
+        } finally {
+            sortBuffer.clear();
+        }
+    }
+
+    private List<Integer> sortExternal(TypeCase typeCase, List<GenericRow> rows, long memorySize)
+            throws Exception {
+        java.nio.file.Path ioPath = tempDir.resolve(typeCase.name + '-' + memorySize);
         java.nio.file.Files.createDirectories(ioPath);
         IOManager ioManager = IOManager.create(ioPath.toString());
         BinaryExternalSortBuffer sorter =
-                radix
-                        ? BinaryExternalSortBuffer.createWithRadixSort(
-                                ioManager,
-                                RowType.of(typeCase.dataType, new IntType()),
-                                new int[] {0, 1},
-                                memorySize,
-                                MemorySegmentPool.DEFAULT_PAGE_SIZE,
-                                128,
-                                CompressOptions.defaultOptions(),
-                                MemorySize.MAX_VALUE)
-                        : BinaryExternalSortBuffer.create(
-                                ioManager,
-                                RowType.of(typeCase.dataType, new IntType()),
-                                new int[] {0, 1},
-                                memorySize,
-                                MemorySegmentPool.DEFAULT_PAGE_SIZE,
-                                128,
-                                CompressOptions.defaultOptions(),
-                                MemorySize.MAX_VALUE);
+                BinaryExternalSortBuffer.create(
+                        ioManager,
+                        RowType.of(typeCase.dataType, new IntType()),
+                        new int[] {0, 1},
+                        memorySize,
+                        MemorySegmentPool.DEFAULT_PAGE_SIZE,
+                        128,
+                        CompressOptions.defaultOptions(),
+                        MemorySize.MAX_VALUE);
         try {
             for (GenericRow row : rows) {
                 sorter.write(row);
             }
-
-            List<Integer> result = new ArrayList<>(rows.size());
-            MutableObjectIterator<BinaryRow> iterator = sorter.sortedIterator();
-            BinaryRow reuse = new BinaryRow(2);
-            while ((reuse = iterator.next(reuse)) != null) {
-                result.add(reuse.getInt(1));
-            }
-            return result;
+            return collectIds(sorter.sortedIterator(), rows.size());
         } finally {
             sorter.clear();
             ioManager.close();
         }
+    }
+
+    private static List<Integer> collectIds(
+            MutableObjectIterator<BinaryRow> iterator, int expectedSize) throws Exception {
+        List<Integer> result = new ArrayList<>(expectedSize);
+        BinaryRow reuse = new BinaryRow(2);
+        while ((reuse = iterator.next(reuse)) != null) {
+            result.add(reuse.getInt(1));
+        }
+        return result;
     }
 
     private static List<GenericRow> rows(TypeCase typeCase, int count) {
