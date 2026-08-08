@@ -81,12 +81,12 @@ public class PaimonStorageHandler implements HiveStoragePredicateHandler, HiveSt
         Properties properties = tableDesc.getProperties();
         String paimonLocation = LocationKeyExtractor.getPaimonLocation(conf, properties);
         map.put(LocationKeyExtractor.INTERNAL_LOCATION, paimonLocation);
-        String dataFieldJsonStr = getDataFieldsJsonStr(properties);
+        String dataFieldJsonStr = getDataFieldsJsonStr(conf, properties);
         tableDesc.getProperties().put(PAIMON_TABLE_FIELDS, dataFieldJsonStr);
     }
 
-    static String getDataFieldsJsonStr(Properties properties) {
-        HiveSchema hiveSchema = HiveSchema.extract(null, properties);
+    static String getDataFieldsJsonStr(Configuration conf, Properties properties) {
+        HiveSchema hiveSchema = HiveSchema.extract(conf, properties);
         return JsonSerdeUtil.toJson(hiveSchema.fields());
     }
 
