@@ -410,8 +410,17 @@ class TableUpdateByRowId:
             bucket=owning_split.bucket,
             raw_convertible=True,
         )
-        table_read = TableRead(self.table, predicate=None, read_type=read_fields)
-        return table_read.to_arrow([origin_split])
+        # Keep _ROW_ID as a row-count anchor. If every requested column was
+        # added after the original file was written, reading only those
+        # missing columns can otherwise produce a zero-row table instead of
+        # one null value per original row.
+        table_read = TableRead(
+            self.table,
+            predicate=None,
+            read_type=read_fields + [SpecialFields.ROW_ID],
+        )
+        original = table_read.to_arrow([origin_split])
+        return original.select([field.name for field in read_fields])
 
     def _merge_update_with_original(
             self,
