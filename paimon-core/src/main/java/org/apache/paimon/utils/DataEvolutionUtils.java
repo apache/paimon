@@ -96,17 +96,36 @@ public class DataEvolutionUtils {
     private static Set<Integer> resolveFileFieldIds(
             List<DataField> schemaFields, DataFileMeta file, boolean strict) {
         List<String> writeCols = file.writeCols();
-        Set<String> writeColNames = writeCols == null ? null : new HashSet<>(writeCols);
-        Set<String> unresolved =
-                strict && writeColNames != null ? new HashSet<>(writeColNames) : null;
         Set<Integer> ids = new HashSet<>();
-        for (DataField field : schemaFields) {
-            // writeCols may also contain physical row-tracking fields outside the table schema.
-            if (writeColNames == null || writeColNames.contains(field.name())) {
+        if (writeCols == null) {
+            for (DataField field : schemaFields) {
                 ids.add(field.id());
-                if (unresolved != null) {
-                    unresolved.remove(field.name());
+            }
+            return ids;
+        }
+
+        Map<String, DataField> byName = new HashMap<>();
+        for (DataField field : schemaFields) {
+            byName.put(field.name(), field);
+        }
+        Set<String> unresolved = strict ? new HashSet<>() : null;
+        for (String writeCol : writeCols) {
+            // A write column is either a plain top-level name or, for sub-field-level data
+            // evolution, a dotted path into a nested column such as "nest.a"; both identify the
+            // same top-level field. Try the exact name first so a column whose own name contains a
+            // dot is not split, matching RowType#projectByPaths.
+            DataField field = byName.get(writeCol);
+            if (field == null) {
+                int dot = writeCol.indexOf('.');
+                if (dot > 0) {
+                    field = byName.get(writeCol.substring(0, dot));
                 }
+            }
+            // writeCols may also contain physical row-tracking fields outside the table schema.
+            if (field != null) {
+                ids.add(field.id());
+            } else if (unresolved != null) {
+                unresolved.add(writeCol);
             }
         }
 

@@ -288,7 +288,9 @@ public class TableSchema implements Serializable {
         return new TableSchema(
                 version,
                 id,
-                new RowType(fields).project(writeCols).getFields(),
+                // writeCols may contain nested dotted paths (e.g. "nest.a") for sub-field-level
+                // data evolution; projectByPaths handles both plain top-level names and paths
+                new RowType(fields).projectByPaths(writeCols).getFields(),
                 highestFieldId,
                 partitionKeys,
                 primaryKeys,
