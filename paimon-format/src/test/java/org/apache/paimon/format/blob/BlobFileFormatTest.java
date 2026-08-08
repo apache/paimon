@@ -442,47 +442,54 @@ public class BlobFileFormatTest {
     }
 
     @Test
-    public void testDuplicateMapBlobKeyLastWinsInline() throws IOException {
-        assertDuplicateMapBlobKeyLastWins(
+    public void testRejectDuplicateBinaryMapBlobKeyOnWrite() throws IOException {
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.BYTES(), DataTypes.BLOB()));
+        Map<Object, Object> entries = new LinkedHashMap<>();
+        entries.put(new byte[] {1}, new BlobData("first".getBytes()));
+        entries.put(new byte[] {1}, new BlobData("second".getBytes()));
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer =
+                    new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE)
+                            .createWriterFactory(rowType)
+                            .create(out, null);
+            assertThatThrownBy(() -> writer.addElement(GenericRow.of(new GenericMap(entries))))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("MAP<X, BLOB> keys must be unique.");
+            writer.close();
+        }
+    }
+
+    @Test
+    public void testRejectDuplicateMapBlobKeyInline() throws IOException {
+        assertDuplicateMapBlobKeyRejected(
                 false,
                 DataTypes.STRING(),
                 BinaryString.fromString("a"),
                 BinaryString.fromString("b"),
-                BinaryString.fromString("a"),
                 (byte) 'a');
     }
 
     @Test
-    public void testDuplicateMapBlobKeyLastWinsAsDescriptor() throws IOException {
-        assertDuplicateMapBlobKeyLastWins(
+    public void testRejectDuplicateMapBlobKeyAsDescriptor() throws IOException {
+        assertDuplicateMapBlobKeyRejected(
                 true,
                 DataTypes.STRING(),
                 BinaryString.fromString("a"),
                 BinaryString.fromString("b"),
-                BinaryString.fromString("a"),
                 (byte) 'a');
     }
 
     @Test
-    public void testDuplicateBinaryMapBlobKeyLastWinsInline() throws IOException {
-        assertDuplicateMapBlobKeyLastWins(
-                false,
-                DataTypes.BINARY(1),
-                new byte[] {1},
-                new byte[] {2},
-                new byte[] {1},
-                (byte) 1);
+    public void testRejectDuplicateBinaryMapBlobKeyInline() throws IOException {
+        assertDuplicateMapBlobKeyRejected(
+                false, DataTypes.BINARY(1), new byte[] {1}, new byte[] {2}, (byte) 1);
     }
 
     @Test
-    public void testDuplicateBinaryMapBlobKeyLastWinsAsDescriptor() throws IOException {
-        assertDuplicateMapBlobKeyLastWins(
-                true,
-                DataTypes.BINARY(1),
-                new byte[] {1},
-                new byte[] {2},
-                new byte[] {1},
-                (byte) 1);
+    public void testRejectDuplicateBinaryMapBlobKeyAsDescriptor() throws IOException {
+        assertDuplicateMapBlobKeyRejected(
+                true, DataTypes.BINARY(1), new byte[] {1}, new byte[] {2}, (byte) 1);
     }
 
     @Test
@@ -564,12 +571,11 @@ public class BlobFileFormatTest {
         assertThat(genericMap.keyArray().getBinary(0)).isEqualTo(new byte[] {1});
     }
 
-    private void assertDuplicateMapBlobKeyLastWins(
+    private void assertDuplicateMapBlobKeyRejected(
             boolean blobAsDescriptor,
             DataType keyType,
             Object firstKey,
             Object secondKey,
-            Object lookupKey,
             byte duplicateKeyByte)
             throws IOException {
         Map<Object, Object> entries = new LinkedHashMap<>();
@@ -599,19 +605,15 @@ public class BlobFileFormatTest {
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
-        List<InternalRow> rows = new ArrayList<>();
-        try (FileRecordReader<InternalRow> reader = readerFactory.createReader(context)) {
-            reader.forEachRemaining(rows::add);
-        }
-
-        assertThat(rows).hasSize(1);
-        GenericMap result = (GenericMap) rows.get(0).getMap(0);
-        assertThat(result.size()).isOne();
-        assertThat(result.contains(lookupKey)).isTrue();
-        assertMapBlob(result.get(lookupKey), blobAsDescriptor, "second".getBytes());
-        if (lookupKey instanceof byte[]) {
-            assertThat(result.keyArray().getBinary(0)).isEqualTo(lookupKey);
-        }
+        assertThatThrownBy(
+                        () -> {
+                            try (FileRecordReader<InternalRow> reader =
+                                    readerFactory.createReader(context)) {
+                                reader.forEachRemaining(ignored -> {});
+                            }
+                        })
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Invalid MAP<X, BLOB> payload: duplicate key.");
     }
 
     @Test
