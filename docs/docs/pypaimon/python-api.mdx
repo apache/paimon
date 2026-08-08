@@ -479,7 +479,8 @@ for batch in table_read.to_arrow_batch_reader(splits):
 Batch reads adapt parallelism to input size and storage latency. Explicit
 `parallelism` or `read.parallelism` takes precedence. Output stays in split
 order. Each active split prefetches at most one batch; this limits readahead
-but is not a hard byte or RSS bound.
+but is not a hard byte or RSS bound. PyArrow runtimes without
+`RecordBatchReader.close` and `from_stream` fall back to serial batch reads.
 
 ### Read Python Iterator
 

@@ -179,6 +179,8 @@ class TableRead:
 
         Batches preserve input split order. Parallel reads are enabled only by
         explicit configuration or the size- and storage-aware default.
+        PyArrow runtimes without ``RecordBatchReader.close`` and
+        ``from_stream`` fall back to serial reads.
         """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         effective = self._resolve_parallelism(parallelism, len(splits))
