@@ -50,6 +50,8 @@ from pypaimon.read.scanner.chunk_shuffle_split_generator import (
 )
 from pypaimon.read.scanner.data_evolution_split_generator import \
     DataEvolutionSplitGenerator
+from pypaimon.read.scanner.data_evolution_stats import \
+    DataEvolutionGroupStatsFilter
 from pypaimon.read.scanner.primary_key_table_split_generator import \
     PrimaryKeyTableSplitGenerator
 from pypaimon.read.split import DataSplit
@@ -469,17 +471,33 @@ class FileScanner:
                 {},
                 row_ranges,
                 score_getter,
+                None,
             )
 
         # Filter manifest files by row ranges if available
         if row_ranges is not None:
             manifest_files = _filter_manifest_files_by_row_ranges(manifest_files, row_ranges)
 
-        entries = self.read_manifest_entries(manifest_files, row_ranges=row_ranges)
+        stats_predicate = getattr(self, 'predicate_for_stats', None)
+        group_stats_enabled = stats_predicate is not None and score_getter is None
+        entries = self.read_manifest_entries(
+            manifest_files,
+            row_ranges=row_ranges,
+            keep_stats=group_stats_enabled,
+        )
 
         # Redundant when early_record_filter ran; kept for explain mode and as safety net.
         if row_ranges is not None:
             entries = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
+
+        group_stats_filter = None
+        if group_stats_enabled:
+            group_stats_filter = DataEvolutionGroupStatsFilter(
+                stats_predicate,
+                self.table.fields,
+                self._schema_fields,
+                self.simple_stats_evolutions,
+            )
 
         return entries, DataEvolutionSplitGenerator(
             self.table,
@@ -488,6 +506,7 @@ class FileScanner:
             self._deletion_files_map(entries),
             row_ranges,
             score_getter,
+            group_stats_filter,
         )
 
     def plan_files(self) -> List[ManifestEntry]:
@@ -536,7 +555,8 @@ class FileScanner:
             return None
 
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta],
-                              row_ranges=None) -> List[ManifestEntry]:
+                              row_ranges=None,
+                              keep_stats=False) -> List[ManifestEntry]:
         max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)
         if self.scan_stats is not None:
             self.scan_stats.manifest_files_total += len(manifest_files)
@@ -561,6 +581,7 @@ class FileScanner:
         return self.manifest_file_manager.read_entries_parallel(
             manifest_files,
             self._filter_manifest_entry,
+            drop_stats=not keep_stats,
             max_workers=max_workers,
             early_entry_filter=self._build_early_bucket_filter(),
             early_record_filter=early_row_filter,
