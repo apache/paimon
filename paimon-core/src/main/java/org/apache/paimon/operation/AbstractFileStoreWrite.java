@@ -278,6 +278,17 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 CommitIncrement increment = writerContainer.writer.prepareCommit(waitCompaction);
                 DataIncrement newFilesIncrement = increment.newFilesIncrement();
                 CompactIncrement compactIncrement = increment.compactIncrement();
+                CommitMessageImpl committable =
+                        new CommitMessageImpl(
+                                partition,
+                                bucket,
+                                writerContainer.totalBuckets,
+                                newFilesIncrement,
+                                compactIncrement);
+                result.add(committable);
+                if (onPrepared != null) {
+                    onPrepared.accept(committable);
+                }
                 if (writerContainer.dynamicBucketMaintainer != null) {
                     newFilesIncrement
                             .newIndexFiles()
@@ -292,17 +303,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                     compactDeletionFile
                             .getOrCompute()
                             .ifPresent(compactIncrement.newIndexFiles()::add);
-                }
-                CommitMessageImpl committable =
-                        new CommitMessageImpl(
-                                partition,
-                                bucket,
-                                writerContainer.totalBuckets,
-                                newFilesIncrement,
-                                compactIncrement);
-                result.add(committable);
-                if (onPrepared != null) {
-                    onPrepared.accept(committable);
                 }
 
                 if (committable.isEmpty()) {
