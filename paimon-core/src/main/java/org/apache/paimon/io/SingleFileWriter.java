@@ -40,6 +40,8 @@ import java.io.UncheckedIOException;
 import java.util.Optional;
 import java.util.function.Function;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * A {@link FileWriter} to produce a single file.
  *
@@ -145,6 +147,8 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         }
 
         try {
+            long rowCount = bundle.rowCount();
+            checkArgument(rowCount >= 0, "Row count must not be negative.");
             if (writer instanceof BundleFormatWriter) {
                 ((BundleFormatWriter) writer).writeBundle(bundle);
             } else {
@@ -152,7 +156,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
                     writer.addElement(row);
                 }
             }
-            recordCount += bundle.rowCount();
+            recordCount += rowCount;
         } catch (Throwable e) {
             LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
             abort();

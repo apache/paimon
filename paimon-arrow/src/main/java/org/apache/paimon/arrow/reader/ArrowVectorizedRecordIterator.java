@@ -27,8 +27,9 @@ public interface ArrowVectorizedRecordIterator extends VectorizedRecordIterator 
     /**
      * Returns a borrowed view of the Arrow vectors backing {@link #batch()}.
      *
-     * <p>The caller does not own the batch and must not retain or close it. Its row order and count
-     * correspond to {@link #batch()}, and it is valid only until {@link #releaseBatch()}.
+     * <p>The caller does not own the batch and must not retain or close it. Its row order, count,
+     * and values correspond to {@link #batch()}, and it is valid only until {@link
+     * #releaseBatch()}.
      */
     ArrowBundleRecords arrowBundle();
 }

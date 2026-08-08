@@ -169,7 +169,22 @@ public class RollingFileWriterTest {
         assertThat(files.get(2).rowCount()).isEqualTo(30);
     }
 
-    private static BundleRecords bundle(int rowCount) {
+    @Test
+    public void testRollingWriterDoesNotReadBundleRowCountAgain() throws IOException {
+        initialize("parquet", false, 1024L * 1024 * 1024, 100L);
+        SingleUseBundleRecords bundle = bundle(150);
+
+        rollingFileWriter.writeBundle(bundle);
+        rollingFileWriter.close();
+
+        assertThat(bundle.rowCountCalls).isEqualTo(1);
+        assertThat(rollingFileWriter.result())
+                .singleElement()
+                .extracting(DataFileMeta::rowCount)
+                .isEqualTo(150L);
+    }
+
+    private static SingleUseBundleRecords bundle(int rowCount) {
         List<InternalRow> rows = new ArrayList<>();
         for (int i = 0; i < rowCount; i++) {
             rows.add(GenericRow.of(i));
@@ -314,6 +329,7 @@ public class RollingFileWriterTest {
 
         private final List<InternalRow> rows;
         private boolean iterated;
+        private int rowCountCalls;
 
         private SingleUseBundleRecords(List<InternalRow> rows) {
             this.rows = rows;
@@ -330,6 +346,7 @@ public class RollingFileWriterTest {
 
         @Override
         public long rowCount() {
+            rowCountCalls++;
             return rows.size();
         }
     }

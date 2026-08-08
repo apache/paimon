@@ -19,6 +19,7 @@
 package org.apache.paimon.format.mosaic;
 
 import org.apache.paimon.arrow.ArrowBundleRecords;
+import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.vector.ArrowFormatWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.BundleFormatWriter;
@@ -125,12 +126,18 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
     @Override
     public void writeBundle(BundleRecords bundleRecords) {
         if (bundleRecords instanceof ArrowBundleRecords) {
-            flush();
-            nativeWriter.write(((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot());
-        } else {
-            for (InternalRow row : bundleRecords) {
-                addElement(row);
+            ArrowBundleRecords arrowBundle = (ArrowBundleRecords) bundleRecords;
+            VectorSchemaRoot root = arrowBundle.getVectorSchemaRoot();
+            if (arrowFormatWriter.isArrowBundleSchemaCompatible(arrowBundle)
+                    && ArrowUtils.hasSameRootAllocator(root, allocator)) {
+                flush();
+                nativeWriter.write(root);
+                return;
             }
+        }
+
+        for (InternalRow row : bundleRecords) {
+            addElement(row);
         }
     }
 

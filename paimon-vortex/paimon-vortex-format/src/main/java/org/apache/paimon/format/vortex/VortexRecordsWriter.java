@@ -102,13 +102,15 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     @Override
     public void writeBundle(BundleRecords bundleRecords) throws IOException {
         if (bundleRecords instanceof ArrowBundleRecords) {
-            flush();
-            writeBundleVsr(((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot());
-        } else {
-            for (InternalRow row : bundleRecords) {
-                addElement(row);
+            ArrowBundleRecords arrowBundle = (ArrowBundleRecords) bundleRecords;
+            if (currentWriter.formatWriter().isArrowBundleSchemaCompatible(arrowBundle)) {
+                flush();
+                writeBundleVsr(arrowBundle.getVectorSchemaRoot());
+                return;
             }
         }
+
+        BundleFormatWriter.super.writeBundle(bundleRecords);
     }
 
     @Override

@@ -76,15 +76,21 @@ public class ArrowBundleWriter implements BundleFormatWriter {
     @Override
     public void writeBundle(BundleRecords bundleRecords) throws IOException {
         if (bundleRecords instanceof ArrowBundleRecords) {
-            add(((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot());
+            ArrowBundleRecords arrowBundle = (ArrowBundleRecords) bundleRecords;
+            VectorSchemaRoot root = arrowBundle.getVectorSchemaRoot();
+            if (arrowFormatWriter.formatWriter().isArrowBundleSchemaCompatible(arrowBundle)
+                    && ArrowUtils.hasSameRootAllocator(root, root.getVector(0).getAllocator())) {
+                flush();
+                add(root);
+                return;
+            }
         } else if (bundleRecords instanceof VectorizedBundleRecords) {
             VectorizedBundleRecords records = (VectorizedBundleRecords) bundleRecords;
             add(records.batch(), records.selected());
-        } else {
-            for (InternalRow row : bundleRecords) {
-                addElement(row);
-            }
+            return;
         }
+
+        BundleFormatWriter.super.writeBundle(bundleRecords);
     }
 
     public void add(VectorSchemaRoot vsr) {

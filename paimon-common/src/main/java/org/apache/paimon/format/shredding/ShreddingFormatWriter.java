@@ -64,9 +64,7 @@ public class ShreddingFormatWriter implements BundleFormatWriter {
             return;
         }
 
-        for (InternalRow row : bundle) {
-            addElement(row);
-        }
+        BundleFormatWriter.super.writeBundle(bundle);
     }
 
     @Override

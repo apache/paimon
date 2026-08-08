@@ -21,11 +21,18 @@ package org.apache.paimon.arrow;
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.BundleRecords;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.types.pojo.Field;
 
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+
+import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
 
 /** Batch records for vector schema root. */
 public class ArrowBundleRecords implements BundleRecords {
@@ -47,6 +54,28 @@ public class ArrowBundleRecords implements BundleRecords {
 
     public RowType getRowType() {
         return rowType;
+    }
+
+    /**
+     * Returns whether row iteration reads every Arrow vector at the same position without name
+     * remapping or synthesized null columns.
+     */
+    public boolean hasIdentityMapping() {
+        List<Field> arrowFields = vectorSchemaRoot.getSchema().getFields();
+        List<DataField> dataFields = rowType.getFields();
+        if (arrowFields.size() != dataFields.size()) {
+            return false;
+        }
+
+        Set<String> mappedNames = new HashSet<>();
+        for (int i = 0; i < arrowFields.size(); i++) {
+            String arrowName = toLowerCaseIfNeed(arrowFields.get(i).getName(), caseSensitive);
+            String dataName = toLowerCaseIfNeed(dataFields.get(i).name(), caseSensitive);
+            if (!arrowName.equals(dataName) || !mappedNames.add(arrowName)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override

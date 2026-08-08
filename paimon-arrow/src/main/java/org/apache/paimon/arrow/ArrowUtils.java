@@ -283,6 +283,22 @@ public class ArrowUtils {
         return out.toByteArray();
     }
 
+    /** Returns whether every vector in the root shares the allocator's root allocator. */
+    public static boolean hasSameRootAllocator(
+            VectorSchemaRoot vectorSchemaRoot, BufferAllocator allocator) {
+        if (vectorSchemaRoot.getFieldVectors().isEmpty()) {
+            return false;
+        }
+
+        BufferAllocator expectedRoot = rootAllocator(allocator);
+        for (FieldVector vector : vectorSchemaRoot.getFieldVectors()) {
+            if (!hasSameRootAllocator(vector, expectedRoot)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public static void serializeToIpc(VectorSchemaRoot vsr, OutputStream out) {
         try (ArrowStreamWriter writer = new ArrowStreamWriter(vsr, null, out)) {
             writer.writeBatch();
@@ -315,5 +331,26 @@ public class ArrowUtils {
         } else {
             return instant.getEpochSecond() * 1_000_000_000 + instant.getNano();
         }
+    }
+
+    private static BufferAllocator rootAllocator(BufferAllocator allocator) {
+        BufferAllocator current = allocator;
+        while (current.getParentAllocator() != null) {
+            current = current.getParentAllocator();
+        }
+        return current;
+    }
+
+    private static boolean hasSameRootAllocator(FieldVector vector, BufferAllocator expectedRoot) {
+        if (rootAllocator(vector.getAllocator()) != expectedRoot) {
+            return false;
+        }
+
+        for (FieldVector child : vector.getChildrenFromFields()) {
+            if (!hasSameRootAllocator(child, expectedRoot)) {
+                return false;
+            }
+        }
+        return true;
     }
 }
