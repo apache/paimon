@@ -500,21 +500,41 @@ class GlobalIndexQueryClientTest {
                                 return endpoint(0, address, "epoch", 1L, 10L);
                             },
                             1,
-                            Duration.ofMillis(50));
+                            Duration.ofMillis(100));
 
-            assertThat(failure(client.getValues(new BinaryRow[] {row(0)})))
-                    .isInstanceOfSatisfying(
-                            GlobalIndexQueryException.class,
-                            e -> assertThat(e.errorCode()).isEqualTo(REQUEST_TIMEOUT));
-            awaitNoPendingRequests(client);
-            assertThat(server.awaitFirstRequest()).isTrue();
+            boolean connectionReady = false;
+            for (int attempt = 0; attempt < 100; attempt++) {
+                try {
+                    assertThat(client.getValues(new BinaryRow[] {row(-1)}).join())
+                            .containsExactly((BinaryRow) null);
+                    connectionReady = true;
+                } catch (CompletionException e) {
+                    assertThat(e.getCause())
+                            .isInstanceOfSatisfying(
+                                    GlobalIndexQueryException.class,
+                                    failure ->
+                                            assertThat(failure.errorCode())
+                                                    .isEqualTo(REQUEST_TIMEOUT));
+                }
+                awaitNoPendingRequests(client);
+                if (connectionReady) {
+                    break;
+                }
+            }
+            assertThat(connectionReady).isTrue();
 
-            for (int i = 1; i < 5; i++) {
+            server.enableBlackHole();
+            queryLocationCalls.set(0);
+
+            for (int i = 0; i < 5; i++) {
                 assertThat(failure(client.getValues(new BinaryRow[] {row(i)})))
                         .isInstanceOfSatisfying(
                                 GlobalIndexQueryException.class,
                                 e -> assertThat(e.errorCode()).isEqualTo(REQUEST_TIMEOUT));
                 awaitNoPendingRequests(client);
+                if (i == 0) {
+                    assertThat(server.awaitFirstBlackHoleRequest()).isTrue();
+                }
             }
 
             assertThat(queryLocationCalls).hasValue(10);
@@ -625,7 +645,8 @@ class GlobalIndexQueryClientTest {
     private static class BlackHoleServer
             extends NetworkServer<GlobalIndexRequest, GlobalIndexResponse> {
 
-        private final CountDownLatch firstRequestReceived = new CountDownLatch(1);
+        private final AtomicBoolean blackHoleEnabled = new AtomicBoolean();
+        private final CountDownLatch firstBlackHoleRequestReceived = new CountDownLatch(1);
 
         private BlackHoleServer() {
             super(
@@ -648,7 +669,15 @@ class GlobalIndexQueryClientTest {
                 @Override
                 public CompletableFuture<GlobalIndexResponse> handleRequest(
                         long requestId, GlobalIndexRequest request) {
-                    firstRequestReceived.countDown();
+                    if (!blackHoleEnabled.get()) {
+                        return CompletableFuture.completedFuture(
+                                new GlobalIndexResponse(
+                                        request.serverEpoch(),
+                                        request.servedGeneration(),
+                                        10L,
+                                        new BinaryRow[request.keys().length]));
+                    }
+                    firstBlackHoleRequestReceived.countDown();
                     return new CompletableFuture<>();
                 }
 
@@ -659,8 +688,12 @@ class GlobalIndexQueryClientTest {
             };
         }
 
-        private boolean awaitFirstRequest() throws InterruptedException {
-            return firstRequestReceived.await(10L, TimeUnit.SECONDS);
+        private void enableBlackHole() {
+            blackHoleEnabled.set(true);
+        }
+
+        private boolean awaitFirstBlackHoleRequest() throws InterruptedException {
+            return firstBlackHoleRequestReceived.await(10L, TimeUnit.SECONDS);
         }
     }
 
