@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.service;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.utils.SinkContextUtils;
 import org.apache.paimon.service.GlobalIndexQueryServiceDescriptor;
 import org.apache.paimon.service.GlobalIndexQueryServiceDescriptor.Endpoint;
 import org.apache.paimon.service.ServiceManager;
@@ -74,7 +75,7 @@ public class GlobalIndexQueryAddressRegister implements Sink<InternalRow> {
                 schemaFingerprint,
                 lookupFieldId,
                 valueFieldIds,
-                nextOwnerToken(context.getAttemptNumber()));
+                nextOwnerToken(SinkContextUtils.getAttemptNumber(context)));
     }
 
     /** Do not annotate to maintain compatibility with Flink 1.18-. */
@@ -88,7 +89,7 @@ public class GlobalIndexQueryAddressRegister implements Sink<InternalRow> {
                 schemaFingerprint,
                 lookupFieldId,
                 valueFieldIds,
-                nextOwnerToken(context.getAttemptNumber()));
+                nextOwnerToken(SinkContextUtils.getAttemptNumber(context)));
     }
 
     private String nextOwnerToken(int attemptNumber) {

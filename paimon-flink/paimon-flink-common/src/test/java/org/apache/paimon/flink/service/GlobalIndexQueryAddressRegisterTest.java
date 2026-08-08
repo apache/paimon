@@ -37,8 +37,8 @@ import org.junit.jupiter.api.Test;
 import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Answers.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /** Tests durable unavailable-generation acknowledgements from the address register. */
 class GlobalIndexQueryAddressRegisterTest extends TableTestBase {
@@ -50,8 +50,7 @@ class GlobalIndexQueryAddressRegisterTest extends TableTestBase {
                 GlobalIndexQueryServiceUtils.querySpec(
                         table, "url", Collections.singletonList("descriptor"));
         GlobalIndexQueryAddressRegister register = new GlobalIndexQueryAddressRegister(table, spec);
-        WriterInitContext context = mock(WriterInitContext.class);
-        when(context.getAttemptNumber()).thenReturn(0);
+        WriterInitContext context = mock(WriterInitContext.class, RETURNS_DEEP_STUBS);
 
         try (SinkWriter<InternalRow> writer = register.createWriter(context)) {
             writer.write(notReadyRow(0, "BTree tail is not covered"), null);

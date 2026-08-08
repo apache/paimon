@@ -50,6 +50,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -491,13 +492,24 @@ class GlobalIndexQueryClientTest {
         try {
             server.start();
             InetSocketAddress address = server.getServerAddress();
+            AtomicInteger queryLocationCalls = new AtomicInteger();
             client =
                     new GlobalIndexQueryClient(
-                            (key, forceUpdate) -> endpoint(0, address, "epoch", 1L, 10L),
+                            (key, forceUpdate) -> {
+                                queryLocationCalls.incrementAndGet();
+                                return endpoint(0, address, "epoch", 1L, 10L);
+                            },
                             1,
                             Duration.ofMillis(50));
 
-            for (int i = 0; i < 5; i++) {
+            assertThat(failure(client.getValues(new BinaryRow[] {row(0)})))
+                    .isInstanceOfSatisfying(
+                            GlobalIndexQueryException.class,
+                            e -> assertThat(e.errorCode()).isEqualTo(REQUEST_TIMEOUT));
+            awaitNoPendingRequests(client);
+            assertThat(server.awaitFirstRequest()).isTrue();
+
+            for (int i = 1; i < 5; i++) {
                 assertThat(failure(client.getValues(new BinaryRow[] {row(i)})))
                         .isInstanceOfSatisfying(
                                 GlobalIndexQueryException.class,
@@ -505,7 +517,7 @@ class GlobalIndexQueryClientTest {
                 awaitNoPendingRequests(client);
             }
 
-            assertThat(server.requestCount()).hasValue(10);
+            assertThat(queryLocationCalls).hasValue(10);
         } finally {
             if (client != null) {
                 client.shutdownFuture().get(10L, TimeUnit.SECONDS);
@@ -613,7 +625,7 @@ class GlobalIndexQueryClientTest {
     private static class BlackHoleServer
             extends NetworkServer<GlobalIndexRequest, GlobalIndexResponse> {
 
-        private final AtomicInteger requestCount = new AtomicInteger();
+        private final CountDownLatch firstRequestReceived = new CountDownLatch(1);
 
         private BlackHoleServer() {
             super(
@@ -636,7 +648,7 @@ class GlobalIndexQueryClientTest {
                 @Override
                 public CompletableFuture<GlobalIndexResponse> handleRequest(
                         long requestId, GlobalIndexRequest request) {
-                    requestCount.incrementAndGet();
+                    firstRequestReceived.countDown();
                     return new CompletableFuture<>();
                 }
 
@@ -647,8 +659,8 @@ class GlobalIndexQueryClientTest {
             };
         }
 
-        private AtomicInteger requestCount() {
-            return requestCount;
+        private boolean awaitFirstRequest() throws InterruptedException {
+            return firstRequestReceived.await(10L, TimeUnit.SECONDS);
         }
     }
 
