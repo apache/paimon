@@ -354,6 +354,7 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
                 "single-shard cancellation tombstone");
 
         Set<String> leasesBeforeRescale = new HashSet<>(table.consumerManager().listAllIds());
+        long duplicateSnapshotId;
         JobClient rescaledJob = startQueryService(table, 2);
         try {
             GlobalIndexQueryServiceDescriptor rescaled =
@@ -389,12 +390,12 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
             assertBatchLookup(table, spec, expected, true);
 
             // Exact BTree coverage is only the bootstrap gate. A duplicate discovered while
-            // materializing a covered snapshot must publish exact NOT_READY and, after the
-            // non-zero grace, advance this attempt's lease instead of pinning history forever.
+            // materializing a covered snapshot must publish exact NOT_READY. The no-restart job
+            // below then proves that its active lease advances after the non-zero grace.
             String duplicateKey = expected.keySet().iterator().next();
             insert(duplicateKey, "duplicate-image".getBytes(StandardCharsets.UTF_8));
             buildBTreeIndex();
-            long duplicateSnapshotId = table.snapshotManager().latestSnapshot().id();
+            duplicateSnapshotId = table.snapshotManager().latestSnapshot().id();
             waitForDescriptor(
                     table,
                     spec,
@@ -404,14 +405,50 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
                                     && descriptor.reason().toLowerCase().contains("duplicate"),
                     rescaledJob,
                     "covered duplicate bootstrap rejection");
-            waitForAnyNewConsumerSnapshot(
-                    table,
-                    leasesBeforeRescale,
-                    duplicateSnapshotId,
-                    rescaledJob,
-                    "bootstrap-invalid lease advancement");
         } finally {
             cancel(rescaledJob);
+        }
+        waitForJobStatus(rescaledJob, JobStatus.CANCELED, "P2 query-service cancellation");
+        GlobalIndexQueryServiceDescriptor canceledDescriptor =
+                waitForDescriptor(
+                        table,
+                        spec,
+                        descriptor ->
+                                !descriptor.ready()
+                                        && descriptor
+                                                .reason()
+                                                .toLowerCase()
+                                                .contains("publisher is closed"),
+                        null,
+                        "P2 publisher cancellation tombstone");
+
+        // A restarted source attempt deliberately leaves its UUID lease until expiration, so the
+        // rescale job cannot deterministically identify one current lease. Verify advancement in a
+        // separate no-restart job with its own prefix; automatic attempt recovery is covered by
+        // testAutomaticAttemptFailover.
+        String leaseCheckConsumerId = CONSUMER_ID + "-lease-check";
+        JobClient leaseCheckJob = startQueryService(table, 2, leaseCheckConsumerId, false);
+        try {
+            waitForDescriptor(
+                    table,
+                    spec,
+                    descriptor ->
+                            !descriptor.ready()
+                                    && !descriptor
+                                            .ownerToken()
+                                            .equals(canceledDescriptor.ownerToken())
+                                    && descriptor.servedSnapshotId() == duplicateSnapshotId
+                                    && descriptor.reason().toLowerCase().contains("duplicate"),
+                    leaseCheckJob,
+                    "no-restart duplicate bootstrap rejection");
+            waitForSingleConsumerSnapshot(
+                    table,
+                    leaseCheckConsumerId,
+                    duplicateSnapshotId,
+                    leaseCheckJob,
+                    "bootstrap-invalid lease advancement");
+        } finally {
+            cancel(leaseCheckJob);
         }
     }
 
@@ -581,12 +618,18 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
     }
 
     private JobClient startQueryService(FileStoreTable table, int parallelism) throws Exception {
-        StreamExecutionEnvironment env =
-                streamExecutionEnvironmentBuilder()
-                        .streamingMode()
-                        .parallelism(parallelism)
-                        .allowRestart()
-                        .build();
+        return startQueryService(table, parallelism, CONSUMER_ID, true);
+    }
+
+    private JobClient startQueryService(
+            FileStoreTable table, int parallelism, String consumerId, boolean allowRestart)
+            throws Exception {
+        StreamExecutionEnvironmentBuilder builder =
+                streamExecutionEnvironmentBuilder().streamingMode().parallelism(parallelism);
+        if (allowRestart) {
+            builder.allowRestart();
+        }
+        StreamExecutionEnvironment env = builder.build();
         // A caller-supplied generic scan option must not prune the bucket-unaware bootstrap. The
         // query service plans its leased snapshot directly and intentionally ignores scan.bucket.
         FileStoreTable serviceTable =
@@ -598,9 +641,9 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
                 parallelism,
                 LOOKUP_FIELD,
                 Collections.singletonList(VALUE_FIELD),
-                CONSUMER_ID,
+                consumerId,
                 LEASE_GRACE_PERIOD);
-        return env.executeAsync("global-index-query-service-it-p" + parallelism);
+        return env.executeAsync("global-index-query-service-it-p" + parallelism + '-' + consumerId);
     }
 
     private GlobalIndexQueryServiceDescriptor waitForDescriptor(
@@ -648,29 +691,42 @@ public class GlobalIndexQueryServiceITCase extends CatalogITCaseBase {
         fail("Timed out waiting for %s.", description);
     }
 
-    private void waitForAnyNewConsumerSnapshot(
+    private static void waitForJobStatus(
+            JobClient jobClient, JobStatus expectedStatus, String description) throws Exception {
+        long deadline = System.nanoTime() + WAIT_TIMEOUT.toNanos();
+        while (System.nanoTime() < deadline) {
+            JobStatus status = jobClient.getJobStatus().get(10, TimeUnit.SECONDS);
+            if (status == expectedStatus) {
+                return;
+            }
+            if (status.isTerminalState()) {
+                throw jobFailure(jobClient, status, description, null);
+            }
+            Thread.sleep(50L);
+        }
+        fail("Timed out waiting for %s.", description);
+    }
+
+    private void waitForSingleConsumerSnapshot(
             FileStoreTable table,
-            Set<String> previousConsumerIds,
+            String consumerIdPrefix,
             long expectedSnapshotId,
             JobClient jobClient,
             String description)
             throws Exception {
         long deadline = System.nanoTime() + WAIT_TIMEOUT.toNanos();
         while (System.nanoTime() < deadline) {
-            boolean advanced =
+            List<String> matchingIds =
                     table.consumerManager().listAllIds().stream()
-                            .filter(id -> id.startsWith(CONSUMER_ID + '-'))
-                            .filter(id -> !previousConsumerIds.contains(id))
-                            .anyMatch(
-                                    id ->
-                                            table.consumerManager()
-                                                    .consumer(id)
-                                                    .map(
-                                                            consumer ->
-                                                                    consumer.nextSnapshot()
-                                                                            == expectedSnapshotId)
-                                                    .orElse(false));
-            if (advanced) {
+                            .filter(id -> id.startsWith(consumerIdPrefix + '-'))
+                            .collect(Collectors.toList());
+            if (matchingIds.size() == 1
+                    && table.consumerManager()
+                            .consumer(matchingIds.get(0))
+                            .map(consumer -> consumer.nextSnapshot() == expectedSnapshotId)
+                            .orElse(false)) {
+                assertThat(jobClient.getJobStatus().get(10, TimeUnit.SECONDS))
+                        .isEqualTo(JobStatus.RUNNING);
                 return;
             }
             JobStatus status = jobClient.getJobStatus().get(10, TimeUnit.SECONDS);
