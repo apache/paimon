@@ -226,6 +226,8 @@ class MosaicBundleWriteIntegrationTest {
                 false,
                 false,
                 false,
+                null,
+                null,
                 null);
     }
 

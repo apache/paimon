@@ -314,6 +314,8 @@ class RowDataFileWriterTest {
                 false,
                 false,
                 false,
+                null,
+                null,
                 null);
     }
 
