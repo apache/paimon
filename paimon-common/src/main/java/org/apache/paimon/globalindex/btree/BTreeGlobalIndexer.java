@@ -66,7 +66,11 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
     private final LazyField<CacheManager> cacheManager;
 
     public BTreeGlobalIndexer(DataField dataField, Options options) {
-        this.keySerializer = KeySerializer.create(dataField.type());
+        this(KeySerializer.create(dataField.type()), options);
+    }
+
+    public BTreeGlobalIndexer(KeySerializer keySerializer, Options options) {
+        this.keySerializer = keySerializer;
         this.options = options;
         this.fallbackScanMaxSize =
                 options.get(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE).getBytes();
@@ -78,6 +82,10 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
                                         options.get(
                                                 BTreeIndexOptions
                                                         .BTREE_INDEX_HIGH_PRIORITY_POOL_RATIO)));
+    }
+
+    protected KeySerializer keySerializer() {
+        return keySerializer;
     }
 
     @Override
@@ -100,11 +108,29 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
             List<GlobalIndexIOMeta> files,
             long totalRowCount,
             ExecutorService executor) {
-        return new LazyFilteredBTreeReader(
+        return newReader(
                 files,
                 keySerializer,
                 fileReader,
                 cacheManager.get(),
+                fallbackScanMaxSize,
+                totalRowCount,
+                executor);
+    }
+
+    protected LazyFilteredBTreeReader newReader(
+            List<GlobalIndexIOMeta> files,
+            KeySerializer keySerializer,
+            GlobalIndexFileReader fileReader,
+            CacheManager cacheManager,
+            long fallbackScanMaxSize,
+            long totalRowCount,
+            ExecutorService executor) {
+        return new LazyFilteredBTreeReader(
+                files,
+                keySerializer,
+                fileReader,
+                cacheManager,
                 fallbackScanMaxSize,
                 totalRowCount,
                 executor);
