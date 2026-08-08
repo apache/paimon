@@ -187,12 +187,29 @@ public class MosaicFileFormat extends FileFormat {
 
         @Override
         public Void visit(TimestampType timestampType) {
+            checkTimestampPrecision(timestampType.getPrecision(), "TIMESTAMP");
             return null;
         }
 
         @Override
         public Void visit(LocalZonedTimestampType localZonedTimestampType) {
+            checkTimestampPrecision(localZonedTimestampType.getPrecision(), "TIMESTAMP_LTZ");
             return null;
+        }
+
+        /**
+         * Precision 0 maps to Arrow {@code TimeUnit.SECOND}, which the mosaic native writer rejects
+         * with "unsupported Timestamp unit: Second". Reject it here so the failure surfaces at
+         * schema validation instead of at write time.
+         */
+        private void checkTimestampPrecision(int precision, String typeName) {
+            if (precision == 0) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Mosaic file format does not support type %s with precision 0, "
+                                        + "please use a precision between 1 and 9.",
+                                typeName));
+            }
         }
 
         @Override

@@ -99,6 +99,35 @@ class MosaicFileFormatTest {
     }
 
     @Test
+    void testValidateDataFieldsTimestampPrecisionZeroUnsupported() {
+        MosaicFileFormat format = createFormat();
+        assertThatThrownBy(() -> format.validateDataFields(DataTypes.ROW(DataTypes.TIMESTAMP(0))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("TIMESTAMP with precision 0");
+    }
+
+    @Test
+    void testValidateDataFieldsLocalZonedTimestampPrecisionZeroUnsupported() {
+        MosaicFileFormat format = createFormat();
+        assertThatThrownBy(
+                        () ->
+                                format.validateDataFields(
+                                        DataTypes.ROW(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("TIMESTAMP_LTZ with precision 0");
+    }
+
+    @Test
+    void testValidateDataFieldsTimestampPrecisionSupported() {
+        MosaicFileFormat format = createFormat();
+        for (int precision = 1; precision <= 9; precision++) {
+            format.validateDataFields(DataTypes.ROW(DataTypes.TIMESTAMP(precision)));
+            format.validateDataFields(
+                    DataTypes.ROW(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(precision)));
+        }
+    }
+
+    @Test
     void testValidateDataFieldsMultisetUnsupported() {
         MosaicFileFormat format = createFormat();
         RowType rowType = DataTypes.ROW(DataTypes.MULTISET(DataTypes.STRING()));
