@@ -22,6 +22,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -76,6 +78,25 @@ public class HadoopSecuredFileSystemTest {
         HadoopFileIO fileIO = createFileIO(options);
         assertThat(fileIO.getFileSystem(new org.apache.hadoop.fs.Path("file:///tmp/test")))
                 .isNotInstanceOf(HadoopSecuredFileSystem.class);
+    }
+
+    @Test
+    public void testCloseClosesTheWrappedFileSystem() throws Exception {
+        File keytabFile = new File(tmp.toFile(), "test-keytab.keytab");
+        assertThat(keytabFile.createNewFile()).isTrue();
+
+        Options options = new Options();
+        options.set("security.kerberos.login.principal", "test-user");
+        options.set("security.kerberos.login.keytab", keytabFile.getAbsolutePath());
+
+        HadoopFileIOTest.RecordingFileSystem wrapped = new HadoopFileIOTest.RecordingFileSystem();
+        FileSystem secured =
+                HadoopSecuredFileSystem.trySecureFileSystem(wrapped, options, new Configuration());
+        assertThat(secured).isInstanceOf(HadoopSecuredFileSystem.class);
+
+        secured.close();
+
+        assertThat(wrapped.closeCount()).isEqualTo(1);
     }
 
     private HadoopFileIO createFileIO(Options options) {

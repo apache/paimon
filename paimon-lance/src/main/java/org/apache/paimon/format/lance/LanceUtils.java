@@ -67,21 +67,7 @@ public class LanceUtils {
         URI uri = path.toUri();
         String schema = uri.getScheme();
 
-        if (fileIO instanceof RESTTokenFileIO) {
-            try {
-                fileIO = ((RESTTokenFileIO) fileIO).fileIO();
-            } catch (IOException e) {
-                throw new RuntimeException("Can't get fileIO from RESTTokenFileIO", e);
-            }
-        }
-
-        Options originOptions;
-        if (fileIO instanceof HadoopOptionsProvider) {
-            originOptions =
-                    ((HadoopOptionsProvider) fileIO).hadoopOptions(path, isRead ? "read" : "write");
-        } else {
-            originOptions = new Options();
-        }
+        Options originOptions = hadoopOptions(fileIO, path, isRead);
 
         Path converted = path;
         Map<String, String> storageOptions = new HashMap<>();
@@ -127,5 +113,28 @@ public class LanceUtils {
         }
 
         return Pair.of(converted, storageOptions);
+    }
+
+    /**
+     * The options of the file system behind {@code fileIO}. A REST token FileIO resolves to an
+     * instance out of a cache shared by the JVM, so the read happens under a lease: without one an
+     * eviction can close that instance while it is being asked.
+     */
+    private static Options hadoopOptions(FileIO fileIO, Path path, boolean isRead) {
+        String opType = isRead ? "read" : "write";
+        if (fileIO instanceof RESTTokenFileIO) {
+            try (RESTTokenFileIO.Lease lease = ((RESTTokenFileIO) fileIO).acquire()) {
+                return hadoopOptions(lease.fileIO(), path, opType);
+            } catch (IOException e) {
+                throw new RuntimeException("Can't get fileIO from RESTTokenFileIO", e);
+            }
+        }
+        return hadoopOptions(fileIO, path, opType);
+    }
+
+    private static Options hadoopOptions(FileIO fileIO, Path path, String opType) {
+        return fileIO instanceof HadoopOptionsProvider
+                ? ((HadoopOptionsProvider) fileIO).hadoopOptions(path, opType)
+                : new Options();
     }
 }

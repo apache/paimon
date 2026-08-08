@@ -23,10 +23,13 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.IOUtils;
 
 import java.io.IOException;
 import java.io.Serializable;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -44,6 +47,9 @@ public class ResolvingFileIO implements FileIO {
     private final Map<CacheKey, FileIO> fileIOMap = new ConcurrentHashMap<>();
 
     private CatalogContext context;
+
+    /** Transient so that a deserialized copy starts out usable. */
+    private transient volatile boolean closed;
 
     // TODO, how to decide the real fileio is object store or not?
     @Override
@@ -127,15 +133,49 @@ public class ResolvingFileIO implements FileIO {
 
     @VisibleForTesting
     public FileIO fileIO(Path path) throws IOException {
+        if (closed) {
+            throw new IOException("This FileIO is closed.");
+        }
         CacheKey cacheKey = new CacheKey(path.toUri().getScheme(), path.toUri().getAuthority());
-        return fileIOMap.computeIfAbsent(
-                cacheKey,
-                k -> {
+        FileIO fileIO =
+                fileIOMap.computeIfAbsent(
+                        cacheKey,
+                        k -> {
+                            try {
+                                return FileIO.get(path, context);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+        if (closed) {
+            // a close() ran while we were resolving and may already have passed this key, so take
+            // the delegate back out rather than leaving it behind unclosed
+            fileIOMap.remove(cacheKey, fileIO);
+            IOUtils.closeQuietly(fileIO);
+            throw new IOException("This FileIO is closed.");
+        }
+        return fileIO;
+    }
+
+    @Override
+    public void close() throws IOException {
+        closed = true;
+        // remove before closing, so that a concurrent close does not close the same delegate twice
+        List<FileIO> toClose = new ArrayList<>();
+        for (CacheKey key : fileIOMap.keySet()) {
+            FileIO fileIO = fileIOMap.remove(key);
+            if (fileIO != null) {
+                toClose.add(fileIO);
+            }
+        }
+        wrap(
+                () -> {
                     try {
-                        return FileIO.get(path, context);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        IOUtils.closeAll(toClose);
+                    } catch (Exception e) {
+                        throw new IOException("Failed to close the resolved file IOs", e);
                     }
+                    return null;
                 });
     }
 
