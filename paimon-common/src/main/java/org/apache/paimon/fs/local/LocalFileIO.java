@@ -95,6 +95,31 @@ public class LocalFileIO implements FileIO {
     }
 
     @Override
+    public void overwriteFileUtf8(Path path, String content) throws IOException {
+        Path tempPath = path.createTempPath();
+        boolean success = false;
+        try {
+            writeFile(tempPath, content, false);
+
+            RENAME_LOCK.lock();
+            try {
+                Files.move(
+                        toPath(tempPath),
+                        toPath(path),
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+                success = true;
+            } finally {
+                RENAME_LOCK.unlock();
+            }
+        } finally {
+            if (!success) {
+                deleteQuietly(tempPath);
+            }
+        }
+    }
+
+    @Override
     public FileStatus getFileStatus(Path path) throws IOException {
         LOG.debug("Invoking getFileStatus for {}", path);
         final File file = toFile(path);

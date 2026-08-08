@@ -25,9 +25,6 @@ import org.apache.paimon.table.query.GlobalIndexQuerySnapshotLease;
 import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.annotation.ArgumentHint;
-import org.apache.flink.table.annotation.DataTypeHint;
-import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.Arrays;
@@ -35,42 +32,31 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Query Service procedure. Usage:
+ * Flink 1.18 positional-argument compatibility for the query-service procedure.
  *
- * <pre><code>
- *  CALL sys.query_service('tableId', 'parallelism')
- * </code></pre>
+ * <p>Flink 1.18 cannot omit optional procedure arguments declared with {@code ProcedureHint}, so
+ * this class keeps the original two-argument primary-key service and adds positional global-index
+ * overloads. Newer Flink versions use the annotated implementation from paimon-flink-common.
  */
 public class QueryServiceProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "query_service";
 
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
+    public String[] call(ProcedureContext procedureContext, String tableId, Integer parallelism)
+            throws Exception {
+        return call(procedureContext, tableId, parallelism, null, null, null, null);
     }
 
-    @ProcedureHint(
-            argument = {
-                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT")),
-                @ArgumentHint(
-                        name = "lookup_key",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true),
-                @ArgumentHint(
-                        name = "value_fields",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true),
-                @ArgumentHint(
-                        name = "consumer_id",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true),
-                @ArgumentHint(
-                        name = "lease_grace_period",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true)
-            })
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            Integer parallelism,
+            String lookupKey,
+            String valueFields)
+            throws Exception {
+        return call(procedureContext, tableId, parallelism, lookupKey, valueFields, null, null);
+    }
+
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
@@ -119,5 +105,10 @@ public class QueryServiceProcedure extends ProcedureBase {
                             : TimeUtils.parseDuration(leaseGracePeriod));
         }
         return execute(env, IDENTIFIER);
+    }
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 }

@@ -29,7 +29,10 @@ import org.apache.paimon.shade.netty4.io.netty.channel.embedded.EmbeddedChannel;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
 import java.nio.channels.ClosedChannelException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -125,6 +128,69 @@ class ClientHandlerTest {
         channel.pipeline().fireChannelInactive();
         assertThat(callback.onFailureCnt).isEqualTo(1);
         assertThat(callback.onFailureBody).isInstanceOf(ClosedChannelException.class);
+
+        assertSecureModeRejectsLegacyFailureFramesWithoutDeserializingThrowable(serializer);
+    }
+
+    private static void assertSecureModeRejectsLegacyFailureFramesWithoutDeserializingThrowable(
+            MessageSerializer<KvRequest, KvResponse> serializer) throws Exception {
+        final TestingClientHandlerCallback callback = new TestingClientHandlerCallback();
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        final EmbeddedChannel channel =
+                new EmbeddedChannel(
+                        new ClientHandler(
+                                serializer,
+                                callback,
+                                LegacyFailureFramePolicy.REJECT_SERIALIZED_THROWABLE));
+
+        DeserializationProbeException.reset();
+        ByteBuf requestFailure =
+                MessageSerializer.serializeRequestFailure(
+                        channel.alloc(), 42L, new DeserializationProbeException());
+        requestFailure.skipBytes(Integer.BYTES);
+        channel.writeInbound(requestFailure);
+
+        assertRejectedWithoutDeserialization(callback, requestFailure);
+
+        callback.reset();
+        ByteBuf serverFailure =
+                MessageSerializer.serializeServerFailure(
+                        channel.alloc(), new DeserializationProbeException());
+        serverFailure.skipBytes(Integer.BYTES);
+        channel.writeInbound(serverFailure);
+
+        assertRejectedWithoutDeserialization(callback, serverFailure);
+    }
+
+    private static void assertRejectedWithoutDeserialization(
+            TestingClientHandlerCallback callback, ByteBuf frame) {
+        assertThat(callback.onRequestFailureCnt).isZero();
+        assertThat(callback.onFailureCnt).isOne();
+        assertThat(callback.onFailureBody)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Rejected prohibited legacy serialized Throwable");
+        assertThat(DeserializationProbeException.deserializationCount()).isZero();
+        assertThat(frame.refCnt()).isZero();
+    }
+
+    private static class DeserializationProbeException extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+        private static final AtomicInteger DESERIALIZATION_COUNT = new AtomicInteger();
+
+        private void readObject(ObjectInputStream input)
+                throws IOException, ClassNotFoundException {
+            input.defaultReadObject();
+            DESERIALIZATION_COUNT.incrementAndGet();
+        }
+
+        private static void reset() {
+            DESERIALIZATION_COUNT.set(0);
+        }
+
+        private static int deserializationCount() {
+            return DESERIALIZATION_COUNT.get();
+        }
     }
 
     @SuppressWarnings("rawtypes")

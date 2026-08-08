@@ -109,6 +109,42 @@ public class DataEvolutionGlobalIndexCoverage {
         return Range.sortAndMergeOverlap(unindexedRanges, true);
     }
 
+    /**
+     * Returns whether every live data-file row range in the pinned snapshot is covered by the given
+     * field's global index.
+     *
+     * <p>Unlike {@link #unindexedRanges(int)}, this method never follows the configured search
+     * mode. In particular, {@code FAST} must not make an incompletely built index look complete to
+     * an online query service.
+     */
+    public boolean isFullyCovered(int fieldId) {
+        if (snapshot == null) {
+            return true;
+        }
+
+        List<Range> indexedRanges =
+                Range.sortAndMergeOverlap(indexedRanges(Collections.singleton(fieldId)), true);
+        SnapshotReader snapshotReader =
+                table.newSnapshotReader()
+                        .withPartitionFilter(partitionFilter)
+                        .withMode(ScanMode.ALL)
+                        .withSnapshot(snapshot);
+        for (Split split : snapshotReader.read().splits()) {
+            if (!(split instanceof DataSplit)) {
+                continue;
+            }
+            for (DataFileMeta file : ((DataSplit) split).dataFiles()) {
+                // A data-evolution lookup cannot safely reason about a file without row IDs.
+                if (file.firstRowId() == null
+                        || indexedRanges.isEmpty()
+                        || !file.nonNullRowIdRange().exclude(indexedRanges).isEmpty()) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     private void addCoverage(int fieldId, Range range) {
         coverageByField.computeIfAbsent(fieldId, k -> new ArrayList<>()).add(range);
     }

@@ -20,6 +20,7 @@ package org.apache.paimon.service;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -55,5 +56,110 @@ class ServiceManagerTest {
 
         Optional<InetSocketAddress[]> result = manager.service(PRIMARY_KEY_LOOKUP);
         assertThat(result).hasValue(addresses);
+    }
+
+    @Test
+    public void testOwnerScopedPublicationAndCloseFencing() {
+        ServiceManager manager = manager();
+        String serviceId = "global-index-test";
+        String oldOwner = "0000000000000000001-0000000000-old";
+        String newOwner = "0000000000000000001-0000000001-new";
+        GlobalIndexQueryServiceDescriptor oldAttempt = descriptor(oldOwner, true, "old");
+        GlobalIndexQueryServiceDescriptor newAttempt = descriptor(newOwner, false, "new attempt");
+
+        manager.resetGlobalIndexService(serviceId, oldAttempt);
+        manager.resetGlobalIndexService(serviceId, newAttempt);
+        // A delayed write and close from the old attempt cannot replace or delete the newer owner.
+        manager.resetGlobalIndexService(serviceId, oldAttempt);
+        assertThat(manager.globalIndexService(serviceId)).contains(newAttempt);
+        manager.deleteGlobalIndexServiceIfOwned(serviceId, oldOwner);
+        assertThat(manager.globalIndexService(serviceId)).contains(newAttempt);
+
+        manager.deleteGlobalIndexServiceIfOwned(serviceId, newOwner);
+        assertThat(manager.globalIndexService(serviceId))
+                .hasValueSatisfying(
+                        tombstone -> {
+                            assertThat(tombstone.ownerToken()).isEqualTo(newOwner);
+                            assertThat(tombstone.ready()).isFalse();
+                            assertThat(tombstone.reason()).contains("publisher is closed");
+                        });
+        // The highest owner token remains as a tombstone, so an even later old READY write cannot
+        // revive discovery.
+        manager.resetGlobalIndexService(serviceId, oldAttempt);
+        assertThat(manager.globalIndexService(serviceId))
+                .hasValueSatisfying(
+                        tombstone -> {
+                            assertThat(tombstone.ownerToken()).isEqualTo(newOwner);
+                            assertThat(tombstone.ready()).isFalse();
+                        });
+        assertThat(manager.nextGlobalIndexOwnerSequence(serviceId)).isEqualTo(2L);
+    }
+
+    @Test
+    public void testSameSequenceHasDeterministicTieBreak() {
+        ServiceManager manager = manager();
+        String serviceId = "global-index-same-sequence";
+        GlobalIndexQueryServiceDescriptor lower =
+                descriptor("0000000000000000005-0000000000-aaa", true, "lower");
+        GlobalIndexQueryServiceDescriptor higher =
+                descriptor("0000000000000000005-0000000000-bbb", false, "higher");
+
+        manager.resetGlobalIndexService(serviceId, lower);
+        manager.resetGlobalIndexService(serviceId, higher);
+        manager.resetGlobalIndexService(serviceId, lower);
+
+        assertThat(manager.globalIndexService(serviceId)).contains(higher);
+        assertThat(manager.nextGlobalIndexOwnerSequence(serviceId)).isEqualTo(6L);
+    }
+
+    @Test
+    public void testOwnerClaimRemovesCanonicalCompatibilityDescriptor() throws IOException {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.resolve("legacy").toUri());
+        ServiceManager manager = new ServiceManager(fileIO, tablePath);
+        String serviceId = "global-index-legacy";
+        GlobalIndexQueryServiceDescriptor legacy = descriptor("legacy-owner", true, "legacy");
+        Path canonicalPath =
+                new Path(new Path(tablePath, "service"), ServiceManager.SERVICE_PREFIX + serviceId);
+        fileIO.overwriteFileUtf8(canonicalPath, JsonSerdeUtil.toJson(legacy));
+        assertThat(manager.globalIndexService(serviceId)).contains(legacy);
+
+        GlobalIndexQueryServiceDescriptor replacement =
+                descriptor("0000000000000000001-0000000000-replacement", false, "replacement");
+        manager.resetGlobalIndexService(serviceId, replacement);
+        assertThat(fileIO.exists(canonicalPath)).isFalse();
+        manager.deleteGlobalIndexServiceIfOwned(serviceId, replacement.ownerToken());
+
+        assertThat(manager.globalIndexService(serviceId))
+                .hasValueSatisfying(
+                        tombstone -> {
+                            assertThat(tombstone.ownerToken()).isEqualTo(replacement.ownerToken());
+                            assertThat(tombstone.ready()).isFalse();
+                        });
+    }
+
+    private ServiceManager manager() {
+        return new ServiceManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+    }
+
+    private GlobalIndexQueryServiceDescriptor descriptor(
+            String ownerToken, boolean ready, String reason) {
+        return new GlobalIndexQueryServiceDescriptor(
+                GlobalIndexQueryServiceDescriptor.PROTOCOL_VERSION,
+                "table-uuid",
+                "main",
+                1L,
+                "schema-fingerprint",
+                1,
+                new int[] {2},
+                3L,
+                3L,
+                "snapshot-uuid",
+                GlobalIndexQueryServiceDescriptor.KEY_HASH_VERSION,
+                GlobalIndexQueryServiceDescriptor.LAYOUT,
+                ownerToken,
+                ready,
+                reason,
+                new GlobalIndexQueryServiceDescriptor.Endpoint[0]);
     }
 }

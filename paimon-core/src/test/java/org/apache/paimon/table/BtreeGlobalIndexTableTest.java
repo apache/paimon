@@ -611,6 +611,25 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testExactCoverageDoesNotTrustFastSearchMode() throws Exception {
+        write(100L);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        assertThat(exactCoverage(table, 1)).isFalse();
+
+        createIndex("f1");
+        table = (FileStoreTable) catalog.getTable(identifier());
+        assertThat(exactCoverage(table, 1)).isTrue();
+
+        appendRows(100, 200);
+        table = (FileStoreTable) catalog.getTable(identifier());
+        assertThat(exactCoverage(table, 1)).isFalse();
+
+        createIndexIncremental("f1");
+        table = (FileStoreTable) catalog.getTable(identifier());
+        assertThat(exactCoverage(table, 1)).isTrue();
+    }
+
+    @Test
     public void testOrdinaryAndSourceBackedBTreeIndexCoverageCanCoexist() throws Exception {
         write(10L);
         FileStoreTable table =
@@ -850,6 +869,21 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         return splits.stream()
                 .map(split -> ((IndexedSplit) split).dataSplit())
                 .collect(Collectors.toList());
+    }
+
+    private boolean exactCoverage(FileStoreTable table, int fieldId) {
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        List<IndexFileMeta> indexFiles =
+                table.store().newIndexFileHandler().scan(snapshot, "btree").stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(Collectors.toList());
+        return new DataEvolutionGlobalIndexCoverage(
+                        table,
+                        snapshot,
+                        PartitionPredicate.ALWAYS_TRUE,
+                        indexFiles,
+                        CoreOptions.GlobalIndexSearchMode.FAST)
+                .isFullyCovered(fieldId);
     }
 
     private List<String> readF1(ReadBuilder readBuilder, TableScan.Plan plan) throws Exception {

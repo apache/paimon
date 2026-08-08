@@ -93,6 +93,12 @@ final class ServerConnection<REQ extends MessageBody, RESP extends MessageBody> 
         }
     }
 
+    int numPendingRequests() {
+        synchronized (connectionLock) {
+            return internalConnection.numPendingRequests();
+        }
+    }
+
     void establishConnection(ChannelFuture future) {
         synchronized (connectionLock) {
             Preconditions.checkState(running, "Connection has already been closed.");
@@ -121,14 +127,30 @@ final class ServerConnection<REQ extends MessageBody, RESP extends MessageBody> 
                     final String clientName,
                     final MessageSerializer<REQ, RESP> serializer,
                     final ServiceRequestStats stats) {
+        return createPendingConnection(
+                clientName, serializer, stats, LegacyFailureFramePolicy.ALLOW_SERIALIZED_THROWABLE);
+    }
+
+    static <REQ extends MessageBody, RESP extends MessageBody>
+            ServerConnection<REQ, RESP> createPendingConnection(
+                    final String clientName,
+                    final MessageSerializer<REQ, RESP> serializer,
+                    final ServiceRequestStats stats,
+                    final LegacyFailureFramePolicy legacyFailureFramePolicy) {
         final Object lock = new Object();
 
         return new ServerConnection<>(
                 lock,
                 new PendingConnection<>(
+                        lock,
                         channel ->
                                 new EstablishedConnection<>(
-                                        lock, clientName, serializer, channel, stats)));
+                                        lock,
+                                        clientName,
+                                        serializer,
+                                        channel,
+                                        stats,
+                                        legacyFailureFramePolicy)));
     }
 
     interface InternalConnection<REQ, RESP> {
@@ -137,6 +159,8 @@ final class ServerConnection<REQ extends MessageBody, RESP extends MessageBody> 
         InternalConnection<REQ, RESP> establishConnection(ChannelFuture future);
 
         boolean isEstablished();
+
+        int numPendingRequests();
 
         CompletableFuture<Void> getCloseFuture();
 
@@ -147,6 +171,7 @@ final class ServerConnection<REQ extends MessageBody, RESP extends MessageBody> 
     private static final class PendingConnection<REQ extends MessageBody, RESP extends MessageBody>
             implements InternalConnection<REQ, RESP> {
 
+        private final Object lock;
         private final Function<Channel, EstablishedConnection<REQ, RESP>> connectionFactory;
         private final CompletableFuture<Void> closeFuture = new CompletableFuture<>();
 
@@ -160,7 +185,9 @@ final class ServerConnection<REQ extends MessageBody, RESP extends MessageBody> 
 
         /** Creates a pending connection to the given server. */
         private PendingConnection(
+                Object lock,
                 Function<Channel, EstablishedConnection<REQ, RESP>> connectionFactory) {
+            this.lock = lock;
             this.connectionFactory = connectionFactory;
         }
 
@@ -182,6 +209,14 @@ final class ServerConnection<REQ extends MessageBody, RESP extends MessageBody> 
                 // Queue this and handle when connected
                 final PendingRequest<REQ, RESP> pending = new PendingRequest<>(request);
                 queuedRequests.add(pending);
+                pending.whenComplete(
+                        (ignored, throwable) -> {
+                            if (pending.isCancelled()) {
+                                synchronized (lock) {
+                                    queuedRequests.remove(pending);
+                                }
+                            }
+                        });
                 return pending;
             }
         }
@@ -199,6 +234,12 @@ final class ServerConnection<REQ extends MessageBody, RESP extends MessageBody> 
         @Override
         public boolean isEstablished() {
             return false;
+        }
+
+        @Override
+        public int numPendingRequests() {
+            queuedRequests.removeIf(CompletableFuture::isCancelled);
+            return queuedRequests.size();
         }
 
         @Override
@@ -224,9 +265,18 @@ final class ServerConnection<REQ extends MessageBody, RESP extends MessageBody> 
 
                 while (!queuedRequests.isEmpty()) {
                     final PendingRequest<REQ, RESP> pending = queuedRequests.poll();
-
-                    FutureUtils.forward(
-                            establishedConnection.sendRequest(pending.getRequest()), pending);
+                    if (pending.isCancelled()) {
+                        continue;
+                    }
+                    CompletableFuture<RESP> forwarded =
+                            establishedConnection.sendRequest(pending.getRequest());
+                    FutureUtils.forward(forwarded, pending);
+                    pending.whenComplete(
+                            (ignored, throwable) -> {
+                                if (pending.isCancelled()) {
+                                    forwarded.cancel(false);
+                                }
+                            });
                 }
 
                 return establishedConnection;
@@ -312,14 +362,17 @@ final class ServerConnection<REQ extends MessageBody, RESP extends MessageBody> 
                 final String clientName,
                 final MessageSerializer<REQ, RESP> serializer,
                 final Channel channel,
-                final ServiceRequestStats stats) {
+                final ServiceRequestStats stats,
+                final LegacyFailureFramePolicy legacyFailureFramePolicy) {
 
             this.lock = lock;
             this.channel = Preconditions.checkNotNull(channel);
 
             // Add the client handler with the callback
             channel.pipeline()
-                    .addLast(clientName + " Handler", new ClientHandler<>(serializer, this));
+                    .addLast(
+                            clientName + " Handler",
+                            new ClientHandler<>(serializer, this, legacyFailureFramePolicy));
 
             this.stats = stats;
             stats.reportActiveConnection();
@@ -390,6 +443,14 @@ final class ServerConnection<REQ extends MessageBody, RESP extends MessageBody> 
                     try {
                         final long requestId = requestCount++;
                         pendingRequests.put(requestId, requestPromiseTs);
+                        requestPromiseTs.whenComplete(
+                                (ignored, throwable) -> {
+                                    if (throwable != null
+                                            && pendingRequests.remove(
+                                                    requestId, requestPromiseTs)) {
+                                        stats.reportFailedRequest();
+                                    }
+                                });
 
                         stats.reportRequest();
 
@@ -431,6 +492,11 @@ final class ServerConnection<REQ extends MessageBody, RESP extends MessageBody> 
         @Override
         public boolean isEstablished() {
             return true;
+        }
+
+        @Override
+        public int numPendingRequests() {
+            return pendingRequests.size();
         }
 
         @Override

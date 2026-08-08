@@ -77,6 +77,9 @@ public class NetworkClient<REQ extends MessageBody, RESP extends MessageBody> {
     /** Statistics tracker. */
     private final ServiceRequestStats stats;
 
+    /** Policy for legacy Java-serialized Throwable failure frames. */
+    private final LegacyFailureFramePolicy legacyFailureFramePolicy;
+
     private final Map<InetSocketAddress, ServerConnection<REQ, RESP>> connections =
             new ConcurrentHashMap<>();
 
@@ -97,13 +100,45 @@ public class NetworkClient<REQ extends MessageBody, RESP extends MessageBody> {
             final int numEventLoopThreads,
             final MessageSerializer<REQ, RESP> serializer,
             final ServiceRequestStats stats) {
+        this(clientName, numEventLoopThreads, serializer, stats, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Creates a client with a protocol-specific maximum response frame length while keeping the
+     * legacy constructor unbounded for compatibility.
+     */
+    public NetworkClient(
+            final String clientName,
+            final int numEventLoopThreads,
+            final MessageSerializer<REQ, RESP> serializer,
+            final ServiceRequestStats stats,
+            final int maxFrameLength) {
+        this(
+                clientName,
+                numEventLoopThreads,
+                serializer,
+                stats,
+                maxFrameLength,
+                LegacyFailureFramePolicy.ALLOW_SERIALIZED_THROWABLE);
+    }
+
+    /** Creates a client with protocol-specific frame and legacy failure-frame policies. */
+    public NetworkClient(
+            final String clientName,
+            final int numEventLoopThreads,
+            final MessageSerializer<REQ, RESP> serializer,
+            final ServiceRequestStats stats,
+            final int maxFrameLength,
+            final LegacyFailureFramePolicy legacyFailureFramePolicy) {
 
         Preconditions.checkArgument(
                 numEventLoopThreads >= 1, "Non-positive number of event loop threads.");
+        Preconditions.checkArgument(maxFrameLength > 0, "Non-positive maximum frame length.");
 
         this.clientName = Preconditions.checkNotNull(clientName);
         this.messageSerializer = Preconditions.checkNotNull(serializer);
         this.stats = Preconditions.checkNotNull(stats);
+        this.legacyFailureFramePolicy = Preconditions.checkNotNull(legacyFailureFramePolicy);
 
         final ThreadFactory threadFactory =
                 new ThreadFactoryBuilder()
@@ -126,7 +161,7 @@ public class NetworkClient<REQ extends MessageBody, RESP extends MessageBody> {
                                         channel.pipeline()
                                                 .addLast(
                                                         new LengthFieldBasedFrameDecoder(
-                                                                Integer.MAX_VALUE, 0, 4, 0, 4))
+                                                                maxFrameLength, 0, 4, 0, 4))
                                                 .addLast(new ChunkedWriteHandler());
                                     }
                                 });
@@ -149,7 +184,10 @@ public class NetworkClient<REQ extends MessageBody, RESP extends MessageBody> {
                         ignored -> {
                             final ServerConnection<REQ, RESP> newConnection =
                                     ServerConnection.createPendingConnection(
-                                            clientName, messageSerializer, stats);
+                                            clientName,
+                                            messageSerializer,
+                                            stats,
+                                            legacyFailureFramePolicy);
                             bootstrap
                                     .connect(serverAddress.getAddress(), serverAddress.getPort())
                                     .addListener(
@@ -227,5 +265,10 @@ public class NetworkClient<REQ extends MessageBody, RESP extends MessageBody> {
 
     public boolean isEventGroupShutdown() {
         return bootstrap == null || bootstrap.config().group().isTerminated();
+    }
+
+    /** Returns the number of requests currently awaiting a network response. */
+    public int getNumPendingRequests() {
+        return connections.values().stream().mapToInt(ServerConnection::numPendingRequests).sum();
     }
 }

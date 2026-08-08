@@ -37,6 +37,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.CommonTestUtils;
 
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -51,6 +52,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 
@@ -84,6 +86,16 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
         RemoteTableQuery query = new RemoteTableQuery(paimonTable("DIM"));
 
         sql("INSERT INTO DIM VALUES (1, 11), (2, 22), (3, 33), (4, 44)");
+        ServiceManager serviceManager = paimonTable("DIM").store().newServiceManager();
+        CommonTestUtils.waitUtil(
+                () ->
+                        serviceManager
+                                .service(PRIMARY_KEY_LOOKUP)
+                                .map(addresses -> addresses.length == 2)
+                                .orElse(false),
+                Duration.ofSeconds(30),
+                Duration.ofMillis(100),
+                "Query service did not publish both executor addresses.");
         Thread.sleep(2000);
 
         assertThat(query.lookup(row(), 0, row(1)))

@@ -20,17 +20,22 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.paimon.privilege.NoPrivilegeException;
+import org.apache.paimon.service.GlobalIndexQueryServiceDescriptor;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.query.GlobalIndexQueryServiceUtils;
+import org.apache.paimon.table.query.GlobalIndexQueryServiceUtils.QuerySpec;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.function.Executable;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -432,6 +437,55 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
                             service.close();
                         })
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    @Timeout(120)
+    public void testGlobalIndexQueryServiceWithPositionalArguments() throws Exception {
+        sql(
+                "CREATE TABLE GLOBAL_IMAGE (url STRING, descriptor BYTES) WITH ("
+                        + "'bucket'='-1', "
+                        + "'global-index.enabled'='true', "
+                        + "'row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true', "
+                        + "'file.format'='avro', "
+                        + "'continuous.discovery-interval'='20 ms', "
+                        + "'consumer.expiration-time'='10 min')");
+        sql("INSERT INTO GLOBAL_IMAGE VALUES ('object.jpg', X'010203')");
+        sql("CALL sys.create_global_index('default.GLOBAL_IMAGE', 'url', 'btree', '', '')");
+
+        FileStoreTable table = paimonTable("GLOBAL_IMAGE");
+        QuerySpec spec =
+                GlobalIndexQueryServiceUtils.querySpec(
+                        table, "url", Collections.singletonList("descriptor"));
+        try (CloseableIterator<Row> service =
+                streamSqlIter(
+                        "CALL sys.query_service('default.GLOBAL_IMAGE', 2, 'url', "
+                                + "'descriptor', 'flink118-global-index-it', '0 s')")) {
+            GlobalIndexQueryServiceDescriptor descriptor = waitForGlobalIndexService(table, spec);
+            assertThat(descriptor.ready()).isTrue();
+            assertThat(descriptor.endpoints()).hasSize(2);
+            assertThat(descriptor.lookupFieldId()).isEqualTo(spec.lookupFieldId());
+            assertThat(descriptor.valueFieldIds()).containsExactly(spec.valueFieldIds());
+        }
+    }
+
+    private GlobalIndexQueryServiceDescriptor waitForGlobalIndexService(
+            FileStoreTable table, QuerySpec spec) throws Exception {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(60).toNanos();
+        GlobalIndexQueryServiceDescriptor last = null;
+        while (System.nanoTime() < deadline) {
+            last =
+                    table.store()
+                            .newServiceManager()
+                            .globalIndexService(spec.serviceId())
+                            .orElse(null);
+            if (last != null && last.ready()) {
+                return last;
+            }
+            Thread.sleep(50L);
+        }
+        throw new AssertionError("Timed out waiting for positional global-index service: " + last);
     }
 
     @Test

@@ -42,10 +42,12 @@ import java.net.InetSocketAddress;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -85,6 +87,12 @@ public abstract class NetworkServer<REQ extends MessageBody, RESP extends Messag
     /** The number of threads to be used for query serving. */
     private final int numQueryThreads;
 
+    /** Maximum number of bytes accepted for one complete network frame. */
+    private final int maxFrameLength;
+
+    /** Maximum number of requests waiting for a query thread. */
+    private final int maxQueuedRequests;
+
     /** Atomic shut down future. */
     private final AtomicReference<CompletableFuture<Void>> serverShutdownFuture =
             new AtomicReference<>(null);
@@ -117,16 +125,61 @@ public abstract class NetworkServer<REQ extends MessageBody, RESP extends Messag
             final Iterator<Integer> bindPortIterator,
             final Integer numEventLoopThreads,
             final Integer numQueryThreads) {
+        this(
+                serverName,
+                bindAddress,
+                bindPortIterator,
+                numEventLoopThreads,
+                numQueryThreads,
+                Integer.MAX_VALUE,
+                Integer.MAX_VALUE);
+    }
+
+    /**
+     * Creates a server with a protocol-specific maximum frame length while keeping the legacy
+     * constructor unbounded for compatibility.
+     */
+    protected NetworkServer(
+            final String serverName,
+            final String bindAddress,
+            final Iterator<Integer> bindPortIterator,
+            final Integer numEventLoopThreads,
+            final Integer numQueryThreads,
+            final int maxFrameLength) {
+        this(
+                serverName,
+                bindAddress,
+                bindPortIterator,
+                numEventLoopThreads,
+                numQueryThreads,
+                maxFrameLength,
+                Integer.MAX_VALUE);
+    }
+
+    /** Creates a server with protocol-specific frame and query-queue bounds. */
+    protected NetworkServer(
+            final String serverName,
+            final String bindAddress,
+            final Iterator<Integer> bindPortIterator,
+            final Integer numEventLoopThreads,
+            final Integer numQueryThreads,
+            final int maxFrameLength,
+            final int maxQueuedRequests) {
 
         Preconditions.checkNotNull(bindPortIterator);
         Preconditions.checkArgument(
                 numEventLoopThreads >= 1, "Non-positive number of event loop threads.");
         Preconditions.checkArgument(numQueryThreads >= 1, "Non-positive number of query threads.");
+        Preconditions.checkArgument(maxFrameLength > 0, "Non-positive maximum frame length.");
+        Preconditions.checkArgument(
+                maxQueuedRequests > 0, "Non-positive maximum queued request count.");
 
         this.serverName = Preconditions.checkNotNull(serverName);
         this.bindAddress = Preconditions.checkNotNull(bindAddress);
         this.numEventLoopThreads = numEventLoopThreads;
         this.numQueryThreads = numQueryThreads;
+        this.maxFrameLength = maxFrameLength;
+        this.maxQueuedRequests = maxQueuedRequests;
 
         this.bindPortRange = new HashSet<>();
         while (bindPortIterator.hasNext()) {
@@ -151,12 +204,27 @@ public abstract class NetworkServer<REQ extends MessageBody, RESP extends Messag
                         .setDaemon(true)
                         .setNameFormat("Paimon " + getServerName() + " Thread %d")
                         .build();
-        return Executors.newFixedThreadPool(numQueryThreads, threadFactory);
+        if (maxQueuedRequests == Integer.MAX_VALUE) {
+            return Executors.newFixedThreadPool(numQueryThreads, threadFactory);
+        }
+        return new ThreadPoolExecutor(
+                numQueryThreads,
+                numQueryThreads,
+                0L,
+                TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(maxQueuedRequests),
+                threadFactory,
+                new ThreadPoolExecutor.AbortPolicy());
     }
 
     /** Returns the thread-pool responsible for processing incoming requests. */
     protected ExecutorService getQueryExecutor() {
         return queryExecutor;
+    }
+
+    /** Returns the configured maximum complete request-frame length. */
+    protected int getMaxFrameLength() {
+        return maxFrameLength;
     }
 
     /**
@@ -246,7 +314,7 @@ public abstract class NetworkServer<REQ extends MessageBody, RESP extends Messag
                         .channel(NioServerSocketChannel.class)
                         .option(ChannelOption.ALLOCATOR, bufferPool)
                         .childOption(ChannelOption.ALLOCATOR, bufferPool)
-                        .childHandler(new ServerChannelInitializer<>(handler));
+                        .childHandler(new ServerChannelInitializer<>(handler, maxFrameLength));
 
         final int defaultHighWaterMark = 64 * 1024; // from DefaultChannelConfig (not exposed)
         // (ignore warning here to make this flexible in case the configuration values change)
@@ -379,21 +447,26 @@ public abstract class NetworkServer<REQ extends MessageBody, RESP extends Messag
         /** The shared request handler. */
         private final AbstractServerHandler<REQ, RESP> sharedRequestHandler;
 
+        /** Maximum number of bytes accepted for one complete network frame. */
+        private final int maxFrameLength;
+
         /**
          * Creates the channel pipeline initializer with the shared request handler.
          *
          * @param sharedRequestHandler Shared request handler.
          */
-        ServerChannelInitializer(AbstractServerHandler<REQ, RESP> sharedRequestHandler) {
+        ServerChannelInitializer(
+                AbstractServerHandler<REQ, RESP> sharedRequestHandler, int maxFrameLength) {
             this.sharedRequestHandler =
                     Preconditions.checkNotNull(sharedRequestHandler, "MessageBody handler");
+            this.maxFrameLength = maxFrameLength;
         }
 
         @Override
         protected void initChannel(SocketChannel channel) {
             channel.pipeline()
                     .addLast(new ChunkedWriteHandler())
-                    .addLast(new LengthFieldBasedFrameDecoder(Integer.MAX_VALUE, 0, 4, 0, 4))
+                    .addLast(new LengthFieldBasedFrameDecoder(maxFrameLength, 0, 4, 0, 4))
                     .addLast(sharedRequestHandler);
         }
     }

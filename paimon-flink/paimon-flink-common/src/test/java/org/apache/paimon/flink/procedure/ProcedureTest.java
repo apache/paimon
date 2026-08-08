@@ -98,6 +98,24 @@ public class ProcedureTest {
         }
     }
 
+    @Test
+    public void testQueryServiceRejectsConsumerPathTraversalBeforeCatalogAccess() {
+        QueryServiceProcedure procedure = new QueryServiceProcedure();
+        assertThatThrownBy(
+                        () ->
+                                procedure.call(
+                                        null,
+                                        "default.images",
+                                        1,
+                                        "url",
+                                        "descriptor",
+                                        "query/../../service",
+                                        "10 min"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("consumer-id")
+                .hasMessageContaining("single alphanumeric path segment");
+    }
+
     private Method getMethodFromName(Class<?> clazz, String methodName) {
         // get all methods of current and parent class
         Method[] methods = clazz.getMethods();
