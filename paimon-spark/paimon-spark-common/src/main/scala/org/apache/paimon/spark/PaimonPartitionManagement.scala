@@ -58,7 +58,13 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
             toPaimonPartition(r, partitionKeys.take(r.numFields))
         }
       case _ =>
-        throw new UnsupportedOperationException("Only FileStoreTable supports partitions.")
+        // Reached by the partition operations this trait still serves directly, such as TRUNCATE
+        // PARTITION. Saying that only a FileStoreTable has partitions would be wrong for a Format
+        // Table with catalog-managed partitions, which has them and lists them here.
+        throw new UnsupportedOperationException(
+          s"This partition operation is supported only for a Paimon table, and ${table.name()} is " +
+            s"not one. A Format Table manages its partitions through ADD PARTITION, " +
+            s"DROP PARTITION and MSCK REPAIR TABLE.")
     }
   }
 
