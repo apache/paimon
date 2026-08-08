@@ -16,9 +16,11 @@
 # under the License.
 
 import os
+import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Iterator, List, Optional
+from urllib.parse import urlparse
 
 import pandas
 import pyarrow
@@ -40,6 +42,18 @@ from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
 
 ROW_KIND_COLUMN = "_row_kind"
+
+
+def _supports_cancellable_arrow_reader():
+    reader_type = pyarrow.ipc.RecordBatchReader
+    return (hasattr(reader_type, "from_stream")
+            and hasattr(reader_type, "close"))
+
+
+def _create_cancellable_arrow_batch_reader(schema, batch_iterator):
+    source_reader = pyarrow.ipc.RecordBatchReader.from_batches(
+        schema, batch_iterator)
+    return pyarrow.ipc.RecordBatchReader.from_stream(source_reader)
 
 
 class _RemainingRows:
@@ -84,6 +98,11 @@ class TableRead:
     # workers (P) each spin up blob_parallelism (B) blob threads, so peak
     # connections ~= P*B. Shrink per-split B to keep the product bounded.
     _MAX_TOTAL_BLOB_WORKERS = 64
+    # Remote reads use smaller byte steps and a floor to hide request latency.
+    _PIPELINE_REMOTE_BYTES_PER_WORKER = 64 * 1024 * 1024
+    _PIPELINE_LOCAL_BYTES_PER_WORKER = 256 * 1024 * 1024
+    _PIPELINE_REMOTE_MIN_WORKERS = 4
+    _PIPELINE_MAX_AUTO_WORKERS = 16
 
     def __init__(
         self,
@@ -150,14 +169,142 @@ class TableRead:
 
         return _record_generator()
 
-    def to_arrow_batch_reader(self, splits: List[Split],
-                              blob_parallelism: Optional[int] = None) -> pyarrow.ipc.RecordBatchReader:
+    def to_arrow_batch_reader(
+        self,
+        splits: List[Split],
+        blob_parallelism: Optional[int] = None,
+        parallelism: Optional[int] = None,
+    ) -> pyarrow.ipc.RecordBatchReader:
+        """Stream batches in split order with explicit or adaptive parallelism.
+
+        PyArrow runtimes without ``RecordBatchReader.close`` or ``from_stream``
+        fall back to serial reads.
+        """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
+        effective = self._resolve_parallelism(parallelism, len(splits))
+        configured = (
+            parallelism is not None or self._read_parallelism is not None
+        )
+        cancellable = _supports_cancellable_arrow_reader()
+        workers = (self._pipeline_workers(splits, effective, configured)
+                   if cancellable and self.limit is None else 1)
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
-        batch_iterator = self._arrow_batch_generator(splits, schema, effective_bp)
-        return pyarrow.ipc.RecordBatchReader.from_batches(schema, batch_iterator)
+        if self.limit is not None and self.limit <= 0:
+            return pyarrow.ipc.RecordBatchReader.from_batches(schema, iter(()))
+        if (self.limit is None
+                and self._should_run_parallel(splits, workers)
+                and cancellable):
+            effective_bp = self._cap_blob_parallelism(workers, effective_bp)
+            batch_iterator = self._pipelined_arrow_batch_generator(
+                splits, schema, effective_bp, workers)
+            return _create_cancellable_arrow_batch_reader(
+                schema, batch_iterator)
+        batch_iterator = self._arrow_batch_generator(
+            splits, schema, effective_bp)
+        return pyarrow.ipc.RecordBatchReader.from_batches(
+            schema, batch_iterator)
+
+    def _pipelined_arrow_batch_generator(
+        self,
+        splits: List[Split],
+        schema: pyarrow.Schema,
+        blob_parallelism: int,
+        workers: int,
+    ) -> Iterator[pyarrow.RecordBatch]:
+        cancel = threading.Event()
+        workers = min(workers, len(splits))
+        if workers < 2:
+            yield from self._arrow_batch_generator(
+                splits, schema, blob_parallelism)
+            return
+        end = object()
+        stop = object()
+        results = queue.Queue()
+        batch_slots = [threading.Semaphore(1) for _ in splits]
+        task_queue = queue.Queue()
+
+        def read_split(index, split):
+            batch_slot = batch_slots[index]
+            batches = self._arrow_batch_generator(
+                [split], schema, blob_parallelism)
+            error = None
+            try:
+                while not cancel.is_set():
+                    batch_slot.acquire()
+                    if cancel.is_set():
+                        batch_slot.release()
+                        break
+                    try:
+                        batch = next(batches)
+                    except StopIteration:
+                        batch_slot.release()
+                        break
+                    except BaseException:
+                        batch_slot.release()
+                        raise
+                    if cancel.is_set():
+                        batch_slot.release()
+                        return
+                    results.put((index, batch))
+            except BaseException as exception:
+                error = exception
+            finally:
+                try:
+                    batches.close()
+                except BaseException as exception:
+                    if error is None:
+                        error = exception
+                if error is not None and not cancel.is_set():
+                    cancel.set()
+                    results.put((-1, error))
+                elif not cancel.is_set():
+                    results.put((index, end))
+
+        def worker():
+            while True:
+                task = task_queue.get()
+                if task is stop:
+                    return
+                read_split(*task)
+                if cancel.is_set():
+                    return
+
+        threads = []
+        try:
+            for _ in range(workers):
+                thread = threading.Thread(target=worker, daemon=True)
+                thread.start()
+                threads.append(thread)
+
+            for index, split in enumerate(splits):
+                task_queue.put((index, split))
+
+            pending = {}
+            for index, batch_slot in enumerate(batch_slots):
+                while True:
+                    if index in pending:
+                        item = pending.pop(index)
+                    else:
+                        item_index, item = results.get()
+                        if item_index < 0:
+                            raise item
+                        if item_index != index:
+                            pending[item_index] = item
+                            continue
+                    if item is end:
+                        break
+                    try:
+                        yield item
+                    finally:
+                        batch_slot.release()
+        finally:
+            cancel.set()
+            for batch_slot in batch_slots:
+                batch_slot.release()
+            for _ in threads:
+                task_queue.put(stop)
 
     @staticmethod
     def _add_row_kind_to_schema(schema: pyarrow.Schema) -> pyarrow.Schema:
@@ -222,7 +369,11 @@ class TableRead:
         if self._should_run_parallel(splits, effective):
             return self._to_arrow_parallel(splits, schema, effective, effective_bp)
 
-        batch_reader = self.to_arrow_batch_reader(splits, blob_parallelism=effective_bp)
+        batch_reader = self.to_arrow_batch_reader(
+            splits,
+            blob_parallelism=effective_bp,
+            parallelism=effective,
+        )
 
         table_list = []
         for batch in iter(batch_reader.read_next_batch, None):
@@ -354,6 +505,115 @@ class TableRead:
         )
         return (effective >= 2 and len(splits) >= 2
                 and not deferred_limit_may_prune)
+
+    def _pipeline_workers(
+        self,
+        splits: List[Split],
+        effective: int,
+        configured: bool,
+    ) -> int:
+        maximum = min(effective, len(splits))
+        if configured or maximum < 2:
+            return maximum
+        maximum = min(maximum, self._PIPELINE_MAX_AUTO_WORKERS)
+
+        total_bytes = sum(
+            self._estimated_split_file_size(split) for split in splits)
+        local = self._pipeline_reads_are_local(splits)
+        if total_bytes <= 0:
+            return (1 if local else
+                    min(maximum, self._PIPELINE_REMOTE_MIN_WORKERS))
+
+        bytes_per_worker = (self._PIPELINE_LOCAL_BYTES_PER_WORKER
+                            if local
+                            else self._PIPELINE_REMOTE_BYTES_PER_WORKER)
+        workers = max(
+            1, (total_bytes + bytes_per_worker - 1) // bytes_per_worker)
+        if not local:
+            workers = max(
+                workers, min(maximum, self._PIPELINE_REMOTE_MIN_WORKERS))
+        return min(maximum, workers)
+
+    def _estimated_split_file_size(self, split: Split) -> int:
+        try:
+            file_size = max(0, int(getattr(split, "file_size", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+        if file_size <= 0:
+            return 0
+
+        current = split
+        visited = set()
+        while id(current) not in visited:
+            visited.add(id(current))
+            data_split = getattr(current, "data_split", None)
+            if not callable(data_split):
+                break
+            underlying = data_split()
+            selected_rows = max(
+                0, int(getattr(current, "row_count", 0) or 0))
+            underlying_rows = max(
+                0, int(getattr(underlying, "row_count", 0) or 0))
+            if 0 < selected_rows < underlying_rows:
+                file_size = (
+                    file_size * selected_rows + underlying_rows - 1
+                ) // underlying_rows
+            current = underlying
+
+        table_fields = getattr(self.table, "fields", None)
+        projected_fields = (
+            getattr(self, "_scan_read_type", None)
+            or getattr(self, "read_type", None)
+        )
+        if (table_fields and projected_fields
+                and len(projected_fields) < len(table_fields)):
+            file_size = (
+                file_size * len(projected_fields) + len(table_fields) - 1
+            ) // len(table_fields)
+        return max(1, file_size)
+
+    def _pipeline_reads_are_local(self, splits: List[Split]) -> bool:
+        runtime_locality = self._runtime_file_io_is_local()
+        if runtime_locality is not None:
+            return runtime_locality
+
+        data_paths = []
+        missing_path = False
+        for split in splits:
+            files = getattr(split, "files", None)
+            if files is None:
+                missing_path = True
+                continue
+            for data_file in files:
+                path = (
+                    getattr(data_file, "external_path", None)
+                    or getattr(data_file, "file_path", None)
+                )
+                if path:
+                    data_paths.append(str(path))
+                else:
+                    missing_path = True
+
+        if not data_paths or missing_path:
+            data_paths.append(str(getattr(self.table, "table_path", "") or ""))
+        return all(self._is_local_data_path(path) for path in data_paths)
+
+    def _runtime_file_io_is_local(self) -> Optional[bool]:
+        from pypaimon.filesystem.caching_file_io import CachingFileIO
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        file_io = getattr(self.table, "file_io", None)
+        while isinstance(file_io, CachingFileIO):
+            file_io = getattr(file_io, "_delegate", None)
+        if isinstance(file_io, LocalFileIO):
+            return True
+        return None
+
+    @staticmethod
+    def _is_local_data_path(path: str) -> bool:
+        if len(path) >= 2 and path[0].isalpha() and path[1] == ":":
+            return True
+        return urlparse(path).scheme.lower() in ("", "file")
 
     def _limit_covers_all_splits(self, splits: List[Split]) -> bool:
         """Return whether split metadata proves that LIMIT cannot drop rows."""
