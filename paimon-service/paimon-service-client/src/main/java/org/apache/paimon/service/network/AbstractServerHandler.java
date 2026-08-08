@@ -40,6 +40,7 @@ import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -68,6 +69,9 @@ public abstract class AbstractServerHandler<REQ extends MessageBody, RESP extend
     /** Exposed server statistics. */
     private final ServiceRequestStats stats;
 
+    /** Whether this protocol permits Java-serialized Throwable failure frames. */
+    private final LegacyFailureFramePolicy legacyFailureFramePolicy;
+
     /**
      * Create the handler.
      *
@@ -78,11 +82,21 @@ public abstract class AbstractServerHandler<REQ extends MessageBody, RESP extend
             final NetworkServer<REQ, RESP> server,
             final MessageSerializer<REQ, RESP> serializer,
             final ServiceRequestStats stats) {
+        this(server, serializer, stats, LegacyFailureFramePolicy.ALLOW_SERIALIZED_THROWABLE);
+    }
+
+    /** Creates a handler with an explicit legacy failure-frame policy. */
+    public AbstractServerHandler(
+            final NetworkServer<REQ, RESP> server,
+            final MessageSerializer<REQ, RESP> serializer,
+            final ServiceRequestStats stats,
+            final LegacyFailureFramePolicy legacyFailureFramePolicy) {
 
         this.server = Preconditions.checkNotNull(server);
         this.serializer = Preconditions.checkNotNull(serializer);
         this.queryExecutor = server.getQueryExecutor();
         this.stats = Preconditions.checkNotNull(stats);
+        this.legacyFailureFramePolicy = Preconditions.checkNotNull(legacyFailureFramePolicy);
     }
 
     protected String getServerName() {
@@ -123,7 +137,19 @@ public abstract class AbstractServerHandler<REQ extends MessageBody, RESP extend
                 // blocking (e.g. file I/O).
                 //
                 // A submission failure is not treated as fatal.
-                queryExecutor.submit(new AsyncRequestTask<>(this, ctx, requestId, request, stats));
+                try {
+                    queryExecutor.submit(
+                            new AsyncRequestTask<>(this, ctx, requestId, request, stats));
+                } catch (RejectedExecutionException e) {
+                    RESP rejectedResponse = rejectedExecutionResponse(requestId, request);
+                    if (rejectedResponse == null) {
+                        throw e;
+                    }
+                    stats.reportFailedRequest();
+                    ctx.writeAndFlush(
+                            MessageSerializer.serializeResponse(
+                                    ctx.alloc(), requestId, rejectedResponse));
+                }
 
             } else {
                 // ------------------------------------------------------------
@@ -136,12 +162,15 @@ public abstract class AbstractServerHandler<REQ extends MessageBody, RESP extend
                                 + ". Expected "
                                 + MessageType.REQUEST
                                 + ".";
-                final ByteBuf failure =
-                        MessageSerializer.serializeServerFailure(
-                                ctx.alloc(), new IllegalArgumentException(errMsg));
-
                 LOG.debug(errMsg);
-                ctx.writeAndFlush(failure);
+                if (allowsSerializedThrowableFailureFrames()) {
+                    final ByteBuf failure =
+                            MessageSerializer.serializeServerFailure(
+                                    ctx.alloc(), new IllegalArgumentException(errMsg));
+                    ctx.writeAndFlush(failure);
+                } else {
+                    ctx.close();
+                }
             }
         } catch (Throwable t) {
             LOG.error(
@@ -149,24 +178,35 @@ public abstract class AbstractServerHandler<REQ extends MessageBody, RESP extend
                     requestId == UNKNOWN_REQUEST_ID ? "unknown" : requestId,
                     t);
 
-            final String stringifiedCause = ExceptionUtils.stringifyException(t);
+            if (allowsSerializedThrowableFailureFrames()) {
+                final String stringifiedCause = ExceptionUtils.stringifyException(t);
 
-            String errMsg;
-            ByteBuf err;
-            if (request != null) {
-                errMsg = "Failed request with ID " + requestId + ". Caused by: " + stringifiedCause;
-                err =
-                        MessageSerializer.serializeRequestFailure(
-                                ctx.alloc(), requestId, new RuntimeException(errMsg));
-                stats.reportFailedRequest();
+                String errMsg;
+                ByteBuf err;
+                if (request != null) {
+                    errMsg =
+                            "Failed request with ID "
+                                    + requestId
+                                    + ". Caused by: "
+                                    + stringifiedCause;
+                    err =
+                            MessageSerializer.serializeRequestFailure(
+                                    ctx.alloc(), requestId, new RuntimeException(errMsg));
+                    stats.reportFailedRequest();
+                } else {
+                    errMsg = "Failed incoming message. Caused by: " + stringifiedCause;
+                    err =
+                            MessageSerializer.serializeServerFailure(
+                                    ctx.alloc(), new RuntimeException(errMsg));
+                }
+
+                ctx.writeAndFlush(err);
             } else {
-                errMsg = "Failed incoming message. Caused by: " + stringifiedCause;
-                err =
-                        MessageSerializer.serializeServerFailure(
-                                ctx.alloc(), new RuntimeException(errMsg));
+                if (request != null) {
+                    stats.reportFailedRequest();
+                }
+                ctx.close();
             }
-
-            ctx.writeAndFlush(err);
 
         } finally {
             // IMPORTANT: We have to always recycle the incoming buffer.
@@ -181,14 +221,24 @@ public abstract class AbstractServerHandler<REQ extends MessageBody, RESP extend
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        final String msg =
-                "Exception in server pipeline. Caused by: "
-                        + ExceptionUtils.stringifyException(cause);
-        final ByteBuf err =
-                MessageSerializer.serializeServerFailure(ctx.alloc(), new RuntimeException(msg));
+        if (allowsSerializedThrowableFailureFrames()) {
+            final String msg =
+                    "Exception in server pipeline. Caused by: "
+                            + ExceptionUtils.stringifyException(cause);
+            final ByteBuf err =
+                    MessageSerializer.serializeServerFailure(
+                            ctx.alloc(), new RuntimeException(msg));
 
-        LOG.debug(msg);
-        ctx.writeAndFlush(err).addListener(ChannelFutureListener.CLOSE);
+            LOG.debug(msg);
+            ctx.writeAndFlush(err).addListener(ChannelFutureListener.CLOSE);
+        } else {
+            LOG.debug("Exception in server pipeline; closing secure protocol connection.", cause);
+            ctx.close();
+        }
+    }
+
+    private boolean allowsSerializedThrowableFailureFrames() {
+        return legacyFailureFramePolicy == LegacyFailureFramePolicy.ALLOW_SERIALIZED_THROWABLE;
     }
 
     /**
@@ -202,6 +252,13 @@ public abstract class AbstractServerHandler<REQ extends MessageBody, RESP extend
      * @return A future with the response to be forwarded to the client.
      */
     public abstract CompletableFuture<RESP> handleRequest(final long requestId, final REQ request);
+
+    /**
+     * Returns a protocol response when the query executor rejects a request, or null for legacy.
+     */
+    protected RESP rejectedExecutionResponse(long requestId, REQ request) {
+        return null;
+    }
 
     /**
      * Shuts down any handler-specific resources, e.g. thread pools etc and returns a {@link
@@ -291,25 +348,13 @@ public abstract class AbstractServerHandler<REQ extends MessageBody, RESP extend
 
                                 } catch (BadRequestException e) {
                                     LOG.debug("Bad request (request ID = {})", requestId, e);
-                                    try {
-                                        stats.reportFailedRequest();
-                                        final ByteBuf err =
-                                                MessageSerializer.serializeRequestFailure(
-                                                        ctx.alloc(), requestId, e);
-                                        ctx.writeAndFlush(err);
-                                    } catch (IOException io) {
-                                        LOG.error(
-                                                "Failed to respond with the error after failed request",
-                                                io);
-                                    }
+                                    respondWithRequestFailure(e);
                                 } catch (Throwable t) {
                                     LOG.error(
                                             "Error while handling request with ID {}",
                                             requestId,
                                             t);
-                                    try {
-                                        stats.reportFailedRequest();
-
+                                    if (handler.allowsSerializedThrowableFailureFrames()) {
                                         final String errMsg =
                                                 "Failed request "
                                                         + requestId
@@ -317,19 +362,28 @@ public abstract class AbstractServerHandler<REQ extends MessageBody, RESP extend
                                                         + System.lineSeparator()
                                                         + " Caused by: "
                                                         + ExceptionUtils.stringifyException(t);
-                                        final ByteBuf err =
-                                                MessageSerializer.serializeRequestFailure(
-                                                        ctx.alloc(),
-                                                        requestId,
-                                                        new RuntimeException(errMsg));
-                                        ctx.writeAndFlush(err);
-                                    } catch (IOException io) {
-                                        LOG.error(
-                                                "Failed to respond with the error after failed request",
-                                                io);
+                                        respondWithRequestFailure(new RuntimeException(errMsg));
+                                    } else {
+                                        respondWithRequestFailure(t);
                                     }
                                 }
                             });
+        }
+
+        private void respondWithRequestFailure(Throwable throwable) {
+            stats.reportFailedRequest();
+            if (!handler.allowsSerializedThrowableFailureFrames()) {
+                ctx.close();
+                return;
+            }
+            try {
+                final ByteBuf err =
+                        MessageSerializer.serializeRequestFailure(
+                                ctx.alloc(), requestId, throwable);
+                ctx.writeAndFlush(err);
+            } catch (IOException io) {
+                LOG.error("Failed to respond with the error after failed request", io);
+            }
         }
 
         @Override

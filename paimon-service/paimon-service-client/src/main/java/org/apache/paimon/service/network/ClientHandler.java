@@ -32,6 +32,7 @@ import org.apache.paimon.shade.netty4.io.netty.util.ReferenceCountUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
 
 /**
@@ -49,6 +50,8 @@ public class ClientHandler<REQ extends MessageBody, RESP extends MessageBody>
 
     private final ClientHandlerCallback<RESP> callback;
 
+    private final LegacyFailureFramePolicy legacyFailureFramePolicy;
+
     /**
      * Creates a handler with the callback.
      *
@@ -58,8 +61,17 @@ public class ClientHandler<REQ extends MessageBody, RESP extends MessageBody>
     public ClientHandler(
             final MessageSerializer<REQ, RESP> serializer,
             final ClientHandlerCallback<RESP> callback) {
+        this(serializer, callback, LegacyFailureFramePolicy.ALLOW_SERIALIZED_THROWABLE);
+    }
+
+    /** Creates a handler with an explicit policy for Java-serialized Throwable failure frames. */
+    public ClientHandler(
+            final MessageSerializer<REQ, RESP> serializer,
+            final ClientHandlerCallback<RESP> callback,
+            final LegacyFailureFramePolicy legacyFailureFramePolicy) {
         this.serializer = Preconditions.checkNotNull(serializer);
         this.callback = Preconditions.checkNotNull(callback);
+        this.legacyFailureFramePolicy = Preconditions.checkNotNull(legacyFailureFramePolicy);
     }
 
     @Override
@@ -73,9 +85,11 @@ public class ClientHandler<REQ extends MessageBody, RESP extends MessageBody>
                 RESP result = serializer.deserializeResponse(buf);
                 callback.onRequestResult(requestId, result);
             } else if (msgType == MessageType.REQUEST_FAILURE) {
+                rejectLegacyFailureFrameIfConfigured(msgType);
                 RequestFailure failure = MessageSerializer.deserializeRequestFailure(buf);
                 callback.onRequestFailure(failure.getRequestId(), failure.getCause());
             } else if (msgType == MessageType.SERVER_FAILURE) {
+                rejectLegacyFailureFrameIfConfigured(msgType);
                 throw MessageSerializer.deserializeServerFailure(buf);
             } else {
                 throw new IllegalStateException("Unexpected response type '" + msgType + "'");
@@ -88,6 +102,15 @@ public class ClientHandler<REQ extends MessageBody, RESP extends MessageBody>
             }
         } finally {
             ReferenceCountUtil.release(msg);
+        }
+    }
+
+    private void rejectLegacyFailureFrameIfConfigured(MessageType messageType) throws IOException {
+        if (legacyFailureFramePolicy == LegacyFailureFramePolicy.REJECT_SERIALIZED_THROWABLE) {
+            throw new IOException(
+                    "Rejected prohibited legacy serialized Throwable failure frame of type "
+                            + messageType
+                            + '.');
         }
     }
 
