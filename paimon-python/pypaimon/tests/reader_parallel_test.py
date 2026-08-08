@@ -19,14 +19,17 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import types
 import unittest
 from unittest import mock
 
 import pyarrow as pa
+import pyarrow.dataset as ds
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.table_read import TableRead, _RemainingRows
+from pypaimon.read.table_read import (
+    TableRead, _RemainingRows, _supports_cancellable_arrow_reader)
 
 
 class ResolveParallelismTest(unittest.TestCase):
@@ -118,6 +121,210 @@ class RemainingRowsTest(unittest.TestCase):
             t.join()
         self.assertEqual(sum(granted), 10_000)
         self.assertTrue(rr.exhausted())
+
+
+class PipelinePolicyTest(unittest.TestCase):
+
+    @staticmethod
+    def _workers(
+        path,
+        sizes,
+        configured=False,
+        data_paths=None,
+        file_io=None,
+        effective=8,
+    ):
+        read = TableRead.__new__(TableRead)
+        read.table = types.SimpleNamespace(
+            table_path=path, file_io=file_io)
+        splits = []
+        for index, size in enumerate(sizes):
+            files = None
+            if data_paths is not None:
+                files = [types.SimpleNamespace(
+                    external_path=data_paths[index], file_path=None)]
+            splits.append(types.SimpleNamespace(
+                file_size=size, files=files))
+        return read._pipeline_workers(splits, effective, configured)
+
+    def test_adaptive_workers(self):
+        mb = 1024 * 1024
+        cases = [
+            ('small_local', '/tmp/table', [8 * mb] * 8, False, None, 1),
+            ('small_remote', 's3://bucket/table', [4 * mb] * 8,
+             False, None, 4),
+            ('large_remote', 'oss://bucket/table', [64 * mb] * 4,
+             False, None, 4),
+            ('large_local', 'file:///tmp/table', [256 * mb] * 2,
+             False, None, 2),
+            ('explicit', '/tmp/table', [1] * 4, True, None, 4),
+            ('unknown_remote', 'hdfs://host/table', [0, 0],
+             False, None, 2),
+            ('external_remote', '/tmp/table', [64 * mb] * 2, False,
+             ['oss://bucket/a', 'oss://bucket/b'], 2),
+            ('external_local', 'oss://bucket/table', [64 * mb] * 2, False,
+             ['file:///cache/a', 'file:///cache/b'], 1),
+        ]
+        for name, path, sizes, configured, paths, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(expected, self._workers(
+                    path, sizes, configured, paths))
+
+        self.assertEqual(16, self._workers(
+            's3://bucket/table', [64 * mb] * 32, effective=32))
+        self.assertEqual(32, self._workers(
+            '/tmp/table', [1] * 32, configured=True, effective=32))
+
+        from pypaimon.filesystem.caching_file_io import CachingFileIO
+        from pypaimon.filesystem.local_file_io import FuseLocalFileIO
+        from pypaimon.utils.file_type import FileType
+
+        file_ios = [
+            FuseLocalFileIO('oss://bucket/table', '/tmp/fuse/table'),
+            CachingFileIO(object(), object(), {FileType.DATA}),
+        ]
+        for file_io in file_ios:
+            with self.subTest(file_io=type(file_io).__name__):
+                self.assertEqual(1, self._workers(
+                    'oss://bucket/table', [64 * mb] * 2,
+                    file_io=file_io))
+
+    def test_estimate_accounts_for_range_and_projection(self):
+        read = TableRead.__new__(TableRead)
+        read.table = types.SimpleNamespace(fields=list(range(10)))
+        read._scan_read_type = list(range(2))
+        underlying = types.SimpleNamespace(file_size=1000, row_count=1000)
+        sliced = types.SimpleNamespace(
+            file_size=1000,
+            row_count=100,
+            data_split=lambda: underlying,
+        )
+        indexed = types.SimpleNamespace(
+            file_size=1000,
+            row_count=50,
+            data_split=lambda: sliced,
+        )
+
+        self.assertEqual(10, read._estimated_split_file_size(indexed))
+
+
+class PipelinedBatchGeneratorTest(unittest.TestCase):
+
+    def setUp(self):
+        self.read = TableRead.__new__(TableRead)
+        self.read.limit = None
+        self.read._read_parallelism = None
+        self.read.read_type = []
+        self.read.include_row_kind = False
+        self.schema = pa.schema([('value', pa.int64())])
+
+    def _batch(self, value):
+        return pa.RecordBatch.from_arrays(
+            [pa.array([value], type=pa.int64())], schema=self.schema)
+
+    def test_reads_concurrently_and_preserves_split_order(self):
+        second_started = threading.Event()
+
+        def generate(splits, schema, blob_parallelism):
+            value = splits[0]
+            if value == 0 and not second_started.wait(5):
+                raise TimeoutError('second split did not start')
+            if value == 1:
+                second_started.set()
+            yield self._batch(value)
+
+        with mock.patch.object(
+            self.read, '_arrow_batch_generator', side_effect=generate
+        ):
+            batches = list(self.read._pipelined_arrow_batch_generator(
+                [0, 1, 2], self.schema, 1, 2))
+
+        self.assertEqual(
+            [0, 1, 2],
+            [batch.column(0)[0].as_py() for batch in batches],
+        )
+
+    def test_buffers_one_batch_per_active_split(self):
+        produced = [0, 0]
+        second_ready = threading.Event()
+
+        def generate(splits, schema, blob_parallelism):
+            value = splits[0]
+            for _ in range(3):
+                produced[value] += 1
+                if value == 1:
+                    second_ready.set()
+                elif produced[value] == 1 and not second_ready.wait(5):
+                    raise TimeoutError('second split did not produce a batch')
+                yield self._batch(value)
+
+        with mock.patch.object(
+            self.read, '_arrow_batch_generator', side_effect=generate,
+        ):
+            batches = self.read._pipelined_arrow_batch_generator(
+                [0, 1], self.schema, 1, 2)
+            next(batches)
+            self.assertEqual([1, 1], produced)
+            batches.close()
+
+    def test_later_error_bypasses_blocked_earlier_split(self):
+        first_started = threading.Event()
+        release = threading.Event()
+
+        def generate(splits, schema, blob_parallelism):
+            if splits[0] == 0:
+                first_started.set()
+                release.wait(5)
+                yield self._batch(0)
+            else:
+                if not first_started.wait(5):
+                    raise TimeoutError('first split did not start')
+                raise RuntimeError('later split failed')
+
+        try:
+            with mock.patch.object(
+                self.read, '_arrow_batch_generator', side_effect=generate
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, 'later split failed'
+                ):
+                    list(self.read._pipelined_arrow_batch_generator(
+                        [0, 1], self.schema, 1, 2))
+        finally:
+            release.set()
+
+    @unittest.skipUnless(
+        _supports_cancellable_arrow_reader(), 'reader close is unavailable')
+    def test_public_reader_close_cancels_workers(self):
+        started = threading.Barrier(2)
+        closed = []
+        closed_lock = threading.Lock()
+
+        def generate(splits, schema, blob_parallelism):
+            value = splits[0]
+            try:
+                started.wait(5)
+                while True:
+                    yield self._batch(value)
+            finally:
+                with closed_lock:
+                    closed.append(value)
+
+        with mock.patch(
+            'pypaimon.read.table_read.PyarrowFieldParser.from_paimon_schema',
+            return_value=self.schema,
+        ), mock.patch.object(
+            self.read, '_arrow_batch_generator', side_effect=generate
+        ):
+            reader = self.read.to_arrow_batch_reader(
+                [0, 1], parallelism=2)
+            reader.read_next_batch()
+            reader.close()
+
+        deadline = time.monotonic() + 1
+        while len(closed) < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertCountEqual([0, 1], closed)
 
 
 class ParallelReaderAppendOnlyTest(unittest.TestCase):
@@ -225,6 +432,68 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
             .sort_values('user_id').reset_index(drop=True)
         self.assertTrue(serial_df.equals(parallel_df))
 
+    def test_batch_reader_parallelism_controls(self):
+        supports_pipeline = _supports_cancellable_arrow_reader()
+        cases = [
+            ('runtime', self.table, {'parallelism': 4},
+             supports_pipeline, supports_pipeline, True),
+            ('option', self.table_opt_4, {},
+             supports_pipeline, supports_pipeline, False),
+            ('default', self.table, {}, supports_pipeline, False, False),
+            ('no_close', self.table, {'parallelism': 4}, False, False, False),
+        ]
+        for name, table, kwargs, can_close, uses_pipeline, use_scanner in cases:
+            with self.subTest(name=name):
+                rb = table.new_read_builder()
+                splits = self._scan_splits(rb)
+                read = rb.new_read()
+                expected = pa.Table.from_batches(
+                    read.to_arrow_batch_reader(splits, parallelism=1))
+                with mock.patch(
+                    'pypaimon.read.table_read.'
+                    '_supports_cancellable_arrow_reader',
+                    return_value=can_close,
+                ), mock.patch.object(
+                    read,
+                    '_pipelined_arrow_batch_generator',
+                    wraps=read._pipelined_arrow_batch_generator,
+                ) as pipeline:
+                    reader = read.to_arrow_batch_reader(splits, **kwargs)
+                    actual = (
+                        ds.Scanner.from_batches(reader).to_table()
+                        if use_scanner else reader.read_all()
+                    )
+                if uses_pipeline:
+                    pipeline.assert_called_once()
+                else:
+                    pipeline.assert_not_called()
+                self.assertEqual(expected, actual)
+
+    def test_parallel_batch_reader_limit_matches_serial(self):
+        for limit in (0, 600):
+            with self.subTest(limit=limit):
+                rb = self.table.new_read_builder().with_limit(limit)
+                splits = self._scan_splits(rb)
+                read = rb.new_read()
+                serial = read.to_arrow_batch_reader(
+                    splits, parallelism=1).read_all()
+                with mock.patch.object(
+                    read, '_pipelined_arrow_batch_generator'
+                ) as pipeline, mock.patch.object(
+                    read,
+                    '_arrow_batch_generator',
+                    wraps=read._arrow_batch_generator,
+                ) as serial_read:
+                    parallel = read.to_arrow_batch_reader(
+                        splits, parallelism=4).read_all()
+                pipeline.assert_not_called()
+                if limit == 0:
+                    serial_read.assert_not_called()
+                else:
+                    serial_read.assert_called_once()
+                self.assertEqual(serial, parallel)
+                self.assertEqual(limit, parallel.num_rows)
+
     def test_default_none_runs_auto_parallel(self):
         # No runtime arg and no table option => auto. With >= 2 splits on a
         # multi-core box this takes the parallel fan-out path; the result
@@ -257,11 +526,14 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
     def test_method_arg_overrides_option_to_serial(self):
         # option=4 but caller passes 1: should disable parallelism.
         read = self.table_opt_4.new_read_builder().new_read()
-        with mock.patch.object(read, '_to_arrow_parallel') as patched:
+        with mock.patch.object(read, '_to_arrow_parallel') as patched, \
+                mock.patch.object(
+                    read, '_pipelined_arrow_batch_generator') as pipeline:
             patched.side_effect = AssertionError(
                 "_to_arrow_parallel should not be called when arg=1 overrides option")
             splits = self._scan_splits(self.table_opt_4.new_read_builder())
             read.to_arrow(splits, parallelism=1)
+        pipeline.assert_not_called()
 
     def test_method_arg_overrides_option_to_parallel(self):
         # option=1 (forces serial) but caller passes 4: should enable parallelism.
@@ -305,6 +577,8 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
         self.assertNotIn("read.parallelism", str(ctx.exception))
         with self.assertRaises(ValueError):
             read.to_pandas(splits, parallelism=-1)
+        with self.assertRaises(ValueError):
+            read.to_arrow_batch_reader(splits, parallelism=0)
 
     def test_invalid_option_value_raises(self):
         # Build a fresh table with an invalid option value.
@@ -441,17 +715,26 @@ class ParallelReaderPrimaryKeyTest(unittest.TestCase):
         rb = self.table.new_read_builder()
         splits = rb.new_scan().plan().splits()
         read = rb.new_read()
-        serial = read.to_pandas(splits).sort_values(
-            ['dt', 'user_id']).reset_index(drop=True)
-        parallel = read.to_pandas(splits, parallelism=4).sort_values(
-            ['dt', 'user_id']).reset_index(drop=True)
-        self.assertTrue(serial.equals(parallel))
-        # Ensure the merge actually picked the latest version.
-        # user_id=1 / dt=p1 must have behavior='v2-updated', item_id=9001.
-        updated = parallel[(parallel.user_id == 1) & (parallel.dt == 'p1')]
-        self.assertEqual(len(updated), 1)
-        self.assertEqual(updated.iloc[0].behavior, 'v2-updated')
-        self.assertEqual(updated.iloc[0].item_id, 9001)
+
+        def load(kind, parallelism):
+            if kind == 'table':
+                return read.to_pandas(splits, parallelism=parallelism)
+            return pa.Table.from_batches(
+                read.to_arrow_batch_reader(
+                    splits, parallelism=parallelism)).to_pandas()
+
+        for kind in ('table', 'batch_reader'):
+            with self.subTest(kind=kind):
+                serial = load(kind, 1).sort_values(
+                    ['dt', 'user_id']).reset_index(drop=True)
+                parallel = load(kind, 4).sort_values(
+                    ['dt', 'user_id']).reset_index(drop=True)
+                self.assertTrue(serial.equals(parallel))
+                updated = parallel[
+                    (parallel.user_id == 1) & (parallel.dt == 'p1')]
+                self.assertEqual(len(updated), 1)
+                self.assertEqual(updated.iloc[0].behavior, 'v2-updated')
+                self.assertEqual(updated.iloc[0].item_id, 9001)
 
     def test_parallel_with_limit_pk(self):
         limit = 12
