@@ -470,6 +470,43 @@ class NativePlanTest(unittest.TestCase):
             'metastore': 'rest',
         })
 
+    @patch(
+        'pypaimon.filesystem.jindo_file_system_handler.JINDO_AVAILABLE', True)
+    def test_native_plan_prefers_installed_jindo_for_oss(self):
+        table = Mock(table_path='oss://bucket/table')
+        table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
+            CatalogContext.create_from_options(Options({})))
+
+        self.assertEqual(_catalog_options(table), {
+            'metastore': 'filesystem',
+            'fs.oss.impl': 'jindo',
+        })
+
+    @patch(
+        'pypaimon.filesystem.jindo_file_system_handler.JINDO_AVAILABLE', False)
+    def test_native_plan_uses_opendal_without_jindo(self):
+        table = Mock(table_path='oss://bucket/table')
+        table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
+            CatalogContext.create_from_options(Options({})))
+
+        self.assertEqual(_catalog_options(table), {
+            'metastore': 'filesystem',
+        })
+
+    @patch(
+        'pypaimon.filesystem.jindo_file_system_handler.JINDO_AVAILABLE', True)
+    def test_native_plan_respects_explicit_legacy_oss(self):
+        table = Mock(table_path='oss://bucket/table')
+        table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
+            CatalogContext.create_from_options(Options({
+                'fs.oss.impl': 'legacy',
+            })))
+
+        self.assertEqual(_catalog_options(table), {
+            'fs.oss.impl': 'legacy',
+            'metastore': 'filesystem',
+        })
+
     def test_catalog_options_reject_loader_subclass(self):
         class RoutedFileSystemLoader(FileSystemCatalogLoader):
             pass
