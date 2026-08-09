@@ -43,7 +43,7 @@ class JindoInputStreamTest(unittest.TestCase):
             handler, "blob")
 
         self.assertIsInstance(result, JindoInputFile)
-        self.assertTrue(result.supports_concurrent_pread)
+        self.assertFalse(result.supports_concurrent_pread)
         handler._jindo_fs.open.assert_not_called()
         self.assertEqual(b"data", result.read_at(4, 7))
         native_stream.pread.assert_called_once_with(4, 7)

@@ -3878,7 +3878,7 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertGreater(len(streams), 1)
         self.assertLessEqual(len(streams), 8)
 
-    def test_unmarked_read_at_uses_bounded_stream_pool(self):
+    def test_non_concurrent_read_at_uses_bounded_stream_pool(self):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(256)) * 64
@@ -3886,6 +3886,8 @@ class CoalesceRangesTest(unittest.TestCase):
         streams = []
 
         class PositionalStream:
+            supports_concurrent_pread = False
+
             def __init__(self):
                 self.reading = False
                 self.reads = 0

@@ -115,7 +115,8 @@ def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
 
 
 class JindoInputFile:
-    supports_concurrent_pread = True
+    # Jindo stream handles are not documented as thread-safe.
+    supports_concurrent_pread = False
 
     def __init__(self, stream_factory):
         self._stream_factory = stream_factory
