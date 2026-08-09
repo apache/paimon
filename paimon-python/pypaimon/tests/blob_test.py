@@ -16,6 +16,7 @@
 # under the License.
 
 import datetime
+import inspect
 import io
 import os
 import shutil
@@ -1586,11 +1587,17 @@ class BlobEndToEndTest(unittest.TestCase):
 
         with patch("pypaimon.read.split_read.FormatBlobReader") as reader_cls:
             raw_read.file_reader_supplier(file, False, [field.name], False)
-            self.assertEqual(123, reader_cls.call_args.kwargs["file_size"])
+            arguments = inspect.signature(FormatBlobReader).bind_partial(
+                *reader_cls.call_args.args, **reader_cls.call_args.kwargs
+            ).arguments
+            self.assertEqual(123, arguments.get("file_size"))
 
             reader_cls.reset_mock()
             evolution_read._create_raw_blob_file_reader(file, [field.name])
-            self.assertEqual(123, reader_cls.call_args.kwargs["file_size"])
+            arguments = inspect.signature(FormatBlobReader).bind_partial(
+                *reader_cls.call_args.args, **reader_cls.call_args.kwargs
+            ).arguments
+            self.assertEqual(123, arguments.get("file_size"))
 
     def test_blob_reader_row_indices_pushdown(self):
         file_io = LocalFileIO(self.temp_dir, Options({}))
