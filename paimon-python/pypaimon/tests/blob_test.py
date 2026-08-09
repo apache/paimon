@@ -1587,15 +1587,17 @@ class BlobEndToEndTest(unittest.TestCase):
 
         with patch("pypaimon.read.split_read.FormatBlobReader") as reader_cls:
             raw_read.file_reader_supplier(file, False, [field.name], False)
+            args, kwargs = reader_cls.call_args
             arguments = inspect.signature(FormatBlobReader).bind_partial(
-                *reader_cls.call_args.args, **reader_cls.call_args.kwargs
+                *args, **kwargs
             ).arguments
             self.assertEqual(123, arguments.get("file_size"))
 
             reader_cls.reset_mock()
             evolution_read._create_raw_blob_file_reader(file, [field.name])
+            args, kwargs = reader_cls.call_args
             arguments = inspect.signature(FormatBlobReader).bind_partial(
-                *reader_cls.call_args.args, **reader_cls.call_args.kwargs
+                *args, **kwargs
             ).arguments
             self.assertEqual(123, arguments.get("file_size"))
 
