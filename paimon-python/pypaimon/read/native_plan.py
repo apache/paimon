@@ -24,7 +24,7 @@ still applies them while reading, so pushdown remains an optimization.
 
 from typing import List, Optional, Tuple
 
-from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.predicate import Predicate
@@ -93,6 +93,14 @@ def _catalog_options(table) -> dict:
     if metastore is None:
         raise ValueError("native_plan requires an exact built-in catalog loader")
     normalized[CatalogOptions.METASTORE.key()] = metastore
+    if str(getattr(table, 'table_path', '')).startswith('oss://'):
+        from pypaimon.filesystem.jindo_file_system_handler import (
+            JINDO_AVAILABLE,
+        )
+        impl = normalized.get(OssOptions.OSS_IMPL.key())
+        if JINDO_AVAILABLE and (impl is None or impl.lower() == 'jindo'):
+            # This catalog is only used for Rust scan planning.
+            normalized[OssOptions.OSS_IMPL.key()] = 'jindo'
     return normalized
 
 
