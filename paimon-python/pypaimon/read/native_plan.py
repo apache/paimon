@@ -22,9 +22,10 @@ Predicates and limits are pushed into Rust planning. The normal pypaimon reader
 still applies them while reading, so pushdown remains an optimization.
 """
 
+import re
 from typing import List, Optional, Tuple
 
-from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.predicate import Predicate
@@ -44,6 +45,22 @@ def native_runtime_available() -> bool:
     except ImportError:
         return False
     return hasattr(PaimonCatalog, 'get_table') and hasattr(Split, 'serialize')
+
+
+def native_family_search_modes_available() -> bool:
+    """Whether Rust supports family-specific global-index search modes."""
+    if not native_runtime_available():
+        return False
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+    except ImportError:
+        return False
+    try:
+        rust_version = version('pypaimon-rust')
+    except PackageNotFoundError:
+        return False
+    match = re.match(r'^(\d+)\.(\d+)', rust_version)
+    return match is not None and tuple(map(int, match.groups())) >= (0, 4)
 
 
 def _partition_fields(table):
@@ -93,6 +110,14 @@ def _catalog_options(table) -> dict:
     if metastore is None:
         raise ValueError("native_plan requires an exact built-in catalog loader")
     normalized[CatalogOptions.METASTORE.key()] = metastore
+    if str(getattr(table, 'table_path', '')).startswith('oss://'):
+        from pypaimon.filesystem.jindo_file_system_handler import (
+            JINDO_AVAILABLE,
+        )
+        impl = normalized.get(OssOptions.OSS_IMPL.key())
+        if JINDO_AVAILABLE and (impl is None or impl.lower() == 'jindo'):
+            # This catalog is only used for Rust scan planning.
+            normalized[OssOptions.OSS_IMPL.key()] = 'jindo'
     return normalized
 
 
@@ -108,7 +133,11 @@ def _read_options(table) -> dict:
     for option in (
             CoreOptions.SCAN_SNAPSHOT_ID,
             CoreOptions.SCAN_TAG_NAME,
-            CoreOptions.SCAN_TIMESTAMP_MILLIS):
+            CoreOptions.SCAN_TIMESTAMP_MILLIS,
+            CoreOptions.GLOBAL_INDEX_SEARCH_MODE,
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE,
+            CoreOptions.VECTOR_INDEX_SEARCH_MODE,
+            CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE):
         if table_options.contains_key(option.key()):
             options[option.key()] = _option_value_to_string(
                 table_options.get(option))

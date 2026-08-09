@@ -35,6 +35,7 @@ from pypaimon.read.native_plan import (
     _predicate_to_native,
     _read_options,
     _restore_python_partition_paths,
+    native_family_search_modes_available,
     native_plan,
 )
 from pypaimon.read.scan_stats import ScanStats
@@ -328,6 +329,50 @@ class NativePlanTest(unittest.TestCase):
         np.assert_not_called()
         fs.scan.assert_called_once_with()
 
+    def test_family_search_modes_require_rust_0_4(self):
+        for available, expect_native in ((False, False), (True, True)):
+            with self.subTest(available=available):
+                fs = Mock(partition_key_predicate=None)
+                fs.scan.return_value = fallback = object()
+                scan = _scan(native_enabled=True, file_scanner=fs)
+                scan.table.options.options.contains_key.side_effect = (
+                    lambda key: key == 'scalar-index.search-mode')
+                scan.table._applied_dynamic_options = {
+                    'scalar-index.search-mode': 'full',
+                }
+                split = Mock(partition=Mock(values=[]), snapshot_id=1)
+
+                with patch(
+                        'pypaimon.read.native_plan.'
+                        'native_family_search_modes_available',
+                        return_value=available), patch(
+                            'pypaimon.read.native_plan.native_plan',
+                            return_value=[split]) as native:
+                    plan = scan.plan()
+
+                if expect_native:
+                    self.assertEqual(plan.splits(), [split])
+                    native.assert_called_once()
+                    fs.scan.assert_not_called()
+                else:
+                    self.assertIs(plan, fallback)
+                    native.assert_not_called()
+                    fs.scan.assert_called_once_with()
+
+    def test_removing_search_mode_falls_back(self):
+        fs = Mock(partition_key_predicate=None)
+        fs.scan.return_value = fallback = object()
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        scan.table._applied_dynamic_options = {
+            'scalar-index.search-mode': None,
+        }
+
+        with patch('pypaimon.read.native_plan.native_plan') as native:
+            self.assertIs(scan.plan(), fallback)
+
+        native.assert_not_called()
+        fs.scan.assert_called_once_with()
+
     def test_plan_falls_back_when_native_plan_raises(self):
         # A native planning failure (e.g. unsupported scheme) must fall back, not crash.
         fs = Mock(partition_key_predicate=None)
@@ -425,6 +470,43 @@ class NativePlanTest(unittest.TestCase):
             'metastore': 'rest',
         })
 
+    @patch(
+        'pypaimon.filesystem.jindo_file_system_handler.JINDO_AVAILABLE', True)
+    def test_native_plan_prefers_installed_jindo_for_oss(self):
+        table = Mock(table_path='oss://bucket/table')
+        table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
+            CatalogContext.create_from_options(Options({})))
+
+        self.assertEqual(_catalog_options(table), {
+            'metastore': 'filesystem',
+            'fs.oss.impl': 'jindo',
+        })
+
+    @patch(
+        'pypaimon.filesystem.jindo_file_system_handler.JINDO_AVAILABLE', False)
+    def test_native_plan_uses_opendal_without_jindo(self):
+        table = Mock(table_path='oss://bucket/table')
+        table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
+            CatalogContext.create_from_options(Options({})))
+
+        self.assertEqual(_catalog_options(table), {
+            'metastore': 'filesystem',
+        })
+
+    @patch(
+        'pypaimon.filesystem.jindo_file_system_handler.JINDO_AVAILABLE', True)
+    def test_native_plan_respects_explicit_legacy_oss(self):
+        table = Mock(table_path='oss://bucket/table')
+        table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
+            CatalogContext.create_from_options(Options({
+                'fs.oss.impl': 'legacy',
+            })))
+
+        self.assertEqual(_catalog_options(table), {
+            'fs.oss.impl': 'legacy',
+            'metastore': 'filesystem',
+        })
+
     def test_catalog_options_reject_loader_subclass(self):
         class RoutedFileSystemLoader(FileSystemCatalogLoader):
             pass
@@ -454,12 +536,35 @@ class NativePlanTest(unittest.TestCase):
         table.options.source_split_open_file_cost.return_value = 128
         table.options.options = Options({
             'scan.snapshot-id': '9',
+            'global-index.search-mode': 'detail',
+            'scalar-index.search-mode': 'full',
+            'vector-index.search-mode': 'fast',
+            'full-text-index.search-mode': 'fast',
         })
         self.assertEqual(_read_options(table), {
             'source.split.target-size': '1024',
             'source.split.open-file-cost': '128',
             'scan.snapshot-id': '9',
+            'global-index.search-mode': 'detail',
+            'scalar-index.search-mode': 'full',
+            'vector-index.search-mode': 'fast',
+            'full-text-index.search-mode': 'fast',
         })
+
+    @unittest.skipIf(sys.version_info < (3, 8),
+                     "importlib.metadata requires Python 3.8")
+    def test_family_search_mode_version_gate(self):
+        cases = {
+            '0.3.0': False,
+            '0.4.0': True,
+            '0.4.0.dev20260808': True,
+            '1.0.0': True,
+        }
+        for version, expected in cases.items():
+            with self.subTest(version=version), patch(
+                    'importlib.metadata.version', return_value=version):
+                self.assertEqual(
+                    native_family_search_modes_available(), expected)
 
     def test_partition_path_prefers_existing_python_legacy_path(self):
         table = Mock(partition_keys=['p'])
