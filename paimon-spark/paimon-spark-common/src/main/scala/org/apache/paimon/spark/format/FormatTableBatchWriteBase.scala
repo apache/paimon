@@ -115,7 +115,7 @@ private class FormatTableDataWriter(batchWriteBuilder: BatchWriteBuilder, writeS
   }
 
   override def commitImpl(): Seq[CommitMessage] = {
-    val messages = write.prepareCommit().asScala
+    val messages = write.prepareCommit().asScala.toSeq
     registerPrepared(messages)
     messages
   }
