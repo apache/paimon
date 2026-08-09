@@ -265,8 +265,7 @@ class PrimaryKeyIndexWriteTest {
         AbstractFileStoreWrite.WriterContainer<KeyValue> container =
                 write.writers().get(partition).get(bucket);
         AtomicBoolean onPreparedCalled = new AtomicBoolean(false);
-        BucketedPrimaryKeyIndexMaintainer maintainer =
-                spy(container.primaryKeyIndexMaintainer);
+        BucketedPrimaryKeyIndexMaintainer maintainer = spy(container.primaryKeyIndexMaintainer);
         doAnswer(
                         invocation -> {
                             assertThat(onPreparedCalled)
