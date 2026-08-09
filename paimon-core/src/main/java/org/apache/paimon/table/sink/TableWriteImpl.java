@@ -280,8 +280,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
             @Nullable Consumer<CommitMessage> onPrepared)
             throws Exception {
         if (write instanceof AbstractFileStoreWrite) {
-            return ((AbstractFileStoreWrite<?>) write)
-                    .prepareCommit(waitCompaction, commitIdentifier, onPrepared);
+            if (onPrepared != null) {
+                return ((AbstractFileStoreWrite<?>) write)
+                        .prepareCommit(waitCompaction, commitIdentifier, onPrepared);
+            }
+            return write.prepareCommit(waitCompaction, commitIdentifier);
         }
         List<CommitMessage> messages = write.prepareCommit(waitCompaction, commitIdentifier);
         if (onPrepared != null) {
