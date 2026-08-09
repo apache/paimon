@@ -66,9 +66,6 @@ class ResolvingFileIO(FileIO):
     def new_input_stream(self, path: str):
         return self._get_fileio(path).new_input_stream(path)
 
-    def new_range_input_stream(self, path: str):
-        return self._get_fileio(path).new_range_input_stream(path)
-
     def new_output_stream(self, path: str):
         return self._get_fileio(path).new_output_stream(path)
 

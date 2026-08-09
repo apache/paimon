@@ -28,6 +28,8 @@ import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
 
+_LOG = logging.getLogger(__name__)
+
 
 def _fileno(stream):
     if not hasattr(stream, 'fileno'):
@@ -112,15 +114,6 @@ class FileIO(ABC):
     @abstractmethod
     def new_input_stream(self, path: str):
         pass
-
-    def new_range_input_stream(self, path: str):
-        """Open a stream for shared positional range reads.
-
-        Implementations may return a lower-level stream whose positional read
-        avoids cursor emulation. The default preserves third-party FileIO
-        compatibility.
-        """
-        return self.new_input_stream(path)
 
     @abstractmethod
     def new_output_stream(self, path: str):
@@ -289,9 +282,10 @@ class FileIO(ABC):
                 self._remaining = task_count
                 self._max_streams = min(
                     max_streams, task_count, _MAX_EXCLUSIVE_RANGE_STREAMS)
+                self._close_error = None
 
             def _open(self):
-                return self._file_io.new_range_input_stream(self._path)
+                return self._file_io.new_input_stream(self._path)
 
             def _detect(self):
                 with self._condition:
@@ -300,16 +294,23 @@ class FileIO(ABC):
                     if self._concurrent is not None:
                         return
                     self._detecting = True
+                stream = None
                 try:
                     stream = self._open()
-                except Exception:
+                    concurrent = supports_concurrent_pread(stream)
+                except BaseException:
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
                     with self._condition:
                         self._detecting = False
                         self._condition.notify_all()
                     raise
                 with self._condition:
                     self._streams.append(stream)
-                    self._concurrent = supports_concurrent_pread(stream)
+                    self._concurrent = concurrent
                     if not self._concurrent:
                         self._available.append(stream)
                     self._detecting = False
@@ -383,15 +384,24 @@ class FileIO(ABC):
                     self._remaining -= 1
                     close = self._remaining == 0
                 if close:
-                    self.close()
+                    self._close_all()
 
-            def close(self):
+            def _close_all(self):
                 with self._condition:
                     streams = self._streams
                     self._streams = []
                     self._available = []
                 for stream in streams:
-                    stream.close()
+                    try:
+                        stream.close()
+                    except BaseException as error:
+                        if self._close_error is None:
+                            self._close_error = error
+
+            def close(self):
+                self._close_all()
+                if self._close_error is not None:
+                    raise self._close_error
 
         streams = {
             path: _RangeStreamPool(
@@ -435,12 +445,30 @@ class FileIO(ABC):
             finally:
                 streams[path].task_done()
 
+        failed = False
         try:
             with ThreadPoolExecutor(workers) as pool:
                 list(pool.map(_run, tasks))
+        except BaseException:
+            failed = True
+            raise
         finally:
+            close_error = None
             for stream in streams.values():
-                stream.close()
+                try:
+                    stream.close()
+                except BaseException as error:
+                    if close_error is None:
+                        close_error = error
+            if close_error is not None:
+                if failed:
+                    _LOG.warning(
+                        "Failed to close a range input stream",
+                        exc_info=(type(close_error), close_error,
+                                  close_error.__traceback__),
+                    )
+                else:
+                    raise close_error
         return results
 
     def read_blobs_concurrent(self, blobs, parallelism):

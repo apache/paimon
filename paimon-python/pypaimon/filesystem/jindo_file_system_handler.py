@@ -16,6 +16,7 @@
 # under the License.
 
 import logging
+import threading
 
 import pyarrow as pa
 from pyarrow import PythonFile
@@ -116,42 +117,51 @@ def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
 class JindoInputFile:
     supports_concurrent_pread = True
 
-    def __init__(self, jindo_stream):
-        self._stream = jindo_stream
+    def __init__(self, stream_factory):
+        self._stream_factory = stream_factory
+        self._stream = None
+        self._lock = threading.Lock()
         self._closed = False
 
     @property
     def closed(self):
-        if hasattr(self._stream, 'closed'):
-            return self._stream.closed
         return self._closed
 
-    def read(self, nbytes: int = -1):
-        if self.closed:
+    def _get_stream(self):
+        if self._closed:
             raise ValueError("I/O operation on closed file")
+        if self._stream is None:
+            with self._lock:
+                if self._closed:
+                    raise ValueError("I/O operation on closed file")
+                if self._stream is None:
+                    self._stream = self._stream_factory()
+        return self._stream
+
+    def read(self, nbytes: int = -1):
+        stream = self._get_stream()
         if nbytes is None or nbytes < 0:
-            return self._stream.read()
-        return self._stream.read(nbytes)
+            return stream.read()
+        return stream.read(nbytes)
 
     def seek(self, position: int, whence: int = 0):
-        if self.closed:
-            raise ValueError("I/O operation on closed file")
-        self._stream.seek(position, whence)
+        return self._get_stream().seek(position, whence)
 
     def tell(self) -> int:
-        if self.closed:
-            raise ValueError("I/O operation on closed file")
-        return self._stream.tell()
+        return self._get_stream().tell()
 
     def read_at(self, nbytes: int, offset: int):
-        if self.closed:
-            raise ValueError("I/O operation on closed file")
-        return self._stream.pread(nbytes, offset)
+        return self._get_stream().pread(nbytes, offset)
 
     def close(self):
-        if not self._closed:
-            self._stream.close()
+        with self._lock:
+            if self._closed:
+                return
             self._closed = True
+            stream = self._stream
+            self._stream = None
+        if stream is not None:
+            stream.close()
 
     def __enter__(self):
         return self
@@ -321,18 +331,15 @@ class JindoFileSystemHandler(FileSystemHandler):
         self._jindo_fs.copy_file(src_norm, dst_norm)
 
     def open_input_stream(self, path: str):
-        normalized = self._normalize_path(path)
-        jindo_stream = self._jindo_fs.open(normalized, "rb")
-        return PythonFile(JindoInputFile(jindo_stream), mode="r")
+        return PythonFile(self.new_input_stream(path), mode="r")
 
     def open_input_file(self, path: str):
-        normalized = self._normalize_path(path)
-        jindo_stream = self._jindo_fs.open(normalized, "rb")
-        return PythonFile(JindoInputFile(jindo_stream), mode="r")
+        return PythonFile(self.new_input_stream(path), mode="r")
 
-    def open_range_input_stream(self, path: str):
-        stream = self._jindo_fs.open(self._normalize_path(path), "rb")
-        return JindoInputFile(stream)
+    def new_input_stream(self, path: str):
+        normalized = self._normalize_path(path)
+        return JindoInputFile(
+            lambda: self._jindo_fs.open(normalized, "rb"))
 
     def open_output_stream(self, path: str, metadata):
         normalized = self._normalize_path(path)

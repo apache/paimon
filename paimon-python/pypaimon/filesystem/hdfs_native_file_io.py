@@ -120,7 +120,12 @@ class _HdfsReaderAdapter:
         return self.read(size)
 
     def read_at(self, nbytes: int, offset: int) -> bytes:
-        return self._fr.read_range(offset, nbytes)
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        file_size = len(self._fr)
+        if nbytes <= 0 or offset >= file_size:
+            return b''
+        return self._fr.read_range(offset, min(nbytes, file_size - offset))
 
     def seek(self, pos: int, whence: int = 0) -> int:
         self._fr.seek(pos, whence)

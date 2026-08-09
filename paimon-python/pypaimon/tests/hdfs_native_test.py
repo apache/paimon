@@ -467,10 +467,25 @@ class HdfsNativeAdaptersTest(unittest.TestCase):
     def test_reader_adapter_read_at(self):
         from pypaimon.filesystem.hdfs_native_file_io import _HdfsReaderAdapter
         fr = MagicMock()
+        fr.__len__.return_value = 100
         fr.read_range.return_value = b"data"
         adapter = _HdfsReaderAdapter(fr)
         self.assertEqual(adapter.read_at(4, 7), b"data")
         fr.read_range.assert_called_once_with(7, 4)
+
+    def test_reader_adapter_read_at_clamps_to_eof(self):
+        from pypaimon.filesystem.hdfs_native_file_io import _HdfsReaderAdapter
+        fr = MagicMock()
+        fr.__len__.return_value = 10
+        fr.read_range.return_value = b"89"
+        adapter = _HdfsReaderAdapter(fr)
+
+        self.assertEqual(adapter.read_at(4, 8), b"89")
+        fr.read_range.assert_called_once_with(8, 2)
+        self.assertEqual(adapter.read_at(4, 10), b"")
+        self.assertEqual(1, fr.read_range.call_count)
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            adapter.read_at(1, -1)
 
     def test_reader_adapter_read_at_is_concurrent(self):
         from pypaimon.filesystem.hdfs_native_file_io import _HdfsReaderAdapter
@@ -480,6 +495,9 @@ class HdfsNativeAdaptersTest(unittest.TestCase):
                 self.lock = threading.Lock()
                 self.active = 0
                 self.max_active = 0
+
+            def __len__(self):
+                return 64
 
             def read_range(self, offset, length):
                 with self.lock:
@@ -496,7 +514,7 @@ class HdfsNativeAdaptersTest(unittest.TestCase):
         adapter = _HdfsReaderAdapter(reader)
         file_io = FileIO.get("file:///tmp", {})
         opens = []
-        file_io.new_range_input_stream = lambda path: (
+        file_io.new_input_stream = lambda path: (
             opens.append(path) or adapter)
         ranges = [("hdfs://ns/blob", offset, 4)
                   for offset in range(0, 64, 8)]

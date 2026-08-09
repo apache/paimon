@@ -2413,17 +2413,26 @@ class BlobEndToEndTest(unittest.TestCase):
         calls = []
         range_reads = []
         original_read = file_io.read_blobs_concurrent
-        original_open = file_io.new_range_input_stream
+        original_open = file_io.new_input_stream
 
         def read_blobs_concurrent(blobs, parallelism):
             calls.append((list(blobs), parallelism))
             return original_read(blobs, parallelism)
 
-        def new_range_input_stream(path):
+        def new_input_stream(path):
             stream = original_open(path)
 
             class TrackingStream:
                 supports_concurrent_pread = True
+
+                def read(self, length=-1):
+                    return stream.read(length)
+
+                def seek(self, offset, whence=0):
+                    return stream.seek(offset, whence)
+
+                def tell(self):
+                    return stream.tell()
 
                 def read_at(self, length, offset):
                     range_reads.append((path, offset, length))
@@ -2435,7 +2444,7 @@ class BlobEndToEndTest(unittest.TestCase):
             return TrackingStream()
 
         file_io.read_blobs_concurrent = read_blobs_concurrent
-        file_io.new_range_input_stream = new_range_input_stream
+        file_io.new_input_stream = new_input_stream
         reader = FormatBlobReader(
             file_io=file_io,
             file_path=blob_file_path,
@@ -3693,9 +3702,9 @@ class CoalesceRangesTest(unittest.TestCase):
                 output.write(data)
             file_io = FileIO.get(f"file://{tmp_dir}", {})
             reads = []
-            original_open = file_io.new_range_input_stream
+            original_open = file_io.new_input_stream
 
-            def new_range_input_stream(file_path):
+            def new_input_stream(file_path):
                 stream = original_open(file_path)
 
                 class TrackingStream:
@@ -3710,7 +3719,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
                 return TrackingStream()
 
-            file_io.new_range_input_stream = new_range_input_stream
+            file_io.new_input_stream = new_input_stream
             got = file_io.read_ranges_coalesced_views(
                 [(path, 0, 10), (path, 1000, 10)],
                 parallelism=4,
@@ -3750,12 +3759,12 @@ class CoalesceRangesTest(unittest.TestCase):
                     output.write(payload)
 
             file_io = FileIO.get(f"file://{tmp_dir}", {})
-            original_open = file_io.new_range_input_stream
+            original_open = file_io.new_input_stream
             opens = []
             reads = []
             closes = []
 
-            def new_range_input_stream(file_path):
+            def new_input_stream(file_path):
                 opens.append(file_path)
                 stream = original_open(file_path)
 
@@ -3772,7 +3781,7 @@ class CoalesceRangesTest(unittest.TestCase):
 
                 return TrackingStream()
 
-            file_io.new_range_input_stream = new_range_input_stream
+            file_io.new_input_stream = new_input_stream
             cells = [
                 BlobDescriptor(
                     path, i * span_gap, len(payload)).serialize()
@@ -3797,7 +3806,6 @@ class CoalesceRangesTest(unittest.TestCase):
                 output.write(data)
             file_io = FileIO.get(f"file://{tmp_dir}", {})
             fallbacks = []
-            original_read = file_io.read_file_range
 
             class FailingStream:
                 supports_concurrent_pread = True
@@ -3810,9 +3818,9 @@ class CoalesceRangesTest(unittest.TestCase):
 
             def read_file_range(file_path, offset, length):
                 fallbacks.append((file_path, offset, length))
-                return original_read(file_path, offset, length)
+                return data[offset:offset + length]
 
-            file_io.new_range_input_stream = lambda _: FailingStream()
+            file_io.new_input_stream = lambda _: FailingStream()
             file_io.read_file_range = read_file_range
             ranges = [(path, 0, 4), (path, 16, 4)]
 
@@ -3854,12 +3862,12 @@ class CoalesceRangesTest(unittest.TestCase):
 
         streams = []
 
-        def new_range_input_stream(_):
+        def new_input_stream(_):
             stream = SerialStream()
             streams.append(stream)
             return stream
 
-        file_io.new_range_input_stream = new_range_input_stream
+        file_io.new_input_stream = new_input_stream
         ranges = [("blob", i * 4, 2) for i in range(16)]
 
         self.assertEqual(
@@ -3897,12 +3905,12 @@ class CoalesceRangesTest(unittest.TestCase):
             def close(self):
                 self.closed = True
 
-        def new_range_input_stream(_):
+        def new_input_stream(_):
             stream = PositionalStream()
             streams.append(stream)
             return stream
 
-        file_io.new_range_input_stream = new_range_input_stream
+        file_io.new_input_stream = new_input_stream
         ranges = [("blob", i * 128, 16) for i in range(64)]
 
         self.assertEqual(
@@ -3915,6 +3923,66 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertLessEqual(len(streams), 16)
         self.assertEqual(64, sum(stream.reads for stream in streams))
         self.assertTrue(all(stream.closed for stream in streams))
+
+    def test_closes_all_streams_before_raising_close_error(self):
+        from pypaimon.common.file_io import FileIO
+
+        data = bytes(range(128))
+        file_io = FileIO.get("file:///tmp", {})
+        streams = []
+
+        class CloseStream:
+            def __init__(self, index):
+                self.index = index
+                self.closed = False
+
+            def read_at(self, length, offset):
+                time.sleep(0.01)
+                return data[offset:offset + length]
+
+            def close(self):
+                self.closed = True
+                if self.index == 0:
+                    raise IOError("first close failed")
+
+        def new_input_stream(_):
+            stream = CloseStream(len(streams))
+            streams.append(stream)
+            return stream
+
+        file_io.new_input_stream = new_input_stream
+        ranges = [("blob", offset, 4) for offset in range(0, 64, 8)]
+
+        with self.assertRaisesRegex(IOError, "first close failed"):
+            file_io.read_ranges_coalesced(
+                ranges, parallelism=4, max_gap=0)
+
+        self.assertGreater(len(streams), 1)
+        self.assertTrue(all(stream.closed for stream in streams))
+
+    def test_close_error_does_not_mask_read_error(self):
+        from pypaimon.common.file_io import FileIO
+
+        file_io = FileIO.get("file:///tmp", {})
+
+        class FailingStream:
+            supports_concurrent_pread = True
+
+            def read_at(self, length, offset):
+                raise IOError("shared read failed")
+
+            def close(self):
+                raise IOError("close failed")
+
+        def fail_fallback(path, offset, length):
+            raise IOError("fallback read failed")
+
+        file_io.new_input_stream = lambda _: FailingStream()
+        file_io.read_file_range = fail_fallback
+
+        with self.assertRaisesRegex(IOError, "fallback read failed"):
+            file_io.read_ranges_coalesced(
+                [("blob", 0, 4)], parallelism=1, max_gap=0)
 
 
 class ReadFileRangeTest(unittest.TestCase):

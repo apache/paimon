@@ -195,18 +195,14 @@ class LocalDiskCacheManager:
 class CachingInputStream:
     """Wraps a remote stream with block-level caching."""
 
-    supports_concurrent_pread = False
-
-    def __init__(self, file_io, file_path: str, cache, range_reads=False):
+    def __init__(self, file_io, file_path: str, cache):
         self._file_io = file_io
         self._stream = None
         self._file_path = file_path
         self._file_size = -1
         self._cache = cache
-        self._range_reads = range_reads
         self._pos = 0
         self._io_lock = threading.Lock()
-        self._stream_lock = threading.Lock()
         self._remote_supports_pread = None
 
     def _get_file_size(self) -> int:
@@ -313,14 +309,7 @@ class CachingInputStream:
 
     def _get_remote_stream(self):
         if self._stream is None:
-            with self._stream_lock:
-                if self._stream is None:
-                    if self._range_reads:
-                        self._stream = self._file_io.new_range_input_stream(
-                            self._file_path)
-                    else:
-                        self._stream = self._file_io.new_input_stream(
-                            self._file_path)
+            self._stream = self._file_io.new_input_stream(self._file_path)
         return self._stream
 
     def close(self):
@@ -407,13 +396,6 @@ class CachingFileIO(FileIO):
         if self._cache is None or file_type not in self._whitelist or FileType.is_mutable(path):
             return self._delegate.new_input_stream(path)
         return CachingInputStream(self._delegate, path, self._cache)
-
-    def new_range_input_stream(self, path: str):
-        file_type = FileType.classify(path)
-        if self._cache is None or file_type not in self._whitelist or FileType.is_mutable(path):
-            return self._delegate.new_range_input_stream(path)
-        return CachingInputStream(
-            self._delegate, path, self._cache, range_reads=True)
 
     def new_output_stream(self, path: str):
         return self._delegate.new_output_stream(path)
