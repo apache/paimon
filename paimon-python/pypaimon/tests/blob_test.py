@@ -3744,7 +3744,7 @@ class CoalesceRangesTest(unittest.TestCase):
             self.assertEqual(reads, [(path, 0, 1010)])
             self.assertIs(shared[0].obj, shared[1].obj)
 
-    def test_fetch_bodies_reuses_one_stream_for_same_uri(self):
+    def test_fetch_bodies_reuses_bounded_streams_for_same_uri(self):
         from pypaimon.common.file_io import FileIO
         from pypaimon.multimodal.query import ScanQuery
         from pypaimon.table.row.blob import BlobDescriptor
@@ -3793,11 +3793,11 @@ class CoalesceRangesTest(unittest.TestCase):
                 file_io, {"image": cells}, ["image"], parallelism=16)
 
             self.assertEqual(payloads, bodies["image"])
-            self.assertEqual([path], opens)
+            self.assertEqual([path] * 16, opens)
             self.assertEqual(span_count, len(reads))
-            self.assertEqual([path], closes)
+            self.assertEqual([path] * 16, closes)
 
-    def test_shared_stream_failure_reopens_range(self):
+    def test_lane_stream_failure_reopens_range(self):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(64))
@@ -3832,7 +3832,7 @@ class CoalesceRangesTest(unittest.TestCase):
             )
             self.assertEqual(2, len(fallbacks))
 
-    def test_fallback_reads_share_global_stream_budget(self):
+    def test_fallback_reads_do_not_exceed_parallelism(self):
         from pypaimon.common.file_io import FileIO
 
         parallelism = 8
@@ -3892,31 +3892,41 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertLessEqual(max_open_streams, parallelism)
         self.assertEqual(0, open_streams)
 
-    def test_unknown_length_does_not_use_shared_stream(self):
+    def test_known_and_unknown_lengths_share_exclusive_lane(self):
         from pypaimon.common.file_io import FileIO
 
         file_io = FileIO.get("file:///tmp", {})
-        independent_reads = []
+        operations = []
+        streams = []
 
-        class SharedStream:
-            supports_concurrent_pread = True
+        class LaneStream:
+            def __init__(self):
+                self.position = 0
+                self.closed = False
 
             def read_at(self, length, offset):
+                operations.append(("read_at", offset, length))
                 return b"known"
 
             def seek(self, offset):
-                raise AssertionError(
-                    "unknown-length read used the shared stream")
+                operations.append(("seek", offset))
+                self.position = offset
+
+            def read(self):
+                operations.append(("read", self.position))
+                return b"tail"
 
             def close(self):
-                pass
+                self.closed = True
 
-        def read_file_range(path, offset, length):
-            independent_reads.append((path, offset, length))
-            return b"tail"
+        def new_input_stream(_):
+            stream = LaneStream()
+            streams.append(stream)
+            return stream
 
-        file_io.new_input_stream = lambda _: SharedStream()
-        file_io.read_file_range = read_file_range
+        file_io.new_input_stream = new_input_stream
+        file_io.read_file_range = lambda *args: self.fail(
+            "exclusive lane unexpectedly used fallback")
 
         self.assertEqual(
             [b"known", b"tail"],
@@ -3926,7 +3936,13 @@ class CoalesceRangesTest(unittest.TestCase):
                 max_gap=0,
             ),
         )
-        self.assertEqual([("blob", 5, -1)], independent_reads)
+        self.assertEqual([
+            ("read_at", 0, 5),
+            ("seek", 5),
+            ("read", 5),
+        ], operations)
+        self.assertEqual(1, len(streams))
+        self.assertTrue(streams[0].closed)
 
     def test_non_positional_streams_are_exclusive(self):
         from pypaimon.common.file_io import FileIO
@@ -3975,7 +3991,7 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertGreater(len(streams), 1)
         self.assertLessEqual(len(streams), 8)
 
-    def test_non_concurrent_read_at_uses_bounded_stream_pool(self):
+    def test_same_path_uses_bounded_exclusive_lanes(self):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(256)) * 64
@@ -4023,13 +4039,14 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertEqual(64, sum(stream.reads for stream in streams))
         self.assertTrue(all(stream.closed for stream in streams))
 
-    def test_stream_budget_is_shared_across_paths(self):
+    def test_stream_count_is_bounded_across_paths(self):
         from pypaimon.common.file_io import FileIO
 
         file_io = FileIO.get("file:///tmp", {})
         lock = threading.Lock()
         open_streams = 0
         max_open_streams = 0
+        total_streams = 0
 
         class PositionalStream:
             supports_concurrent_pread = False
@@ -4044,9 +4061,10 @@ class CoalesceRangesTest(unittest.TestCase):
                     open_streams -= 1
 
         def new_input_stream(_):
-            nonlocal open_streams, max_open_streams
+            nonlocal open_streams, max_open_streams, total_streams
             with lock:
                 open_streams += 1
+                total_streams += 1
                 max_open_streams = max(max_open_streams, open_streams)
             return PositionalStream()
 
@@ -4063,6 +4081,7 @@ class CoalesceRangesTest(unittest.TestCase):
                 ranges, parallelism=4, max_gap=0),
         )
         self.assertLessEqual(max_open_streams, 4)
+        self.assertEqual(4, total_streams)
         self.assertEqual(0, open_streams)
 
     def test_closes_all_streams_before_raising_close_error(self):
@@ -4107,10 +4126,13 @@ class CoalesceRangesTest(unittest.TestCase):
         file_io = FileIO.get("file:///tmp", {})
 
         class FailingStream:
-            supports_concurrent_pread = True
+            def __init__(self, path):
+                self.path = path
 
             def read_at(self, length, offset):
-                raise IOError("shared read failed")
+                if self.path == "read-error":
+                    raise IOError("shared read failed")
+                return b"ok"
 
             def close(self):
                 raise IOError("close failed")
@@ -4118,14 +4140,17 @@ class CoalesceRangesTest(unittest.TestCase):
         def fail_fallback(path, offset, length):
             raise IOError("fallback read failed")
 
-        file_io.new_input_stream = lambda _: FailingStream()
+        file_io.new_input_stream = FailingStream
         file_io.read_file_range = fail_fallback
 
         with self.assertRaisesRegex(IOError, "fallback read failed"):
             file_io.read_ranges_coalesced(
-                [("blob", 0, 4)], parallelism=1, max_gap=0)
+                [("close-error", 0, 2), ("read-error", 0, 2)],
+                parallelism=2,
+                max_gap=0,
+            )
 
-    def test_discard_close_error_is_propagated_after_fallback(self):
+    def test_failed_stream_close_error_is_propagated_after_fallback(self):
         from pypaimon.common.file_io import FileIO
 
         file_io = FileIO.get("file:///tmp", {})

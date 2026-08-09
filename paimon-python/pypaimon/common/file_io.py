@@ -17,7 +17,6 @@
 
 import logging
 import os
-import threading
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -58,21 +57,12 @@ def pread(stream, length: int, offset: int) -> bytes:
     raise AttributeError("stream does not support positional reads")
 
 
-def supports_concurrent_pread(stream) -> bool:
-    if not supports_pread(stream):
-        return False
-    concurrent = getattr(stream, 'supports_concurrent_pread', None)
-    if concurrent is not None:
-        return bool(concurrent)
-    return _fileno(stream) is not None
-
-
 # Coalescing bounds: merge same-file ranges whose gap is within GAP, capping a
 # merged read at SPAN so threads stay busy and memory stays bounded.
 _COALESCE_GAP = 1 << 20
 _COALESCE_SPAN = 8 << 20
 _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION = 2.0
-_MAX_EXCLUSIVE_RANGE_STREAMS = 16
+_MAX_RANGE_LANES_PER_PATH = 16
 
 
 def create_temp_path(path: str) -> str:
@@ -206,9 +196,9 @@ class FileIO(ABC):
                               max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN):
         """Read ``ranges`` (each ``None`` or ``(path, offset, length)``), returning
         bytes in the same order. Same-file nearby ranges are merged into one read
-        to cut round trips, then sliced. All spans for one path share an input
-        stream; reads run on a thread pool. Negative length (read to EOF) is read
-        on its own, never merged.
+        to cut round trips, then sliced. Each worker lane reuses one exclusive
+        stream for consecutive spans of the same path. Negative length (read to
+        EOF) is read on its own, never merged.
 
         A failed read propagates and aborts the whole batch (unlike a per-row
         ``file.open()`` loop that fails one row at a time).
@@ -259,315 +249,131 @@ class FileIO(ABC):
         for singleton in singletons:
             tasks_by_path.setdefault(singleton[1], []).append(
                 ("one", singleton))
-        tasks = [
-            task for path_tasks in tasks_by_path.values()
-            for task in path_tasks
-        ]
-        if not tasks:
+        task_count = sum(len(path_tasks)
+                         for path_tasks in tasks_by_path.values())
+        if task_count == 0:
             return results
 
-        workers = max(1, min(parallelism, len(tasks)))
+        workers = max(1, min(parallelism, task_count))
 
-        class _RangeStreamBudget:
-            def __init__(self, limit):
-                self._limit = limit
-                self._condition = threading.Condition()
-                self._open_streams = 0
-                self._idle_generation = 0
-                self._pools = []
+        lanes = [[] for _ in range(workers)]
+        lane_loads = [0] * workers
+        for path_tasks in tasks_by_path.values():
+            proportional_lanes = max(
+                1,
+                (workers * len(path_tasks) + task_count - 1) // task_count,
+            )
+            path_lanes = min(
+                len(path_tasks), proportional_lanes,
+                _MAX_RANGE_LANES_PER_PATH)
+            selected = sorted(
+                range(workers), key=lane_loads.__getitem__)[:path_lanes]
+            for index, task in enumerate(path_tasks):
+                lane = selected[index % path_lanes]
+                lanes[lane].append(task)
+                lane_loads[lane] += 1
+        lanes = [lane for lane in lanes if lane]
 
-            def register(self, pools):
-                self._pools = list(pools)
-
-            def acquire(self):
-                while True:
-                    with self._condition:
-                        if self._open_streams < self._limit:
-                            self._open_streams += 1
-                            return
-                        generation = self._idle_generation
-
-                    reclaimed = any(
-                        pool._evict_available_stream()
-                        for pool in self._pools
-                    )
-                    if reclaimed:
-                        continue
-
-                    with self._condition:
-                        if (self._open_streams >= self._limit
-                                and generation == self._idle_generation):
-                            self._condition.wait()
-
-            def release(self):
-                with self._condition:
-                    if self._open_streams <= 0:
-                        raise RuntimeError(
-                            "range stream budget released too many times")
-                    self._open_streams -= 1
-                    self._condition.notify()
-
-            def notify_idle(self):
-                with self._condition:
-                    self._idle_generation += 1
-                    self._condition.notify()
-
-        stream_budget = _RangeStreamBudget(workers)
-
-        class _RangeStreamPool:
-            def __init__(self, file_io, path, task_count, max_streams,
-                         budget):
+        class _RangeLane:
+            def __init__(self, file_io):
                 self._file_io = file_io
-                self._path = path
-                self._budget = budget
-                self._condition = threading.Condition()
-                self._streams = []
-                self._available = []
-                self._opening = 0
-                self._detecting = False
-                self._concurrent = None
-                self._shared_users = 0
-                self._seek_lock = threading.Lock()
-                self._remaining = task_count
-                self._max_streams = min(
-                    max_streams, task_count, _MAX_EXCLUSIVE_RANGE_STREAMS)
+                self._path = None
+                self._stream = None
                 self._close_error = None
 
-            def _open(self):
-                self._budget.acquire()
+            def _close_current(self):
+                stream = self._stream
+                self._stream = None
+                self._path = None
+                if stream is None:
+                    return
                 try:
-                    return self._file_io.new_input_stream(self._path)
-                except BaseException:
-                    self._budget.release()
-                    raise
-
-            def _record_close_error(self, error):
-                with self._condition:
+                    stream.close()
+                except BaseException as error:
                     if self._close_error is None:
                         self._close_error = error
 
-            def _close_stream(self, stream):
+            def _stream_for(self, path):
+                if self._stream is not None and self._path == path:
+                    return self._stream
+                self._close_current()
+                self._stream = self._file_io.new_input_stream(path)
+                self._path = path
+                return self._stream
+
+            def read(self, path, offset, length):
                 try:
-                    stream.close()
-                except BaseException as error:
-                    self._record_close_error(error)
-                finally:
-                    self._budget.release()
-
-            def _detect(self):
-                with self._condition:
-                    while self._concurrent is None and self._detecting:
-                        self._condition.wait()
-                    if self._concurrent is not None:
-                        return
-                    self._detecting = True
-                stream = None
-                try:
-                    stream = self._open()
-                    concurrent = supports_concurrent_pread(stream)
-                except BaseException:
-                    if stream is not None:
-                        self._close_stream(stream)
-                    with self._condition:
-                        self._detecting = False
-                        self._condition.notify_all()
-                    raise
-                with self._condition:
-                    self._streams.append(stream)
-                    self._concurrent = concurrent
-                    if not self._concurrent:
-                        self._available.append(stream)
-                    self._detecting = False
-                    self._condition.notify_all()
-
-            def _acquire(self):
-                while True:
-                    self._detect()
-                    with self._condition:
-                        if self._concurrent is None:
-                            continue
-                        if self._concurrent:
-                            self._shared_users += 1
-                            return self._streams[0], False
-                        if self._available:
-                            return self._available.pop(), True
-                        if (len(self._streams) + self._opening
-                                < self._max_streams):
-                            self._opening += 1
-                            break
-                        self._condition.wait()
-                try:
-                    stream = self._open()
-                except BaseException:
-                    with self._condition:
-                        self._opening -= 1
-                        self._condition.notify_all()
-                    raise
-                with self._condition:
-                    self._streams.append(stream)
-                    self._opening -= 1
-                    self._condition.notify_all()
-                return stream, True
-
-            def _return(self, stream):
-                with self._condition:
-                    self._available.append(stream)
-                    self._condition.notify()
-                self._budget.notify_idle()
-
-            def _release_shared(self):
-                with self._condition:
-                    self._shared_users -= 1
-                    idle = self._shared_users == 0
-                    if idle:
-                        self._condition.notify_all()
-                if idle:
-                    self._budget.notify_idle()
-
-            def _evict_available_stream(self):
-                with self._condition:
-                    if self._available:
-                        stream = self._available.pop()
-                    elif (self._concurrent and self._shared_users == 0
-                          and self._streams):
-                        stream = self._streams[0]
-                        self._concurrent = None
-                    else:
-                        return False
-                    self._streams.remove(stream)
-                    self._condition.notify_all()
-                self._close_stream(stream)
-                return True
-
-            def _discard(self, stream):
-                with self._condition:
-                    self._streams.remove(stream)
-                    self._condition.notify_all()
-                self._close_stream(stream)
-
-            def read(self, offset, length):
-                stream, exclusive = self._acquire()
-                failed = False
-                try:
+                    stream = self._stream_for(path)
                     if length >= 0 and supports_pread(stream):
                         return pread(stream, length, offset)
-                    if not exclusive:
-                        with self._seek_lock:
-                            stream.seek(offset)
-                            return (stream.read() if length < 0
-                                    else stream.read(length))
                     stream.seek(offset)
-                    return stream.read() if length < 0 else stream.read(length)
+                    return (stream.read() if length < 0
+                            else stream.read(length))
                 except Exception:
-                    failed = True
-                    raise
-                finally:
-                    if exclusive:
-                        if failed:
-                            self._discard(stream)
-                        else:
-                            self._return(stream)
-                    else:
-                        self._release_shared()
-
-            def task_done(self):
-                with self._condition:
-                    self._remaining -= 1
-                    close = self._remaining == 0
-                if close:
-                    self._close_all()
-
-            def _close_all(self):
-                with self._condition:
-                    streams = self._streams
-                    self._streams = []
-                    self._available = []
-                for stream in streams:
-                    self._close_stream(stream)
+                    self._close_current()
+                    return self._file_io.read_file_range(
+                        path, offset, length)
 
             def close(self):
-                self._close_all()
-                with self._condition:
-                    close_error = self._close_error
-                if close_error is not None:
-                    raise close_error
+                self._close_current()
+                if self._close_error is not None:
+                    raise self._close_error
 
-        streams = {
-            path: _RangeStreamPool(
-                self, path, len(path_tasks), workers, stream_budget)
-            for path, path_tasks in tasks_by_path.items()
-        }
-        stream_budget.register(streams.values())
-
-        def _read_independent(path, offset, length):
-            stream_budget.acquire()
-            try:
-                return self.read_file_range(path, offset, length)
-            finally:
-                stream_budget.release()
-
-        def _read(path, offset, length):
-            if length < 0:
-                return _read_independent(path, offset, length)
-            try:
-                return streams[path].read(offset, length)
-            except Exception:
-                # Preserve the previous independent-open behavior as a retry
-                # when a shared stream becomes unusable.
-                return _read_independent(path, offset, length)
-
-        def _run(task):
+        def _run_task(reader, task):
             kind, payload = task
-            path = payload[0] if kind == "span" else payload[1]
-            try:
-                if kind == "span":
-                    path, span_off, span_len, members = payload
-                    buf = _read(path, span_off, span_len)
-                    if return_views:
-                        buf = memoryview(buf)
-                        useful = sum(length for _, _, length in members)
-                        share_buffer = (
-                            max_retained_amplification <= 0
-                            or span_len <= useful * max_retained_amplification
-                        )
-                    for idx, off, length in members:
-                        s = off - span_off
-                        value = buf[s:s + length]
-                        if return_views and not share_buffer:
-                            value = memoryview(bytes(value))
-                        results[idx] = value
-                else:
-                    idx, path, off, length = payload
-                    result = _read(path, off, length)
-                    results[idx] = (
-                        memoryview(result) if return_views else result)
-            finally:
-                streams[path].task_done()
-
-        failed = False
-        try:
-            with ThreadPoolExecutor(workers) as pool:
-                list(pool.map(_run, tasks))
-        except BaseException:
-            failed = True
-            raise
-        finally:
-            close_error = None
-            for stream in streams.values():
-                try:
-                    stream.close()
-                except BaseException as error:
-                    if close_error is None:
-                        close_error = error
-            if close_error is not None:
-                if failed:
-                    _LOG.warning(
-                        "Failed to close a range input stream",
-                        exc_info=(type(close_error), close_error,
-                                  close_error.__traceback__),
+            if kind == "span":
+                path, span_off, span_len, members = payload
+                buf = reader.read(path, span_off, span_len)
+                if return_views:
+                    buf = memoryview(buf)
+                    useful = sum(length for _, _, length in members)
+                    share_buffer = (
+                        max_retained_amplification <= 0
+                        or span_len <= useful * max_retained_amplification
                     )
-                else:
-                    raise close_error
+                for idx, off, length in members:
+                    start = off - span_off
+                    value = buf[start:start + length]
+                    if return_views and not share_buffer:
+                        value = memoryview(bytes(value))
+                    results[idx] = value
+            else:
+                idx, path, offset, length = payload
+                result = reader.read(path, offset, length)
+                results[idx] = (
+                    memoryview(result) if return_views else result)
+
+        def _run_lane(lane):
+            reader = _RangeLane(self)
+            read_error = None
+            try:
+                for task in lane:
+                    _run_task(reader, task)
+            except BaseException as error:
+                read_error = error
+            close_error = None
+            try:
+                reader.close()
+            except BaseException as error:
+                close_error = error
+            return read_error, close_error
+
+        with ThreadPoolExecutor(len(lanes)) as pool:
+            outcomes = list(pool.map(_run_lane, lanes))
+        read_error = next(
+            (error for error, _ in outcomes if error is not None), None)
+        close_error = next(
+            (error for _, error in outcomes if error is not None), None)
+        if read_error is not None:
+            if close_error is not None:
+                _LOG.warning(
+                    "Failed to close a range input stream",
+                    exc_info=(type(close_error), close_error,
+                              close_error.__traceback__),
+                )
+            raise read_error
+        if close_error is not None:
+            raise close_error
         return results
 
     def read_blobs_concurrent(self, blobs, parallelism):
