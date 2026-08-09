@@ -15,8 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import tempfile
 import unittest
 
+import pyarrow as pa
+
+from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
@@ -27,6 +31,7 @@ from pypaimon.read.scanner.data_evolution_stats import \
     DataEvolutionGroupStatsFilter
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.special_fields import SpecialFields
 
 
 def _empty_stats():
@@ -321,6 +326,53 @@ class DataEvolutionGroupStatsFilterTest(unittest.TestCase):
 
 
 class DataEvolutionGroupStatsPlanningTest(unittest.TestCase):
+
+    def test_system_field_predicate_skips_group_stats(self):
+        arrow_schema = pa.schema([
+            ('id', pa.int64()),
+            ('value', pa.int32()),
+        ])
+        with tempfile.TemporaryDirectory() as warehouse:
+            catalog = CatalogFactory.create({'warehouse': warehouse})
+            catalog.create_database('default', False)
+            catalog.create_table(
+                'default.t',
+                Schema.from_pyarrow_schema(arrow_schema, options={
+                    'metadata.stats-mode': 'full',
+                    'data-evolution.enabled': 'true',
+                    'row-tracking.enabled': 'true',
+                }),
+                False,
+            )
+            table = catalog.get_table('default.t')
+
+            batch_write = table.new_batch_write_builder()
+            writer = batch_write.new_write()
+            commit = batch_write.new_commit()
+            try:
+                writer.write_arrow(pa.table({
+                    'id': [1, 2],
+                    'value': [10, 20],
+                }, schema=arrow_schema))
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+
+            read_builder = table.new_read_builder().with_projection([
+                'id',
+                SpecialFields.SEQUENCE_NUMBER.name,
+            ])
+            predicate = read_builder.new_predicate_builder().greater_than(
+                SpecialFields.SEQUENCE_NUMBER.name, -1)
+            read_builder.with_filter(predicate)
+
+            plan = read_builder.new_scan().plan()
+            result = read_builder.new_read().to_arrow(plan.splits())
+            self.assertEqual({
+                'id': [1, 2],
+                SpecialFields.SEQUENCE_NUMBER.name: [1, 1],
+            }, result.to_pydict())
 
     def test_prunes_groups_before_split_packing(self):
         fields = [DataField(0, 'id', AtomicType('INT'))]

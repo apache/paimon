@@ -236,7 +236,7 @@ class FileScanner:
         else:
             self.predicate_for_stats = predicate
         self.predicate_for_stats = exclude_predicate_with_fields(
-            self.predicate_for_stats, {SpecialFields.ROW_ID.name})
+            self.predicate_for_stats, SpecialFields.SYSTEM_FIELD_NAMES)
         # Partition columns aren't in data files, so skip them for value-stats pruning.
         self.predicate_for_stats = exclude_predicate_with_fields(
             self.predicate_for_stats, set(self.table.partition_keys))
