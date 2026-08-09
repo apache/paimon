@@ -46,7 +46,7 @@ class FormatBlobReader(RecordBatchReader):
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
                  full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool,
                  batch_size: int = 1024, row_indices: Optional[Any] = None,
-                 blob_parallelism: int = 1):
+                 blob_parallelism: int = 1, file_size: Optional[int] = None):
         self._file_io = file_io
         self._file_path = file_path
         self._push_down_predicate = push_down_predicate
@@ -63,7 +63,11 @@ class FormatBlobReader(RecordBatchReader):
         self._blob_iterator = None
         self._current_batch = None
         try:
-            self._file_size = file_io.get_file_size(file_path)
+            self._file_size = (
+                file_size
+                if file_size is not None and file_size > 0
+                else file_io.get_file_size(file_path)
+            )
             self._input_stream = file_io.new_input_stream(file_path)
             self._read_index()
             self._apply_row_indices(row_indices)

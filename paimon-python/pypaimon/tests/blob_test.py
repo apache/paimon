@@ -1354,6 +1354,16 @@ class BlobEndToEndTest(unittest.TestCase):
         except OSError:
             pass
 
+    @staticmethod
+    def _write_single_blob(path, field, value):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        with open(path, 'wb') as output:
+            writer = BlobFormatWriter(output)
+            writer.add_element(GenericRow(
+                [BlobData(value)], [field], RowKind.INSERT))
+            writer.close()
+
     def test_blob_end_to_end(self):
         # Set up file I/O
         file_io = LocalFileIO(self.temp_dir, Options({}))
@@ -1442,6 +1452,145 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertEqual(batch.column(0)[1].as_py(), b"world")
         self.assertEqual(counting_file_io.input_stream_count, 1)
         reader.close()
+
+    def test_blob_reader_uses_provided_file_size(self):
+        class NoStatFileIO:
+
+            def __init__(self, delegate):
+                self._delegate = delegate
+
+            def __getattr__(self, name):
+                return getattr(self._delegate, name)
+
+            def get_file_size(self, path):
+                raise AssertionError("get_file_size should not be called")
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "provided-size.blob")
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        self._write_single_blob(path, field, b"value")
+
+        reader = FormatBlobReader(
+            NoStatFileIO(file_io),
+            path,
+            [field.name],
+            [field],
+            None,
+            False,
+            file_size=os.path.getsize(path),
+        )
+        try:
+            self.assertEqual(
+                [b"value"], reader.read_arrow_batch().column(0).to_pylist())
+        finally:
+            reader.close()
+
+    def test_blob_reader_falls_back_to_file_size_lookup(self):
+        class CountingFileIO:
+
+            def __init__(self, delegate):
+                self._delegate = delegate
+                self.size_calls = 0
+
+            def __getattr__(self, name):
+                return getattr(self._delegate, name)
+
+            def get_file_size(self, path):
+                self.size_calls += 1
+                return self._delegate.get_file_size(path)
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "fallback-size.blob")
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        self._write_single_blob(path, field, b"value")
+
+        for file_size in [None, 0]:
+            with self.subTest(file_size=file_size):
+                counting_file_io = CountingFileIO(file_io)
+                reader = FormatBlobReader(
+                    counting_file_io,
+                    path,
+                    [field.name],
+                    [field],
+                    None,
+                    False,
+                    file_size=file_size,
+                )
+                try:
+                    self.assertEqual(
+                        [b"value"],
+                        reader.read_arrow_batch().column(0).to_pylist())
+                    self.assertEqual(1, counting_file_io.size_calls)
+                finally:
+                    reader.close()
+
+    def test_split_read_passes_blob_file_size(self):
+        from pypaimon.read.split_read import (
+            DataEvolutionSplitRead,
+            RawFileSplitRead,
+        )
+
+        class _Options:
+
+            @staticmethod
+            def read_batch_size():
+                return 128
+
+        class _Table:
+            file_io = object()
+            options = _Options()
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        table = _Table()
+        table.fields = [field]
+        table.table_schema = type("_Schema", (), {"fields": [field]})()
+        file = DataFileMeta(
+            file_name="data.blob",
+            file_size=123,
+            row_count=1,
+            min_key=None,
+            max_key=None,
+            key_stats=None,
+            value_stats=None,
+            min_sequence_number=0,
+            max_sequence_number=0,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            first_row_id=0,
+            write_cols=[field.name],
+            file_path="data.blob",
+        )
+
+        raw_read = RawFileSplitRead.__new__(RawFileSplitRead)
+        raw_read.table = table
+        raw_read.read_fields = [field]
+        raw_read.trimmed_primary_key = []
+        raw_read._blob_parallelism = 1
+        raw_read._get_fields_and_predicate = lambda *args: (
+            [field.name], None, None)
+        raw_read._row_sidecar_file_name = lambda _: None
+        raw_read._nested_path_by_name = lambda: None
+        raw_read._file_read_fields = lambda _: [field]
+        raw_read._target_read_fields = lambda: [field]
+        raw_read._read_blob_as_descriptor = lambda _: False
+        raw_read.create_index_mapping = lambda: None
+        raw_read._create_partition_info = lambda: None
+
+        evolution_read = DataEvolutionSplitRead.__new__(DataEvolutionSplitRead)
+        evolution_read.table = table
+        evolution_read.read_fields = [field]
+        evolution_read.row_ranges = None
+        evolution_read._blob_parallelism = 1
+        evolution_read._read_blob_as_descriptor = lambda _: False
+
+        with patch("pypaimon.read.split_read.FormatBlobReader") as reader_cls:
+            raw_read.file_reader_supplier(file, False, [field.name], False)
+            self.assertEqual(123, reader_cls.call_args.kwargs["file_size"])
+
+            reader_cls.reset_mock()
+            evolution_read._create_raw_blob_file_reader(file, [field.name])
+            self.assertEqual(123, reader_cls.call_args.kwargs["file_size"])
 
     def test_blob_reader_row_indices_pushdown(self):
         file_io = LocalFileIO(self.temp_dir, Options({}))
