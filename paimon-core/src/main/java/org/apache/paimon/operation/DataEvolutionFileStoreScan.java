@@ -62,6 +62,8 @@ import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
+import static org.apache.paimon.utils.InternalRowUtils.compare;
+import static org.apache.paimon.utils.InternalRowUtils.get;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
@@ -358,9 +360,14 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                     || fileRange.from != groupStart
                     || fileRange.to != groupEnd) {
                 rowOffsets[j] = -2;
-            } else {
-                fieldOffsets[j] = fileStats.index();
+                continue;
             }
+            int fieldOffset = fileStats.index();
+            if (!isValidStats(file.valueStats(), fieldOffset, targetTypes[j], groupRowCount)) {
+                rowOffsets[j] = -2;
+                continue;
+            }
+            fieldOffsets[j] = fieldOffset;
         }
         DataEvolutionRow finalMin =
                 new DataEvolutionRow(normalMetas.size(), rowOffsets, fieldOffsets);
@@ -377,6 +384,30 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         finalMax.setRows(max);
         finalNullCounts.setRows(nullCounts);
         return new EvolutionStats(groupRowCount, finalMin, finalMax, finalNullCounts);
+    }
+
+    private static boolean isValidStats(
+            SimpleStats stats, int fieldOffset, DataType type, long rowCount) {
+        try {
+            Object min = get(stats.minValues(), fieldOffset, type);
+            Object max = get(stats.maxValues(), fieldOffset, type);
+            BinaryArray nullCounts = stats.nullCounts();
+            Long nullCount =
+                    nullCounts.isNullAt(fieldOffset) ? null : nullCounts.getLong(fieldOffset);
+            if (nullCount != null && (nullCount < 0 || nullCount > rowCount)) {
+                return false;
+            }
+            if ((min == null) != (max == null)) {
+                return false;
+            }
+            if (min == null) {
+                return true;
+            }
+            return (nullCount == null || nullCount != rowCount)
+                    && compare(min, max, type.getTypeRoot()) <= 0;
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /** Note: Keep this thread-safe. */

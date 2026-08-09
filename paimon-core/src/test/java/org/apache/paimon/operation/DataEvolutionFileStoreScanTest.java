@@ -107,8 +107,8 @@ public class DataEvolutionFileStoreScanTest {
         assertThat(minRow.getString(1).toString()).isEqualTo("a");
         assertThat(maxRow.getString(1).toString()).isEqualTo("z");
 
-        assertThat(nullCounts.getInt(0)).isEqualTo(0);
-        assertThat(nullCounts.getInt(1)).isEqualTo(1);
+        assertThat(nullCounts.getLong(0)).isEqualTo(0L);
+        assertThat(nullCounts.getLong(1)).isEqualTo(1L);
 
         assertThat(minRow.getFieldCount()).isEqualTo(2);
         assertThat(maxRow.getFieldCount()).isEqualTo(2);
@@ -241,9 +241,9 @@ public class DataEvolutionFileStoreScanTest {
         assertThat(maxRow.getInt(2)).isEqualTo(40);
         assertThat(minRow.getString(1).toString()).isEqualTo("a");
         assertThat(maxRow.getString(1).toString()).isEqualTo("c");
-        assertThat(nullCounts.getInt(0)).isEqualTo(1);
-        assertThat(nullCounts.getInt(1)).isEqualTo(1);
-        assertThat(nullCounts.getInt(2)).isEqualTo(2);
+        assertThat(nullCounts.getLong(0)).isEqualTo(1L);
+        assertThat(nullCounts.getLong(1)).isEqualTo(1L);
+        assertThat(nullCounts.getLong(2)).isEqualTo(2L);
     }
 
     @Test
@@ -298,9 +298,9 @@ public class DataEvolutionFileStoreScanTest {
         assertThat(minRow.getInt(2)).isEqualTo(20);
         assertThat(maxRow.getInt(2)).isEqualTo(40);
 
-        assertThat(nullCounts.getInt(0)).isEqualTo(0);
-        assertThat(nullCounts.getInt(1)).isEqualTo(1);
-        assertThat(nullCounts.getInt(2)).isEqualTo(1);
+        assertThat(nullCounts.getLong(0)).isEqualTo(0L);
+        assertThat(nullCounts.getLong(1)).isEqualTo(1L);
+        assertThat(nullCounts.getLong(2)).isEqualTo(1L);
     }
 
     @Test
@@ -353,8 +353,8 @@ public class DataEvolutionFileStoreScanTest {
         assertThat(minRow.isNullAt(2)).isTrue();
         assertThat(maxRow.isNullAt(2)).isTrue();
 
-        assertThat(nullCounts.getInt(0)).isEqualTo(0);
-        assertThat(nullCounts.getInt(1)).isEqualTo(1);
+        assertThat(nullCounts.getLong(0)).isEqualTo(0L);
+        assertThat(nullCounts.getLong(1)).isEqualTo(1L);
         assertThat(nullCounts.isNullAt(2)).isTrue();
     }
 
@@ -607,6 +607,49 @@ public class DataEvolutionFileStoreScanTest {
     }
 
     @Test
+    public void testInvalidProviderStatsAreUnknown() {
+        Schema schema = createSchema("f0");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+
+        assertInvalidProviderStatsAreUnknown(tableSchema, 10, 10, -1);
+        assertInvalidProviderStatsAreUnknown(tableSchema, 10, 10, 11);
+        assertInvalidProviderStatsAreUnknown(tableSchema, null, 10, 0);
+        assertInvalidProviderStatsAreUnknown(tableSchema, 10, null, 0);
+        assertInvalidProviderStatsAreUnknown(tableSchema, 10, 1, 0);
+        assertInvalidProviderStatsAreUnknown(tableSchema, 10, 10, 10);
+    }
+
+    private void assertInvalidProviderStatsAreUnknown(
+            TableSchema tableSchema, Object min, Object max, int nullCount) {
+        SimpleStats stats =
+                createSimpleStats(
+                        GenericRow.of(min),
+                        GenericRow.of(max),
+                        createBinaryArray(new int[] {nullCount}),
+                        new int[] {0});
+        EvolutionStats result =
+                DataEvolutionFileStoreScan.evolutionStats(
+                        tableSchema,
+                        scanTableSchema,
+                        Collections.singletonList(
+                                createManifestEntry(0L, stats, "invalid.parquet", 0L, 0L, 10L)),
+                        new EvolutionStatsCache());
+
+        assertThat(result.minValues().isNullAt(0)).isTrue();
+        assertThat(result.maxValues().isNullAt(0)).isTrue();
+        assertThat(result.nullCounts().isNullAt(0)).isTrue();
+        Predicate predicate = new PredicateBuilder(tableSchema.logicalRowType()).equal(0, 5);
+        assertThat(
+                        predicate.test(
+                                result.rowCount(),
+                                result.minValues(),
+                                result.maxValues(),
+                                result.nullCounts()))
+                .isTrue();
+    }
+
+    @Test
     public void testIntersectsRowRanges() {
         List<Range> rowRanges =
                 Arrays.asList(
@@ -737,9 +780,9 @@ public class DataEvolutionFileStoreScanTest {
 
     private BinaryArray createBinaryArray(int[] values) {
         BinaryArray array = new BinaryArray();
-        BinaryArrayWriter writer = new BinaryArrayWriter(array, values.length, 4);
+        BinaryArrayWriter writer = new BinaryArrayWriter(array, values.length, 8);
         for (int i = 0; i < values.length; i++) {
-            writer.writeInt(i, values[i]);
+            writer.writeLong(i, values[i]);
         }
         writer.complete();
         return array;

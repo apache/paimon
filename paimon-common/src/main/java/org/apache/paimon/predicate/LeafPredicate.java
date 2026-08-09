@@ -40,7 +40,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-import static org.apache.paimon.utils.InternalRowUtils.compare;
 import static org.apache.paimon.utils.InternalRowUtils.get;
 
 /** Leaf node of a {@link Predicate} tree. Compares a field in the row with literals. */
@@ -153,24 +152,6 @@ public class LeafPredicate implements Predicate {
         Object min = get(minValues, index, type);
         Object max = get(maxValues, index, type);
         Long nullCount = nullCounts.isNullAt(index) ? null : nullCounts.getLong(index);
-        if (nullCount != null && (nullCount < 0 || nullCount > rowCount)) {
-            return true;
-        }
-        if ((min == null) != (max == null)) {
-            return true;
-        }
-        if (min != null) {
-            if (nullCount != null && nullCount == rowCount) {
-                return true;
-            }
-            try {
-                if (compare(min, max, type.getTypeRoot()) > 0) {
-                    return true;
-                }
-            } catch (RuntimeException e) {
-                return true;
-            }
-        }
         if (nullCount == null || rowCount != nullCount) {
             // not all null
             // min or max is null

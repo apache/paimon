@@ -63,29 +63,6 @@ class LeafPredicateTest {
     }
 
     @Test
-    public void testInvalidStatsFailOpen() {
-        Predicate predicate = new PredicateBuilder(RowType.of(DataTypes.INT())).equal(0, 5);
-
-        assertInvalidStatsFailOpen(predicate, 10, 10, -1L);
-        assertInvalidStatsFailOpen(predicate, 10, 10, 11L);
-        assertInvalidStatsFailOpen(predicate, null, 10, 0L);
-        assertInvalidStatsFailOpen(predicate, 10, null, 0L);
-        assertInvalidStatsFailOpen(predicate, 10, 1, 0L);
-        assertInvalidStatsFailOpen(predicate, 10, 10, 10L);
-    }
-
-    private void assertInvalidStatsFailOpen(
-            Predicate predicate, Object min, Object max, Long nullCount) {
-        assertThat(
-                        predicate.test(
-                                10,
-                                GenericRow.of(min),
-                                GenericRow.of(max),
-                                new GenericArray(new Long[] {nullCount})))
-                .isTrue();
-    }
-
-    @Test
     public void testClass() throws IOException, ClassNotFoundException {
         LeafPredicate predicate = create();
         LeafPredicate clone = InstantiationUtil.clone(predicate);
