@@ -50,6 +50,8 @@ from pypaimon.read.scanner.chunk_shuffle_split_generator import (
 )
 from pypaimon.read.scanner.data_evolution_split_generator import \
     DataEvolutionSplitGenerator
+from pypaimon.read.scanner.data_evolution_stats import \
+    DataEvolutionGroupStatsFilter
 from pypaimon.read.scanner.primary_key_table_split_generator import \
     PrimaryKeyTableSplitGenerator
 from pypaimon.read.split import DataSplit
@@ -234,7 +236,7 @@ class FileScanner:
         else:
             self.predicate_for_stats = predicate
         self.predicate_for_stats = exclude_predicate_with_fields(
-            self.predicate_for_stats, {SpecialFields.ROW_ID.name})
+            self.predicate_for_stats, SpecialFields.SYSTEM_FIELD_NAMES)
         # Partition columns aren't in data files, so skip them for value-stats pruning.
         self.predicate_for_stats = exclude_predicate_with_fields(
             self.predicate_for_stats, set(self.table.partition_keys))
@@ -383,6 +385,12 @@ class FileScanner:
         # Generate splits
         splits = split_generator.create_splits(entries)
 
+        if self.data_evolution and self.scan_stats is not None:
+            # Data-evolution stats pruning happens on complete row-id groups
+            # inside the split generator, not in _filter_manifest_entry.
+            self.scan_stats.entries_after_stats = sum(
+                len(split.files) for split in splits)
+
         if self.table.is_primary_key_table:
             splits = self._apply_primary_key_sorted_indexes(splits)
 
@@ -469,17 +477,32 @@ class FileScanner:
                 {},
                 row_ranges,
                 score_getter,
+                None,
             )
 
         # Filter manifest files by row ranges if available
         if row_ranges is not None:
             manifest_files = _filter_manifest_files_by_row_ranges(manifest_files, row_ranges)
 
-        entries = self.read_manifest_entries(manifest_files, row_ranges=row_ranges)
+        stats_predicate = getattr(self, 'predicate_for_stats', None)
+        group_stats_enabled = stats_predicate is not None and score_getter is None
+        entries = self.read_manifest_entries(
+            manifest_files,
+            row_ranges=row_ranges,
+            keep_stats=group_stats_enabled,
+        )
 
         # Redundant when early_record_filter ran; kept for explain mode and as safety net.
         if row_ranges is not None:
             entries = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
+
+        group_stats_filter = None
+        if group_stats_enabled:
+            group_stats_filter = DataEvolutionGroupStatsFilter(
+                stats_predicate,
+                self.table.fields,
+                self._schema_fields,
+            )
 
         return entries, DataEvolutionSplitGenerator(
             self.table,
@@ -488,6 +511,7 @@ class FileScanner:
             self._deletion_files_map(entries),
             row_ranges,
             score_getter,
+            group_stats_filter,
         )
 
     def plan_files(self) -> List[ManifestEntry]:
@@ -536,7 +560,8 @@ class FileScanner:
             return None
 
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta],
-                              row_ranges=None) -> List[ManifestEntry]:
+                              row_ranges=None,
+                              keep_stats=False) -> List[ManifestEntry]:
         max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)
         if self.scan_stats is not None:
             self.scan_stats.manifest_files_total += len(manifest_files)
@@ -561,6 +586,7 @@ class FileScanner:
         return self.manifest_file_manager.read_entries_parallel(
             manifest_files,
             self._filter_manifest_entry,
+            drop_stats=not keep_stats,
             max_workers=max_workers,
             early_entry_filter=self._build_early_bucket_filter(),
             early_record_filter=early_row_filter,
@@ -854,8 +880,6 @@ class FileScanner:
                 return True
             # Data evolution: file stats may be from another schema, skip stats filter and filter in reader.
             if self.data_evolution:
-                if stats is not None:
-                    stats.entries_after_stats += 1
                 return True
             if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                 stats_fields = entry.file.write_cols

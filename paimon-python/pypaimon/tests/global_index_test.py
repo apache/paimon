@@ -15,12 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import tempfile
 import unittest
 from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
 
+from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
@@ -218,6 +220,86 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
 
 
 class GlobalIndexScalarFallbackTest(unittest.TestCase):
+
+    def test_full_fallback_groups_are_pruned_before_split_packing(self):
+        from pypaimon.read.scanner.file_scanner import (
+            _GlobalIndexPlanningResult,
+        )
+
+        with tempfile.TemporaryDirectory() as warehouse:
+            catalog = CatalogFactory.create({'warehouse': warehouse})
+            catalog.create_database('default', False)
+            schema = Schema.from_pyarrow_schema(
+                pa.schema([('key', pa.int64()), ('value', pa.string())]),
+                options={
+                    'data-evolution.enabled': 'true',
+                    'row-tracking.enabled': 'true',
+                    'metadata.stats-mode': 'full',
+                    'target-file-row-num': '10',
+                    'source.split.target-size': '1kb',
+                },
+            )
+            catalog.create_table('default.fallback_stats', schema, False)
+            table = catalog.get_table('default.fallback_stats')
+            for start in range(0, 100, 10):
+                write_builder = table.new_batch_write_builder()
+                writer = write_builder.new_write()
+                commit = write_builder.new_commit()
+                writer.write_arrow(pa.table({
+                    'key': list(range(start, start + 10)),
+                    'value': ['v{}'.format(i)
+                              for i in range(start, start + 10)],
+                }, schema=pa.schema([
+                    ('key', pa.int64()),
+                    ('value', pa.string()),
+                ])))
+                commit.commit(writer.prepare_commit())
+                writer.close()
+                commit.close()
+
+            read_builder = table.new_read_builder()
+            read_builder.with_filter(
+                read_builder.new_predicate_builder().equal('key', 5))
+            index_plan = (
+                _GlobalIndexPlanningResult(
+                    GlobalIndexResult.from_range(Range(5, 5)),
+                    [Range(10, 99)],
+                )
+            )
+
+            baseline_scan = read_builder.new_scan()
+            baseline_scan.file_scanner._global_index_result = index_plan
+            baseline_scan.file_scanner.predicate_for_stats = None
+            baseline_plan = baseline_scan.plan()
+
+            scan = read_builder.new_scan()
+            scan.file_scanner._global_index_result = index_plan
+            plan = scan.plan()
+
+            stats_scan = read_builder.new_scan()
+            stats_scan.file_scanner._global_index_result = index_plan
+            stats_plan, stats = stats_scan.file_scanner.scan_with_stats()
+
+            self.assertEqual(
+                10,
+                sum(len(split.files) for split in baseline_plan.splits()),
+            )
+            self.assertEqual(1, len(plan.splits()))
+            self.assertEqual(
+                1, sum(len(split.files) for split in plan.splits()))
+            self.assertEqual(10, stats.entries_after_bucket)
+            self.assertEqual(1, stats.entries_after_stats)
+            self.assertEqual(
+                1, sum(len(split.files) for split in stats_plan.splits()))
+            baseline_result = read_builder.new_read().to_arrow(
+                baseline_plan.splits()).to_pydict()
+            pruned_result = read_builder.new_read().to_arrow(
+                plan.splits()).to_pydict()
+            self.assertEqual(
+                {'key': [5], 'value': ['v5']},
+                baseline_result,
+            )
+            self.assertEqual(baseline_result, pruned_result)
 
     def test_eval_global_index_keeps_unindexed_ranges_out_of_bitmap(self):
         from pypaimon.read.scanner.file_scanner import (
