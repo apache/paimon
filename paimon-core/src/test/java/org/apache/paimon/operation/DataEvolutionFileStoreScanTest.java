@@ -218,7 +218,11 @@ public class DataEvolutionFileStoreScanTest {
                                 GenericRow.of(2, 20),
                                 GenericRow.of(4, 40),
                                 createBinaryArray(new int[] {1, 2}),
-                                new int[] {0, 2}));
+                                new int[] {0, 2}),
+                        "newer.parquet",
+                        1L,
+                        0L,
+                        100L);
 
         List<ManifestEntry> entries = Arrays.asList(entry2, entry1);
 
@@ -259,7 +263,11 @@ public class DataEvolutionFileStoreScanTest {
                                 GenericRow.of(1, BinaryString.fromString("a")),
                                 GenericRow.of(3, BinaryString.fromString("c")),
                                 createBinaryArray(new int[] {0, 1}),
-                                new int[] {0, 1}));
+                                new int[] {0, 1}),
+                        "base-newer.parquet",
+                        1L,
+                        0L,
+                        100L);
 
         ManifestEntry entry2 =
                 createManifestEntry(
@@ -311,7 +319,8 @@ public class DataEvolutionFileStoreScanTest {
                                 GenericRow.of(1, BinaryString.fromString("a")),
                                 GenericRow.of(3, BinaryString.fromString("c")),
                                 createBinaryArray(new int[] {0, 1}),
-                                new int[] {0, 1}));
+                                new int[] {0, 1}),
+                        1L);
 
         ManifestEntry entry2 =
                 createManifestEntryWithDifferentCols(
@@ -384,7 +393,8 @@ public class DataEvolutionFileStoreScanTest {
         newTypeMaxWriter.complete();
         SimpleStats newTypeStats =
                 new SimpleStats(newTypeMin, newTypeMax, createBinaryArray(new int[] {0, 0}));
-        ManifestEntry newTypeEntry = createManifestEntry(1L, newTypeStats);
+        ManifestEntry newTypeEntry =
+                createManifestEntry(1L, newTypeStats, "new-type.parquet", 1L, 0L, 100L);
 
         EvolutionStats result =
                 DataEvolutionFileStoreScan.evolutionStats(
@@ -495,6 +505,108 @@ public class DataEvolutionFileStoreScanTest {
     }
 
     @Test
+    public void testNewestIncompatibleProviderIsUnknown() {
+        Schema oldSchema = createSchema("f0");
+        schemas.put(0L, TableSchema.create(0L, oldSchema));
+        TableSchema currentSchema =
+                TableSchema.create(
+                        1L, Schema.newBuilder().column("f0", DataTypes.BIGINT()).build());
+        schemas.put(1L, currentSchema);
+
+        ManifestEntry compatible =
+                createManifestEntry(
+                        1L,
+                        createSimpleStats(
+                                GenericRow.of(10),
+                                GenericRow.of(20),
+                                createBinaryArray(new int[] {0}),
+                                new int[] {0}),
+                        "compatible.parquet",
+                        1L,
+                        0L,
+                        10L);
+        ManifestEntry newerIncompatible =
+                createManifestEntry(
+                        0L,
+                        createSimpleStats(
+                                GenericRow.of(100),
+                                GenericRow.of(200),
+                                createBinaryArray(new int[] {0}),
+                                new int[] {0}),
+                        "incompatible.parquet",
+                        2L,
+                        0L,
+                        10L);
+
+        EvolutionStats result =
+                DataEvolutionFileStoreScan.evolutionStats(
+                        currentSchema,
+                        scanTableSchema,
+                        Arrays.asList(compatible, newerIncompatible),
+                        new EvolutionStatsCache());
+
+        assertThat(result.minValues().isNullAt(0)).isTrue();
+        assertThat(result.nullCounts().isNullAt(0)).isTrue();
+    }
+
+    @Test
+    public void testPartialLatestProviderIsUnknown() {
+        Schema schema = createSchema("f0");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+        SimpleStats baseStats =
+                createSimpleStats(
+                        GenericRow.of(0),
+                        GenericRow.of(9),
+                        createBinaryArray(new int[] {0}),
+                        new int[] {0});
+        SimpleStats partialStats =
+                createSimpleStats(
+                        GenericRow.of(100),
+                        GenericRow.of(104),
+                        createBinaryArray(new int[] {0}),
+                        new int[] {0});
+
+        EvolutionStats result =
+                DataEvolutionFileStoreScan.evolutionStats(
+                        tableSchema,
+                        scanTableSchema,
+                        Arrays.asList(
+                                createManifestEntry(0L, baseStats, "base.parquet", 0L, 0L, 10L),
+                                createManifestEntry(
+                                        0L, partialStats, "partial.parquet", 1L, 5L, 5L)),
+                        new EvolutionStatsCache());
+
+        assertThat(result.minValues().isNullAt(0)).isTrue();
+        assertThat(result.nullCounts().isNullAt(0)).isTrue();
+    }
+
+    @Test
+    public void testTiedLatestProvidersAreUnknown() {
+        Schema schema = createSchema("f0");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+        SimpleStats stats =
+                createSimpleStats(
+                        GenericRow.of(0),
+                        GenericRow.of(9),
+                        createBinaryArray(new int[] {0}),
+                        new int[] {0});
+
+        EvolutionStats result =
+                DataEvolutionFileStoreScan.evolutionStats(
+                        tableSchema,
+                        scanTableSchema,
+                        Arrays.asList(
+                                createManifestEntry(0L, stats, "first.parquet", 1L, 0L, 10L),
+                                createManifestEntry(0L, stats, "second.parquet", 1L, 0L, 10L)),
+                        new EvolutionStatsCache());
+
+        assertThat(result.minValues().isNullAt(0)).isTrue();
+        assertThat(result.nullCounts().isNullAt(0)).isTrue();
+    }
+
+    @Test
     public void testIntersectsRowRanges() {
         List<Range> rowRanges =
                 Arrays.asList(
@@ -523,17 +635,27 @@ public class DataEvolutionFileStoreScanTest {
     }
 
     private ManifestEntry createManifestEntry(Long schemaId, SimpleStats stats) {
+        return createManifestEntry(schemaId, stats, "test-file.parquet", 0L, 0L, 100L);
+    }
+
+    private ManifestEntry createManifestEntry(
+            Long schemaId,
+            SimpleStats stats,
+            String fileName,
+            long sequence,
+            long firstRowId,
+            long rowCount) {
         DataFileMeta fileMeta =
                 DataFileMeta.create(
-                        "test-file.parquet",
+                        fileName,
                         100L,
-                        100L,
+                        rowCount,
                         createBinaryRow(1),
                         createBinaryRow(100),
                         stats,
                         stats,
-                        0L,
-                        0L,
+                        sequence,
+                        sequence,
                         schemaId,
                         0,
                         Collections.emptyList(),
@@ -542,7 +664,7 @@ public class DataEvolutionFileStoreScanTest {
                         FileSource.APPEND,
                         null,
                         null,
-                        null,
+                        firstRowId,
                         null);
 
         return ManifestEntry.create(FileKind.ADD, createBinaryRow(0), 0, 0, fileMeta);
@@ -550,8 +672,17 @@ public class DataEvolutionFileStoreScanTest {
 
     private ManifestEntry createManifestEntryWithDifferentCols(
             Long schemaId, String[] writeCols, String[] valueStatsCols, SimpleStats stats) {
+        return createManifestEntryWithDifferentCols(schemaId, writeCols, valueStatsCols, stats, 0L);
+    }
+
+    private ManifestEntry createManifestEntryWithDifferentCols(
+            Long schemaId,
+            String[] writeCols,
+            String[] valueStatsCols,
+            SimpleStats stats,
+            long sequence) {
         return createManifestEntryWithDifferentColsAndFileName(
-                "test-file.parquet", schemaId, writeCols, valueStatsCols, stats);
+                "test-file.parquet", schemaId, writeCols, valueStatsCols, stats, sequence);
     }
 
     private ManifestEntry createManifestEntryWithDifferentColsAndFileName(
@@ -560,6 +691,17 @@ public class DataEvolutionFileStoreScanTest {
             String[] writeCols,
             String[] valueStatsCols,
             SimpleStats stats) {
+        return createManifestEntryWithDifferentColsAndFileName(
+                fileName, schemaId, writeCols, valueStatsCols, stats, 0L);
+    }
+
+    private ManifestEntry createManifestEntryWithDifferentColsAndFileName(
+            String fileName,
+            Long schemaId,
+            String[] writeCols,
+            String[] valueStatsCols,
+            SimpleStats stats,
+            long sequence) {
         DataFileMeta fileMeta =
                 DataFileMeta.create(
                         fileName,
@@ -569,8 +711,8 @@ public class DataEvolutionFileStoreScanTest {
                         createBinaryRow(100),
                         stats,
                         stats,
-                        0L,
-                        0L,
+                        sequence,
+                        sequence,
                         schemaId,
                         0,
                         Collections.emptyList(),
@@ -579,7 +721,7 @@ public class DataEvolutionFileStoreScanTest {
                         FileSource.APPEND,
                         Arrays.stream(valueStatsCols).collect(Collectors.toList()),
                         null,
-                        null,
+                        0L,
                         Arrays.stream(writeCols).collect(Collectors.toList()));
 
         return ManifestEntry.create(FileKind.ADD, createBinaryRow(0), 0, 0, fileMeta);

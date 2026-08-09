@@ -20,7 +20,7 @@ from typing import Callable, Dict, List, Tuple
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
+from pypaimon.read.push_down_utils import rewrite_predicate_indices
 from pypaimon.schema.data_types import DataField
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.row.generic_row import GenericRow
@@ -33,9 +33,9 @@ _UNKNOWN = 2
 
 class _FileLayout:
 
-    def __init__(self, data_fields, stats_field_ids):
+    def __init__(self, data_fields, stats_offsets):
         self.data_fields = {field.id: field for field in data_fields}
-        self.stats_field_ids = stats_field_ids
+        self.stats_offsets = stats_offsets
 
 
 class DataEvolutionGroupStatsFilter:
@@ -46,12 +46,10 @@ class DataEvolutionGroupStatsFilter:
         predicate: Predicate,
         table_fields: List[DataField],
         schema_fields: Callable[[int], List[DataField]],
-        stats_evolutions: SimpleStatsEvolutions,
     ):
-        self.predicate = predicate
+        self.predicate = rewrite_predicate_indices(predicate, table_fields)
         self.table_fields = table_fields
         self.schema_fields = schema_fields
-        self.stats_evolutions = stats_evolutions
         self._layout_cache: Dict[Tuple, _FileLayout] = {}
 
     def may_match(self, files: List[DataFileMeta]) -> bool:
@@ -87,7 +85,6 @@ class DataEvolutionGroupStatsFilter:
         max_values = []
         null_counts = []
         states = []
-        evolved_stats = {}
         for field_index, field in enumerate(self.table_fields):
             providers = [
                 (file, layout)
@@ -119,29 +116,19 @@ class DataEvolutionGroupStatsFilter:
             if (file_range.from_ != group_start
                     or file_range.to != group_end
                     or source_field.type != field.type
-                    or field.id not in layout.stats_field_ids):
+                    or field.id not in layout.stats_offsets):
                 self._append_unknown(
                     min_values, max_values, null_counts, states)
                 continue
 
-            stats = evolved_stats.get(id(file))
-            if stats is None:
-                stats_fields = (
-                    file.value_stats_cols
-                    if file.value_stats_cols is not None
-                    else file.write_cols
-                )
-                stats = self.stats_evolutions.get_or_create(
-                    file.schema_id).evolution(
-                        file.value_stats, file.row_count, stats_fields)
-                evolved_stats[id(file)] = stats
-
-            min_value = stats.min_values.get_field(field_index)
-            max_value = stats.max_values.get_field(field_index)
+            stats = file.value_stats
+            stats_offset = layout.stats_offsets[field.id]
+            min_value = stats.min_values.get_field(stats_offset)
+            max_value = stats.max_values.get_field(stats_offset)
             null_count = (
-                stats.null_counts[field_index]
+                stats.null_counts[stats_offset]
                 if (stats.null_counts is not None
-                    and field_index < len(stats.null_counts))
+                    and stats_offset < len(stats.null_counts))
                 else None
             )
             self._validate_stats(
@@ -188,7 +175,10 @@ class DataEvolutionGroupStatsFilter:
             {field.name: field for field in data_fields},
             file.value_stats_cols,
         )
-        layout = _FileLayout(data_fields, {field.id for field in stats_fields})
+        layout = _FileLayout(
+            data_fields,
+            {field.id: index for index, field in enumerate(stats_fields)},
+        )
         self._layout_cache[key] = layout
         return layout
 
@@ -224,6 +214,8 @@ class DataEvolutionGroupStatsFilter:
                 raise ValueError("Incomparable min/max values in file stats.") from exc
             if not ordered:
                 raise ValueError("Invalid min/max order in file stats.")
+            if null_count == row_count:
+                raise ValueError("All-null stats contain non-null bounds.")
 
     def _predicate_may_match(self, predicate, stats, states, row_count):
         if predicate.method == 'and':
@@ -242,10 +234,14 @@ class DataEvolutionGroupStatsFilter:
             return True
         if states[index] == _UNKNOWN:
             return True
-        if (states[index] == _MISSING
-                or (stats.null_counts[index] is not None
-                    and stats.null_counts[index] == row_count)):
+        if states[index] == _MISSING:
             tester = Predicate.testers.get(predicate.method)
             return True if tester is None else tester.test_by_value(
                 None, predicate.literals)
+        field_type = getattr(self.table_fields[index].type, 'type', None)
+        if (field_type in ('FLOAT', 'DOUBLE')
+                and predicate.method in ('notEqual', 'notIn')):
+            # PyArrow min/max can omit NaN, which still matches negative
+            # predicates.
+            return True
         return predicate.test_by_simple_stats(stats, row_count)

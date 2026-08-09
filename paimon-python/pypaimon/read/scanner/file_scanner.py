@@ -502,7 +502,6 @@ class FileScanner:
                 stats_predicate,
                 self.table.fields,
                 self._schema_fields,
-                self.simple_stats_evolutions,
             )
 
         return entries, DataEvolutionSplitGenerator(

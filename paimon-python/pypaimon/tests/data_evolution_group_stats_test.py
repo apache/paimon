@@ -21,7 +21,6 @@ from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.read.scanner.data_evolution_split_generator import \
     DataEvolutionSplitGenerator
 from pypaimon.read.scanner.data_evolution_stats import \
@@ -88,8 +87,6 @@ class DataEvolutionGroupStatsFilterTest(unittest.TestCase):
             predicate,
             current_fields,
             lambda schema_id: schemas[schema_id],
-            SimpleStatsEvolutions(
-                lambda schema_id: schemas[schema_id], current_schema_id),
         )
 
     def test_merges_stats_from_latest_file_for_each_column(self):
@@ -145,17 +142,67 @@ class DataEvolutionGroupStatsFilterTest(unittest.TestCase):
             null_counts=[11])
         reversed_min_max = _file(
             'reversed-min-max.parquet', 0, 10, fields, [100], [0])
+        contradictory_all_null = _file(
+            'all-null-with-bounds.parquet', 0, 10, fields, [5], [5],
+            null_counts=[10])
 
         cases = [
             (unknown_write_col, builder.is_not_null('value')),
             (unknown_stats_col, builder.equal('value', 50)),
             (bad_null_count, builder.is_not_null('value')),
             (reversed_min_max, builder.equal('value', 50)),
+            (contradictory_all_null, builder.not_equal('value', 5)),
         ]
         for file, predicate in cases:
             with self.subTest(file=file.file_name):
                 self.assertTrue(self._filter(
                     predicate, {0: fields}, 0).may_match([file]))
+
+    def test_projected_predicate_is_rebound_by_name(self):
+        fields = [
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'b', AtomicType('INT')),
+            DataField(2, 'c', AtomicType('INT')),
+        ]
+        projected = [fields[0], fields[2]]
+        file = _file(
+            'data.parquet', 0, 1, fields, [1, 0, 200], [1, 0, 200])
+        predicate = PredicateBuilder(projected).greater_than('c', 150)
+
+        self.assertTrue(self._filter(
+            predicate, {0: fields}, 0).may_match([file]))
+
+    def test_negative_float_predicates_fail_open_for_nan(self):
+        for type_name in ('FLOAT', 'DOUBLE'):
+            fields = [DataField(0, 'value', AtomicType(type_name))]
+            file = _file('data.parquet', 0, 2, fields, [5.0], [5.0])
+            builder = PredicateBuilder(fields)
+            for predicate in (
+                    builder.not_equal('value', 5.0),
+                    builder.is_not_in('value', [5.0])):
+                with self.subTest(type=type_name, method=predicate.method):
+                    self.assertTrue(self._filter(
+                        predicate, {0: fields}, 0).may_match([file]))
+
+    def test_projected_layout_is_cached(self):
+        fields = [DataField(0, 'value', AtomicType('INT'))]
+        schema_loads = []
+
+        def load_schema(schema_id):
+            schema_loads.append(schema_id)
+            return fields
+
+        stats_filter = DataEvolutionGroupStatsFilter(
+            PredicateBuilder(fields).equal('value', 5),
+            fields,
+            load_schema,
+        )
+        stats_filter.may_match([_file(
+            'first.parquet', 0, 1, fields, [5], [5])])
+        stats_filter.may_match([_file(
+            'second.parquet', 1, 1, fields, [5], [5])])
+
+        self.assertEqual([0], schema_loads)
 
     def test_value_stats_cols_controls_covered_fields(self):
         fields = [
@@ -291,7 +338,6 @@ class DataEvolutionGroupStatsPlanningTest(unittest.TestCase):
             predicate,
             fields,
             lambda schema_id: fields,
-            SimpleStatsEvolutions(lambda schema_id: fields, 0),
         )
         without_pruning = DataEvolutionSplitGenerator(
             _Table(), 1024 * 1024, 0).create_splits(entries)
