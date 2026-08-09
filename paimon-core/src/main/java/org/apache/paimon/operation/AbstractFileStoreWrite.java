@@ -234,7 +234,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @Override
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
-        return prepareCommit(waitCompaction, commitIdentifier, null);
+        // Flink and other non-Spark callers use the legacy path: maintainers run before the
+        // CommitMessage is materialized so idle writers can be cleaned correctly.
+        return prepareCommitInternal(waitCompaction, commitIdentifier, null, false);
     }
 
     /**
@@ -246,6 +248,17 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             boolean waitCompaction,
             long commitIdentifier,
             @Nullable java.util.function.Consumer<CommitMessage> onPrepared)
+            throws Exception {
+        // Spark task-side cleanup registers drained data files before maintainer work that can
+        // fail, so a speculative kill can still abort already-written files.
+        return prepareCommitInternal(waitCompaction, commitIdentifier, onPrepared, true);
+    }
+
+    private List<CommitMessage> prepareCommitInternal(
+            boolean waitCompaction,
+            long commitIdentifier,
+            @Nullable java.util.function.Consumer<CommitMessage> onPrepared,
+            boolean onPreparedBeforeMaintainers)
             throws Exception {
         Function<WriterContainer<T>, Boolean> writerCleanChecker;
         if (writers.values().stream()
@@ -278,16 +291,19 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 CommitIncrement increment = writerContainer.writer.prepareCommit(waitCompaction);
                 DataIncrement newFilesIncrement = increment.newFilesIncrement();
                 CompactIncrement compactIncrement = increment.compactIncrement();
-                CommitMessageImpl committable =
-                        new CommitMessageImpl(
-                                partition,
-                                bucket,
-                                writerContainer.totalBuckets,
-                                newFilesIncrement,
-                                compactIncrement);
-                result.add(committable);
-                if (onPrepared != null) {
-                    onPrepared.accept(committable);
+                CommitMessageImpl committable = null;
+                if (onPreparedBeforeMaintainers) {
+                    committable =
+                            new CommitMessageImpl(
+                                    partition,
+                                    bucket,
+                                    writerContainer.totalBuckets,
+                                    newFilesIncrement,
+                                    compactIncrement);
+                    result.add(committable);
+                    if (onPrepared != null) {
+                        onPrepared.accept(committable);
+                    }
                 }
                 if (writerContainer.dynamicBucketMaintainer != null) {
                     newFilesIncrement
@@ -303,6 +319,16 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                     compactDeletionFile
                             .getOrCompute()
                             .ifPresent(compactIncrement.newIndexFiles()::add);
+                }
+                if (!onPreparedBeforeMaintainers) {
+                    committable =
+                            new CommitMessageImpl(
+                                    partition,
+                                    bucket,
+                                    writerContainer.totalBuckets,
+                                    newFilesIncrement,
+                                    compactIncrement);
+                    result.add(committable);
                 }
 
                 if (committable.isEmpty()) {
