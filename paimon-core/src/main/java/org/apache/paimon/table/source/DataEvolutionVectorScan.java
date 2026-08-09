@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
@@ -159,7 +160,8 @@ public class DataEvolutionVectorScan implements VectorScan {
             splits.add(new IndexVectorSearchSplit(range.from, range.to, vectorFiles, scalarFiles));
         }
 
-        GlobalIndexSearchMode vectorSearchMode = table.coreOptions().vectorIndexSearchMode();
+        CoreOptions effectiveOptions = effectiveCoreOptions();
+        GlobalIndexSearchMode vectorSearchMode = effectiveOptions.vectorIndexSearchMode();
         List<Range> rawRowRanges =
                 new DataEvolutionGlobalIndexCoverage(
                                 table,
@@ -175,7 +177,7 @@ public class DataEvolutionVectorScan implements VectorScan {
                                     snapshot,
                                     partitionFilter,
                                     scalarIndexFiles(allIndexFiles),
-                                    table.coreOptions().scalarIndexSearchMode())
+                                    effectiveOptions.scalarIndexSearchMode())
                             .unindexedRanges(table.rowType(), filter);
             if (vectorSearchMode == GlobalIndexSearchMode.FAST) {
                 scalarUnindexedRanges =
@@ -207,6 +209,12 @@ public class DataEvolutionVectorScan implements VectorScan {
                 return planSnapshot;
             }
         };
+    }
+
+    private CoreOptions effectiveCoreOptions() {
+        Map<String, String> merged = new HashMap<>(table.options());
+        merged.putAll(options);
+        return CoreOptions.fromMap(merged);
     }
 
     private static boolean isPrimaryColumn(GlobalIndexMeta meta, int fieldId) {
