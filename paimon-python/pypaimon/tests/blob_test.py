@@ -3832,6 +3832,66 @@ class CoalesceRangesTest(unittest.TestCase):
             )
             self.assertEqual(2, len(fallbacks))
 
+    def test_fallback_reads_share_global_stream_budget(self):
+        from pypaimon.common.file_io import FileIO
+
+        parallelism = 8
+        file_io = FileIO.get("file:///tmp", {})
+        barrier = threading.Barrier(parallelism)
+        lock = threading.Lock()
+        open_streams = 0
+        max_open_streams = 0
+
+        def opened():
+            nonlocal open_streams, max_open_streams
+            with lock:
+                open_streams += 1
+                max_open_streams = max(max_open_streams, open_streams)
+
+        def closed():
+            nonlocal open_streams
+            with lock:
+                open_streams -= 1
+
+        class FailingStream:
+            supports_concurrent_pread = True
+
+            def __init__(self):
+                self.closed = False
+                opened()
+
+            def read_at(self, length, offset):
+                barrier.wait()
+                raise IOError("pooled read failed")
+
+            def close(self):
+                if not self.closed:
+                    self.closed = True
+                    closed()
+
+        def read_file_range(path, offset, length):
+            opened()
+            try:
+                time.sleep(0.01)
+                return b"ok"
+            finally:
+                closed()
+
+        file_io.new_input_stream = lambda _: FailingStream()
+        file_io.read_file_range = read_file_range
+        ranges = [
+            ("blob-%d" % index, 0, 2)
+            for index in range(parallelism)
+        ]
+
+        self.assertEqual(
+            [b"ok"] * parallelism,
+            file_io.read_ranges_coalesced(
+                ranges, parallelism=parallelism, max_gap=0),
+        )
+        self.assertLessEqual(max_open_streams, parallelism)
+        self.assertEqual(0, open_streams)
+
     def test_unknown_length_does_not_use_shared_stream(self):
         from pypaimon.common.file_io import FileIO
 

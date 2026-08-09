@@ -514,7 +514,7 @@ class FileIO(ABC):
             except Exception:
                 # Preserve the previous independent-open behavior as a retry
                 # when a shared stream becomes unusable.
-                return self.read_file_range(path, offset, length)
+                return _read_independent(path, offset, length)
 
         def _run(task):
             kind, payload = task
