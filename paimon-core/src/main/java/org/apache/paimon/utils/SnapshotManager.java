@@ -551,6 +551,7 @@ public class SnapshotManager implements Serializable {
 
     public Iterator<Snapshot> snapshotsWithId(List<Long> snapshotIds) {
         return snapshotIds.stream()
+                .filter(this::snapshotExists)
                 .map(this::snapshot)
                 .sorted(Comparator.comparingLong(Snapshot::id))
                 .iterator();

@@ -25,9 +25,12 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -35,6 +38,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -45,11 +49,13 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link SnapshotsTable}. */
 public class SnapshotsTableTest extends TableTestBase {
@@ -94,6 +100,41 @@ public class SnapshotsTableTest extends TableTestBase {
         List<InternalRow> expectedRow = getExpectedResult(new long[] {1, 2});
         List<InternalRow> result = read(snapshotsTable);
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
+    }
+
+    @Test
+    public void testReadSnapshotsWithInFilterContainingUnknownId() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
+        Predicate predicate =
+                builder.in(
+                        snapshotsTable.rowType().getFieldNames().indexOf("snapshot_id"),
+                        Arrays.asList(1L, 99L));
+
+        ReadBuilder readBuilder = snapshotsTable.newReadBuilder().withFilter(predicate);
+        List<InternalRow> result = new ArrayList<>();
+        InternalRowSerializer serializer = new InternalRowSerializer(snapshotsTable.rowType());
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(row -> result.add(serializer.copy(row)));
+
+        assertThat(result).containsExactlyInAnyOrderElementsOf(getExpectedResult(new long[] {1}));
+    }
+
+    @Test
+    public void testReadSnapshotsWithEqualFilterOnUnknownIdStillFails() {
+        PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
+        Predicate predicate =
+                builder.equal(snapshotsTable.rowType().getFieldNames().indexOf("snapshot_id"), 99L);
+
+        ReadBuilder readBuilder = snapshotsTable.newReadBuilder().withFilter(predicate);
+        assertThatThrownBy(
+                        () ->
+                                readBuilder
+                                        .newRead()
+                                        .createReader(readBuilder.newScan().plan())
+                                        .forEachRemaining(row -> {}))
+                .isInstanceOf(RuntimeException.class);
     }
 
     private List<InternalRow> getExpectedResult(long[] snapshotIds) {
