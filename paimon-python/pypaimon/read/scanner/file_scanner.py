@@ -385,6 +385,12 @@ class FileScanner:
         # Generate splits
         splits = split_generator.create_splits(entries)
 
+        if self.data_evolution and self.scan_stats is not None:
+            # Data-evolution stats pruning happens on complete row-id groups
+            # inside the split generator, not in _filter_manifest_entry.
+            self.scan_stats.entries_after_stats = sum(
+                len(split.files) for split in splits)
+
         if self.table.is_primary_key_table:
             splits = self._apply_primary_key_sorted_indexes(splits)
 
@@ -875,8 +881,6 @@ class FileScanner:
                 return True
             # Data evolution: file stats may be from another schema, skip stats filter and filter in reader.
             if self.data_evolution:
-                if stats is not None:
-                    stats.entries_after_stats += 1
                 return True
             if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                 stats_fields = entry.file.write_cols

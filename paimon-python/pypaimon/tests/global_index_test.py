@@ -276,6 +276,10 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             scan.file_scanner._global_index_result = index_plan
             plan = scan.plan()
 
+            stats_scan = read_builder.new_scan()
+            stats_scan.file_scanner._global_index_result = index_plan
+            stats_plan, stats = stats_scan.file_scanner.scan_with_stats()
+
             self.assertEqual(
                 10,
                 sum(len(split.files) for split in baseline_plan.splits()),
@@ -283,6 +287,10 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
             self.assertEqual(1, len(plan.splits()))
             self.assertEqual(
                 1, sum(len(split.files) for split in plan.splits()))
+            self.assertEqual(10, stats.entries_after_bucket)
+            self.assertEqual(1, stats.entries_after_stats)
+            self.assertEqual(
+                1, sum(len(split.files) for split in stats_plan.splits()))
             baseline_result = read_builder.new_read().to_arrow(
                 baseline_plan.splits()).to_pydict()
             pruned_result = read_builder.new_read().to_arrow(

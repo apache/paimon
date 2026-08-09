@@ -22,6 +22,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.schema.data_types import DataField
+from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.row.generic_row import GenericRow
 
 
@@ -135,14 +136,19 @@ class DataEvolutionGroupStatsFilter:
                         file.value_stats, file.row_count, stats_fields)
                 evolved_stats[id(file)] = stats
 
-            min_values.append(stats.min_values.get_field(field_index))
-            max_values.append(stats.max_values.get_field(field_index))
-            null_counts.append(
+            min_value = stats.min_values.get_field(field_index)
+            max_value = stats.max_values.get_field(field_index)
+            null_count = (
                 stats.null_counts[field_index]
                 if (stats.null_counts is not None
                     and field_index < len(stats.null_counts))
                 else None
             )
+            self._validate_stats(
+                min_value, max_value, null_count, row_count)
+            min_values.append(min_value)
+            max_values.append(max_value)
+            null_counts.append(null_count)
             states.append(_KNOWN)
 
         return (
@@ -175,21 +181,49 @@ class DataEvolutionGroupStatsFilter:
 
         schema_fields = self.schema_fields(file.schema_id)
         fields_by_name = {field.name: field for field in schema_fields}
-        data_fields = (
-            schema_fields
-            if file.write_cols is None
-            else [fields_by_name[name] for name in file.write_cols
-                  if name in fields_by_name]
-        )
-        stats_fields = (
-            data_fields
-            if file.value_stats_cols is None
-            else [fields_by_name[name] for name in file.value_stats_cols
-                  if name in fields_by_name]
+        data_fields = self._project_fields(
+            schema_fields, fields_by_name, file.write_cols)
+        stats_fields = self._project_fields(
+            data_fields,
+            {field.name: field for field in data_fields},
+            file.value_stats_cols,
         )
         layout = _FileLayout(data_fields, {field.id for field in stats_fields})
         self._layout_cache[key] = layout
         return layout
+
+    @staticmethod
+    def _project_fields(default_fields, fields_by_name, names):
+        if names is None:
+            return default_fields
+        if len(names) != len(set(names)):
+            raise ValueError("Duplicate fields in file stats metadata.")
+        unknown = [
+            name for name in names
+            if name not in fields_by_name
+            and not SpecialFields.is_system_field(name)
+        ]
+        if unknown:
+            raise ValueError("Unknown fields in file stats metadata: %s" % unknown)
+        return [fields_by_name[name] for name in names if name in fields_by_name]
+
+    @staticmethod
+    def _validate_stats(min_value, max_value, null_count, row_count):
+        if (null_count is not None
+                and (isinstance(null_count, bool)
+                     or not isinstance(null_count, int)
+                     or null_count < 0
+                     or null_count > row_count)):
+            raise ValueError("Invalid null count in file stats.")
+        if (min_value is None) != (max_value is None):
+            raise ValueError("Incomplete min/max values in file stats.")
+        if min_value is not None:
+            try:
+                ordered = min_value <= max_value
+            except TypeError as exc:
+                raise ValueError("Incomparable min/max values in file stats.") from exc
+            if not ordered:
+                raise ValueError("Invalid min/max order in file stats.")
 
     def _predicate_may_match(self, predicate, stats, states, row_count):
         if predicate.method == 'and':

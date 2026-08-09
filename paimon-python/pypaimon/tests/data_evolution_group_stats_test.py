@@ -131,6 +131,32 @@ class DataEvolutionGroupStatsFilterTest(unittest.TestCase):
                     builder.equal('value', 1000),
                     {0: fields}, 0).may_match([file]))
 
+    def test_invalid_stats_metadata_fails_open(self):
+        fields = [DataField(0, 'value', AtomicType('INT'))]
+        builder = PredicateBuilder(fields)
+        unknown_write_col = _file(
+            'unknown-write.parquet', 0, 10, fields, [], [],
+            write_cols=['unknown'])
+        unknown_stats_col = _file(
+            'unknown-stats.parquet', 0, 10, fields, [0], [9])
+        unknown_stats_col.value_stats_cols = ['unknown']
+        bad_null_count = _file(
+            'bad-null-count.parquet', 0, 10, fields, [0], [9],
+            null_counts=[11])
+        reversed_min_max = _file(
+            'reversed-min-max.parquet', 0, 10, fields, [100], [0])
+
+        cases = [
+            (unknown_write_col, builder.is_not_null('value')),
+            (unknown_stats_col, builder.equal('value', 50)),
+            (bad_null_count, builder.is_not_null('value')),
+            (reversed_min_max, builder.equal('value', 50)),
+        ]
+        for file, predicate in cases:
+            with self.subTest(file=file.file_name):
+                self.assertTrue(self._filter(
+                    predicate, {0: fields}, 0).may_match([file]))
+
     def test_value_stats_cols_controls_covered_fields(self):
         fields = [
             DataField(0, 'without_stats', AtomicType('INT')),
