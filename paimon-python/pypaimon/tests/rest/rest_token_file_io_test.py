@@ -140,6 +140,24 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 read_content = stream.read()
                 self.assertEqual(read_content, test_content)
 
+    def test_range_stream_is_forwarded(self):
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                self.catalog_options,
+            )
+            delegate = MagicMock()
+            expected = object()
+            delegate.new_range_input_stream.return_value = expected
+            with patch.object(file_io, 'file_io', return_value=delegate):
+                self.assertIs(
+                    expected,
+                    file_io.new_range_input_stream("file:///blob"),
+                )
+            delegate.new_range_input_stream.assert_called_once_with(
+                "file:///blob")
+
     def test_pickle_serialization(self):
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
             original_file_io = RESTTokenFileIO(

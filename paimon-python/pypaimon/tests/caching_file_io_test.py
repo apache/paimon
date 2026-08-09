@@ -289,6 +289,21 @@ class CachingFileIOTest(unittest.TestCase):
         with caching_io.new_input_stream("manifest-abc") as s:
             self.assertEqual(data, s.read())
 
+    def test_cached_range_stream_uses_delegate_range_stream(self):
+        data = b"manifest data"
+        delegate = self._make_delegate({"manifest-abc": data})
+        delegate.new_range_input_stream.side_effect = (
+            lambda path: io.BytesIO(data))
+        cache = LocalDiskCacheManager(
+            self.cache_dir, 2 ** 63 - 1, block_size=64)
+        caching_io = CachingFileIO(delegate, cache)
+
+        with caching_io.new_range_input_stream("manifest-abc") as stream:
+            self.assertEqual(data, stream.read_at(len(data), 0))
+
+        delegate.new_range_input_stream.assert_called_once_with("manifest-abc")
+        delegate.new_input_stream.assert_not_called()
+
     def test_global_index_file_is_cached(self):
         data = b"index data"
         delegate = self._make_delegate({"global-index-uuid.index": data})

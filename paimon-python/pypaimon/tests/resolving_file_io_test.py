@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import MagicMock
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
@@ -84,6 +85,16 @@ class ResolvingFileIOTest(unittest.TestCase):
         opts = Options({CatalogOptions.WAREHOUSE.key(): 'file:///tmp/warehouse'})
         resolving = ResolvingFileIO(opts)
         self.assertFalse(resolving.is_object_store())
+
+    def test_range_stream_is_forwarded(self):
+        resolving = ResolvingFileIO(Options({}))
+        delegate = MagicMock()
+        expected = object()
+        delegate.new_range_input_stream.return_value = expected
+        resolving._get_fileio = MagicMock(return_value=delegate)
+
+        self.assertIs(expected, resolving.new_range_input_stream("file:///x"))
+        delegate.new_range_input_stream.assert_called_once_with("file:///x")
 
 
 class ResolvingFileIOReadWriteTest(unittest.TestCase):

@@ -358,6 +358,11 @@ class PyArrowFileIO(FileIO):
         path_str = self.to_filesystem_path(path)
         return self.filesystem.open_input_file(path_str)
 
+    def new_range_input_stream(self, path: str):
+        if self._use_jindo:
+            return self.filesystem.handler.open_range_input_stream(path)
+        return self.new_input_stream(path)
+
     def new_output_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
 

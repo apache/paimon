@@ -17,6 +17,7 @@
 
 import logging
 import os
+import threading
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -30,7 +31,7 @@ from pypaimon.common.options import Options
 
 def supports_pread(stream) -> bool:
     """Check if the stream supports position-based reads (thread-safe I/O)."""
-    if hasattr(stream, 'read_at'):
+    if hasattr(stream, 'read_at') or hasattr(stream, 'pread'):
         return True
     if hasattr(stream, 'fileno'):
         try:
@@ -43,6 +44,8 @@ def supports_pread(stream) -> bool:
 
 def pread(stream, length: int, offset: int) -> bytes:
     """Position-based read without changing the stream cursor. Thread-safe."""
+    if hasattr(stream, 'pread'):
+        return stream.pread(length, offset)
     if hasattr(stream, 'read_at'):
         return stream.read_at(length, offset)
     return os.pread(stream.fileno(), length, offset)
@@ -94,6 +97,15 @@ class FileIO(ABC):
     @abstractmethod
     def new_input_stream(self, path: str):
         pass
+
+    def new_range_input_stream(self, path: str):
+        """Open a stream for shared positional range reads.
+
+        Implementations may return a lower-level stream whose positional read
+        avoids cursor emulation. The default preserves third-party FileIO
+        compatibility.
+        """
+        return self.new_input_stream(path)
 
     @abstractmethod
     def new_output_stream(self, path: str):
@@ -186,8 +198,9 @@ class FileIO(ABC):
                               max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN):
         """Read ``ranges`` (each ``None`` or ``(path, offset, length)``), returning
         bytes in the same order. Same-file nearby ranges are merged into one read
-        to cut round trips, then sliced; reads run on a thread pool. Negative
-        length (read to EOF) is read on its own, never merged.
+        to cut round trips, then sliced. All spans for one path share an input
+        stream; reads run on a thread pool. Negative length (read to EOF) is read
+        on its own, never merged.
 
         A failed read propagates and aborts the whole batch (unlike a per-row
         ``file.open()`` loop that fails one row at a time).
@@ -232,36 +245,109 @@ class FileIO(ABC):
                 coalescible.append((index, path, offset, length))
 
         spans = _coalesce_ranges(coalescible, max_gap, max_span)
+        tasks_by_path = {}
+        for span in spans:
+            tasks_by_path.setdefault(span[0], []).append(("span", span))
+        for singleton in singletons:
+            tasks_by_path.setdefault(singleton[1], []).append(
+                ("one", singleton))
+        tasks = [
+            task for path_tasks in tasks_by_path.values()
+            for task in path_tasks
+        ]
+        if not tasks:
+            return results
+
+        class _SharedRangeStream:
+            def __init__(self, file_io, path, task_count):
+                self._file_io = file_io
+                self._path = path
+                self._stream = None
+                self._open_lock = threading.Lock()
+                self._seek_lock = threading.Lock()
+                self._positional = None
+                self._remaining = task_count
+
+            def _get(self):
+                if self._stream is None:
+                    with self._open_lock:
+                        if self._stream is None:
+                            self._stream = self._file_io.new_range_input_stream(
+                                self._path)
+                            self._positional = supports_pread(self._stream)
+                return self._stream
+
+            def read(self, offset, length):
+                stream = self._get()
+                if length >= 0 and self._positional:
+                    return pread(stream, length, offset)
+                with self._seek_lock:
+                    stream.seek(offset)
+                    return stream.read() if length < 0 else stream.read(length)
+
+            def release(self):
+                with self._open_lock:
+                    self._remaining -= 1
+                    if self._remaining == 0:
+                        self._close()
+
+            def close(self):
+                with self._open_lock:
+                    self._close()
+
+            def _close(self):
+                if self._stream is not None:
+                    self._stream.close()
+                    self._stream = None
+
+        streams = {
+            path: _SharedRangeStream(self, path, len(path_tasks))
+            for path, path_tasks in tasks_by_path.items()
+        }
+
+        def _read(path, offset, length):
+            try:
+                return streams[path].read(offset, length)
+            except Exception:
+                # Preserve the previous independent-open behavior as a retry
+                # when a shared stream becomes unusable.
+                return self.read_file_range(path, offset, length)
 
         def _run(task):
             kind, payload = task
-            if kind == "span":
-                path, span_off, span_len, members = payload
-                buf = self.read_file_range(path, span_off, span_len)
-                if return_views:
-                    buf = memoryview(buf)
-                    useful = sum(length for _, _, length in members)
-                    share_buffer = (
-                        max_retained_amplification <= 0
-                        or span_len <= useful * max_retained_amplification
-                    )
-                for idx, off, length in members:
-                    s = off - span_off
-                    value = buf[s:s + length]
-                    if return_views and not share_buffer:
-                        value = memoryview(bytes(value))
-                    results[idx] = value
-            else:
-                idx, path, off, length = payload
-                result = self.read_file_range(path, off, length)
-                results[idx] = memoryview(result) if return_views else result
+            path = payload[0] if kind == "span" else payload[1]
+            try:
+                if kind == "span":
+                    path, span_off, span_len, members = payload
+                    buf = _read(path, span_off, span_len)
+                    if return_views:
+                        buf = memoryview(buf)
+                        useful = sum(length for _, _, length in members)
+                        share_buffer = (
+                            max_retained_amplification <= 0
+                            or span_len <= useful * max_retained_amplification
+                        )
+                    for idx, off, length in members:
+                        s = off - span_off
+                        value = buf[s:s + length]
+                        if return_views and not share_buffer:
+                            value = memoryview(bytes(value))
+                        results[idx] = value
+                else:
+                    idx, path, off, length = payload
+                    result = _read(path, off, length)
+                    results[idx] = (
+                        memoryview(result) if return_views else result)
+            finally:
+                streams[path].release()
 
-        tasks = [("span", s) for s in spans] + [("one", g) for g in singletons]
-        if not tasks:
-            return results
         workers = max(1, min(parallelism, len(tasks)))
-        with ThreadPoolExecutor(workers) as pool:
-            list(pool.map(_run, tasks))
+        try:
+            with ThreadPoolExecutor(workers) as pool:
+                list(pool.map(_run, tasks))
+        finally:
+            for stream in streams.values():
+                stream.close()
         return results
 
     def read_blobs_concurrent(self, blobs, parallelism):

@@ -328,6 +328,10 @@ class JindoFileSystemHandler(FileSystemHandler):
         jindo_stream = self._jindo_fs.open(normalized, "rb")
         return PythonFile(JindoInputFile(jindo_stream), mode="r")
 
+    def open_range_input_stream(self, path: str):
+        """Open the native stream so callers can use Jindo ``pread`` directly."""
+        return self._jindo_fs.open(self._normalize_path(path), "rb")
+
     def open_output_stream(self, path: str, metadata):
         normalized = self._normalize_path(path)
         jindo_stream = self._jindo_fs.open(normalized, "wb")
