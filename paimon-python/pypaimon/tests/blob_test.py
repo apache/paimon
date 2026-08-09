@@ -3832,6 +3832,42 @@ class CoalesceRangesTest(unittest.TestCase):
             )
             self.assertEqual(2, len(fallbacks))
 
+    def test_unknown_length_does_not_use_shared_stream(self):
+        from pypaimon.common.file_io import FileIO
+
+        file_io = FileIO.get("file:///tmp", {})
+        independent_reads = []
+
+        class SharedStream:
+            supports_concurrent_pread = True
+
+            def read_at(self, length, offset):
+                return b"known"
+
+            def seek(self, offset):
+                raise AssertionError(
+                    "unknown-length read used the shared stream")
+
+            def close(self):
+                pass
+
+        def read_file_range(path, offset, length):
+            independent_reads.append((path, offset, length))
+            return b"tail"
+
+        file_io.new_input_stream = lambda _: SharedStream()
+        file_io.read_file_range = read_file_range
+
+        self.assertEqual(
+            [b"known", b"tail"],
+            file_io.read_ranges_coalesced(
+                [("blob", 0, 5), ("blob", 5, -1)],
+                parallelism=1,
+                max_gap=0,
+            ),
+        )
+        self.assertEqual([("blob", 5, -1)], independent_reads)
+
     def test_non_positional_streams_are_exclusive(self):
         from pypaimon.common.file_io import FileIO
 

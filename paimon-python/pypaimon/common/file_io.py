@@ -326,6 +326,7 @@ class FileIO(ABC):
                 self._opening = 0
                 self._detecting = False
                 self._concurrent = None
+                self._shared_users = 0
                 self._seek_lock = threading.Lock()
                 self._remaining = task_count
                 self._max_streams = min(
@@ -380,11 +381,14 @@ class FileIO(ABC):
                     self._condition.notify_all()
 
             def _acquire(self):
-                self._detect()
-                with self._condition:
-                    if self._concurrent:
-                        return self._streams[0], False
-                    while True:
+                while True:
+                    self._detect()
+                    with self._condition:
+                        if self._concurrent is None:
+                            continue
+                        if self._concurrent:
+                            self._shared_users += 1
+                            return self._streams[0], False
                         if self._available:
                             return self._available.pop(), True
                         if (len(self._streams) + self._opening
@@ -411,11 +415,25 @@ class FileIO(ABC):
                     self._condition.notify()
                 self._budget.notify_idle()
 
+            def _release_shared(self):
+                with self._condition:
+                    self._shared_users -= 1
+                    idle = self._shared_users == 0
+                    if idle:
+                        self._condition.notify_all()
+                if idle:
+                    self._budget.notify_idle()
+
             def _evict_available_stream(self):
                 with self._condition:
-                    if not self._available:
+                    if self._available:
+                        stream = self._available.pop()
+                    elif (self._concurrent and self._shared_users == 0
+                          and self._streams):
+                        stream = self._streams[0]
+                        self._concurrent = None
+                    else:
                         return False
-                    stream = self._available.pop()
                     self._streams.remove(stream)
                     self._condition.notify_all()
                 self._close_stream(stream)
@@ -449,6 +467,8 @@ class FileIO(ABC):
                             self._discard(stream)
                         else:
                             self._return(stream)
+                    else:
+                        self._release_shared()
 
             def task_done(self):
                 with self._condition:
@@ -479,7 +499,16 @@ class FileIO(ABC):
         }
         stream_budget.register(streams.values())
 
+        def _read_independent(path, offset, length):
+            stream_budget.acquire()
+            try:
+                return self.read_file_range(path, offset, length)
+            finally:
+                stream_budget.release()
+
         def _read(path, offset, length):
+            if length < 0:
+                return _read_independent(path, offset, length)
             try:
                 return streams[path].read(offset, length)
             except Exception:
