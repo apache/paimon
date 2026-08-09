@@ -77,12 +77,7 @@ public class InferShreddingWritePlanWriter implements BundleFormatWriter {
     public void writeBundle(BundleRecords bundle) throws IOException {
         if (!planFinalized) {
             for (InternalRow row : bundle) {
-                bufferedRows.add(
-                        InternalRowUtils.copyInternalRow(row, writePlanFactory.logicalRowType()));
-                totalBufferedRowCount++;
-            }
-            if (totalBufferedRowCount >= writePlanFactory.inferBufferRowCount()) {
-                finalizePlanAndFlush();
+                addElement(row);
             }
             return;
         }

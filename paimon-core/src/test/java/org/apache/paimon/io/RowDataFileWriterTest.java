@@ -74,7 +74,6 @@ class RowDataFileWriterTest {
 
         writer.writeBundle(bundle);
 
-        assertThat(bundle.rowCountCalls).isEqualTo(1);
         assertThat(bundle.iteratorCalls).isZero();
         assertThat(formatWriter.writtenBundle).isSameAs(bundle);
         assertThat(formatWriter.bundleWrites).isEqualTo(1);
@@ -107,7 +106,6 @@ class RowDataFileWriterTest {
 
         writer.writeBundle(bundle);
 
-        assertThat(bundle.rowCountCalls).isEqualTo(1);
         assertThat(bundle.iteratorCalls).isZero();
         assertThat(formatWriter.writtenBundle).isSameAs(bundle);
         assertThat(formatWriter.bundleWrites).isEqualTo(1);
@@ -144,7 +142,7 @@ class RowDataFileWriterTest {
     }
 
     @Test
-    void testBundleFormatWriterCanChooseRowFallback() throws Exception {
+    void testBundleFormatWriterWithoutOptInFallsBackToRows() throws Exception {
         TestingFallbackBundleFormatWriter formatWriter = new TestingFallbackBundleFormatWriter();
         LongCounter sequenceCounter = new LongCounter();
         RowDataFileWriter writer =
@@ -158,6 +156,7 @@ class RowDataFileWriterTest {
 
         writer.writeBundle(rows(GenericRow.of(1), GenericRow.of(2)));
 
+        assertThat(formatWriter.bundleWrites).isZero();
         assertThat(formatWriter.rowWrites).isEqualTo(2);
         assertThat(writer.recordCount()).isEqualTo(2);
         assertThat(sequenceCounter.getValue()).isEqualTo(2);
@@ -379,10 +378,26 @@ class RowDataFileWriterTest {
             bundleWrites++;
             writtenBundle = bundle;
         }
+
+        @Override
+        public boolean supportsRowEquivalentBundleWrite() {
+            return true;
+        }
     }
 
     private static class TestingFallbackBundleFormatWriter extends TestingFormatWriter
-            implements BundleFormatWriter {}
+            implements BundleFormatWriter {
+
+        private int bundleWrites;
+
+        @Override
+        public void writeBundle(BundleRecords bundle) {
+            bundleWrites++;
+            for (InternalRow row : bundle) {
+                addElement(row);
+            }
+        }
+    }
 
     private static class TestingThrowingBundleFormatWriter extends TestingFormatWriter
             implements BundleFormatWriter {
@@ -396,6 +411,11 @@ class RowDataFileWriterTest {
         @Override
         public void writeBundle(BundleRecords bundle) throws IOException {
             throw failure;
+        }
+
+        @Override
+        public boolean supportsRowEquivalentBundleWrite() {
+            return true;
         }
     }
 
@@ -473,7 +493,6 @@ class RowDataFileWriterTest {
 
         private final List<InternalRow> rows;
         private int iteratorCalls;
-        private int rowCountCalls;
 
         private TrackingBundleRecords(List<InternalRow> rows) {
             this.rows = rows;
@@ -487,7 +506,6 @@ class RowDataFileWriterTest {
 
         @Override
         public long rowCount() {
-            rowCountCalls++;
             return rows.size();
         }
     }

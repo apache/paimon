@@ -18,27 +18,30 @@
 
 package org.apache.paimon.format;
 
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.BundleRecords;
 
 import java.io.IOException;
 
-/** Format write with bundle interface. */
+/** Format writer with bundle interface. */
 public interface BundleFormatWriter extends FormatWriter {
 
     /**
-     * Writes a bundle with semantics equivalent to invoking {@link #addElement} for every record.
-     *
-     * <p>The implementation may consume the bundle natively, convert or copy it, or fall back to
-     * row-by-row writes. It must not retain borrowed buffers after this method returns unless it
-     * has copied them or acquired independent ownership.
+     * Writes a bundle of records.
      *
      * @param bundle the records to be written
      * @throws IOException if exception happens
      */
-    default void writeBundle(BundleRecords bundle) throws IOException {
-        for (InternalRow row : bundle) {
-            addElement(row);
-        }
+    void writeBundle(BundleRecords bundle) throws IOException;
+
+    /**
+     * Returns whether {@link #writeBundle} is equivalent to invoking {@link #addElement} for every
+     * record.
+     *
+     * <p>An implementation returning {@code true} must preserve record values and order. It must
+     * not retain borrowed buffers after {@link #writeBundle} returns unless it has copied them or
+     * acquired independent ownership.
+     */
+    default boolean supportsRowEquivalentBundleWrite() {
+        return false;
     }
 }

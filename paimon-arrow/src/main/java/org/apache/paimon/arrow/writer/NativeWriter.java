@@ -25,12 +25,6 @@ public abstract class NativeWriter {
 
     public abstract long nativeMemoryUsed();
 
-    /**
-     * Writes an Arrow batch represented by C Data Interface addresses.
-     *
-     * <p>The implementation must consume the batch synchronously or acquire independent ownership
-     * before returning. Both addresses become invalid immediately after this method returns.
-     */
     public abstract void writeIpcBytes(long arrayAddress, long schemaAddress);
 
     public abstract void close();

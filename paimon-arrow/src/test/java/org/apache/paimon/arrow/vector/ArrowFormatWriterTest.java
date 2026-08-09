@@ -623,6 +623,35 @@ public class ArrowFormatWriterTest {
         }
     }
 
+    @Test
+    public void testArrowBundleSchemaCompatibilityIgnoresFieldDescription() {
+        RowType writerType = RowType.builder().field("value", DataTypes.INT()).build();
+        RowType bundleType =
+                RowType.builder().field("value", DataTypes.INT(), "different description").build();
+
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(writerType, 1, true)) {
+            assertThat(
+                            writer.isArrowBundleSchemaCompatible(
+                                    new ArrowBundleRecords(
+                                            writer.getVectorSchemaRoot(), bundleType, true)))
+                    .isTrue();
+        }
+    }
+
+    @Test
+    public void testArrowBundleSchemaCompatibilityRequiresLogicalType() {
+        RowType writerType = RowType.builder().field("value", DataTypes.VARCHAR(10)).build();
+        RowType bundleType = RowType.builder().field("value", DataTypes.CHAR(10)).build();
+
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(writerType, 1, true)) {
+            assertThat(
+                            writer.isArrowBundleSchemaCompatible(
+                                    new ArrowBundleRecords(
+                                            writer.getVectorSchemaRoot(), bundleType, true)))
+                    .isFalse();
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testWriteWithExternalAllocator(boolean allocationFailed) {

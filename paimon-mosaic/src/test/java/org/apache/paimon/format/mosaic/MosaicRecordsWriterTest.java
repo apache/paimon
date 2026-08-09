@@ -140,7 +140,8 @@ class MosaicRecordsWriterTest {
                 .write(any(VectorSchemaRoot.class));
 
         try (BufferAllocator sourceAllocator =
-                        writerAllocator.newChildAllocator("mosaic-schema-test", 0, Long.MAX_VALUE);
+                        writerAllocator.newChildAllocator(
+                                "mosaic-reordered-test", 0, Long.MAX_VALUE);
                 VectorSchemaRoot root =
                         ArrowUtils.createVectorSchemaRoot(sourceType, sourceAllocator)) {
             setInt((IntVector) root.getVector("b"), 20);

@@ -19,7 +19,6 @@
 package org.apache.paimon.format.lance;
 
 import org.apache.paimon.arrow.ArrowBundleRecords;
-import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.vector.ArrowFormatWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.BundleFormatWriter;
@@ -66,18 +65,12 @@ public class LanceRecordsWriter implements BundleFormatWriter {
     @Override
     public void writeBundle(BundleRecords bundleRecords) throws IOException {
         if (bundleRecords instanceof ArrowBundleRecords) {
-            ArrowBundleRecords arrowBundle = (ArrowBundleRecords) bundleRecords;
-            VectorSchemaRoot root = arrowBundle.getVectorSchemaRoot();
-            if (arrowFormatWriter.isArrowBundleSchemaCompatible(arrowBundle)
-                    && ArrowUtils.hasSameRootAllocator(root, arrowFormatWriter.getAllocator())) {
-                flush();
-                nativeWriter.ensureInitialized(arrowFormatWriter.getAllocator());
-                add(root);
-                return;
+            add(((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot());
+        } else {
+            for (InternalRow row : bundleRecords) {
+                addElement(row);
             }
         }
-
-        BundleFormatWriter.super.writeBundle(bundleRecords);
     }
 
     public void add(VectorSchemaRoot vsr) throws IOException {

@@ -41,7 +41,7 @@ import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
 /** Reader from a {@link VectorSchemaRoot} to paimon rows. */
 public class ArrowBatchReader {
 
-    private final VectorizedColumnBatch reusableBatch;
+    private final VectorizedColumnBatch batch;
     private final Arrow2PaimonVectorConverter[] convertors;
     private final RowType projectedRowType;
     private final boolean caseSensitive;
@@ -57,11 +57,12 @@ public class ArrowBatchReader {
             RowType rowType,
             boolean caseSensitive,
             Arrow2PaimonVectorConverter.Arrow2PaimonVectorConvertorVisitor visitor) {
-        this.reusableBatch = new VectorizedColumnBatch(new ColumnVector[rowType.getFieldCount()]);
+        ColumnVector[] columnVectors = new ColumnVector[rowType.getFieldCount()];
         this.convertors = new Arrow2PaimonVectorConverter[rowType.getFieldCount()];
+        this.batch = new VectorizedColumnBatch(columnVectors);
         this.projectedRowType = rowType;
 
-        for (int i = 0; i < convertors.length; i++) {
+        for (int i = 0; i < columnVectors.length; i++) {
             this.convertors[i] =
                     Arrow2PaimonVectorConverter.construct(visitor, rowType.getTypeAt(i));
         }
@@ -69,9 +70,30 @@ public class ArrowBatchReader {
     }
 
     public Iterable<InternalRow> readBatch(VectorSchemaRoot vsr) {
-        populateBatch(vsr, reusableBatch);
-        int rowCount = reusableBatch.getNumRows();
-        final ColumnarRow columnarRow = new ColumnarRow(reusableBatch);
+        int[] mapping = new int[projectedRowType.getFieldCount()];
+        Schema arrowSchema = vsr.getSchema();
+        Map<String, Integer> arrowFieldIndex = new HashMap<>();
+        List<Field> arrowFields = arrowSchema.getFields();
+        for (int j = 0; j < arrowFields.size(); j++) {
+            arrowFieldIndex.put(toLowerCaseIfNeed(arrowFields.get(j).getName(), caseSensitive), j);
+        }
+        List<DataField> dataFields = projectedRowType.getFields();
+        for (int i = 0; i < dataFields.size(); ++i) {
+            String fieldName = toLowerCaseIfNeed(dataFields.get(i).name(), caseSensitive);
+            mapping[i] = arrowFieldIndex.getOrDefault(fieldName, -1);
+        }
+
+        for (int i = 0; i < batch.columns.length; i++) {
+            if (mapping[i] >= 0) {
+                batch.columns[i] = convertors[i].convertVector(vsr.getVector(mapping[i]));
+            } else {
+                batch.columns[i] = AllNullColumnVector.INSTANCE;
+            }
+        }
+
+        int rowCount = vsr.getRowCount();
+        batch.setNumRows(vsr.getRowCount());
+        final ColumnarRow columnarRow = new ColumnarRow(batch);
         return () ->
                 new Iterator<InternalRow>() {
                     private int position = 0;
@@ -88,43 +110,5 @@ public class ArrowBatchReader {
                         return columnarRow;
                     }
                 };
-    }
-
-    /**
-     * Wraps an Arrow batch as Paimon column vectors without materializing rows.
-     *
-     * <p>The returned batch container is not reused, but its columns borrow vectors owned by {@code
-     * vsr} and must not be used after the root is released.
-     */
-    public VectorizedColumnBatch readVectorizedBatch(VectorSchemaRoot vsr) {
-        VectorizedColumnBatch resultBatch =
-                new VectorizedColumnBatch(new ColumnVector[projectedRowType.getFieldCount()]);
-        populateBatch(vsr, resultBatch);
-        return resultBatch;
-    }
-
-    private void populateBatch(VectorSchemaRoot vsr, VectorizedColumnBatch targetBatch) {
-        int[] mapping = new int[projectedRowType.getFieldCount()];
-        Schema arrowSchema = vsr.getSchema();
-        Map<String, Integer> arrowFieldIndex = new HashMap<>();
-        List<Field> arrowFields = arrowSchema.getFields();
-        for (int j = 0; j < arrowFields.size(); j++) {
-            arrowFieldIndex.put(toLowerCaseIfNeed(arrowFields.get(j).getName(), caseSensitive), j);
-        }
-        List<DataField> dataFields = projectedRowType.getFields();
-        for (int i = 0; i < dataFields.size(); ++i) {
-            String fieldName = toLowerCaseIfNeed(dataFields.get(i).name(), caseSensitive);
-            mapping[i] = arrowFieldIndex.getOrDefault(fieldName, -1);
-        }
-
-        for (int i = 0; i < targetBatch.columns.length; i++) {
-            if (mapping[i] >= 0) {
-                targetBatch.columns[i] = convertors[i].convertVector(vsr.getVector(mapping[i]));
-            } else {
-                targetBatch.columns[i] = AllNullColumnVector.INSTANCE;
-            }
-        }
-
-        targetBatch.setNumRows(vsr.getRowCount());
     }
 }

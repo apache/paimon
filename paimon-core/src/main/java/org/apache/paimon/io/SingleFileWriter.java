@@ -164,6 +164,11 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         }
     }
 
+    protected final boolean supportsRowEquivalentBundleWrite() {
+        return writer instanceof BundleFormatWriter
+                && ((BundleFormatWriter) writer).supportsRowEquivalentBundleWrite();
+    }
+
     protected InternalRow writeImpl(T record) throws IOException {
         if (closed) {
             throw new RuntimeException("Writer has already closed!");

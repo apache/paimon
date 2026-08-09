@@ -26,10 +26,14 @@ import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.arrow.writer.ArrowFieldWriters;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.arrow.memory.BufferAllocator;
@@ -310,8 +314,65 @@ public class ArrowFormatWriter implements AutoCloseable {
     public boolean isArrowBundleSchemaCompatible(ArrowBundleRecords bundle) {
         return !bundle.getVectorSchemaRoot().getFieldVectors().isEmpty()
                 && bundle.hasIdentityMapping()
-                && rowType.equals(bundle.getRowType())
+                && hasSameLogicalLayout(rowType, bundle.getRowType())
                 && vectorSchemaRoot.getSchema().equals(bundle.getVectorSchemaRoot().getSchema());
+    }
+
+    private static boolean hasSameLogicalLayout(DataType left, DataType right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null
+                || right == null
+                || left.getClass() != right.getClass()
+                || left.isNullable() != right.isNullable()) {
+            return false;
+        }
+
+        if (left instanceof RowType) {
+            List<DataField> leftFields = ((RowType) left).getFields();
+            List<DataField> rightFields = ((RowType) right).getFields();
+            if (leftFields.size() != rightFields.size()) {
+                return false;
+            }
+            for (int i = 0; i < leftFields.size(); i++) {
+                DataField leftField = leftFields.get(i);
+                DataField rightField = rightFields.get(i);
+                if (!leftField.name().equals(rightField.name())
+                        || !hasSameLogicalLayout(leftField.type(), rightField.type())) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        if (left instanceof ArrayType) {
+            return hasSameLogicalLayout(
+                    ((ArrayType) left).getElementType(), ((ArrayType) right).getElementType());
+        }
+
+        if (left instanceof MapType) {
+            MapType leftMap = (MapType) left;
+            MapType rightMap = (MapType) right;
+            return hasSameLogicalLayout(leftMap.getKeyType(), rightMap.getKeyType())
+                    && hasSameLogicalLayout(leftMap.getValueType(), rightMap.getValueType());
+        }
+
+        if (left instanceof MultisetType) {
+            return hasSameLogicalLayout(
+                    ((MultisetType) left).getElementType(),
+                    ((MultisetType) right).getElementType());
+        }
+
+        if (left instanceof VectorType) {
+            VectorType leftVector = (VectorType) left;
+            VectorType rightVector = (VectorType) right;
+            return leftVector.getLength() == rightVector.getLength()
+                    && hasSameLogicalLayout(
+                            leftVector.getElementType(), rightVector.getElementType());
+        }
+
+        return left.equals(right);
     }
 
     private static RowType replaceWithShreddingType(

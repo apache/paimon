@@ -18,10 +18,13 @@
 
 package org.apache.paimon.format.mosaic;
 
+import org.apache.paimon.arrow.ArrowBundleRecords;
+import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.BundleFormatWriter;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -37,6 +40,9 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.VectorSchemaRoot;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -44,6 +50,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 
@@ -78,6 +85,38 @@ class MosaicReaderWriterTest {
         assertThat(result.get(0).getString(1).toString()).isEqualTo("hello");
         assertThat(result.get(1).getInt(0)).isEqualTo(2);
         assertThat(result.get(1).getString(1).toString()).isEqualTo("world");
+    }
+
+    @Test
+    void testPublicWriterFactoryFallsBackForCrossRootArrowBundle() throws IOException {
+        RowType rowType = RowType.builder().field("value", DataTypes.INT()).build();
+        Path path = newPath();
+        MosaicFileFormat format = createFormat();
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
+        LocalFileIO fileIO = new LocalFileIO();
+
+        try (RootAllocator sourceAllocator = new RootAllocator();
+                VectorSchemaRoot root =
+                        ArrowUtils.createVectorSchemaRoot(rowType, sourceAllocator);
+                BundleFormatWriter writer =
+                        (BundleFormatWriter)
+                                writerFactory.create(fileIO.newOutputStream(path, false), "zstd")) {
+            IntVector vector = (IntVector) root.getVector("value");
+            vector.allocateNew(2);
+            vector.setSafe(0, 7);
+            vector.setSafe(1, 9);
+            vector.setValueCount(2);
+            root.setRowCount(2);
+
+            CountingArrowBundleRecords bundle = new CountingArrowBundleRecords(root, rowType);
+            writer.writeBundle(bundle);
+            assertThat(bundle.iteratorCalls()).isEqualTo(1);
+        }
+
+        List<InternalRow> result = readAll(rowType, rowType, path, null);
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).getInt(0)).isEqualTo(7);
+        assertThat(result.get(1).getInt(0)).isEqualTo(9);
     }
 
     @Test
@@ -356,6 +395,25 @@ class MosaicReaderWriterTest {
             return true;
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    private static class CountingArrowBundleRecords extends ArrowBundleRecords {
+
+        private int iteratorCalls;
+
+        private CountingArrowBundleRecords(VectorSchemaRoot root, RowType rowType) {
+            super(root, rowType, true);
+        }
+
+        @Override
+        public Iterator<InternalRow> iterator() {
+            iteratorCalls++;
+            return super.iterator();
+        }
+
+        private int iteratorCalls() {
+            return iteratorCalls;
         }
     }
 }

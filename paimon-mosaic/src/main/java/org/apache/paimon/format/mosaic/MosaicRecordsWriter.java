@@ -128,6 +128,8 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
         if (bundleRecords instanceof ArrowBundleRecords) {
             ArrowBundleRecords arrowBundle = (ArrowBundleRecords) bundleRecords;
             VectorSchemaRoot root = arrowBundle.getVectorSchemaRoot();
+            // Mosaic exports the borrowed vectors through the writer allocator, so direct writes
+            // require every source vector to share its root; otherwise preserve semantics via rows.
             if (arrowFormatWriter.isArrowBundleSchemaCompatible(arrowBundle)
                     && ArrowUtils.hasSameRootAllocator(root, allocator)) {
                 flush();
@@ -139,6 +141,11 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
         for (InternalRow row : bundleRecords) {
             addElement(row);
         }
+    }
+
+    @Override
+    public boolean supportsRowEquivalentBundleWrite() {
+        return true;
     }
 
     @Override

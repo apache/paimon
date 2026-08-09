@@ -21,6 +21,7 @@ package org.apache.paimon.format.shredding;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.shredding.ShreddingWritePlan;
+import org.apache.paimon.format.BundleFormatWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.io.BundleRecords;
@@ -29,6 +30,7 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -56,8 +58,9 @@ class InferShreddingWritePlanWriterTest {
         writer.writeBundle(bundle(GenericRow.of(6), GenericRow.of(7)));
         writer.close();
 
-        assertThat(writePlanFactory.sampleValues).containsExactly(1, 2, 3, 4);
+        assertThat(writePlanFactory.sampleValues).containsExactly(1, 2, 3);
         assertThat(writerFactory.writer.values).containsExactly(101, 102, 103, 104, 105, 106, 107);
+        assertThat(writerFactory.writer.bundleWriteCount).isEqualTo(1);
     }
 
     @Test
@@ -102,13 +105,22 @@ class InferShreddingWritePlanWriterTest {
         }
     }
 
-    private static class TestingFormatWriter implements FormatWriter {
+    private static class TestingFormatWriter implements BundleFormatWriter {
 
         private final List<Integer> values = new ArrayList<>();
+        private int bundleWriteCount;
 
         @Override
         public void addElement(InternalRow element) {
             values.add(element.getInt(0));
+        }
+
+        @Override
+        public void writeBundle(BundleRecords bundle) throws IOException {
+            bundleWriteCount++;
+            for (InternalRow row : bundle) {
+                addElement(row);
+            }
         }
 
         @Override
