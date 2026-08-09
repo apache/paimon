@@ -131,6 +131,25 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('ap_t', [{'k': 3, 'v': 'c'}])
         self._assert_matches('ap_t')
 
+    def test_dynamic_family_search_mode_uses_native_plan(self):
+        self.cat.create_table(
+            'default.search_mode_t', Schema.from_pyarrow_schema(self.schema), False)
+        self._write('search_mode_t', [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
+
+        table = self.cat.get_table('default.search_mode_t').copy({
+            'scan.native-plan.enabled': 'true',
+            'scalar-index.search-mode': 'full',
+        })
+        builder = table.new_read_builder()
+        plan = builder.new_scan().plan()
+
+        self.assertEqual(
+            sorted(builder.new_read().to_arrow(plan.splits()).to_pylist(),
+                   key=lambda row: row['k']),
+            [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}],
+        )
+        self.assertTrue(builder.explain().native_planned)
+
     def test_data_evolution_blob_projection_filter_limit(self):
         schema = pa.schema([
             ('k', pa.int64()),
