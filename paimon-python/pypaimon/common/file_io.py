@@ -267,7 +267,52 @@ class FileIO(ABC):
             return results
 
         workers = max(1, min(parallelism, len(tasks)))
-        stream_budget = threading.BoundedSemaphore(workers)
+
+        class _RangeStreamBudget:
+            def __init__(self, limit):
+                self._limit = limit
+                self._condition = threading.Condition()
+                self._open_streams = 0
+                self._idle_generation = 0
+                self._pools = []
+
+            def register(self, pools):
+                self._pools = list(pools)
+
+            def acquire(self):
+                while True:
+                    with self._condition:
+                        if self._open_streams < self._limit:
+                            self._open_streams += 1
+                            return
+                        generation = self._idle_generation
+
+                    reclaimed = any(
+                        pool._evict_available_stream()
+                        for pool in self._pools
+                    )
+                    if reclaimed:
+                        continue
+
+                    with self._condition:
+                        if (self._open_streams >= self._limit
+                                and generation == self._idle_generation):
+                            self._condition.wait()
+
+            def release(self):
+                with self._condition:
+                    if self._open_streams <= 0:
+                        raise RuntimeError(
+                            "range stream budget released too many times")
+                    self._open_streams -= 1
+                    self._condition.notify()
+
+            def notify_idle(self):
+                with self._condition:
+                    self._idle_generation += 1
+                    self._condition.notify()
+
+        stream_budget = _RangeStreamBudget(workers)
 
         class _RangeStreamPool:
             def __init__(self, file_io, path, task_count, max_streams,
@@ -364,6 +409,17 @@ class FileIO(ABC):
                 with self._condition:
                     self._available.append(stream)
                     self._condition.notify()
+                self._budget.notify_idle()
+
+            def _evict_available_stream(self):
+                with self._condition:
+                    if not self._available:
+                        return False
+                    stream = self._available.pop()
+                    self._streams.remove(stream)
+                    self._condition.notify_all()
+                self._close_stream(stream)
+                return True
 
             def _discard(self, stream):
                 with self._condition:
@@ -421,6 +477,7 @@ class FileIO(ABC):
                 self, path, len(path_tasks), workers, stream_budget)
             for path, path_tasks in tasks_by_path.items()
         }
+        stream_budget.register(streams.values())
 
         def _read(path, offset, length):
             try:
