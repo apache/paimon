@@ -267,11 +267,14 @@ class FileIO(ABC):
             return results
 
         workers = max(1, min(parallelism, len(tasks)))
+        stream_budget = threading.BoundedSemaphore(workers)
 
         class _RangeStreamPool:
-            def __init__(self, file_io, path, task_count, max_streams):
+            def __init__(self, file_io, path, task_count, max_streams,
+                         budget):
                 self._file_io = file_io
                 self._path = path
+                self._budget = budget
                 self._condition = threading.Condition()
                 self._streams = []
                 self._available = []
@@ -285,7 +288,25 @@ class FileIO(ABC):
                 self._close_error = None
 
             def _open(self):
-                return self._file_io.new_input_stream(self._path)
+                self._budget.acquire()
+                try:
+                    return self._file_io.new_input_stream(self._path)
+                except BaseException:
+                    self._budget.release()
+                    raise
+
+            def _record_close_error(self, error):
+                with self._condition:
+                    if self._close_error is None:
+                        self._close_error = error
+
+            def _close_stream(self, stream):
+                try:
+                    stream.close()
+                except BaseException as error:
+                    self._record_close_error(error)
+                finally:
+                    self._budget.release()
 
             def _detect(self):
                 with self._condition:
@@ -300,10 +321,7 @@ class FileIO(ABC):
                     concurrent = supports_concurrent_pread(stream)
                 except BaseException:
                     if stream is not None:
-                        try:
-                            stream.close()
-                        except Exception:
-                            pass
+                        self._close_stream(stream)
                     with self._condition:
                         self._detecting = False
                         self._condition.notify_all()
@@ -331,7 +349,7 @@ class FileIO(ABC):
                         self._condition.wait()
                 try:
                     stream = self._open()
-                except Exception:
+                except BaseException:
                     with self._condition:
                         self._opening -= 1
                         self._condition.notify_all()
@@ -348,13 +366,10 @@ class FileIO(ABC):
                     self._condition.notify()
 
             def _discard(self, stream):
-                try:
-                    stream.close()
-                except Exception:
-                    pass
                 with self._condition:
                     self._streams.remove(stream)
                     self._condition.notify_all()
+                self._close_stream(stream)
 
             def read(self, offset, length):
                 stream, exclusive = self._acquire()
@@ -392,20 +407,18 @@ class FileIO(ABC):
                     self._streams = []
                     self._available = []
                 for stream in streams:
-                    try:
-                        stream.close()
-                    except BaseException as error:
-                        if self._close_error is None:
-                            self._close_error = error
+                    self._close_stream(stream)
 
             def close(self):
                 self._close_all()
-                if self._close_error is not None:
-                    raise self._close_error
+                with self._condition:
+                    close_error = self._close_error
+                if close_error is not None:
+                    raise close_error
 
         streams = {
             path: _RangeStreamPool(
-                self, path, len(path_tasks), workers)
+                self, path, len(path_tasks), workers, stream_budget)
             for path, path_tasks in tasks_by_path.items()
         }
 
