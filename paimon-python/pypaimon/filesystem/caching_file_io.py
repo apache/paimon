@@ -195,6 +195,8 @@ class LocalDiskCacheManager:
 class CachingInputStream:
     """Wraps a remote stream with block-level caching."""
 
+    supports_concurrent_pread = False
+
     def __init__(self, file_io, file_path: str, cache, range_reads=False):
         self._file_io = file_io
         self._stream = None

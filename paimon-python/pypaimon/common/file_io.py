@@ -30,7 +30,7 @@ from pypaimon.common.options import Options
 
 
 def supports_pread(stream) -> bool:
-    """Check if the stream supports position-based reads (thread-safe I/O)."""
+    """Check if the stream supports position-based reads."""
     if hasattr(stream, 'read_at') or hasattr(stream, 'pread'):
         return True
     if hasattr(stream, 'fileno'):
@@ -43,7 +43,7 @@ def supports_pread(stream) -> bool:
 
 
 def pread(stream, length: int, offset: int) -> bytes:
-    """Position-based read without changing the stream cursor. Thread-safe."""
+    """Position-based read without changing the stream cursor."""
     if hasattr(stream, 'pread'):
         return stream.pread(length, offset)
     if hasattr(stream, 'read_at'):
@@ -51,11 +51,17 @@ def pread(stream, length: int, offset: int) -> bytes:
     return os.pread(stream.fileno(), length, offset)
 
 
+def supports_concurrent_pread(stream) -> bool:
+    return (supports_pread(stream)
+            and getattr(stream, 'supports_concurrent_pread', True))
+
+
 # Coalescing bounds: merge same-file ranges whose gap is within GAP, capping a
 # merged read at SPAN so threads stay busy and memory stays bounded.
 _COALESCE_GAP = 1 << 20
 _COALESCE_SPAN = 8 << 20
 _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION = 2.0
+_MAX_EXCLUSIVE_RANGE_STREAMS = 16
 
 
 def create_temp_path(path: str) -> str:
@@ -258,50 +264,129 @@ class FileIO(ABC):
         if not tasks:
             return results
 
-        class _SharedRangeStream:
-            def __init__(self, file_io, path, task_count):
+        workers = max(1, min(parallelism, len(tasks)))
+
+        class _RangeStreamPool:
+            def __init__(self, file_io, path, task_count, max_streams):
                 self._file_io = file_io
                 self._path = path
-                self._stream = None
-                self._open_lock = threading.Lock()
+                self._condition = threading.Condition()
+                self._streams = []
+                self._available = []
+                self._opening = 0
+                self._detecting = False
+                self._concurrent = None
                 self._seek_lock = threading.Lock()
-                self._positional = None
                 self._remaining = task_count
+                self._max_streams = min(
+                    max_streams, task_count, _MAX_EXCLUSIVE_RANGE_STREAMS)
 
-            def _get(self):
-                if self._stream is None:
-                    with self._open_lock:
-                        if self._stream is None:
-                            self._stream = self._file_io.new_range_input_stream(
-                                self._path)
-                            self._positional = supports_pread(self._stream)
-                return self._stream
+            def _open(self):
+                return self._file_io.new_range_input_stream(self._path)
+
+            def _detect(self):
+                with self._condition:
+                    while self._concurrent is None and self._detecting:
+                        self._condition.wait()
+                    if self._concurrent is not None:
+                        return
+                    self._detecting = True
+                try:
+                    stream = self._open()
+                except Exception:
+                    with self._condition:
+                        self._detecting = False
+                        self._condition.notify_all()
+                    raise
+                with self._condition:
+                    self._streams.append(stream)
+                    self._concurrent = supports_concurrent_pread(stream)
+                    if not self._concurrent:
+                        self._available.append(stream)
+                    self._detecting = False
+                    self._condition.notify_all()
+
+            def _acquire(self):
+                self._detect()
+                with self._condition:
+                    if self._concurrent:
+                        return self._streams[0], False
+                    while True:
+                        if self._available:
+                            return self._available.pop(), True
+                        if (len(self._streams) + self._opening
+                                < self._max_streams):
+                            self._opening += 1
+                            break
+                        self._condition.wait()
+                try:
+                    stream = self._open()
+                except Exception:
+                    with self._condition:
+                        self._opening -= 1
+                        self._condition.notify_all()
+                    raise
+                with self._condition:
+                    self._streams.append(stream)
+                    self._opening -= 1
+                    self._condition.notify_all()
+                return stream, True
+
+            def _return(self, stream):
+                with self._condition:
+                    self._available.append(stream)
+                    self._condition.notify()
+
+            def _discard(self, stream):
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+                with self._condition:
+                    self._streams.remove(stream)
+                    self._condition.notify_all()
 
             def read(self, offset, length):
-                stream = self._get()
-                if length >= 0 and self._positional:
-                    return pread(stream, length, offset)
-                with self._seek_lock:
+                stream, exclusive = self._acquire()
+                failed = False
+                try:
+                    if length >= 0 and supports_pread(stream):
+                        return pread(stream, length, offset)
+                    if not exclusive:
+                        with self._seek_lock:
+                            stream.seek(offset)
+                            return (stream.read() if length < 0
+                                    else stream.read(length))
                     stream.seek(offset)
                     return stream.read() if length < 0 else stream.read(length)
+                except Exception:
+                    failed = True
+                    raise
+                finally:
+                    if exclusive:
+                        if failed:
+                            self._discard(stream)
+                        else:
+                            self._return(stream)
 
-            def release(self):
-                with self._open_lock:
+            def task_done(self):
+                with self._condition:
                     self._remaining -= 1
-                    if self._remaining == 0:
-                        self._close()
+                    close = self._remaining == 0
+                if close:
+                    self.close()
 
             def close(self):
-                with self._open_lock:
-                    self._close()
-
-            def _close(self):
-                if self._stream is not None:
-                    self._stream.close()
-                    self._stream = None
+                with self._condition:
+                    streams = self._streams
+                    self._streams = []
+                    self._available = []
+                for stream in streams:
+                    stream.close()
 
         streams = {
-            path: _SharedRangeStream(self, path, len(path_tasks))
+            path: _RangeStreamPool(
+                self, path, len(path_tasks), workers)
             for path, path_tasks in tasks_by_path.items()
         }
 
@@ -339,9 +424,8 @@ class FileIO(ABC):
                     results[idx] = (
                         memoryview(result) if return_views else result)
             finally:
-                streams[path].release()
+                streams[path].task_done()
 
-        workers = max(1, min(parallelism, len(tasks)))
         try:
             with ThreadPoolExecutor(workers) as pool:
                 list(pool.map(_run, tasks))

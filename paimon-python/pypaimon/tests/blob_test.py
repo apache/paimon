@@ -3815,7 +3815,7 @@ class CoalesceRangesTest(unittest.TestCase):
             )
             self.assertEqual(2, len(fallbacks))
 
-    def test_shared_non_positional_stream_serializes_reads(self):
+    def test_non_positional_streams_are_exclusive(self):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(128))
@@ -3844,8 +3844,14 @@ class CoalesceRangesTest(unittest.TestCase):
             def close(self):
                 pass
 
-        stream = SerialStream()
-        file_io.new_range_input_stream = lambda _: stream
+        streams = []
+
+        def new_range_input_stream(_):
+            stream = SerialStream()
+            streams.append(stream)
+            return stream
+
+        file_io.new_range_input_stream = new_range_input_stream
         ranges = [("blob", i * 4, 2) for i in range(16)]
 
         self.assertEqual(
@@ -3853,6 +3859,56 @@ class CoalesceRangesTest(unittest.TestCase):
             file_io.read_ranges_coalesced(
                 ranges, parallelism=8, max_gap=0),
         )
+        self.assertGreater(len(streams), 1)
+        self.assertLessEqual(len(streams), 8)
+
+    def test_non_thread_safe_pread_uses_bounded_stream_pool(self):
+        from pypaimon.common.file_io import FileIO
+
+        data = bytes(range(256)) * 64
+        file_io = FileIO.get("file:///tmp", {})
+        streams = []
+
+        class PositionalStream:
+            supports_concurrent_pread = False
+
+            def __init__(self):
+                self.reading = False
+                self.reads = 0
+                self.closed = False
+
+            def pread(self, length, offset):
+                if self.reading:
+                    raise AssertionError("one stream was used concurrently")
+                self.reading = True
+                try:
+                    time.sleep(0.01)
+                    self.reads += 1
+                    return data[offset:offset + length]
+                finally:
+                    self.reading = False
+
+            def close(self):
+                self.closed = True
+
+        def new_range_input_stream(_):
+            stream = PositionalStream()
+            streams.append(stream)
+            return stream
+
+        file_io.new_range_input_stream = new_range_input_stream
+        ranges = [("blob", i * 128, 16) for i in range(64)]
+
+        self.assertEqual(
+            [data[offset:offset + length]
+             for _, offset, length in ranges],
+            file_io.read_ranges_coalesced(
+                ranges, parallelism=32, max_gap=0),
+        )
+        self.assertGreater(len(streams), 1)
+        self.assertLessEqual(len(streams), 16)
+        self.assertEqual(64, sum(stream.reads for stream in streams))
+        self.assertTrue(all(stream.closed for stream in streams))
 
 
 class ReadFileRangeTest(unittest.TestCase):
