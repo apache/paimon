@@ -349,6 +349,18 @@ class PredicateTest(unittest.TestCase):
         predicate = predicate_builder.is_in('f0', [1, 2])
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:1])
 
+    def test_is_in_with_null_literal_append(self):
+        table = self.catalog.get_table('default.test_append')
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+
+        predicate = predicate_builder.is_in('f1', [None])
+        _check_filtered_result(
+            table.new_read_builder().with_filter(predicate), self.df.iloc[0:0])
+
+        predicate = predicate_builder.is_in('f1', ['abc', None])
+        _check_filtered_result(
+            table.new_read_builder().with_filter(predicate), self.df.loc[[0]])
+
     def test_is_in_pk(self):
         table = self.catalog.get_table('default.test_pk')
         predicate_builder = table.new_read_builder().new_predicate_builder()
@@ -360,6 +372,13 @@ class PredicateTest(unittest.TestCase):
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.is_not_in('f0', [1, 2])
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[2:4])
+
+    def test_is_not_in_with_null_literal_append(self):
+        table = self.catalog.get_table('default.test_append')
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        predicate = predicate_builder.is_not_in('f1', ['abc', None])
+        _check_filtered_result(
+            table.new_read_builder().with_filter(predicate), self.df.iloc[0:0])
 
     def test_is_not_in_pk(self):
         table = self.catalog.get_table('default.test_pk')
@@ -557,6 +576,33 @@ class PredicateTest(unittest.TestCase):
         scanner = ds.InMemoryDataset(table).scanner(filter=predicate.to_arrow())
 
         self.assertEqual(scanner.to_table().to_pydict(), {"val": [3]})
+
+    def test_in_and_not_in_null_literal_semantics(self):
+        table = pa.table({"val": [None, 1, 2]})
+
+        in_predicate = Predicate(
+            method='in', index=0, field='val', literals=[1, None])
+        scanner = ds.InMemoryDataset(table).scanner(
+            filter=in_predicate.to_arrow())
+        self.assertEqual(scanner.to_table().to_pydict(), {"val": [1]})
+
+        not_in_predicate = Predicate(
+            method='notIn', index=0, field='val', literals=[1, None])
+        scanner = ds.InMemoryDataset(table).scanner(
+            filter=not_in_predicate.to_arrow())
+        self.assertEqual(scanner.to_table().to_pydict(), {"val": []})
+        self.assertFalse(not_in_predicate.test(OffsetRow([2], 0, 1)))
+
+        fields = [DataField(0, 'val', 'INT')]
+        stats = SimpleStats(
+            min_values=GenericRow([1], fields),
+            max_values=GenericRow([2], fields),
+            null_counts=[0],
+        )
+        self.assertFalse(Predicate(
+            method='in', index=0, field='val', literals=[None]
+        ).test_by_simple_stats(stats, 2))
+        self.assertFalse(not_in_predicate.test_by_simple_stats(stats, 2))
 
     @pytest.mark.python_plan
     def test_pk_reader_with_filter(self):
