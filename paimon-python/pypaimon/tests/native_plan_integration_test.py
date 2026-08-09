@@ -23,6 +23,7 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.read.native_plan import native_family_search_modes_available
 from pypaimon.utils.range import Range
 
 
@@ -131,6 +132,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('ap_t', [{'k': 3, 'v': 'c'}])
         self._assert_matches('ap_t')
 
+    @unittest.skipUnless(native_family_search_modes_available(),
+                         "pypaimon-rust 0.4+ required")
     def test_dynamic_family_search_mode_uses_native_plan(self):
         self.cat.create_table(
             'default.search_mode_t', Schema.from_pyarrow_schema(self.schema), False)
