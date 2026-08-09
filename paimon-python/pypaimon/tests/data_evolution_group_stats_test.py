@@ -308,6 +308,17 @@ class DataEvolutionGroupStatsFilterTest(unittest.TestCase):
 
         self.assertTrue(stats_filter.may_match([base, partial_delta]))
 
+    def test_tied_latest_providers_fail_open(self):
+        fields = [DataField(0, 'value', AtomicType('INT'))]
+        first = _file(
+            'first.parquet', 0, 10, fields, [0], [9], sequence=1)
+        second = _file(
+            'second.parquet', 0, 10, fields, [100], [109], sequence=1)
+        stats_filter = self._filter(
+            PredicateBuilder(fields).equal('value', 50), {0: fields}, 0)
+
+        self.assertTrue(stats_filter.may_match([first, second]))
+
 
 class DataEvolutionGroupStatsPlanningTest(unittest.TestCase):
 

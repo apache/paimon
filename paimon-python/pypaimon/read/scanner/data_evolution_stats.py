@@ -38,6 +38,14 @@ class _FileLayout:
         self.stats_offsets = stats_offsets
 
 
+class _StatsProvider:
+
+    def __init__(self, file, layout):
+        self.file = file
+        self.layout = layout
+        self.tied = False
+
+
 class DataEvolutionGroupStatsFilter:
     """Conservatively filters logical row-id groups by merged column stats."""
 
@@ -78,20 +86,25 @@ class DataEvolutionGroupStatsFilter:
                 special_field_ids.update(layout.data_fields)
             else:
                 normal_files.append((file, layout))
-        normal_files.sort(key=lambda item: item[0].max_sequence_number,
-                          reverse=True)
+        providers = {}
+        for file, layout in normal_files:
+            for field_id in layout.data_fields:
+                current = providers.get(field_id)
+                if (current is None
+                        or file.max_sequence_number
+                        > current.file.max_sequence_number):
+                    providers[field_id] = _StatsProvider(file, layout)
+                elif (file.max_sequence_number
+                      == current.file.max_sequence_number):
+                    current.tied = True
 
         min_values = []
         max_values = []
         null_counts = []
         states = []
         for field_index, field in enumerate(self.table_fields):
-            providers = [
-                (file, layout)
-                for file, layout in normal_files
-                if field.id in layout.data_fields
-            ]
-            if not providers:
+            provider = providers.get(field.id)
+            if provider is None:
                 if field.id in special_field_ids:
                     self._append_unknown(
                         min_values, max_values, null_counts, states)
@@ -102,14 +115,13 @@ class DataEvolutionGroupStatsFilter:
                     states.append(_MISSING)
                 continue
 
-            file, layout = providers[0]
-            latest_sequence = file.max_sequence_number
-            if sum(1 for candidate, _ in providers
-                   if candidate.max_sequence_number == latest_sequence) > 1:
+            if provider.tied:
                 self._append_unknown(
                     min_values, max_values, null_counts, states)
                 continue
 
+            file = provider.file
+            layout = provider.layout
             file_range = file.non_null_row_id_range()
             source_field = layout.data_fields[field.id]
             # Partial-file stats do not describe the complete logical group.
