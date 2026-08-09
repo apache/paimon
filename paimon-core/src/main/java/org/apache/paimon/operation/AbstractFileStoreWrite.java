@@ -249,9 +249,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             long commitIdentifier,
             @Nullable java.util.function.Consumer<CommitMessage> onPrepared)
             throws Exception {
-        // Spark task-side cleanup registers drained data files before maintainer work that can
-        // fail, so a speculative kill can still abort already-written files.
-        return prepareCommitInternal(waitCompaction, commitIdentifier, onPrepared, true);
+        // Only Spark speculative cleanup passes onPrepared; Flink calls this with null and must
+        // keep the legacy maintainer ordering for idle writer cleanup.
+        return prepareCommitInternal(
+                waitCompaction, commitIdentifier, onPrepared, onPrepared != null);
     }
 
     private List<CommitMessage> prepareCommitInternal(
