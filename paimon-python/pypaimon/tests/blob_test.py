@@ -1555,6 +1555,47 @@ class BlobEndToEndTest(unittest.TestCase):
         finally:
             reader_module._reset_file_format_dataset_cache()
 
+    def test_blob_index_cache_uses_full_path(self):
+        class NormalizingFileIO(LocalFileIO):
+            def to_filesystem_path(self, path):
+                return os.path.basename(path)
+
+        def write(path, values, field):
+            from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'wb') as output:
+                writer = BlobFormatWriter(output)
+                for value in values:
+                    writer.add_element(GenericRow(
+                        [BlobData(value)], [field], RowKind.INSERT))
+                writer.close()
+
+        def read(file_io, path, field):
+            reader = FormatBlobReader(
+                file_io, path, [field.name], [field], None, False,
+                file_size=os.path.getsize(path),
+            )
+            try:
+                return reader.read_arrow_batch().column(0).to_pylist()
+            finally:
+                reader.close()
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        first_path = os.path.join(self.temp_dir, "first", "same.blob")
+        second_path = os.path.join(self.temp_dir, "second", "same.blob")
+        write(first_path, [b'a', b'bbb'], field)
+        write(second_path, [b'cc', b'dd'], field)
+        self.assertEqual(os.path.getsize(first_path), os.path.getsize(second_path))
+
+        reader_module._reset_file_format_dataset_cache()
+        try:
+            file_io = NormalizingFileIO(self.temp_dir, Options({}))
+            self.assertEqual([b'a', b'bbb'], read(file_io, first_path, field))
+            self.assertEqual([b'cc', b'dd'], read(file_io, second_path, field))
+        finally:
+            reader_module._reset_file_format_dataset_cache()
+
     def test_split_read_passes_blob_file_size(self):
         from pypaimon.read.split import DataSplit
         from pypaimon.read.split_read import (

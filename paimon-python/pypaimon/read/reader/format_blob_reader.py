@@ -295,16 +295,10 @@ class FormatBlobReader(RecordBatchReader):
             self._input_stream = None
 
     def _read_index(self) -> None:
-        to_filesystem_path = getattr(
-            self._file_io, 'to_filesystem_path', None)
-        cache_path = (
-            to_filesystem_path(self.file_path)
-            if to_filesystem_path is not None else self.file_path
-        )
         blob_lengths, blob_offsets = _cached_file_format_metadata(
             self._file_io,
             'blob',
-            cache_path,
+            self.file_path,
             self._load_index,
             self._estimate_index_size,
             self._file_size,
