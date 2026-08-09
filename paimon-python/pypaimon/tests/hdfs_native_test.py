@@ -18,6 +18,8 @@
 import os
 import sys
 import tempfile
+import threading
+import time
 import types
 import unittest
 from unittest.mock import MagicMock, patch
@@ -461,6 +463,50 @@ class HdfsNativeAdaptersTest(unittest.TestCase):
         adapter = _HdfsReaderAdapter(fr)
         self.assertEqual(adapter.read(), b"all-content")
         fr.read.assert_called_once_with(-1)
+
+    def test_reader_adapter_read_at(self):
+        from pypaimon.filesystem.hdfs_native_file_io import _HdfsReaderAdapter
+        fr = MagicMock()
+        fr.read_range.return_value = b"data"
+        adapter = _HdfsReaderAdapter(fr)
+        self.assertEqual(adapter.read_at(4, 7), b"data")
+        fr.read_range.assert_called_once_with(7, 4)
+
+    def test_reader_adapter_read_at_is_concurrent(self):
+        from pypaimon.filesystem.hdfs_native_file_io import _HdfsReaderAdapter
+
+        class RangeReader:
+            def __init__(self):
+                self.lock = threading.Lock()
+                self.active = 0
+                self.max_active = 0
+
+            def read_range(self, offset, length):
+                with self.lock:
+                    self.active += 1
+                    self.max_active = max(self.max_active, self.active)
+                try:
+                    time.sleep(0.01)
+                    return bytes([offset]) * length
+                finally:
+                    with self.lock:
+                        self.active -= 1
+
+        reader = RangeReader()
+        adapter = _HdfsReaderAdapter(reader)
+        file_io = FileIO.get("file:///tmp", {})
+        opens = []
+        file_io.new_range_input_stream = lambda path: (
+            opens.append(path) or adapter)
+        ranges = [("hdfs://ns/blob", offset, 4)
+                  for offset in range(0, 64, 8)]
+        results = file_io.read_ranges_coalesced(
+            ranges, parallelism=8, max_gap=0)
+
+        self.assertEqual(
+            [bytes([offset]) * 4 for _, offset, _ in ranges], results)
+        self.assertEqual(["hdfs://ns/blob"], opens)
+        self.assertEqual(8, reader.max_active)
 
     def test_reader_adapter_close_releases_underlying(self):
         from pypaimon.filesystem.hdfs_native_file_io import _HdfsReaderAdapter

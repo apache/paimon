@@ -117,6 +117,9 @@ class _HdfsReaderAdapter:
     def read1(self, size: int = -1) -> bytes:
         return self.read(size)
 
+    def read_at(self, nbytes: int, offset: int) -> bytes:
+        return self._fr.read_range(offset, nbytes)
+
     def seek(self, pos: int, whence: int = 0) -> int:
         self._fr.seek(pos, whence)
         return self._fr.tell()

@@ -31,7 +31,7 @@ from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 
 class JindoRangeInputStreamTest(unittest.TestCase):
 
-    def test_marks_native_stream_as_non_concurrent(self):
+    def test_returns_native_stream_for_pread(self):
         handler = MagicMock()
         handler._normalize_path.return_value = "oss://bucket/blob"
         native_stream = object()
@@ -40,8 +40,7 @@ class JindoRangeInputStreamTest(unittest.TestCase):
         result = JindoFileSystemHandler.open_range_input_stream(
             handler, "blob")
 
-        self.assertIs(native_stream, result._stream)
-        self.assertFalse(result.supports_concurrent_pread)
+        self.assertIs(native_stream, result)
         handler._jindo_fs.open.assert_called_once_with(
             "oss://bucket/blob", "rb")
 
