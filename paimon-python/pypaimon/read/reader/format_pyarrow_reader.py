@@ -80,7 +80,7 @@ class _FileFormatDatasetCache:
         self._loads = {}
         self._lock = threading.Lock()
 
-    def get_or_load(self, key: Tuple[Any, str, str], loader: Callable[[], Any],
+    def get_or_load(self, key: Tuple[Any, ...], loader: Callable[[], Any],
                     size_estimator: Callable[[Any], Optional[int]]):
         with self._lock:
             entry = self._entries.get(key)
@@ -215,6 +215,22 @@ def _file_format_metadata_cache_max_size(file_io: FileIO) -> int:
         CatalogOptions.FILE_FORMAT_METADATA_CACHE_MAX_SIZE).get_bytes()
 
 
+def _cached_file_format_metadata(file_io: FileIO, file_format: str,
+                                 file_path: str, loader, size_estimator,
+                                 cache_identity=None):
+    cache_max_size = _file_format_metadata_cache_max_size(file_io)
+    filesystem = getattr(file_io, 'filesystem', file_io)
+    key = (_FilesystemIdentity(filesystem), file_format, file_path)
+    if cache_identity is not None:
+        key += (cache_identity,)
+    if cache_max_size <= 0:
+        _reset_file_format_dataset_cache()
+        return loader()
+
+    return _file_format_dataset_cache(cache_max_size).get_or_load(
+        key, loader, lambda value: size_estimator(key, value))
+
+
 def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
                          cache_max_size: int):
     file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
@@ -224,11 +240,11 @@ def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
         return ds.dataset(
             file_path_for_pyarrow, format=file_format, filesystem=filesystem)
 
-    key = (_FilesystemIdentity(filesystem), file_format, file_path_for_pyarrow)
     if cache_max_size <= 0:
         _reset_file_format_dataset_cache()
         return load()
 
+    key = (_FilesystemIdentity(filesystem), file_format, file_path_for_pyarrow)
     return _file_format_dataset_cache(cache_max_size).get_or_load(
         key,
         load,

@@ -61,8 +61,8 @@ when it is false, it will read the full amount of data into memory.
 
 ## File Format Metadata Cache
 
-Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated
-size limit in the catalog options:
+Reusable Parquet/ORC metadata and Blob file indexes are cached across reads.
+Configure their estimated size limit in the catalog options:
 
 ```python
 catalog = CatalogFactory.create({
@@ -74,10 +74,9 @@ read_builder = table.new_read_builder()
 ```
 
 The default limit is 50 MB; set it to `0 b` to disable and clear the cache. The
-cache is local to each process and benefits workers reused with
-`DataLoader(..., persistent_workers=True)`. The cache uses a conservative
-per-entry memory estimate and an internal entry-count safeguard; actual native
-PyArrow memory may still be higher. The cache assumes immutable Paimon data files.
+cache is local to each process and benefits long-lived workers. It uses a
+conservative per-entry memory estimate and an internal entry-count safeguard.
+The cache assumes immutable Paimon data files.
 
 ## Shuffle
 

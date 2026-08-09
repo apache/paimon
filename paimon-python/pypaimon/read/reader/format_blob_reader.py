@@ -16,6 +16,7 @@
 # under the License.
 
 import struct
+import sys
 from typing import List, Optional, Any, Iterator, BinaryIO
 
 import pyarrow as pa
@@ -26,6 +27,10 @@ from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.read.reader.format_pyarrow_reader import (
+    _FILE_FORMAT_METADATA_CACHE_MIN_ENTRY_SIZE,
+    _cached_file_format_metadata,
+)
 from pypaimon.schema.data_types import (
     DataField,
     PyarrowFieldParser,
@@ -290,6 +295,26 @@ class FormatBlobReader(RecordBatchReader):
             self._input_stream = None
 
     def _read_index(self) -> None:
+        to_filesystem_path = getattr(
+            self._file_io, 'to_filesystem_path', None)
+        cache_path = (
+            to_filesystem_path(self.file_path)
+            if to_filesystem_path is not None else self.file_path
+        )
+        blob_lengths, blob_offsets = _cached_file_format_metadata(
+            self._file_io,
+            'blob',
+            cache_path,
+            self._load_index,
+            self._estimate_index_size,
+            self._file_size,
+        )
+        # Readers may apply different row selections, so keep cached metadata
+        # immutable and give each reader its own lists.
+        self.blob_lengths = list(blob_lengths)
+        self.blob_offsets = list(blob_offsets)
+
+    def _load_index(self):
         f = self._input_stream
 
         # Seek to header: last 5 bytes
@@ -323,8 +348,21 @@ class FormatBlobReader(RecordBatchReader):
             else:
                 blob_offsets.append(offset)
                 offset += length
-        self.blob_lengths = blob_lengths
-        self.blob_offsets = blob_offsets
+        return tuple(blob_lengths), tuple(blob_offsets)
+
+    @staticmethod
+    def _estimate_index_size(key, index) -> int:
+        blob_lengths, blob_offsets = index
+        int_size = sys.getsizeof(key[-1])
+        size = (
+            sys.getsizeof(key)
+            + sum(sys.getsizeof(item) for item in key)
+            + sys.getsizeof(index)
+            + sys.getsizeof(blob_lengths)
+            + sys.getsizeof(blob_offsets)
+            + (len(blob_lengths) + len(blob_offsets)) * int_size
+        )
+        return max(_FILE_FORMAT_METADATA_CACHE_MIN_ENTRY_SIZE, size)
 
     def _apply_row_indices(self, row_indices: Optional[Any]) -> None:
         if row_indices is None:

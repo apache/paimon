@@ -84,7 +84,7 @@ class CatalogOptions:
         .memory_type()
         .default_value(MemorySize.of_mebi_bytes(50))
         .with_description(
-            "Maximum estimated size of reusable PyArrow Dataset metadata "
+            "Maximum estimated size of reusable file-format metadata "
             "cached in the current process. Set to 0 to disable and clear "
             "the cache."
         )
