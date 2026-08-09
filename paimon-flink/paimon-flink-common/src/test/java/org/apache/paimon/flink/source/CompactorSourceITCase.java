@@ -27,6 +27,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions.CompactionBucketDistributio
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
@@ -65,6 +66,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -204,6 +206,39 @@ public class CompactorSourceITCase extends AbstractTestBase {
         }
         assertThat(actual)
                 .hasSameElementsAs(Arrays.asList("+I 6|20221208|16|0|1", "+I 6|20221209|15|0|1"));
+
+        write.close();
+        commit.close();
+        it.close();
+    }
+
+    @Test
+    public void testStreamingReadPreservesStatsWhenDeleteManifestStatsAreDropped()
+            throws Exception {
+        FileStoreTable table =
+                createFileStoreTable()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.MANIFEST_DELETE_FILE_DROP_STATS.key(), "true"));
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
+        DataStreamSource<RowData> compactorSource =
+                new CompactorSourceBuilder("test", table)
+                        .withContinuousMode(true)
+                        .withEnv(env)
+                        .build();
+        CloseableIterator<RowData> it = compactorSource.executeAndCollect();
+
+        List<DataFileMeta> files = dataFileMetaSerializer.deserializeList(it.next().getBinary(3));
+        assertThat(files).hasSize(1);
+        assertThat(files.get(0).valueStats()).isNotEqualTo(EMPTY_STATS);
 
         write.close();
         commit.close();
