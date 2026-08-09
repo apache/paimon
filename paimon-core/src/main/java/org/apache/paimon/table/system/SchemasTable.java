@@ -310,7 +310,10 @@ public class SchemasTable implements ReadonlyTable {
 
     private static List<TableSchema> schemasWithId(
             SchemaManager schemaManager, List<Long> schemaIds) {
-        return schemaIds.stream().map(schemaManager::schema).collect(Collectors.toList());
+        return schemaIds.stream()
+                .filter(schemaManager::schemaExists)
+                .map(schemaManager::schema)
+                .collect(Collectors.toList());
     }
 
     private static List<TableSchema> listWithRange(
