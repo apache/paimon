@@ -69,36 +69,6 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             boolean asyncFileWrite,
             boolean statsDenseStore,
             boolean isExternalPath,
-            @Nullable List<String> writeCols) {
-        this(
-                fileIO,
-                context,
-                path,
-                writeSchema,
-                schemaId,
-                seqNumCounterSupplier,
-                fileIndexOptions,
-                fileSource,
-                asyncFileWrite,
-                statsDenseStore,
-                isExternalPath,
-                writeCols,
-                null,
-                null);
-    }
-
-    public RowDataFileWriter(
-            FileIO fileIO,
-            FileWriterContext context,
-            Path path,
-            RowType writeSchema,
-            long schemaId,
-            Supplier<LongCounter> seqNumCounterSupplier,
-            FileIndexOptions fileIndexOptions,
-            FileSource fileSource,
-            boolean asyncFileWrite,
-            boolean statsDenseStore,
-            boolean isExternalPath,
             @Nullable List<String> writeCols,
             @Nullable FileFormat rowSidecarFormat,
             @Nullable Path rowSidecarPath) {

@@ -281,7 +281,9 @@ public class DedicatedFormatRollingFileWriter
                             asyncFileWrite,
                             statsDenseStore,
                             pathFactory.isExternalPath(),
-                            normalColumnNames);
+                            normalColumnNames,
+                            null,
+                            null);
             return new ProjectedFileWriter<>(rowDataFileWriter, projectionNormalFields);
         };
     }
@@ -326,7 +328,9 @@ public class DedicatedFormatRollingFileWriter
                                         asyncFileWrite,
                                         statsDenseStore,
                                         pathFactory.isExternalPath(),
-                                        vectorStoreColumnNames),
+                                        vectorStoreColumnNames,
+                                        null,
+                                        null),
                         targetFileSize,
                         Long.MAX_VALUE),
                 vectorStoreProjection);
