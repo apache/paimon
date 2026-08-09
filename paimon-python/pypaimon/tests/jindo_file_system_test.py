@@ -25,22 +25,29 @@ import pyarrow.fs as pafs
 from pyarrow.fs import PyFileSystem
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
-from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
+from pypaimon.filesystem.jindo_file_system_handler import (
+    JindoFileSystemHandler, JindoInputFile, JINDO_AVAILABLE)
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 
 
 class JindoRangeInputStreamTest(unittest.TestCase):
 
-    def test_returns_native_stream_for_pread(self):
+    def test_wraps_native_stream_for_concurrent_pread(self):
         handler = MagicMock()
         handler._normalize_path.return_value = "oss://bucket/blob"
-        native_stream = object()
+        native_stream = MagicMock()
+        native_stream.closed = False
+        native_stream.pread.return_value = b"data"
         handler._jindo_fs.open.return_value = native_stream
 
         result = JindoFileSystemHandler.open_range_input_stream(
             handler, "blob")
 
-        self.assertIs(native_stream, result)
+        self.assertIsInstance(result, JindoInputFile)
+        self.assertIs(native_stream, result._stream)
+        self.assertTrue(result.supports_concurrent_pread)
+        self.assertEqual(b"data", result.read_at(4, 7))
+        native_stream.pread.assert_called_once_with(4, 7)
         handler._jindo_fs.open.assert_called_once_with(
             "oss://bucket/blob", "rb")
 

@@ -29,31 +29,40 @@ import pyarrow.fs as pafs
 from pypaimon.common.options import Options
 
 
+def _fileno(stream):
+    if not hasattr(stream, 'fileno'):
+        return None
+    try:
+        return stream.fileno()
+    except Exception:
+        return None
+
+
 def supports_pread(stream) -> bool:
     """Check if the stream supports position-based reads."""
-    if hasattr(stream, 'read_at') or hasattr(stream, 'pread'):
+    # Unlike read_at, Python pread methods have no common argument order.
+    if hasattr(stream, 'read_at'):
         return True
-    if hasattr(stream, 'fileno'):
-        try:
-            stream.fileno()
-            return True
-        except Exception:
-            pass
-    return False
+    return _fileno(stream) is not None
 
 
 def pread(stream, length: int, offset: int) -> bytes:
     """Position-based read without changing the stream cursor."""
-    if hasattr(stream, 'pread'):
-        return stream.pread(length, offset)
+    fd = _fileno(stream)
+    if fd is not None:
+        return os.pread(fd, length, offset)
     if hasattr(stream, 'read_at'):
         return stream.read_at(length, offset)
-    return os.pread(stream.fileno(), length, offset)
+    raise AttributeError("stream does not support positional reads")
 
 
 def supports_concurrent_pread(stream) -> bool:
-    return (supports_pread(stream)
-            and getattr(stream, 'supports_concurrent_pread', True))
+    if not supports_pread(stream):
+        return False
+    concurrent = getattr(stream, 'supports_concurrent_pread', None)
+    if concurrent is not None:
+        return bool(concurrent)
+    return _fileno(stream) is not None
 
 
 # Coalescing bounds: merge same-file ranges whose gap is within GAP, capping a

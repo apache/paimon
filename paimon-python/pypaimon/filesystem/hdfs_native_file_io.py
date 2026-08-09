@@ -107,6 +107,8 @@ class _HdfsReaderAdapter:
     is closed — hdfs-native's own FileReader.__exit__ is a no-op.
     """
 
+    supports_concurrent_pread = True
+
     def __init__(self, fr):
         self._fr = fr
         self._closed = False

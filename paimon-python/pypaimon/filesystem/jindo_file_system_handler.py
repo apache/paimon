@@ -114,6 +114,8 @@ def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
 
 
 class JindoInputFile:
+    supports_concurrent_pread = True
+
     def __init__(self, jindo_stream):
         self._stream = jindo_stream
         self._closed = False
@@ -329,7 +331,8 @@ class JindoFileSystemHandler(FileSystemHandler):
         return PythonFile(JindoInputFile(jindo_stream), mode="r")
 
     def open_range_input_stream(self, path: str):
-        return self._jindo_fs.open(self._normalize_path(path), "rb")
+        stream = self._jindo_fs.open(self._normalize_path(path), "rb")
+        return JindoInputFile(stream)
 
     def open_output_stream(self, path: str, metadata):
         normalized = self._normalize_path(path)
