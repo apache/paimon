@@ -55,6 +55,7 @@ def pread(stream, length: int, offset: int) -> bytes:
 _COALESCE_GAP = 1 << 20
 _COALESCE_SPAN = 8 << 20
 _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION = 2.0
+# Bound per-object opens; 16 cuts them by 75% for default 64-range batches.
 _MAX_RANGE_LANES_PER_PATH = 16
 
 
@@ -251,14 +252,34 @@ class FileIO(ABC):
 
         lanes = [[] for _ in range(workers)]
         lane_loads = [0] * workers
-        for path_tasks in tasks_by_path.values():
-            proportional_lanes = max(
-                1,
-                (workers * len(path_tasks) + task_count - 1) // task_count,
+        path_task_groups = list(tasks_by_path.values())
+        path_capacities = [
+            min(len(path_tasks), _MAX_RANGE_LANES_PER_PATH)
+            for path_tasks in path_task_groups
+        ]
+        path_lane_counts = [1] * len(path_task_groups)
+        remaining_lanes = max(
+            0,
+            min(workers, sum(path_capacities)) - len(path_task_groups),
+        )
+        for _ in range(remaining_lanes):
+            candidates = [
+                index for index in range(len(path_task_groups))
+                if path_lane_counts[index] < path_capacities[index]
+            ]
+            if not candidates:
+                break
+            index = max(
+                candidates,
+                key=lambda value: (
+                    len(path_task_groups[value])
+                    / path_lane_counts[value]
+                ),
             )
-            path_lanes = min(
-                len(path_tasks), proportional_lanes,
-                _MAX_RANGE_LANES_PER_PATH)
+            path_lane_counts[index] += 1
+
+        for path_tasks, path_lanes in zip(
+                path_task_groups, path_lane_counts):
             selected = sorted(
                 range(workers), key=lane_loads.__getitem__)[:path_lanes]
             for index, task in enumerate(path_tasks):

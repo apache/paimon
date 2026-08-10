@@ -3800,7 +3800,7 @@ class CoalesceRangesTest(unittest.TestCase):
                 opened()
 
             def read_at(self, length, offset):
-                barrier.wait()
+                barrier.wait(timeout=5)
                 raise IOError("pooled read failed")
 
             def close(self):
@@ -3830,6 +3830,7 @@ class CoalesceRangesTest(unittest.TestCase):
         )
         self.assertLessEqual(max_open_streams, parallelism)
         self.assertEqual(0, open_streams)
+        self.assertFalse(barrier.broken)
 
     def test_known_and_unknown_lengths_share_exclusive_lane(self):
         from pypaimon.common.file_io import FileIO
@@ -3971,10 +3972,46 @@ class CoalesceRangesTest(unittest.TestCase):
             file_io.read_ranges_coalesced(
                 ranges, parallelism=64, max_gap=0),
         )
-        self.assertGreater(len(streams), 1)
-        self.assertLessEqual(len(streams), 16)
+        self.assertEqual(16, len(streams))
+        self.assertTrue(all(stream.reads == 4 for stream in streams))
         self.assertEqual(64, sum(stream.reads for stream in streams))
         self.assertTrue(all(stream.closed for stream in streams))
+
+    def test_skewed_paths_redistribute_capped_lanes(self):
+        from collections import Counter
+
+        from pypaimon.common.file_io import FileIO
+
+        file_io = FileIO.get("file:///tmp", {})
+        streams = Counter()
+        lock = threading.Lock()
+
+        class PositionalStream:
+            def __init__(self, path):
+                self.path = path
+
+            def read_at(self, length, offset):
+                return self.path[0].encode() * length
+
+            def close(self):
+                pass
+
+        def new_input_stream(path):
+            with lock:
+                streams[path] += 1
+            return PositionalStream(path)
+
+        file_io.new_input_stream = new_input_stream
+        ranges = (
+            [("hot", index * 2, 1) for index in range(9900)]
+            + [("cold", index * 2, 1) for index in range(100)]
+        )
+
+        result = file_io.read_ranges_coalesced(
+            ranges, parallelism=64, max_gap=0)
+
+        self.assertEqual([b"h"] * 9900 + [b"c"] * 100, result)
+        self.assertEqual(Counter({"hot": 16, "cold": 16}), streams)
 
     def test_stream_count_is_bounded_across_paths(self):
         from pypaimon.common.file_io import FileIO
