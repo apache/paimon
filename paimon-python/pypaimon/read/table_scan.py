@@ -40,16 +40,25 @@ _NATIVE_FAMILY_SEARCH_MODE_OPTIONS = frozenset({
 _NATIVE_SEARCH_MODE_OPTIONS = _NATIVE_FAMILY_SEARCH_MODE_OPTIONS | {
     CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(),
 }
+_NATIVE_FORWARDED_OPTIONS = frozenset({
+    CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key(),
+    CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(),
+    CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(),
+    CoreOptions.SCAN_SNAPSHOT_ID.key(),
+    CoreOptions.SCAN_TAG_NAME.key(),
+    CoreOptions.SCAN_TIMESTAMP.key(),
+    CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+}) | _NATIVE_SEARCH_MODE_OPTIONS
+_NATIVE_PLAN_INDEPENDENT_OPTIONS = frozenset({
+    CoreOptions.BLOB_AS_DESCRIPTOR.key(),
+    CoreOptions.READ_BATCH_SIZE.key(),
+    CoreOptions.READ_PARALLELISM.key(),
+})
 _NATIVE_TIME_TRAVEL_OPTIONS = frozenset({
     CoreOptions.SCAN_SNAPSHOT_ID.key(),
     CoreOptions.SCAN_TAG_NAME.key(),
     CoreOptions.SCAN_TIMESTAMP.key(),
     CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
-})
-_NATIVE_SAFE_REMOVED_OPTIONS = frozenset({
-    CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(),
-    CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(),
-    CoreOptions.BLOB_AS_DESCRIPTOR.key(),
 })
 
 
@@ -170,8 +179,12 @@ class TableScan:
             return False
         # Rust cannot remove an option persisted in the catalog-loaded schema.
         applied_options = getattr(self.table, '_applied_dynamic_options', {}) or {}
-        if any(value is None and key not in _NATIVE_SAFE_REMOVED_OPTIONS
-               for key, value in applied_options.items()):
+        allowed_options = (
+            _NATIVE_FORWARDED_OPTIONS | _NATIVE_PLAN_INDEPENDENT_OPTIONS)
+        if (set(applied_options) - allowed_options
+                or any(key in (_NATIVE_TIME_TRAVEL_OPTIONS
+                               | _NATIVE_SEARCH_MODE_OPTIONS) and value is None
+                       for key, value in applied_options.items())):
             return False
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         unsupported_scan_keys = set(SCAN_KEYS) - _NATIVE_TIME_TRAVEL_OPTIONS
