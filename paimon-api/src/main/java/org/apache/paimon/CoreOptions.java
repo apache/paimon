@@ -509,12 +509,6 @@ public class CoreOptions implements Serializable {
                                     + "in the previous file. This must not exceed "
                                     + "'variant.shredding.minFieldCardinalityRatio'.");
 
-    public static final ConfigOption<String> MANIFEST_FORMAT =
-            key("manifest.format")
-                    .stringType()
-                    .defaultValue(CoreOptions.FILE_FORMAT_AVRO)
-                    .withDescription("Specify the message format of manifest files.");
-
     public static final ConfigOption<String> MANIFEST_COMPRESSION =
             key("manifest.compression")
                     .stringType()
@@ -3042,10 +3036,6 @@ public class CoreOptions implements Serializable {
 
     public String fileFormatString() {
         return normalizeFileFormat(options.get(FILE_FORMAT));
-    }
-
-    public String manifestFormatString() {
-        return normalizeFileFormat(options.get(MANIFEST_FORMAT));
     }
 
     public String manifestCompression() {

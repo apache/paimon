@@ -130,6 +130,16 @@ public class FileFormatTest {
         assertThat(orcFileFormat.readBatchSize()).isEqualTo(1024);
     }
 
+    @Test
+    public void testManifestFormatIsAlwaysAvro() {
+        Options tableOptions = new Options();
+        tableOptions.set(CoreOptions.FILE_FORMAT, "orc");
+
+        FileFormat manifestFormat = FileFormat.manifestFormat(new CoreOptions(tableOptions));
+
+        assertThat(manifestFormat.getFormatIdentifier()).isEqualTo(CoreOptions.FILE_FORMAT_AVRO);
+    }
+
     public FileFormat createFileFormat(String codec) {
         Options tableOptions = new Options();
         tableOptions.set(CoreOptions.FILE_FORMAT, CoreOptions.FILE_FORMAT_AVRO);
