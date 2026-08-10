@@ -4013,6 +4013,56 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertEqual([b"h"] * 9900 + [b"c"] * 100, result)
         self.assertEqual(Counter({"hot": 16, "cold": 16}), streams)
 
+    def test_path_memberships_can_exceed_worker_count(self):
+        from collections import Counter
+
+        from pypaimon.common.file_io import FileIO
+
+        file_io = FileIO.get("file:///tmp", {})
+        streams = Counter()
+        lock = threading.Lock()
+        active_streams = 0
+        max_active_streams = 0
+
+        class PositionalStream:
+            def __init__(self, path):
+                self.path = path
+                self.closed = False
+
+            def read_at(self, length, offset):
+                return self.path[0].encode() * length
+
+            def close(self):
+                nonlocal active_streams
+                if self.closed:
+                    return
+                self.closed = True
+                with lock:
+                    active_streams -= 1
+
+        def new_input_stream(path):
+            nonlocal active_streams, max_active_streams
+            with lock:
+                streams[path] += 1
+                active_streams += 1
+                max_active_streams = max(
+                    max_active_streams, active_streams)
+            return PositionalStream(path)
+
+        file_io.new_input_stream = new_input_stream
+        ranges = (
+            [("hot", index * 2, 1) for index in range(10000)]
+            + [("cold-%d" % index, 0, 1) for index in range(63)]
+        )
+
+        result = file_io.read_ranges_coalesced(
+            ranges, parallelism=64, max_gap=0)
+
+        self.assertEqual(10063, len(result))
+        self.assertEqual(16, streams["hot"])
+        self.assertLessEqual(max_active_streams, 64)
+        self.assertEqual(0, active_streams)
+
     def test_stream_count_is_bounded_across_paths(self):
         from pypaimon.common.file_io import FileIO
 

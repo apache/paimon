@@ -257,10 +257,21 @@ class FileIO(ABC):
             min(len(path_tasks), _MAX_RANGE_LANES_PER_PATH)
             for path_tasks in path_task_groups
         ]
-        path_lane_counts = [1] * len(path_task_groups)
+        path_lane_counts = [
+            min(
+                capacity,
+                max(
+                    1,
+                    (workers * len(path_tasks) + task_count - 1)
+                    // task_count,
+                ),
+            )
+            for path_tasks, capacity in zip(
+                path_task_groups, path_capacities)
+        ]
         remaining_lanes = max(
             0,
-            min(workers, sum(path_capacities)) - len(path_task_groups),
+            min(workers, sum(path_capacities)) - sum(path_lane_counts),
         )
         for _ in range(remaining_lanes):
             candidates = [
