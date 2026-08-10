@@ -3930,7 +3930,7 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertGreater(len(streams), 1)
         self.assertLessEqual(len(streams), 8)
 
-    def test_same_path_uses_requested_exclusive_lanes(self):
+    def test_same_path_reuses_bounded_exclusive_lanes(self):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(256)) * 64
@@ -3969,10 +3969,10 @@ class CoalesceRangesTest(unittest.TestCase):
             [data[offset:offset + length]
              for _, offset, length in ranges],
             file_io.read_ranges_coalesced(
-                ranges, parallelism=32, max_gap=0),
+                ranges, parallelism=64, max_gap=0),
         )
         self.assertGreater(len(streams), 1)
-        self.assertLessEqual(len(streams), 32)
+        self.assertLessEqual(len(streams), 16)
         self.assertEqual(64, sum(stream.reads for stream in streams))
         self.assertTrue(all(stream.closed for stream in streams))
 

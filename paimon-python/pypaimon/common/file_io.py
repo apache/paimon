@@ -55,6 +55,7 @@ def pread(stream, length: int, offset: int) -> bytes:
 _COALESCE_GAP = 1 << 20
 _COALESCE_SPAN = 8 << 20
 _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION = 2.0
+_MAX_RANGE_LANES_PER_PATH = 16
 
 
 def create_temp_path(path: str) -> str:
@@ -255,7 +256,9 @@ class FileIO(ABC):
                 1,
                 (workers * len(path_tasks) + task_count - 1) // task_count,
             )
-            path_lanes = min(len(path_tasks), proportional_lanes)
+            path_lanes = min(
+                len(path_tasks), proportional_lanes,
+                _MAX_RANGE_LANES_PER_PATH)
             selected = sorted(
                 range(workers), key=lane_loads.__getitem__)[:path_lanes]
             for index, task in enumerate(path_tasks):
