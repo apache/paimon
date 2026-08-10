@@ -17,5 +17,20 @@
 
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.data.decimal import Decimal
+from pypaimon.data.variant_path import (
+    variant_get,
+    variant_get_many,
+    variant_set,
+    variant_set_many,
+    variant_transform,
+)
 
-__all__ = ['Timestamp', 'Decimal']
+__all__ = [
+    'Timestamp',
+    'Decimal',
+    'variant_get',
+    'variant_get_many',
+    'variant_set',
+    'variant_set_many',
+    'variant_transform',
+]
