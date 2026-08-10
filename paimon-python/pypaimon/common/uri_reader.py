@@ -57,6 +57,10 @@ class FileUriReader(UriReader):
     def __init__(self, file_io: Any):
         self._file_io = file_io
 
+    @property
+    def file_io(self) -> Any:
+        return self._file_io
+
     def new_input_stream(self, uri: str):
         try:
             return self._file_io.new_input_stream(uri)
@@ -109,8 +113,26 @@ class UriReaderFactory:
 
     def __init__(self, catalog_options: Union[Options, dict]) -> None:
         self.catalog_options = catalog_options if isinstance(catalog_options, Options) else Options(catalog_options)
-        self._readers = LRUCache(CatalogOptions.BLOB_FILE_IO_DEFAULT_CACHE_SIZE)
         self._readers_lock = rwlock.RWLockFair()
+        self._owned_file_ios = []
+        self._closing = False
+        self._readers = self._new_reader_cache()
+
+    @staticmethod
+    def from_file_io(file_io: Any) -> 'UriReaderFactory':
+        """Reuse a token-aware FileIO for non-HTTP URIs (Java fromFileIO)."""
+        cached = getattr(file_io, '_paimon_from_file_io_uri_reader_factory', None)
+        if cached is not None:
+            return cached
+        factory = _ProvidedFileIOUriReaderFactory(file_io)
+        try:
+            file_io._paimon_from_file_io_uri_reader_factory = factory
+        except Exception:
+            pass
+        return factory
+
+    def _new_reader_cache(self) -> LRUCache:
+        return LRUCache(CatalogOptions.BLOB_FILE_IO_DEFAULT_CACHE_SIZE)
 
     def create(self, input_uri: str) -> UriReader:
         try:
@@ -148,12 +170,38 @@ class UriReaderFactory:
             from pypaimon.common.file_io import FileIO
             uri_string = parsed_uri.geturl()
             file_io = FileIO.get(uri_string, self.catalog_options)
+            self._owned_file_ios.append(file_io)
             return UriReader.from_file(file_io)
         except Exception as e:
             raise RuntimeError(f"Failed to create reader for URI {parsed_uri.geturl()}") from e
 
     def clear_cache(self) -> None:
-        self._readers.clear()
+        if self._closing:
+            return
+        self._closing = True
+        wlock = self._readers_lock.gen_wlock()
+        wlock.acquire()
+        try:
+            file_ios = list(self._owned_file_ios)
+            self._owned_file_ios = []
+            self._readers = self._new_reader_cache()
+        finally:
+            wlock.release()
+        first_error = None
+        try:
+            for file_io in file_ios:
+                try:
+                    file_io.close()
+                except Exception as error:
+                    if first_error is None:
+                        first_error = error
+        finally:
+            self._closing = False
+        if first_error is not None:
+            raise first_error
+
+    def close(self) -> None:
+        self.clear_cache()
 
     def get_cache_size(self) -> int:
         return len(self._readers)
@@ -161,8 +209,27 @@ class UriReaderFactory:
     def __getstate__(self):
         state = self.__dict__.copy()
         del state['_readers_lock']
+        del state['_readers']
+        del state['_owned_file_ios']
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._readers_lock = rwlock.RWLockFair()
+        self._owned_file_ios = []
+        self._closing = False
+        self._readers = self._new_reader_cache()
+
+
+class _ProvidedFileIOUriReaderFactory(UriReaderFactory):
+    """Resolves HTTP(S) via HttpUriReader and every other URI through file_io."""
+
+    def __init__(self, file_io: Any) -> None:
+        super().__init__({})
+        self._provided_file_io = file_io
+
+    def _new_reader(self, key: UriKey, parsed_uri: ParseResult) -> UriReader:
+        scheme = (key.scheme or '').lower()
+        if scheme in ('http', 'https'):
+            return UriReader.from_http()
+        return UriReader.from_file(self._provided_file_io)

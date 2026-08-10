@@ -43,6 +43,7 @@ class DeferredBlobResolveReader(RecordBatchReader):
         batch = self._inner.read_arrow_batch()
         if batch is None:
             return None
+        self._refresh_blob_view_lookup(self._inner)
 
         columns = list(batch.columns)
         fields = list(batch.schema)
@@ -52,6 +53,9 @@ class DeferredBlobResolveReader(RecordBatchReader):
             if column_index < 0:
                 continue
             values = batch.column(column_index).to_pylist()
+            # Dedicated .blob files live on the table filesystem. Resolve
+            # through this FileIO so REST tokens and test wrappers apply;
+            # UriReaderFactory would rebuild an unscoped FileIO.
             blobs = [Blob.from_bytes(value, self._file_io) for value in values]
             if self._blob_parallelism > 1:
                 payloads = self._file_io.read_blobs_concurrent(

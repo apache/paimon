@@ -59,6 +59,7 @@ class FilterRecordBatchReader(RecordBatchReader):
             batch = self.reader.read_arrow_batch()
             if batch is None:
                 return None
+            self._refresh_blob_view_lookup(self.reader)
             if batch.num_rows == 0:
                 return batch
             filtered = self._filter_batch(batch)
@@ -98,6 +99,8 @@ class FilterRecordBatchReader(RecordBatchReader):
             self.file_io,
             self.blob_field_indices,
             self.vector_field_indices,
+            self.descriptor_field_indices,
+            self.blob_view_lookup,
         )
         selected = []
         pos = 0

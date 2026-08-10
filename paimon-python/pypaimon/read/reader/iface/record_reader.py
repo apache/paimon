@@ -39,3 +39,18 @@ class RecordReader(Generic[T], ABC):
         """
         Closes the reader and should release all resources.
         """
+
+    def _adopt_blob_metadata(self, reader) -> None:
+        self.file_io = getattr(reader, 'file_io', None)
+        self.blob_field_indices = getattr(reader, 'blob_field_indices', None)
+        self.descriptor_field_indices = getattr(reader, 'descriptor_field_indices', None)
+        self.blob_view_lookup = getattr(reader, 'blob_view_lookup', None)
+        self.vector_field_indices = getattr(reader, 'vector_field_indices', None)
+
+    def _refresh_blob_view_lookup(self, reader) -> None:
+        # BlobInlineConvertReader fills lookup during the first prescan, after
+        # wrappers have already copied metadata in __init__.
+        self.blob_view_lookup = getattr(
+            reader, 'blob_view_lookup', self.blob_view_lookup)
+        self.descriptor_field_indices = getattr(
+            reader, 'descriptor_field_indices', self.descriptor_field_indices)

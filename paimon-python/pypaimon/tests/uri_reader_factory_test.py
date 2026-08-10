@@ -18,6 +18,7 @@
 import os
 import tempfile
 import unittest
+import io
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.uri_reader import UriReaderFactory, HttpUriReader, FileUriReader, UriReader
 
@@ -119,6 +120,33 @@ class UriReaderFactoryTest(unittest.TestCase):
         # Same scheme/authority should not increase cache size
         self.factory.create("http://example.com/another_file.txt")
         self.assertEqual(self.factory.get_cache_size(), initial_size + 3)
+
+    def test_clear_cache_releases_owned_file_ios(self):
+        self.factory.create(f"file://{self.temp_file}")
+        self.assertEqual(len(self.factory._owned_file_ios), 1)
+        self.factory.clear_cache()
+        self.assertEqual(self.factory.get_cache_size(), 0)
+        self.assertEqual(self.factory._owned_file_ios, [])
+
+    def test_lru_eviction_keeps_owned_file_ios_until_close(self):
+        from cachetools import LRUCache
+
+        small_factory = UriReaderFactory({})
+        small_factory._readers = LRUCache(1)
+        small_factory.create(f"file://{self.temp_file}")
+        self.assertEqual(len(small_factory._owned_file_ios), 1)
+        small_factory.create("http://example.com/other")
+        self.assertEqual(len(small_factory._owned_file_ios), 1)
+        small_factory.clear_cache()
+        self.assertEqual(len(small_factory._owned_file_ios), 0)
+
+    def test_pickle_resets_reader_cache(self):
+        import pickle
+
+        self.factory.create(f"file://{self.temp_file}")
+        restored = pickle.loads(pickle.dumps(self.factory))
+        self.assertEqual(restored.get_cache_size(), 0)
+        self.assertEqual(restored._owned_file_ios, [])
 
     def test_uri_reader_functionality(self):
         """Test that created URI readers actually work."""
@@ -222,6 +250,26 @@ class UriReaderFactoryTest(unittest.TestCase):
         self.assertEqual(str(path), oss_file_path)
         path = UriReader.get_file_path(self.temp_file)
         self.assertEqual(str(path), self.temp_file)
+
+    def test_from_file_io_reuses_provided_file_io_for_non_http(self):
+        data = b"token-scoped blob"
+
+        class TokenFileIO:
+            def __init__(self):
+                self.opened_paths = []
+
+            def new_input_stream(self, path):
+                self.opened_paths.append(path)
+                return io.BytesIO(data)
+
+        file_io = TokenFileIO()
+        factory = UriReaderFactory.from_file_io(file_io)
+        self.assertIs(factory, UriReaderFactory.from_file_io(file_io))
+        self.assertIsInstance(factory.create("https://example.com/blob.bin"), HttpUriReader)
+        reader = factory.create("file-backed/blob.bin")
+        self.assertIsInstance(reader, FileUriReader)
+        self.assertEqual(reader.new_input_stream("file-backed/blob.bin").read(), data)
+        self.assertEqual(file_io.opened_paths, ["file-backed/blob.bin"])
 
 
 if __name__ == '__main__':

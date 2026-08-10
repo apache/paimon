@@ -54,13 +54,13 @@ class BlobDescriptor:
     def serialize(self) -> bytes:
         uri_bytes = self._uri.encode('utf-8')
         uri_length = len(uri_bytes)
-        data = struct.pack('<B', self._version)  # version (1 byte)
-        if self._version > 1:
-            data += struct.pack('<Q', self.MAGIC)  # magic (8 bytes, unsigned)
-        data += struct.pack('<I', uri_length)  # uri length (4 bytes)
-        data += uri_bytes  # uri bytes
-        data += struct.pack('<q', self._offset)  # offset (8 bytes, signed)
-        data += struct.pack('<q', self._length)  # length (8 bytes, signed)
+        # Always write CURRENT_VERSION with magic, matching Java BlobDescriptor.serialize().
+        data = struct.pack('<B', self.CURRENT_VERSION)
+        data += struct.pack('<Q', self.MAGIC)
+        data += struct.pack('<I', uri_length)
+        data += uri_bytes
+        data += struct.pack('<q', self._offset)
+        data += struct.pack('<q', self._length)
         return data
 
     @classmethod
@@ -117,6 +117,53 @@ class BlobDescriptor:
         descriptor = cls(uri, blob_offset, blob_length)
         descriptor._version = version
         return descriptor
+
+    @classmethod
+    def _try_parse_serialized(cls, data: bytes) -> Optional['BlobDescriptor']:
+        if not isinstance(data, (bytes, bytearray)):
+            return None
+        raw = bytes(data)
+        if len(raw) < 21:
+            return None
+        try:
+            offset = 0
+            version = raw[offset]
+            offset += 1
+            if version < 1 or version > cls.CURRENT_VERSION:
+                return None
+            if version > 1:
+                if offset + 8 > len(raw):
+                    return None
+                magic = struct.unpack('<Q', raw[offset:offset + 8])[0]
+                if magic != cls.MAGIC:
+                    return None
+                offset += 8
+            if offset + 4 > len(raw):
+                return None
+            uri_length = struct.unpack('<I', raw[offset:offset + 4])[0]
+            total = offset + 4 + uri_length + 16
+            if total != len(raw):
+                return None
+            return cls.deserialize(raw)
+        except (ValueError, struct.error, UnicodeDecodeError):
+            return None
+
+    @classmethod
+    def parse_if_serialized(cls, data: bytes) -> Optional['BlobDescriptor']:
+        """Best-effort parse when data fully encodes a v1 or v2 descriptor.
+
+        Intended for callers that already know bytes represent a descriptor
+        (for example :meth:`Blob.from_descriptor_bytes`). The heuristic
+        :meth:`from_bytes` entry point uses :meth:`is_blob_descriptor` (v2
+        magic only) so inline payload bytes are not misclassified as v1
+        descriptors.
+
+        Unlike :meth:`is_blob_descriptor` (v2 magic header only), this accepts
+        v1 descriptors without a magic prefix. Parsing is strict (exact byte
+        length match) but still heuristic: arbitrary inline blob bytes could
+        theoretically match.
+        """
+        return cls._try_parse_serialized(data)
 
     @classmethod
     def is_blob_descriptor(cls, data: bytes) -> bool:
@@ -387,6 +434,47 @@ class Blob(ABC):
         return BlobRef(uri_reader, descriptor)
 
     @staticmethod
+    def _blob_ref_from_descriptor(
+            descriptor: 'BlobDescriptor', file_io=None, uri_reader_factory=None,
+    ) -> 'BlobRef':
+        if uri_reader_factory is None:
+            if file_io is None:
+                raise ValueError("file_io is required to resolve BlobDescriptor bytes")
+            uri_reader = UriReader.from_file(file_io)
+        else:
+            uri_reader = uri_reader_factory.create(descriptor.uri)
+        return BlobRef(uri_reader, descriptor)
+
+    @staticmethod
+    def from_descriptor_bytes(
+            data: Optional[bytes], file_io=None, uri_reader_factory=None,
+    ) -> Optional['Blob']:
+        """Build a Blob from bytes known to contain a descriptor.
+
+        Version 1 descriptors have no magic header, so they cannot be
+        distinguished safely from arbitrary payload bytes. Callers which know
+        from schema or storage context that a value is a descriptor must use
+        this method instead of the heuristic :meth:`from_bytes` entry point.
+
+        Malformed or non-descriptor bytes raise :class:`ValueError` (fail-fast).
+        Trailing padding after the descriptor payload is accepted, matching
+        Java :meth:`BlobDescriptor.deserialize`.
+        """
+        if data is None:
+            return None
+        if not isinstance(data, (bytes, bytearray)):
+            raise TypeError(
+                f"Blob.from_descriptor_bytes expects bytes, got {type(data)}")
+
+        try:
+            descriptor = BlobDescriptor.deserialize(bytes(data))
+        except (ValueError, struct.error, UnicodeDecodeError) as exc:
+            raise ValueError(
+                "Expected BlobDescriptor bytes, got raw bytes") from exc
+        return Blob._blob_ref_from_descriptor(
+            descriptor, file_io=file_io, uri_reader_factory=uri_reader_factory)
+
+    @staticmethod
     def from_view(view_struct: BlobViewStruct) -> 'BlobView':
         return BlobView(view_struct)
 
@@ -401,20 +489,9 @@ class Blob(ABC):
         data = bytes(data)
         if BlobViewStruct.is_blob_view_struct(data):
             return Blob.from_view(BlobViewStruct.deserialize(data))
-        is_descriptor = BlobDescriptor.is_blob_descriptor(data)
-        if not allow_blob_data and not is_descriptor:
-            raise ValueError(
-                "Expected BlobDescriptor bytes, got raw bytes (allow_blob_data=False)"
-            )
-        if is_descriptor:
-            descriptor = BlobDescriptor.deserialize(data)
-            if uri_reader_factory is None:
-                if file_io is None:
-                    raise ValueError("file_io is required to resolve BlobDescriptor bytes")
-                uri_reader = UriReader.from_file(file_io)
-            else:
-                uri_reader = uri_reader_factory.create(descriptor.uri)
-            return BlobRef(uri_reader, descriptor)
+        if BlobDescriptor.is_blob_descriptor(data) or not allow_blob_data:
+            return Blob.from_descriptor_bytes(
+                data, file_io=file_io, uri_reader_factory=uri_reader_factory)
         return BlobData(data)
 
 
@@ -502,6 +579,10 @@ class BlobRef(Blob):
 
     def to_descriptor(self) -> BlobDescriptor:
         return self._descriptor
+
+    @property
+    def uri_reader(self) -> UriReader:
+        return self._uri_reader
 
     def new_input_stream(self) -> BinaryIO:
         uri = self._descriptor.uri

@@ -100,6 +100,11 @@ class PyArrowFileIO(FileIO):
         self.__dict__.update(state)
         self._legacy_bucket_lock = threading.Lock()
 
+    def close(self):
+        uri_reader_factory = getattr(self, 'uri_reader_factory', None)
+        if uri_reader_factory is not None:
+            uri_reader_factory.close()
+
     @staticmethod
     def parse_location(location: str):
         uri = urlparse(location)

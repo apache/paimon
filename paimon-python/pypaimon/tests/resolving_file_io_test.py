@@ -85,6 +85,38 @@ class ResolvingFileIOTest(unittest.TestCase):
         resolving = ResolvingFileIO(opts)
         self.assertFalse(resolving.is_object_store())
 
+    def test_uri_reader_factory_creates_http_reader(self):
+        resolving = ResolvingFileIO(Options({}))
+        try:
+            factory = resolving.uri_reader_factory
+            self.assertIsNotNone(factory)
+            reader = factory.create("https://example.com/blob.bin")
+            self.assertEqual(type(reader).__name__, "HttpUriReader")
+        finally:
+            resolving.close()
+
+    def test_uri_reader_factory_reuses_self_for_non_http(self):
+        import io
+
+        from pypaimon.common.uri_reader import FileUriReader
+
+        resolving = ResolvingFileIO(Options({}))
+        opened = []
+
+        def tracking(path):
+            opened.append(path)
+            return io.BytesIO(b"ok")
+
+        resolving.new_input_stream = tracking
+        try:
+            reader = resolving.uri_reader_factory.create("file:///tmp/blob.bin")
+            self.assertIsInstance(reader, FileUriReader)
+            self.assertEqual(
+                reader.new_input_stream("file:///tmp/blob.bin").read(), b"ok")
+            self.assertEqual(opened, ["file:///tmp/blob.bin"])
+        finally:
+            resolving.close()
+
 
 class ResolvingFileIOReadWriteTest(unittest.TestCase):
     """End-to-end read/write tests using ResolvingFileIO with local filesystem."""
