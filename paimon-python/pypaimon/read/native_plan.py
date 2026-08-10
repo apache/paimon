@@ -124,11 +124,17 @@ def _catalog_options(table) -> dict:
 def _read_options(table) -> dict:
     """Effective Rust read options, including FileStoreTable.copy overrides."""
     options = {
+        str(key): _option_value_to_string(value)
+        for key, value in (
+            getattr(table, '_applied_dynamic_options', {}) or {}).items()
+        if value is not None and key != CoreOptions.SCAN_TIMESTAMP.key()
+    }
+    options.update({
         CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): str(
             table.options.source_split_target_size()),
         CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): str(
             table.options.source_split_open_file_cost()),
-    }
+    })
     table_options = table.options.options
     for option in (
             CoreOptions.SCAN_SNAPSHOT_ID,

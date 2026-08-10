@@ -373,6 +373,22 @@ class NativePlanTest(unittest.TestCase):
         native.assert_not_called()
         fs.scan.assert_called_once_with()
 
+    def test_dynamic_read_option_uses_native_plan(self):
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        scan.table._applied_dynamic_options = {
+            'blob-as-descriptor': 'true',
+        }
+        split = Mock(partition=Mock(values=[]), snapshot_id=1)
+
+        with patch(
+                'pypaimon.read.native_plan.native_plan',
+                return_value=[split]) as native:
+            self.assertEqual(scan.plan().splits(), [split])
+
+        native.assert_called_once()
+        fs.scan.assert_not_called()
+
     def test_plan_falls_back_when_native_plan_raises(self):
         # A native planning failure (e.g. unsupported scheme) must fall back, not crash.
         fs = Mock(partition_key_predicate=None)
@@ -541,7 +557,13 @@ class NativePlanTest(unittest.TestCase):
             'vector-index.search-mode': 'fast',
             'full-text-index.search-mode': 'fast',
         })
+        table._applied_dynamic_options = {
+            'blob-as-descriptor': True,
+            'read.batch-size': 2048,
+        }
         self.assertEqual(_read_options(table), {
+            'blob-as-descriptor': 'true',
+            'read.batch-size': '2048',
             'source.split.target-size': '1024',
             'source.split.open-file-cost': '128',
             'scan.snapshot-id': '9',
@@ -655,6 +677,7 @@ class NativePlanTest(unittest.TestCase):
         table.options.source_split_target_size.return_value = 1024
         table.options.source_split_open_file_cost.return_value = 128
         table.options.options.contains_key.return_value = False
+        table._applied_dynamic_options = {}
         split = Mock()
         split.serialize.return_value = b'bytes'
         rt = Mock()

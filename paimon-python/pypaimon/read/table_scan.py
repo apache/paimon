@@ -40,21 +40,16 @@ _NATIVE_FAMILY_SEARCH_MODE_OPTIONS = frozenset({
 _NATIVE_SEARCH_MODE_OPTIONS = _NATIVE_FAMILY_SEARCH_MODE_OPTIONS | {
     CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(),
 }
-# Options native forwards to Rust; any other copy() override is invisible to Rust.
-_NATIVE_FORWARDED_OPTIONS = frozenset({
-    CoreOptions.SCAN_NATIVE_PLAN_ENABLED.key(),
-    CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(),
-    CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(),
-    CoreOptions.SCAN_SNAPSHOT_ID.key(),
-    CoreOptions.SCAN_TAG_NAME.key(),
-    CoreOptions.SCAN_TIMESTAMP.key(),
-    CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
-}) | _NATIVE_SEARCH_MODE_OPTIONS
 _NATIVE_TIME_TRAVEL_OPTIONS = frozenset({
     CoreOptions.SCAN_SNAPSHOT_ID.key(),
     CoreOptions.SCAN_TAG_NAME.key(),
     CoreOptions.SCAN_TIMESTAMP.key(),
     CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+})
+_NATIVE_SAFE_REMOVED_OPTIONS = frozenset({
+    CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(),
+    CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(),
+    CoreOptions.BLOB_AS_DESCRIPTOR.key(),
 })
 
 
@@ -109,8 +104,8 @@ class TableScan:
         a primary-key table whose trimmed PK is empty (PK equals the partition
         key; native may mark splits raw-convertible and skip merge), dynamic
         bucket / cross-partition PK tables (unconfirmed Rust parity), a stale
-        schema without time travel, copy() overrides Rust does not see (notably
-        removing a persisted scan option), unsupported time travel selectors,
+        schema without time travel, removed copy() options which Rust cannot
+        represent, unsupported time travel selectors,
         query auth, non-main branch, incremental scans, a missing/old
         pypaimon-rust, or a catalog / identifier Rust cannot reconstruct. Keep
         this capability gate in sync when adding scan features."""
@@ -175,10 +170,8 @@ class TableScan:
             return False
         # Rust cannot remove an option persisted in the catalog-loaded schema.
         applied_options = getattr(self.table, '_applied_dynamic_options', {}) or {}
-        if (set(applied_options) - _NATIVE_FORWARDED_OPTIONS
-                or any(key in (_NATIVE_TIME_TRAVEL_OPTIONS
-                               | _NATIVE_SEARCH_MODE_OPTIONS) and value is None
-                       for key, value in applied_options.items())):
+        if any(value is None and key not in _NATIVE_SAFE_REMOVED_OPTIONS
+               for key, value in applied_options.items()):
             return False
         from pypaimon.snapshot.time_travel_util import SCAN_KEYS
         unsupported_scan_keys = set(SCAN_KEYS) - _NATIVE_TIME_TRAVEL_OPTIONS
