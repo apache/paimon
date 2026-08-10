@@ -17,6 +17,7 @@
 ################################################################################
 
 import unittest
+from unittest import mock
 
 import pyarrow as pa
 
@@ -73,6 +74,36 @@ class TableUpdateByRowIdChunkedTest(unittest.TestCase):
             {"value": b"updated-3", "metadata": b"new-3"},
         ])
 
+    def test_update_positions_are_sorted_once_for_all_columns(self):
+        original = pa.table({
+            "left": pa.chunked_array([[1], [2]]),
+            "right": pa.chunked_array([[10], [20]]),
+        })
+        updates = pa.table({
+            SpecialFields.ROW_ID.name: pa.array([1], type=pa.int64()),
+            "left": pa.array([3]),
+            "right": pa.array([30]),
+        })
+
+        with mock.patch("builtins.sorted", wraps=sorted) as sorted_mock:
+            merged, _ = self._updater()._merge_update_with_original(
+                original, updates, ["left", "right"], first_row_id=0)
+
+        self.assertEqual(sorted_mock.call_count, 1)
+        self.assertEqual(merged["left"].to_pylist(), [1, 3])
+        self.assertEqual(merged["right"].to_pylist(), [10, 30])
+
+    def test_update_position_outside_column_range_raises(self):
+        original = pa.table({"payload": pa.array([1, 2])})
+        updates = pa.table({
+            SpecialFields.ROW_ID.name: pa.array([2], type=pa.int64()),
+            "payload": pa.array([3]),
+        })
+
+        with self.assertRaisesRegex(IndexError, "outside column range"):
+            self._updater()._merge_update_with_original(
+                original, updates, ["payload"], first_row_id=0)
+
     def test_total_offsets_over_int32_remain_in_separate_chunks(self):
         child_length = 1_100_000_000
         large_chunk = self._list_chunk([0, child_length])
@@ -111,10 +142,16 @@ class TableUpdateByRowIdChunkedTest(unittest.TestCase):
             "payload": pa.chunked_array([replacement_chunk]),
         })
 
-        merged, _ = self._updater()._merge_update_with_original(
-            original, updates, ["payload"], first_row_id=0)
+        with mock.patch.object(
+                TableUpdateByRowId,
+                "_chunk_offsets",
+                wraps=TableUpdateByRowId._chunk_offsets,
+        ) as chunk_offsets:
+            merged, _ = self._updater()._merge_update_with_original(
+                original, updates, ["payload"], first_row_id=0)
 
         payload = merged["payload"]
+        self.assertEqual(chunk_offsets.call_count, 1)
         self.assertEqual(payload.num_chunks, 2)
         self.assertEqual(
             [len(chunk[0].values) for chunk in payload.chunks],

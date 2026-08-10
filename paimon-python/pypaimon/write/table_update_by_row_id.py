@@ -464,6 +464,7 @@ class TableUpdateByRowId:
             int(relative_index.as_py()): idx
             for idx, relative_index in enumerate(relative_indices)
         }
+        sorted_updates = None
         # Caller (_write_by_first_row_id) only enters this method with a
         # non-empty group, so update_positions is non-empty here.
         blob_row_count = max(update_positions) + 1
@@ -490,8 +491,16 @@ class TableUpdateByRowId:
                 continue
             update_col = update_by_col[col_name]
             original_col = original_data[col_name]
+            if sorted_updates is None:
+                sorted_updates = sorted(update_positions.items())
+                row_count = len(original_col)
+                for position, _ in sorted_updates:
+                    if position < 0 or position >= row_count:
+                        raise IndexError(
+                            f"Update position {position} is outside column "
+                            f"range [0, {row_count})")
             merged_columns[col_name] = self._merge_chunked_column(
-                original_col, update_col, update_positions)
+                original_col, update_col, sorted_updates)
 
         merged_table = pa.table(merged_columns) if merged_columns else None
 
@@ -502,7 +511,7 @@ class TableUpdateByRowId:
             cls,
             original_col: pa.ChunkedArray,
             update_col: pa.ChunkedArray,
-            update_positions: Dict[int, int],
+            sorted_updates: List[Tuple[int, int]],
     ) -> pa.ChunkedArray:
         """Merge updates without flattening a column into one Arrow Array.
 
@@ -513,14 +522,7 @@ class TableUpdateByRowId:
         fallback temporarily concatenates original and replacement values),
         split that row range and retry.
         """
-        row_count = len(original_col)
-        for position in update_positions:
-            if position < 0 or position >= row_count:
-                raise IndexError(
-                    f"Update position {position} is outside column range "
-                    f"[0, {row_count})")
-
-        sorted_updates = sorted(update_positions.items())
+        update_chunk_offsets = cls._chunk_offsets(update_col)
         sorted_updates_idx = 0
         chunk_start_row = 0
         merged_chunks: List[pa.Array] = []
@@ -538,7 +540,11 @@ class TableUpdateByRowId:
                 sorted_updates_idx += 1
 
             merged_chunks.extend(cls._merge_chunk_with_updates(
-                original_chunk, update_col, chunk_updates))
+                original_chunk,
+                update_col,
+                update_chunk_offsets,
+                chunk_updates,
+            ))
             chunk_start_row = chunk_end
 
         return pa.chunked_array(merged_chunks, type=original_col.type)
@@ -548,6 +554,7 @@ class TableUpdateByRowId:
             cls,
             original: pa.Array,
             update_col: pa.ChunkedArray,
+            update_chunk_offsets: List[int],
             updates: List[Tuple[int, int]],
     ) -> List[pa.Array]:
         if not updates:
@@ -555,7 +562,10 @@ class TableUpdateByRowId:
 
         try:
             replacements = cls._take_from_chunked_array(
-                update_col, [update_index for _, update_index in updates])
+                update_col,
+                update_chunk_offsets,
+                [update_index for _, update_index in updates],
+            )
             if replacements.type != original.type:
                 replacements = cls._coerce_column(
                     replacements, original.type)
@@ -592,21 +602,35 @@ class TableUpdateByRowId:
             ]
             return (
                 cls._merge_chunk_with_updates(
-                    original.slice(0, split_at), update_col, left_updates)
+                    original.slice(0, split_at),
+                    update_col,
+                    update_chunk_offsets,
+                    left_updates,
+                )
                 + cls._merge_chunk_with_updates(
-                    original.slice(split_at), update_col, right_updates)
+                    original.slice(split_at),
+                    update_col,
+                    update_chunk_offsets,
+                    right_updates,
+                )
             )
 
     @staticmethod
+    def _chunk_offsets(column: pa.ChunkedArray) -> List[int]:
+        offsets = [0]
+        for chunk in column.chunks:
+            offsets.append(offsets[-1] + len(chunk))
+        return offsets
+
+    @staticmethod
     def _take_from_chunked_array(
-            column: pa.ChunkedArray, indices: List[int]) -> pa.Array:
+            column: pa.ChunkedArray,
+            chunk_offsets: List[int],
+            indices: List[int],
+    ) -> pa.Array:
         """Take values without asking Arrow to combine unrelated chunks."""
         if not indices:
             return pa.array([], type=column.type)
-
-        chunk_offsets = [0]
-        for chunk in column.chunks:
-            chunk_offsets.append(chunk_offsets[-1] + len(chunk))
 
         pieces: List[pa.Array] = []
         current_chunk_index = None
