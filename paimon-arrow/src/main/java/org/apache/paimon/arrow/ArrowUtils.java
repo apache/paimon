@@ -302,17 +302,8 @@ public class ArrowUtils {
      */
     public static boolean hasSameRootAllocator(
             VectorSchemaRoot vectorSchemaRoot, BufferAllocator allocator) {
-        if (vectorSchemaRoot.getFieldVectors().isEmpty()) {
-            return false;
-        }
-
-        BufferAllocator expectedRoot = rootAllocator(allocator);
-        for (FieldVector vector : vectorSchemaRoot.getFieldVectors()) {
-            if (!hasSameRootAllocator(vector, expectedRoot)) {
-                return false;
-            }
-        }
-        return true;
+        List<FieldVector> vectors = vectorSchemaRoot.getFieldVectors();
+        return !vectors.isEmpty() && allVectorsShareRootWith(vectors, allocator.getRoot());
     }
 
     public static void serializeToIpc(VectorSchemaRoot vsr, OutputStream out) {
@@ -349,21 +340,11 @@ public class ArrowUtils {
         }
     }
 
-    private static BufferAllocator rootAllocator(BufferAllocator allocator) {
-        BufferAllocator current = allocator;
-        while (current.getParentAllocator() != null) {
-            current = current.getParentAllocator();
-        }
-        return current;
-    }
-
-    private static boolean hasSameRootAllocator(FieldVector vector, BufferAllocator expectedRoot) {
-        if (rootAllocator(vector.getAllocator()) != expectedRoot) {
-            return false;
-        }
-
-        for (FieldVector child : vector.getChildrenFromFields()) {
-            if (!hasSameRootAllocator(child, expectedRoot)) {
+    private static boolean allVectorsShareRootWith(
+            List<FieldVector> vectors, BufferAllocator expectedRoot) {
+        for (FieldVector vector : vectors) {
+            if (vector.getAllocator().getRoot() != expectedRoot
+                    || !allVectorsShareRootWith(vector.getChildrenFromFields(), expectedRoot)) {
                 return false;
             }
         }
