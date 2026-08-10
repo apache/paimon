@@ -144,11 +144,6 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
     }
 
     @Override
-    public boolean supportsRowEquivalentBundleWrite() {
-        return true;
-    }
-
-    @Override
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) {
         if (!suggestedCheck) {
             return false;

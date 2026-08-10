@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.BundleFormatWriter;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
@@ -142,7 +143,7 @@ class RowDataFileWriterTest {
     }
 
     @Test
-    void testBundleFormatWriterWithoutOptInFallsBackToRows() throws Exception {
+    void testBundleFormatWriterCanChooseRowFallback() throws Exception {
         TestingFallbackBundleFormatWriter formatWriter = new TestingFallbackBundleFormatWriter();
         LongCounter sequenceCounter = new LongCounter();
         RowDataFileWriter writer =
@@ -156,7 +157,7 @@ class RowDataFileWriterTest {
 
         writer.writeBundle(rows(GenericRow.of(1), GenericRow.of(2)));
 
-        assertThat(formatWriter.bundleWrites).isZero();
+        assertThat(formatWriter.bundleWrites).isEqualTo(1);
         assertThat(formatWriter.rowWrites).isEqualTo(2);
         assertThat(writer.recordCount()).isEqualTo(2);
         assertThat(sequenceCounter.getValue()).isEqualTo(2);
@@ -287,6 +288,36 @@ class RowDataFileWriterTest {
         assertThat(writer.result().embeddedIndex()).isNotNull();
     }
 
+    @Test
+    void testRowSidecarFallsBackToRows() throws Exception {
+        FileIO fileIO = fileIO();
+        TestingBundleFormatWriter formatWriter = new TestingBundleFormatWriter();
+        TestingFormatWriter sidecarWriter = new TestingFormatWriter();
+        FileFormat rowSidecarFormat = mock(FileFormat.class);
+        when(rowSidecarFormat.createWriterFactory(ROW_TYPE))
+                .thenReturn(new TestingFormatWriterFactory(sidecarWriter));
+        Path rowSidecarPath = new Path("file:/tmp/data-file.row");
+        RowDataFileWriter writer =
+                createWriter(
+                        fileIO,
+                        ROW_TYPE,
+                        formatWriter,
+                        SimpleStatsProducer.disabledProducer(),
+                        new LongCounter(),
+                        new FileIndexOptions(),
+                        rowSidecarFormat,
+                        rowSidecarPath);
+
+        writer.writeBundle(rows(GenericRow.of(1), GenericRow.of(2)));
+
+        assertThat(formatWriter.bundleWrites).isZero();
+        assertThat(formatWriter.rowWrites).isEqualTo(2);
+        assertThat(sidecarWriter.rowWrites).isEqualTo(2);
+
+        writer.close();
+        assertThat(writer.result().extraFiles()).containsExactly(rowSidecarPath.getName());
+    }
+
     private static FileIO fileIO() throws IOException {
         FileIO fileIO = mock(FileIO.class);
         when(fileIO.getFileSize(PATH)).thenReturn(123L);
@@ -300,6 +331,26 @@ class RowDataFileWriterTest {
             SimpleStatsProducer statsProducer,
             LongCounter sequenceCounter,
             FileIndexOptions fileIndexOptions) {
+        return createWriter(
+                fileIO,
+                rowType,
+                formatWriter,
+                statsProducer,
+                sequenceCounter,
+                fileIndexOptions,
+                null,
+                null);
+    }
+
+    private static RowDataFileWriter createWriter(
+            FileIO fileIO,
+            RowType rowType,
+            FormatWriter formatWriter,
+            SimpleStatsProducer statsProducer,
+            LongCounter sequenceCounter,
+            FileIndexOptions fileIndexOptions,
+            FileFormat rowSidecarFormat,
+            Path rowSidecarPath) {
         return new RowDataFileWriter(
                 fileIO,
                 new FileWriterContext(
@@ -314,8 +365,8 @@ class RowDataFileWriterTest {
                 false,
                 false,
                 null,
-                null,
-                null);
+                rowSidecarFormat,
+                rowSidecarPath);
     }
 
     private static BundleRecords rows(InternalRow... rows) {
@@ -378,11 +429,6 @@ class RowDataFileWriterTest {
             bundleWrites++;
             writtenBundle = bundle;
         }
-
-        @Override
-        public boolean supportsRowEquivalentBundleWrite() {
-            return true;
-        }
     }
 
     private static class TestingFallbackBundleFormatWriter extends TestingFormatWriter
@@ -411,11 +457,6 @@ class RowDataFileWriterTest {
         @Override
         public void writeBundle(BundleRecords bundle) throws IOException {
             throw failure;
-        }
-
-        @Override
-        public boolean supportsRowEquivalentBundleWrite() {
-            return true;
         }
     }
 

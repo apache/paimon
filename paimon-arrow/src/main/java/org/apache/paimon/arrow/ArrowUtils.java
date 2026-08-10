@@ -277,6 +277,19 @@ public class ArrowUtils {
         return ArrowCStruct.of(array, schema);
     }
 
+    /** Releases Arrow C Data callbacks that have not already been consumed by native code. */
+    public static void releaseCDataIfNeeded(ArrowArray array, ArrowSchema schema) {
+        try {
+            if (array.snapshot().release != 0) {
+                array.release();
+            }
+        } finally {
+            if (schema.snapshot().release != 0) {
+                schema.release();
+            }
+        }
+    }
+
     public static byte[] serializeToIpc(VectorSchemaRoot vsr) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         serializeToIpc(vsr, out);
