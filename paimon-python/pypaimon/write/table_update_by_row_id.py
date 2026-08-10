@@ -587,7 +587,8 @@ class TableUpdateByRowId:
                 for replacement_index, (position, _) in enumerate(updates):
                     indices[position] = replacement_offset + replacement_index
                 return [combined.take(pa.array(indices))]
-        except pa.lib.ArrowInvalid as error:
+        except (pa.lib.ArrowInvalid,
+                pa.lib.ArrowCapacityError) as error:
             if not cls._is_offset_overflow(error) or len(original) <= 1:
                 raise
 
@@ -667,7 +668,9 @@ class TableUpdateByRowId:
         return pa.concat_arrays(pieces)
 
     @staticmethod
-    def _is_offset_overflow(error: pa.lib.ArrowInvalid) -> bool:
+    def _is_offset_overflow(error: pa.lib.ArrowException) -> bool:
+        if isinstance(error, pa.lib.ArrowCapacityError):
+            return True
         message = str(error).lower()
         return (
             "offset overflow" in message

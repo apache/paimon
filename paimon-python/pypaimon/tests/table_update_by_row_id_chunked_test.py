@@ -20,6 +20,7 @@ import unittest
 from unittest import mock
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
@@ -156,6 +157,41 @@ class TableUpdateByRowIdChunkedTest(unittest.TestCase):
         self.assertEqual(
             [len(chunk[0].values) for chunk in payload.chunks],
             [original_value_length, replacement_value_length],
+        )
+
+    def test_replace_with_mask_capacity_error_splits_chunk(self):
+        original = pa.table({
+            "payload": pa.array(
+                [b"a", b"b", b"c", b"d"], type=pa.binary()),
+        })
+        updates = pa.table({
+            SpecialFields.ROW_ID.name:
+                pa.array([1, 3], type=pa.int64()),
+            "payload": pa.array([b"B", b"D"], type=pa.binary()),
+        })
+        real_replace_with_mask = pc.replace_with_mask
+        attempted_lengths = []
+
+        def replace_with_capacity_limit(values, mask, replacements):
+            attempted_lengths.append(len(values))
+            if len(values) > 2:
+                raise pa.lib.ArrowCapacityError(
+                    "array cannot contain more than 2147483647 bytes")
+            return real_replace_with_mask(values, mask, replacements)
+
+        with mock.patch.object(
+                pc,
+                "replace_with_mask",
+                side_effect=replace_with_capacity_limit,
+        ):
+            merged, _ = self._updater()._merge_update_with_original(
+                original, updates, ["payload"], first_row_id=0)
+
+        self.assertEqual(attempted_lengths, [4, 2, 2])
+        self.assertEqual(merged["payload"].num_chunks, 2)
+        self.assertEqual(
+            merged["payload"].to_pylist(),
+            [b"a", b"B", b"c", b"D"],
         )
 
     @staticmethod
