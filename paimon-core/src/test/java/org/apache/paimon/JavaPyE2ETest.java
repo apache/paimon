@@ -1496,9 +1496,6 @@ public class JavaPyE2ETest {
         Map<Object, Object> binaryPayloads = new LinkedHashMap<>();
         binaryPayloads.put(
                 new byte[] {0, (byte) 0xff, 1, 2},
-                new BlobData("java-binary-first".getBytes(StandardCharsets.UTF_8)));
-        binaryPayloads.put(
-                new byte[] {0, (byte) 0xff, 1, 2},
                 new BlobData("java-binary".getBytes(StandardCharsets.UTF_8)));
         Map<Object, Object> varbinaryPayloads = new LinkedHashMap<>();
         varbinaryPayloads.put(

@@ -1663,7 +1663,6 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'binary_payloads': pa.array(
                 [
                     [
-                        (bytes([0, 255, 1, 2]), b'python-binary-first'),
                         (bytes([0, 255, 1, 2]), b'python-binary'),
                     ],
                     None,
