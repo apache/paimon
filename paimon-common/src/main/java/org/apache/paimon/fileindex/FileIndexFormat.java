@@ -125,6 +125,11 @@ public final class FileIndexFormat {
         return new Reader(inputStream, fileRowType);
     }
 
+    /** Creates a reader for accessing header metadata without reading index payloads. */
+    public static Reader createMetadataReader(SeekableInputStream inputStream) {
+        return new Reader(inputStream, RowType.builder().build());
+    }
+
     /** Metadata of one column index stored in a file index container. */
     public static class FileIndexMeta {
 

@@ -125,9 +125,8 @@ public class FileIndexFormatFormatTest {
 
         List<FileIndexFormat.FileIndexMeta> metas;
         try (FileIndexFormat.Reader reader =
-                FileIndexFormat.createReader(
-                        new ByteArraySeekableStream(baos.toByteArray()),
-                        RowType.builder().build())) {
+                FileIndexFormat.createMetadataReader(
+                        new ByteArraySeekableStream(baos.toByteArray()))) {
             metas = reader.indexMetas();
         }
 

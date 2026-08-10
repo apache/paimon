@@ -23,23 +23,31 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FileIndexesTable}. */
 public class FileIndexesTableTest extends TableTestBase {
@@ -78,6 +86,60 @@ public class FileIndexesTableTest extends TableTestBase {
                                 .distinct()
                                 .collect(Collectors.toList()))
                 .hasSize(1);
+    }
+
+    @Test
+    public void testLazyReadExternalFileIndexes() throws Exception {
+        String tableName = "LazyExternalIndexes";
+        FileIndexesTable fileIndexesTable = createTable(tableName, "1 B", true);
+        FileStoreTable dataTable = (FileStoreTable) catalog.getTable(identifier(tableName));
+
+        ReadBuilder readBuilder = fileIndexesTable.newReadBuilder();
+        List<Split> systemSplits = readBuilder.newScan().plan().splits();
+        assertThat(systemSplits).hasSize(1);
+
+        List<DataSplit> dataSplits =
+                ((FilesTable.FilesSplit) systemSplits.get(0))
+                        .splits(dataTable).stream()
+                                .map(DataSplit.class::cast)
+                                .collect(Collectors.toList());
+        List<DataFileMeta> dataFiles =
+                dataSplits.stream()
+                        .flatMap(split -> split.dataFiles().stream())
+                        .collect(Collectors.toList());
+        assertThat(dataFiles).hasSize(2);
+
+        DataSplit firstSplit = dataSplits.get(0);
+        DataFileMeta secondFile = dataFiles.get(1);
+        String secondIndexFile =
+                secondFile.extraFiles().stream()
+                        .filter(name -> name.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
+                        .findFirst()
+                        .orElseThrow(AssertionError::new);
+        Path secondIndexPath =
+                dataTable
+                        .store()
+                        .pathFactory()
+                        .createDataFilePathFactory(firstSplit.partition(), firstSplit.bucket())
+                        .toAlignedPath(secondIndexFile, secondFile);
+        try (PositionOutputStream output =
+                dataTable.fileIO().newOutputStream(secondIndexPath, true)) {
+            output.write(0);
+        }
+
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(systemSplits.get(0))) {
+            RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+            InternalRow first = batch.next();
+            InternalRow second = batch.next();
+            assertThat(first).isNotNull();
+            assertThat(second).isNotNull();
+            assertThat(first.getString(2)).isEqualTo(second.getString(2));
+            assertThatThrownBy(batch::next)
+                    .isInstanceOf(UncheckedIOException.class)
+                    .hasMessageContaining(secondIndexPath.toString());
+            batch.releaseBatch();
+        }
     }
 
     @Test
@@ -141,6 +203,12 @@ public class FileIndexesTableTest extends TableTestBase {
 
     private FileIndexesTable createTable(String tableName, String inManifestThreshold)
             throws Exception {
+        return createTable(tableName, inManifestThreshold, false);
+    }
+
+    private FileIndexesTable createTable(
+            String tableName, String inManifestThreshold, boolean writeSeparateFiles)
+            throws Exception {
         Identifier identifier = identifier(tableName);
         catalog.createTable(
                 identifier,
@@ -158,7 +226,12 @@ public class FileIndexesTableTest extends TableTestBase {
                         .build(),
                 false);
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        write(table, GenericRow.of(1, 1), GenericRow.of(2, 1));
+        if (writeSeparateFiles) {
+            write(table, GenericRow.of(1, 1));
+            write(table, GenericRow.of(2, 1));
+        } else {
+            write(table, GenericRow.of(1, 1), GenericRow.of(2, 1));
+        }
 
         return (FileIndexesTable)
                 catalog.getTable(

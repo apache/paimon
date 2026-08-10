@@ -37,7 +37,6 @@ import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
@@ -79,6 +78,8 @@ import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing file indexes of data files in a snapshot. */
 public class FileIndexesTable implements ReadonlyTable {
+
+    private static final long serialVersionUID = 1L;
 
     public static final String FILE_INDEXES = "file_indexes";
 
@@ -188,6 +189,7 @@ public class FileIndexesTable implements ReadonlyTable {
                     snapshotReader.partitions().stream()
                             .map(
                                     partition ->
+                                            // Keep file inventory planning aligned with FilesTable.
                                             new FilesTable.FilesSplit(
                                                     partition, bucketPredicate, null))
                             .collect(Collectors.toList());
@@ -201,7 +203,6 @@ public class FileIndexesTable implements ReadonlyTable {
         private static final Set<String> FILE_PUSHDOWN_FIELDS = Collections.singleton("file_path");
 
         private final FileStoreTable storeTable;
-        private final SchemaManager schemaManager;
         private final DataFilePathFactories pathFactories;
 
         @Nullable private Predicate filePredicate;
@@ -210,7 +211,6 @@ public class FileIndexesTable implements ReadonlyTable {
 
         private FileIndexesRead(FileStoreTable storeTable) {
             this.storeTable = storeTable;
-            this.schemaManager = storeTable.schemaManager();
             this.pathFactories = new DataFilePathFactories(storeTable.store().pathFactory());
         }
 
@@ -271,31 +271,7 @@ public class FileIndexesTable implements ReadonlyTable {
                             CastExecutors.resolveToString(
                                     storeTable.schema().logicalPartitionType());
 
-            List<InternalRow> rows = new ArrayList<>();
-            try {
-                for (Split dataSplit : dataSplits) {
-                    DataSplit splitData = (DataSplit) dataSplit;
-                    DataFilePathFactory dataFilePathFactory =
-                            pathFactories.get(splitData.partition(), splitData.bucket());
-                    for (DataFileMeta file : splitData.dataFiles()) {
-                        BinaryString filePath = filePath(splitData, file);
-                        if (filePredicate != null && !testFilePath(filePath)) {
-                            continue;
-                        }
-                        rows.addAll(
-                                indexRows(
-                                        splitData,
-                                        file,
-                                        filePath,
-                                        dataFilePathFactory,
-                                        partitionCastExecutor));
-                    }
-                }
-            } catch (IOException e) {
-                throw new UncheckedIOException("Failed to read file index metadata.", e);
-            }
-
-            Iterator<InternalRow> iterator = rows.iterator();
+            Iterator<InternalRow> iterator = splitRows(dataSplits, partitionCastExecutor);
             if (predicate != null) {
                 iterator = Iterators.filter(iterator, predicate::test);
             }
@@ -310,6 +286,40 @@ public class FileIndexesTable implements ReadonlyTable {
             return new IteratorRecordReader<>(iterator);
         }
 
+        private Iterator<InternalRow> splitRows(
+                List<Split> dataSplits,
+                CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
+            Iterator<Iterator<InternalRow>> splitRows =
+                    Iterators.transform(
+                            dataSplits.iterator(),
+                            split -> fileRows((DataSplit) split, partitionCastExecutor));
+            return Iterators.concat(splitRows);
+        }
+
+        private Iterator<InternalRow> fileRows(
+                DataSplit dataSplit,
+                CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
+            DataFilePathFactory dataFilePathFactory =
+                    pathFactories.get(dataSplit.partition(), dataSplit.bucket());
+            Iterator<Iterator<InternalRow>> fileRows =
+                    Iterators.transform(
+                            dataSplit.dataFiles().iterator(),
+                            file -> {
+                                BinaryString filePath = filePath(dataSplit, file);
+                                if (filePredicate != null && !testFilePath(filePath)) {
+                                    return Collections.emptyIterator();
+                                }
+                                return indexRows(
+                                                dataSplit,
+                                                file,
+                                                filePath,
+                                                dataFilePathFactory,
+                                                partitionCastExecutor)
+                                        .iterator();
+                            });
+            return Iterators.concat(fileRows);
+        }
+
         private boolean testFilePath(BinaryString filePath) {
             GenericRow row = new GenericRow(TABLE_TYPE.getFieldCount());
             row.setField(2, filePath);
@@ -321,14 +331,12 @@ public class FileIndexesTable implements ReadonlyTable {
                 DataFileMeta file,
                 BinaryString filePath,
                 DataFilePathFactory dataFilePathFactory,
-                CastExecutor<InternalRow, BinaryString> partitionCastExecutor)
-                throws IOException {
+                CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
             byte[] embeddedIndex = file.embeddedIndex();
             if (embeddedIndex != null) {
                 try (FileIndexFormat.Reader reader =
-                        FileIndexFormat.createReader(
-                                new ByteArraySeekableStream(embeddedIndex),
-                                schemaManager.schema(file.schemaId()).logicalRowType())) {
+                        FileIndexFormat.createMetadataReader(
+                                new ByteArraySeekableStream(embeddedIndex))) {
                     return toRows(
                             dataSplit,
                             file,
@@ -338,6 +346,11 @@ public class FileIndexesTable implements ReadonlyTable {
                             EMBEDDED,
                             null,
                             embeddedIndex.length);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(
+                            "Failed to read file index metadata from " + filePath + ".", e);
+                } catch (RuntimeException e) {
+                    throw fileIndexReadException(filePath.toString(), e);
                 }
             }
 
@@ -357,21 +370,36 @@ public class FileIndexesTable implements ReadonlyTable {
             }
 
             Path indexPath = dataFilePathFactory.toAlignedPath(indexFiles.get(0), file);
-            long containerSize = storeTable.fileIO().getFileStatus(indexPath).getLen();
-            try (FileIndexFormat.Reader reader =
-                    FileIndexFormat.createReader(
-                            storeTable.fileIO().newInputStream(indexPath),
-                            schemaManager.schema(file.schemaId()).logicalRowType())) {
-                return toRows(
-                        dataSplit,
-                        file,
-                        filePath,
-                        partitionCastExecutor,
-                        reader.indexMetas(),
-                        FILE,
-                        BinaryString.fromString(indexPath.toString()),
-                        containerSize);
+            try {
+                long containerSize = storeTable.fileIO().getFileStatus(indexPath).getLen();
+                try (FileIndexFormat.Reader reader =
+                        FileIndexFormat.createMetadataReader(
+                                storeTable.fileIO().newInputStream(indexPath))) {
+                    return toRows(
+                            dataSplit,
+                            file,
+                            filePath,
+                            partitionCastExecutor,
+                            reader.indexMetas(),
+                            FILE,
+                            BinaryString.fromString(indexPath.toString()),
+                            containerSize);
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(
+                        "Failed to read file index metadata from " + indexPath + ".", e);
+            } catch (RuntimeException e) {
+                throw fileIndexReadException(indexPath.toString(), e);
             }
+        }
+
+        private static RuntimeException fileIndexReadException(
+                String indexLocation, RuntimeException exception) {
+            String message = "Failed to read file index metadata from " + indexLocation + ".";
+            if (exception.getCause() instanceof IOException) {
+                return new UncheckedIOException(message, (IOException) exception.getCause());
+            }
+            return new RuntimeException(message, exception);
         }
 
         private static List<InternalRow> toRows(
