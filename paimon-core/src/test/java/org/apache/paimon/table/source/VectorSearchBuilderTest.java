@@ -1319,6 +1319,17 @@ public class VectorSearchBuilderTest extends TableTestBase {
         GlobalIndexResult result =
                 searchBuilder.newVectorRead().read(searchBuilder.newVectorScan().scan());
         assertThat(result.results().isEmpty()).isTrue();
+
+        VectorSearchBuilder fullFallback =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter)
+                        .withOption(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full");
+        GlobalIndexResult fallbackResult =
+                fullFallback.newVectorRead().read(fullFallback.newVectorScan().scan());
+        assertThat(fallbackResult.results()).containsExactly(8L);
     }
 
     @Test
