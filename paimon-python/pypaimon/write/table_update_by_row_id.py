@@ -513,37 +513,38 @@ class TableUpdateByRowId:
         fallback temporarily concatenates original and replacement values),
         split that row range and retry.
         """
-        column_length = len(original_col)
+        row_count = len(original_col)
         for position in update_positions:
-            if position < 0 or position >= column_length:
+            if position < 0 or position >= row_count:
                 raise IndexError(
                     f"Update position {position} is outside column range "
-                    f"[0, {column_length})")
+                    f"[0, {row_count})")
 
         sorted_updates = sorted(update_positions.items())
-        update_cursor = 0
-        row_offset = 0
+        sorted_updates_idx = 0
+        chunk_start_row = 0
         merged_chunks: List[pa.Array] = []
 
         for original_chunk in original_col.chunks:
-            chunk_end = row_offset + len(original_chunk)
+            chunk_end = chunk_start_row + len(original_chunk)
             chunk_updates: List[Tuple[int, int]] = []
             while (
-                    update_cursor < len(sorted_updates)
-                    and sorted_updates[update_cursor][0] < chunk_end
+                    sorted_updates_idx < len(sorted_updates)
+                    and sorted_updates[sorted_updates_idx][0] < chunk_end
             ):
-                position, update_index = sorted_updates[update_cursor]
-                chunk_updates.append((position - row_offset, update_index))
-                update_cursor += 1
+                position, update_index = sorted_updates[sorted_updates_idx]
+                chunk_updates.append((
+                    position - chunk_start_row, update_index))
+                sorted_updates_idx += 1
 
-            merged_chunks.extend(cls._merge_array_with_updates(
+            merged_chunks.extend(cls._merge_chunk_with_updates(
                 original_chunk, update_col, chunk_updates))
-            row_offset = chunk_end
+            chunk_start_row = chunk_end
 
         return pa.chunked_array(merged_chunks, type=original_col.type)
 
     @classmethod
-    def _merge_array_with_updates(
+    def _merge_chunk_with_updates(
             cls,
             original: pa.Array,
             update_col: pa.ChunkedArray,
@@ -559,11 +560,7 @@ class TableUpdateByRowId:
                 replacements = cls._coerce_column(
                     replacements, original.type)
 
-            if (
-                    len(updates) == len(original)
-                    and all(position == index
-                            for index, (position, _) in enumerate(updates))
-            ):
+            if len(updates) == len(original):
                 return [replacements]
 
             mask_values = np.zeros(len(original), dtype=np.bool_)
@@ -594,9 +591,9 @@ class TableUpdateByRowId:
                 if position >= split_at
             ]
             return (
-                cls._merge_array_with_updates(
+                cls._merge_chunk_with_updates(
                     original.slice(0, split_at), update_col, left_updates)
-                + cls._merge_array_with_updates(
+                + cls._merge_chunk_with_updates(
                     original.slice(split_at), update_col, right_updates)
             )
 
