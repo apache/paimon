@@ -452,15 +452,11 @@ class TableUpdateByRowId:
             pa.scalar(first_row_id, type=pa.int64())
         ).cast(pa.int64())
 
-        # Build a boolean mask: True at positions that need to be updated
-        all_indices = pa.array(range(original_data.num_rows), type=pa.int64())
-        mask = pc.is_in(all_indices, value_set=relative_indices)
-
         # Build the merged table column by column
         merged_columns = {}
         blob_columns: Dict[str, List[object]] = {}
         update_by_col = {
-            col_name: update_data[col_name].combine_chunks()
+            col_name: update_data[col_name]
             for col_name in column_names
             if col_name in update_data.column_names
         }
@@ -493,34 +489,178 @@ class TableUpdateByRowId:
                 ]
                 continue
             update_col = update_by_col[col_name]
-            original_col = original_data[col_name].combine_chunks()
-            if update_col.type != original_col.type:
-                update_col = self._coerce_column(
-                    update_col, original_col.type)
-            try:
-                merged_columns[col_name] = pc.replace_with_mask(
-                    original_col, mask, update_col)
-            except pa.lib.ArrowNotImplementedError:
-                n = original_data.num_rows
-                combined = pa.concat_arrays(
-                    [original_col, update_col])
-                offset = len(original_col)
-                indices = np.arange(n, dtype=np.int64)
-                for orig_pos, upd_idx in update_positions.items():
-                    indices[orig_pos] = offset + upd_idx
-                merged_columns[col_name] = combined.take(
-                    pa.array(indices))
+            original_col = original_data[col_name]
+            merged_columns[col_name] = self._merge_chunked_column(
+                original_col, update_col, update_positions)
 
         merged_table = pa.table(merged_columns) if merged_columns else None
 
         return merged_table, blob_columns
 
+    @classmethod
+    def _merge_chunked_column(
+            cls,
+            original_col: pa.ChunkedArray,
+            update_col: pa.ChunkedArray,
+            update_positions: Dict[int, int],
+    ) -> pa.ChunkedArray:
+        """Merge updates without flattening a column into one Arrow Array.
+
+        ``binary``, ``string`` and ``list`` use signed 32-bit offsets, so a
+        valid multi-chunk column can exceed 2 GiB while each individual Array
+        remains below the limit. Keep those chunks independent. If merging an
+        individual chunk still overflows (for example, the struct/list
+        fallback temporarily concatenates original and replacement values),
+        split that row range and retry.
+        """
+        column_length = len(original_col)
+        for position in update_positions:
+            if position < 0 or position >= column_length:
+                raise IndexError(
+                    f"Update position {position} is outside column range "
+                    f"[0, {column_length})")
+
+        sorted_updates = sorted(update_positions.items())
+        update_cursor = 0
+        row_offset = 0
+        merged_chunks: List[pa.Array] = []
+
+        for original_chunk in original_col.chunks:
+            chunk_end = row_offset + len(original_chunk)
+            chunk_updates: List[Tuple[int, int]] = []
+            while (
+                    update_cursor < len(sorted_updates)
+                    and sorted_updates[update_cursor][0] < chunk_end
+            ):
+                position, update_index = sorted_updates[update_cursor]
+                chunk_updates.append((position - row_offset, update_index))
+                update_cursor += 1
+
+            merged_chunks.extend(cls._merge_array_with_updates(
+                original_chunk, update_col, chunk_updates))
+            row_offset = chunk_end
+
+        return pa.chunked_array(merged_chunks, type=original_col.type)
+
+    @classmethod
+    def _merge_array_with_updates(
+            cls,
+            original: pa.Array,
+            update_col: pa.ChunkedArray,
+            updates: List[Tuple[int, int]],
+    ) -> List[pa.Array]:
+        if not updates:
+            return [original]
+
+        try:
+            replacements = cls._take_from_chunked_array(
+                update_col, [update_index for _, update_index in updates])
+            if replacements.type != original.type:
+                replacements = cls._coerce_column(
+                    replacements, original.type)
+
+            if (
+                    len(updates) == len(original)
+                    and all(position == index
+                            for index, (position, _) in enumerate(updates))
+            ):
+                return [replacements]
+
+            mask_values = np.zeros(len(original), dtype=np.bool_)
+            for position, _ in updates:
+                mask_values[position] = True
+            mask = pa.array(mask_values)
+
+            try:
+                return [pc.replace_with_mask(original, mask, replacements)]
+            except pa.lib.ArrowNotImplementedError:
+                combined = pa.concat_arrays([original, replacements])
+                indices = np.arange(len(original), dtype=np.int64)
+                replacement_offset = len(original)
+                for replacement_index, (position, _) in enumerate(updates):
+                    indices[position] = replacement_offset + replacement_index
+                return [combined.take(pa.array(indices))]
+        except pa.lib.ArrowInvalid as error:
+            if not cls._is_offset_overflow(error) or len(original) <= 1:
+                raise
+
+            split_at = len(original) // 2
+            left_updates = [
+                update for update in updates if update[0] < split_at
+            ]
+            right_updates = [
+                (position - split_at, update_index)
+                for position, update_index in updates
+                if position >= split_at
+            ]
+            return (
+                cls._merge_array_with_updates(
+                    original.slice(0, split_at), update_col, left_updates)
+                + cls._merge_array_with_updates(
+                    original.slice(split_at), update_col, right_updates)
+            )
+
+    @staticmethod
+    def _take_from_chunked_array(
+            column: pa.ChunkedArray, indices: List[int]) -> pa.Array:
+        """Take values without asking Arrow to combine unrelated chunks."""
+        if not indices:
+            return pa.array([], type=column.type)
+
+        chunk_offsets = [0]
+        for chunk in column.chunks:
+            chunk_offsets.append(chunk_offsets[-1] + len(chunk))
+
+        pieces: List[pa.Array] = []
+        current_chunk_index = None
+        current_local_indices: List[int] = []
+
+        def append_piece(chunk_index: int, local_indices: List[int]):
+            chunk = column.chunk(chunk_index)
+            start = local_indices[0]
+            if all(value == start + offset
+                   for offset, value in enumerate(local_indices)):
+                pieces.append(chunk.slice(start, len(local_indices)))
+            else:
+                pieces.append(chunk.take(pa.array(
+                    local_indices, type=pa.int64())))
+
+        for index in indices:
+            if index < 0 or index >= len(column):
+                raise IndexError(
+                    f"Update index {index} is outside column range "
+                    f"[0, {len(column)})")
+            chunk_index = bisect.bisect_right(chunk_offsets, index) - 1
+            local_index = index - chunk_offsets[chunk_index]
+            if current_chunk_index is None:
+                current_chunk_index = chunk_index
+            elif chunk_index != current_chunk_index:
+                append_piece(current_chunk_index, current_local_indices)
+                current_chunk_index = chunk_index
+                current_local_indices = []
+            current_local_indices.append(local_index)
+
+        append_piece(current_chunk_index, current_local_indices)
+        if len(pieces) == 1:
+            return pieces[0]
+        return pa.concat_arrays(pieces)
+
+    @staticmethod
+    def _is_offset_overflow(error: pa.lib.ArrowInvalid) -> bool:
+        message = str(error).lower()
+        return (
+            "offset overflow" in message
+            or "too large to convert" in message
+        )
+
     @staticmethod
     def _coerce_column(col: pa.Array, target_type: pa.DataType) -> pa.Array:
         try:
             return col.cast(target_type)
+        except pa.lib.ArrowInvalid as error:
+            if TableUpdateByRowId._is_offset_overflow(error):
+                raise
         except (pa.lib.ArrowNotImplementedError,
-                pa.lib.ArrowInvalid,
                 pa.lib.ArrowTypeError):
             pass
         pylist = col.to_pylist()
