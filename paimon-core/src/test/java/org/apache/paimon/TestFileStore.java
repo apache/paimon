@@ -819,7 +819,6 @@ public class TestFileStore extends KeyValueFileStore {
                     MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
 
             conf.set(CoreOptions.FILE_FORMAT, format);
-            conf.set(CoreOptions.MANIFEST_FORMAT, format);
             conf.set(CoreOptions.PATH, root);
             conf.set(CoreOptions.BUCKET, numBuckets);
 
