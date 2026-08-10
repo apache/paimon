@@ -4842,6 +4842,12 @@ public class CoreOptions implements Serializable {
                         + "without producing a snapshot at the beginning. "
                         + "For batch sources, behaves the same as the \"latest-full\" startup mode."),
 
+        LATEST_DELTA(
+                "latest-delta",
+                "For batch sources, reads newly changed files from the latest snapshot. "
+                        + "This mode does not search backwards for an APPEND snapshot, so a latest "
+                        + "COMPACT or OVERWRITE snapshot produces no records. Streaming sources are not supported."),
+
         COMPACTED_FULL(
                 "compacted-full",
                 "For streaming sources, produces a snapshot after the latest compaction on the table "
