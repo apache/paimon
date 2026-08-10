@@ -57,6 +57,7 @@ _COALESCE_SPAN = 8 << 20
 _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION = 2.0
 # Bound per-object opens; 16 cuts them by 75% for default 64-range batches.
 _MAX_RANGE_LANES_PER_PATH = 16
+_RANGE_REQUEST_WEIGHT = 1 << 20
 
 
 def create_temp_path(path: str) -> str:
@@ -250,9 +251,19 @@ class FileIO(ABC):
 
         workers = max(1, min(parallelism, task_count))
 
+        def _task_weight(task):
+            kind, payload = task
+            length = payload[2] if kind == "span" else payload[3]
+            return _RANGE_REQUEST_WEIGHT + max(0, length)
+
         lanes = [[] for _ in range(workers)]
         lane_loads = [0] * workers
         path_task_groups = list(tasks_by_path.values())
+        path_loads = [
+            sum(_task_weight(task) for task in path_tasks)
+            for path_tasks in path_task_groups
+        ]
+        total_load = sum(path_loads)
         path_capacities = [
             min(len(path_tasks), _MAX_RANGE_LANES_PER_PATH)
             for path_tasks in path_task_groups
@@ -262,12 +273,10 @@ class FileIO(ABC):
                 capacity,
                 max(
                     1,
-                    (workers * len(path_tasks) + task_count - 1)
-                    // task_count,
+                    (workers * path_load + total_load - 1) // total_load,
                 ),
             )
-            for path_tasks, capacity in zip(
-                path_task_groups, path_capacities)
+            for path_load, capacity in zip(path_loads, path_capacities)
         ]
         remaining_lanes = max(
             0,
@@ -283,8 +292,7 @@ class FileIO(ABC):
             index = max(
                 candidates,
                 key=lambda value: (
-                    len(path_task_groups[value])
-                    / path_lane_counts[value]
+                    path_loads[value] / path_lane_counts[value]
                 ),
             )
             path_lane_counts[index] += 1
@@ -293,10 +301,10 @@ class FileIO(ABC):
                 path_task_groups, path_lane_counts):
             selected = sorted(
                 range(workers), key=lane_loads.__getitem__)[:path_lanes]
-            for index, task in enumerate(path_tasks):
-                lane = selected[index % path_lanes]
+            for task in sorted(path_tasks, key=_task_weight, reverse=True):
+                lane = min(selected, key=lane_loads.__getitem__)
                 lanes[lane].append(task)
-                lane_loads[lane] += 1
+                lane_loads[lane] += _task_weight(task)
         lanes = [lane for lane in lanes if lane]
 
         class _RangeLane:
@@ -311,17 +319,21 @@ class FileIO(ABC):
                 self._stream = None
                 self._path = None
                 if stream is None:
-                    return
+                    return None
                 try:
                     stream.close()
                 except BaseException as error:
                     if self._close_error is None:
                         self._close_error = error
+                    return error
+                return None
 
             def _stream_for(self, path):
                 if self._stream is not None and self._path == path:
                     return self._stream
-                self._close_current()
+                close_error = self._close_current()
+                if close_error is not None:
+                    raise close_error
                 self._stream = self._file_io.new_input_stream(path)
                 self._path = path
                 return self._stream
@@ -334,8 +346,10 @@ class FileIO(ABC):
                     stream.seek(offset)
                     return (stream.read() if length < 0
                             else stream.read(length))
-                except Exception:
+                except Exception as read_error:
                     self._close_current()
+                    if self._close_error is not None:
+                        raise read_error
                     return self._file_io.read_file_range(
                         path, offset, length)
 

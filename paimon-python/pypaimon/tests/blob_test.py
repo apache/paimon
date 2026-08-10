@@ -3977,6 +3977,46 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertEqual(64, sum(stream.reads for stream in streams))
         self.assertTrue(all(stream.closed for stream in streams))
 
+    def test_same_path_lanes_balance_estimated_io(self):
+        from pypaimon.common.file_io import FileIO
+
+        large = 8 << 20
+        file_io = FileIO.get("file:///tmp", {})
+        streams = []
+
+        class PositionalStream:
+            def __init__(self):
+                self.lengths = []
+
+            def read_at(self, length, offset):
+                self.lengths.append(length)
+                return b"x"
+
+            def close(self):
+                pass
+
+        def new_input_stream(_):
+            stream = PositionalStream()
+            streams.append(stream)
+            return stream
+
+        file_io.new_input_stream = new_input_stream
+        ranges = []
+        offset = 0
+        for index in range(256):
+            length = large if index % 16 == 0 else 1
+            ranges.append(("blob", offset, length))
+            offset += length + 1
+
+        file_io.read_ranges_coalesced(
+            ranges, parallelism=64, max_gap=0)
+
+        self.assertEqual(16, len(streams))
+        self.assertEqual(
+            [1] * 16,
+            sorted(stream.lengths.count(large) for stream in streams),
+        )
+
     def test_skewed_paths_redistribute_capped_lanes(self):
         from collections import Counter
 
@@ -4165,14 +4205,14 @@ class CoalesceRangesTest(unittest.TestCase):
         file_io.new_input_stream = FailingStream
         file_io.read_file_range = fail_fallback
 
-        with self.assertRaisesRegex(IOError, "fallback read failed"):
+        with self.assertRaisesRegex(IOError, "shared read failed"):
             file_io.read_ranges_coalesced(
                 [("close-error", 0, 2), ("read-error", 0, 2)],
                 parallelism=2,
                 max_gap=0,
             )
 
-    def test_failed_stream_close_error_is_propagated_after_fallback(self):
+    def test_failed_stream_close_stops_before_fallback(self):
         from pypaimon.common.file_io import FileIO
 
         file_io = FileIO.get("file:///tmp", {})
@@ -4192,10 +4232,10 @@ class CoalesceRangesTest(unittest.TestCase):
         file_io.new_input_stream = lambda _: FailingStream()
         file_io.read_file_range = read_file_range
 
-        with self.assertRaisesRegex(IOError, "discard close failed"):
+        with self.assertRaisesRegex(IOError, "pooled read failed"):
             file_io.read_ranges_coalesced(
                 [("blob", 0, 2)], parallelism=1, max_gap=0)
-        self.assertEqual([("blob", 0, 2)], fallbacks)
+        self.assertEqual([], fallbacks)
 
 
 class ReadFileRangeTest(unittest.TestCase):
