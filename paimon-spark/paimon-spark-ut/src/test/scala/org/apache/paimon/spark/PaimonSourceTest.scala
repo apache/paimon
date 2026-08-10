@@ -105,7 +105,6 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
 
         val query = spark.readStream
           .format("paimon")
-          .option(SparkConnectorOptions.BATCH_WRITTEN_COLUMNS_ENABLED.key(), true)
           .load(location)
           .select("a")
           .writeStream
@@ -154,7 +153,6 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
 
         val source = spark.readStream
           .format("paimon")
-          .option(SparkConnectorOptions.BATCH_WRITTEN_COLUMNS_ENABLED.key(), true)
           .load(location)
         val query = source
           .union(source)
@@ -182,7 +180,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
-  test("Paimon Source: written columns metadata is disabled by default") {
+  test("Paimon Source: written columns metadata is available by default") {
     withTempDir {
       checkpointDir =>
         val TableSnapshotState(_, location, snapshotData, _, _) =
@@ -205,7 +203,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
 
         try {
           query.processAllAvailable()
-          assert(!metadataAvailable)
+          assert(metadataAvailable)
           assert(rowCount == snapshotData.size)
         } finally {
           query.stop()
@@ -223,10 +221,8 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
           spark.sql("INSERT INTO written_columns_source_2 VALUES (2)")
 
           val source1 = spark.readStream
-            .option(SparkConnectorOptions.BATCH_WRITTEN_COLUMNS_ENABLED.key(), true)
             .table("written_columns_source_1")
           val source2 = spark.readStream
-            .option(SparkConnectorOptions.BATCH_WRITTEN_COLUMNS_ENABLED.key(), true)
             .table("written_columns_source_2")
           @volatile var nonEmptyBatchMetadataPresent = Seq.empty[Boolean]
 
@@ -280,7 +276,6 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
             @volatile var nonEmptyBatchColumns = Seq.empty[WrittenColumns]
 
             val query = spark.readStream
-              .option(SparkConnectorOptions.BATCH_WRITTEN_COLUMNS_ENABLED.key(), true)
               .option(SparkConnectorOptions.MAX_FILES_PER_TRIGGER.key(), 1)
               .option("scan.mode", "latest")
               .table("`T$row_tracking`")

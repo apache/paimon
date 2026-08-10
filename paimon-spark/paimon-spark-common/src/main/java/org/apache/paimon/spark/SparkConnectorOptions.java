@@ -131,14 +131,6 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "The maximum delay between two adjacent batches, which used to create MinRowsReadLimit with read.stream.minRowsPerTrigger together.");
 
-    public static final ConfigOption<Boolean> BATCH_WRITTEN_COLUMNS_ENABLED =
-            key("read.stream.batch-written-columns.enabled")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether to expose the written field ids of an admitted micro-batch "
-                                    + "through PaimonSparkMicroBatchMetadata.");
-
     public static final ConfigOption<Boolean> READ_CHANGELOG =
             key("read.changelog")
                     .booleanType()

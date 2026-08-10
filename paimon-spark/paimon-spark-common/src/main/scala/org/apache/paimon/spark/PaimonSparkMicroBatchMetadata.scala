@@ -42,9 +42,8 @@ object PaimonSparkMicroBatchMetadata {
   /**
    * Returns written columns for a raw foreachBatch Dataset with exactly one Paimon streaming
    * source. This method only inspects driver-side RDD planning metadata and does not run a Spark
-   * job. The result is empty when metadata collection was not enabled, the Dataset is not backed by
-   * a Paimon source, the lineage is incomplete, or multiple Paimon sources make the result
-   * ambiguous.
+   * job. The result is empty when the Dataset is not backed by a Paimon source, the lineage is
+   * incomplete, or multiple Paimon sources make the result ambiguous.
    */
   def writtenColumns(batch: Dataset[_]): Optional[WrittenColumns] = {
     try {

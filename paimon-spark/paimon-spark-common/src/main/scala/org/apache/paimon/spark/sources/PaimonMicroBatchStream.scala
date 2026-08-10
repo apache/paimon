@@ -21,7 +21,7 @@ package org.apache.paimon.spark.sources
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
 import org.apache.paimon.schema.TableSchema
-import org.apache.paimon.spark.{PaimonImplicits, PaimonInputPartition, PaimonMicroBatchInputPartition, PaimonMicroBatchMetadata, PaimonPartitionReaderFactory, SparkConnectorOptions}
+import org.apache.paimon.spark.{PaimonImplicits, PaimonMicroBatchInputPartition, PaimonMicroBatchMetadata, PaimonPartitionReaderFactory, SparkConnectorOptions}
 import org.apache.paimon.table.DataTable
 import org.apache.paimon.table.source.{AllColumns, ReadBuilder}
 import org.apache.paimon.utils.DataEvolutionUtils
@@ -105,9 +105,6 @@ class PaimonMicroBatchStream(
 
   private lazy val blobAsDescriptor: Boolean = options.get(CoreOptions.BLOB_AS_DESCRIPTOR)
 
-  private lazy val batchWrittenColumnsEnabled: Boolean =
-    options.get(SparkConnectorOptions.BATCH_WRITTEN_COLUMNS_ENABLED)
-
   private[spark] lazy val schemaLoader: Function[JLong, TableSchema] = {
     val schemaManager = table.schemaManager()
     val schemaCache = new ConcurrentHashMap[JLong, TableSchema]()
@@ -163,16 +160,10 @@ class PaimonMicroBatchStream(
     val endOffset = PaimonSourceOffset(end)
 
     val admittedSplits = getBatch(startOffset, Some(endOffset), None)
-    if (!batchWrittenColumnsEnabled) {
-      admittedSplits
-        .map(ids => PaimonInputPartition(ids.entry))
-        .toArray[InputPartition]
-    } else {
-      val plannedBatch = createPlannedMicroBatch(startOffset, endOffset, admittedSplits)
-      plannedBatch.admittedSplits
-        .map(ids => PaimonMicroBatchInputPartition(Seq(ids.entry), plannedBatch.metadata))
-        .toArray[InputPartition]
-    }
+    val plannedBatch = createPlannedMicroBatch(startOffset, endOffset, admittedSplits)
+    plannedBatch.admittedSplits
+      .map(ids => PaimonMicroBatchInputPartition(Seq(ids.entry), plannedBatch.metadata))
+      .toArray[InputPartition]
   }
 
   private def createPlannedMicroBatch(
