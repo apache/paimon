@@ -225,7 +225,7 @@ public class RangeBitmap {
 
     private RoaringBitmap32 isNull(@Nullable RoaringBitmap32 foundSet) {
         if (cardinality <= 0) {
-            return rid > 0 ? RoaringBitmap32.bitmapOf(0, rid - 1) : new RoaringBitmap32();
+            return rid > 0 ? RoaringBitmap32.bitmapOfRange(0, rid) : new RoaringBitmap32();
         }
 
         if (foundSet != null && foundSet.isEmpty()) {
@@ -306,7 +306,7 @@ public class RangeBitmap {
             @Nullable RoaringBitmap32 foundSet,
             BiFunction<Integer, RoaringBitmap32, RoaringBitmap32> function) {
         if (cardinality <= 0) {
-            return rid > 0 ? RoaringBitmap32.bitmapOf(0, rid - 1) : new RoaringBitmap32();
+            return rid > 0 ? RoaringBitmap32.bitmapOfRange(0, rid) : new RoaringBitmap32();
         }
 
         RoaringBitmap32 bitmap;
