@@ -1126,10 +1126,9 @@ Supported Paimon type strings for shredded sub-fields: `BOOLEAN`, `INT`, `BIGINT
 
 </Tabs>
 
-### VARIANT Path Updates
+### VARIANT DOUBLE Updates
 
-Use path helpers when only a few scalar fields change. They avoid decoding
-unrelated fields into Python objects:
+Transform existing DOUBLE paths without decoding unrelated fields:
 
 ```python
 import operator
@@ -1142,10 +1141,7 @@ updated_payload = variant_transform(payload, {
 })
 ```
 
-`variant_get` extracts one path as an Arrow array. `variant_get_many` and
-`variant_set_many` process several paths in one pass. `variant_set` replaces
-one path. Set operations require existing paths and scalar replacement values;
-they keep the original VARIANT metadata.
+The paths must exist and contain DOUBLE values. The metadata is unchanged.
 
 
 **`GenericVariant` API:**
