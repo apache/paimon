@@ -2166,9 +2166,10 @@ public class CoreOptions implements Serializable {
                     .enumType(RangeStrategy.class)
                     .defaultValue(RangeStrategy.SIZE)
                     .withDescription(
-                            "The range strategy of sort compaction, the default value is quantity.\n"
-                                    + "If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, "
-                                    + "the config can be set to size.");
+                            "The range strategy of sort compaction, the default value is size.\n"
+                                    + "The size strategy ranges by the data size allocated to each sorting task, which avoids "
+                                    + "the performance bottlenecks caused by uneven data size. "
+                                    + "The config can be set to quantity to range by the number of rows instead.");
 
     public static final ConfigOption<Integer> SORT_COMPACTION_SAMPLE_MAGNIFICATION =
             key("sort-compaction.local-sample.magnification")
