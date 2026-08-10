@@ -25,6 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.Split;
@@ -125,7 +126,16 @@ final class FileSystemSplitEnumerator extends SplitEnumerator {
         List<PartitionEntry> partitionEntries = new ArrayList<>();
         for (Pair<LinkedHashMap<String, String>, Path> partition2Path : partition2Paths) {
             BinaryRow row = toPartitionRow(partition2Path.getKey());
-            partitionEntries.add(new PartitionEntry(row, -1L, -1L, -1L, -1L, -1));
+            // Discovering partitions from directories measures nothing about what is inside them,
+            // so every statistic is unknown rather than zero.
+            partitionEntries.add(
+                    new PartitionEntry(
+                            row,
+                            PartitionStatistics.UNKNOWN,
+                            PartitionStatistics.UNKNOWN,
+                            PartitionStatistics.UNKNOWN,
+                            PartitionStatistics.UNKNOWN,
+                            PartitionStatistics.UNKNOWN_TOTAL_BUCKETS));
         }
         return partitionEntries;
     }

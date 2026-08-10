@@ -16,66 +16,36 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.format;
+package org.apache.paimon.io;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
-import org.apache.paimon.partition.PartitionStatistics;
-import org.apache.paimon.table.sink.CommitMessage;
-
-import javax.annotation.Nullable;
 
 /**
- * {@link CommitMessage} implementation for format table.
- *
- * <p>Carries the row count and byte size of the one file it commits, counted while writing. The
- * partition is not carried: {@link FormatTableCommit} derives it from the committer's target path,
- * and deriving it once keeps the statistics and the registered partition from ever disagreeing.
+ * One data file a format table writer finished, with what it holds. The row count and byte size are
+ * counted while writing, so carrying them alongside the committer costs no extra IO and is the only
+ * place they can still be had exactly — after the commit the file is just bytes on a path.
  */
-public class TwoPhaseCommitMessage implements CommitMessage {
-
-    private static final long serialVersionUID = 1L;
+public class FormatTableWrittenFile {
 
     private final TwoPhaseOutputStream.Committer committer;
     private final long recordCount;
     private final long fileSizeInBytes;
 
-    public TwoPhaseCommitMessage(TwoPhaseOutputStream.Committer committer) {
-        this(committer, PartitionStatistics.UNKNOWN, PartitionStatistics.UNKNOWN);
-    }
-
-    public TwoPhaseCommitMessage(
+    public FormatTableWrittenFile(
             TwoPhaseOutputStream.Committer committer, long recordCount, long fileSizeInBytes) {
         this.committer = committer;
         this.recordCount = recordCount;
         this.fileSizeInBytes = fileSizeInBytes;
     }
 
-    @Override
-    public BinaryRow partition() {
-        return null;
-    }
-
-    @Override
-    public int bucket() {
-        return 0;
-    }
-
-    @Override
-    public @Nullable Integer totalBuckets() {
-        return 0;
-    }
-
-    public TwoPhaseOutputStream.Committer getCommitter() {
+    public TwoPhaseOutputStream.Committer committer() {
         return committer;
     }
 
-    /** Rows in this file, or {@link PartitionStatistics#UNKNOWN} when nobody counted them. */
     public long recordCount() {
         return recordCount;
     }
 
-    /** Bytes in this file, or {@link PartitionStatistics#UNKNOWN} when nobody measured them. */
     public long fileSizeInBytes() {
         return fileSizeInBytes;
     }
