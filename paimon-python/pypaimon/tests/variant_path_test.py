@@ -193,6 +193,72 @@ class TestVariantReplace(unittest.TestCase):
             {'y': 3.0, 'z': -4.0},
         ])
 
+    def test_vectorized_paths_support_varying_offsets(self):
+        column = _variants([
+            {
+                'prefix': 'x' * index,
+                'items': ['y' * (64 - index), {
+                    'value': float(index),
+                    'other': float(-index),
+                }],
+            }
+            for index in range(1, 64)
+        ])
+        paths = {
+            '$.items[1].value': pa.float64(),
+            '$.items[1].other': pa.float64(),
+        }
+
+        with patch(
+                'pypaimon.data.variant_path._path_positions',
+                side_effect=AssertionError("slow path is not allowed")):
+            current = variant_get(column, paths)
+            result = variant_replace(column, {
+                path: pc.negate(values)
+                for path, values in current.items()
+            })
+
+        decoded = _decode(result)
+        self.assertEqual(
+            [row['items'][1]['value'] for row in decoded],
+            [float(-index) for index in range(1, 64)],
+        )
+        self.assertEqual(
+            [row['items'][1]['other'] for row in decoded],
+            [float(index) for index in range(1, 64)],
+        )
+
+    def test_vectorized_paths_support_wide_containers(self):
+        rows = []
+        for row in range(3):
+            value = {'field_%03d' % i: i for i in range(300)}
+            value['field_299'] = float(row)
+            value['items'] = list(range(299)) + [float(row + 10)]
+            rows.append(value)
+        column = _variants(rows)
+        paths = {
+            '$.field_299': pa.float64(),
+            '$.items[299]': pa.float64(),
+        }
+
+        with patch(
+                'pypaimon.data.variant_path._path_positions',
+                side_effect=AssertionError("slow path is not allowed")):
+            current = variant_get(column, paths)
+            result = variant_replace(column, {
+                path: pc.negate(values)
+                for path, values in current.items()
+            })
+
+        self.assertEqual(current['$.field_299'].to_pylist(), [0.0, 1.0, 2.0])
+        self.assertEqual(
+            current['$.items[299]'].to_pylist(), [10.0, 11.0, 12.0])
+        decoded = _decode(result)
+        self.assertEqual(
+            [row['field_299'] for row in decoded], [0.0, -1.0, -2.0])
+        self.assertEqual(
+            [row['items'][299] for row in decoded], [-10.0, -11.0, -12.0])
+
     def test_scalar_and_same_length_string_replacement(self):
         column = _variants([{'text': 'aa'}, {'text': 'bb'}])
 

@@ -21,6 +21,7 @@ import re
 import struct
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
+import numpy as np
 import pyarrow as pa
 
 from pypaimon.data._variant_binary import (
@@ -343,6 +344,14 @@ class _BinaryValues:
                 (index + 1) * self.width)[0],
         )
 
+    def numpy_offsets(self):
+        return np.frombuffer(
+            self.offsets,
+            dtype=np.dtype(self.value_format),
+            count=len(self.array) + 1,
+            offset=self.array.offset * self.width,
+        ).astype(np.int64, copy=False)
+
     def used_bounds(self) -> Tuple[int, int]:
         first = self.array.offset
         last = first + len(self.array)
@@ -398,6 +407,177 @@ class _BinaryValues:
             null_count=self.array.null_count,
             offset=offset,
         )
+
+
+def _take_unsigned(data, positions, widths):
+    result = np.empty(len(positions), dtype=np.int64)
+    for width in range(1, 5):
+        selected = widths == width
+        if not np.any(selected):
+            continue
+        selected_positions = positions[selected]
+        if (np.any(selected_positions < 0)
+                or np.any(selected_positions + width > len(data))):
+            raise ValueError("Invalid VARIANT offset")
+        indices = selected_positions[:, None] + np.arange(width)
+        values = data[indices].astype(np.int64, copy=False)
+        result[selected] = np.sum(
+            values << (np.arange(width, dtype=np.int64) * 8), axis=1)
+    return result
+
+
+def _all_binary_values_equal(values: _BinaryValues, expected: bytes) -> bool:
+    offsets = values.numpy_offsets()
+    lengths = offsets[1:] - offsets[:-1]
+    if np.any(lengths != len(expected)):
+        return False
+    if not len(offsets) > 1 or not expected:
+        return True
+
+    data = np.frombuffer(values.data, dtype=np.uint8)
+    expected_array = np.frombuffer(expected, dtype=np.uint8)
+    rows_per_batch = max(1, (1024 * 1024) // len(expected))
+    for row in range(0, len(lengths), rows_per_batch):
+        end = min(row + rows_per_batch, len(lengths))
+        starts = offsets[row:end]
+        indices = starts[:, None] + np.arange(len(expected))
+        if not np.all(data[indices] == expected_array):
+            return False
+    return True
+
+
+def _vectorized_path_positions(
+        values: _BinaryValues,
+        metadata: pa.Array,
+        valid_count: int,
+        paths: Sequence[_Path],
+):
+    if (valid_count != len(values.array)
+            or values.array.null_count
+            or metadata.null_count
+            or not len(values.array)):
+        return None
+
+    metadata_values = _BinaryValues(metadata)
+    first_metadata = bytes(metadata_values.view(0))
+    if not _all_binary_values_equal(metadata_values, first_metadata):
+        return None
+
+    key_ids = _metadata_key_ids(first_metadata)
+    nodes, result_nodes = _compile_paths(tuple(paths))
+    row_offsets = values.numpy_offsets()
+    row_starts = row_offsets[:-1]
+    row_ends = row_offsets[1:]
+    data = np.frombuffer(values.data, dtype=np.uint8)
+    first_value = values.view(0)
+    positions = [np.zeros(len(values.array), dtype=np.int64)]
+
+    try:
+        for parent_node, kind, segment in nodes[1:]:
+            parent = positions[parent_node]
+            absolute_parent = row_starts + parent
+            if (np.any(absolute_parent < row_starts)
+                    or np.any(absolute_parent >= row_ends)):
+                return None
+            headers = data[absolute_parent]
+            type_info = (headers >> 2).astype(np.int64, copy=False)
+
+            if kind == 'key':
+                if np.any((headers & 0x3) != _OBJECT):
+                    return None
+                key_id = key_ids.get(segment)
+                if key_id is None:
+                    return None
+                first_layout = _object_layout(
+                    first_value, int(parent[0]))
+                size, id_size, _, id_start, _, _ = first_layout
+                id_table = bytes(
+                    first_value[id_start:id_start + size * id_size])
+                slot = _field_slot(id_table, id_size, key_id)
+                if slot is None:
+                    return None
+
+                size_widths = np.where(
+                    ((type_info >> 4) & 0x1) != 0, _U32_SIZE, 1)
+                sizes = _take_unsigned(
+                    data, absolute_parent + 1, size_widths)
+                id_widths = ((type_info >> 2) & 0x3) + 1
+                offset_widths = (type_info & 0x3) + 1
+                if np.any(sizes <= slot):
+                    return None
+                id_starts = absolute_parent + 1 + size_widths
+                ids = _take_unsigned(
+                    data, id_starts + slot * id_widths, id_widths)
+                if np.any(ids != key_id):
+                    return None
+                offset_starts = id_starts + sizes * id_widths
+                offsets = _take_unsigned(
+                    data,
+                    offset_starts + slot * offset_widths,
+                    offset_widths,
+                )
+                data_starts = offset_starts + (sizes + 1) * offset_widths
+                child = data_starts + offsets - row_starts
+            else:
+                if np.any((headers & 0x3) != _ARRAY):
+                    return None
+                size_widths = np.where(
+                    ((type_info >> 2) & 0x1) != 0, _U32_SIZE, 1)
+                sizes = _take_unsigned(
+                    data, absolute_parent + 1, size_widths)
+                if np.any(sizes <= segment):
+                    return None
+                offset_widths = (type_info & 0x3) + 1
+                offset_starts = absolute_parent + 1 + size_widths
+                offsets = _take_unsigned(
+                    data,
+                    offset_starts + segment * offset_widths,
+                    offset_widths,
+                )
+                data_starts = offset_starts + (sizes + 1) * offset_widths
+                child = data_starts + offsets - row_starts
+
+            if np.any(child < 0) or np.any(row_starts + child >= row_ends):
+                return None
+            positions.append(child)
+    except (IndexError, ValueError):
+        return None
+
+    return (
+        row_starts,
+        row_ends,
+        data,
+        tuple(positions[node] for node in result_nodes),
+    )
+
+
+def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
+    planned = _vectorized_path_positions(
+        values, chunk.field(1), len(chunk) - chunk.null_count,
+        parsed_paths)
+    if planned is None:
+        return None
+    row_starts, row_ends, data, positions = planned
+    results = []
+    for pos, target_type in zip(positions, target_types):
+        if not (pa.types.is_float32(target_type)
+                or pa.types.is_float64(target_type)):
+            return None
+        absolute = row_starts + pos
+        headers = data[absolute]
+        if np.all(headers == _primitive_header(_DOUBLE)):
+            value_size, data_type = 8, np.dtype('<f8')
+        elif np.all(headers == _primitive_header(_FLOAT)):
+            value_size, data_type = 4, np.dtype('<f4')
+        else:
+            return None
+        if np.any(absolute + 1 + value_size > row_ends):
+            return None
+        indices = absolute[:, None] + 1 + np.arange(value_size)
+        raw = np.ascontiguousarray(data[indices])
+        result = raw.view(data_type).reshape(-1)
+        results.append(pa.array(result, type=target_type))
+    return results
 
 
 def _decode_scalar(value, metadata: bytes, pos: int):
@@ -492,11 +672,76 @@ class _Replacement:
         struct.pack_into(
             self._value_format, data, pos, self._type_header, value)
 
+    def numpy_values(self, offset: int, length: int):
+        if self._value_format is None:
+            return None
+        data_type = (
+            np.dtype('<f8') if pa.types.is_float64(self.type)
+            else np.dtype('<f4')
+        )
+        if self._array is None:
+            if not self._value.is_valid:
+                return None
+            return np.full(length, self._value.as_py(), dtype=data_type)
+
+        values = self._array.slice(offset, length)
+        if values.null_count:
+            return None
+        if isinstance(values, pa.ChunkedArray):
+            values = values.combine_chunks()
+        return np.asarray(
+            values.to_numpy(zero_copy_only=False), dtype=data_type)
+
     def encode(self, value) -> bytes:
         if value is not None and self._value_format is not None:
             return struct.pack(
                 self._value_format, self._type_header, value)
         return _encode_scalar_to_value_bytes(value, self.type)
+
+
+def _vectorized_replace_chunk(
+        chunk,
+        values,
+        parsed,
+        parsed_paths,
+        global_row,
+):
+    planned = _vectorized_path_positions(
+        values,
+        chunk.field(1),
+        len(chunk) - chunk.null_count,
+        parsed_paths,
+    )
+    if planned is None:
+        return None
+    row_starts, row_ends, input_data, positions = planned
+
+    replacements = []
+    for (_, _, provider), pos in zip(parsed, positions):
+        replacement = provider.numpy_values(global_row, len(chunk))
+        if replacement is None:
+            return None
+        absolute = row_starts + pos
+        expected_header = provider._type_header
+        if not np.all(input_data[absolute] == expected_header):
+            return None
+        if np.any(absolute + provider._fixed_size > row_ends):
+            return None
+        replacements.append((pos, provider, replacement))
+
+    data, data_start = values.copy_used_data()
+    output_data = np.frombuffer(data, dtype=np.uint8)
+    relative_starts = row_starts - data_start
+    for pos, provider, replacement in replacements:
+        absolute = relative_starts + pos
+        output_data[absolute] = provider._type_header
+        value_size = provider._fixed_size - 1
+        replacement_bytes = np.ascontiguousarray(
+            replacement).view(np.uint8).reshape(len(chunk), value_size)
+        indices = absolute[:, None] + 1 + np.arange(value_size)
+        output_data[indices] = replacement_bytes
+
+    return _patched_chunk(chunk, values, data, data_start)
 
 
 def _supported_replacement_type(data_type: pa.DataType) -> bool:
@@ -528,6 +773,16 @@ def _variant_get(column, paths: Mapping[str, pa.DataType]):
     result_chunks = {path: [] for path in paths}
     for chunk in chunks:
         values = _BinaryValues(chunk.field(0))
+        vectorized = _vectorized_get_chunk(
+            chunk,
+            values,
+            parsed_paths,
+            [target_type for _, _, target_type in parsed],
+        )
+        if vectorized is not None:
+            for (path, _, _), result in zip(parsed, vectorized):
+                result_chunks[path].append(result)
+            continue
         metadata = chunk.field(1).to_pylist()
         valid = chunk.is_valid().to_pylist()
         results = {path: [] for path in paths}
@@ -615,6 +870,17 @@ def variant_replace(
     global_row = 0
     for chunk in chunks:
         values = _BinaryValues(chunk.field(0))
+        vectorized = _vectorized_replace_chunk(
+            chunk,
+            values,
+            parsed,
+            parsed_paths,
+            global_row,
+        )
+        if vectorized is not None:
+            result_chunks.append(vectorized)
+            global_row += len(chunk)
+            continue
         metadata = chunk.field(1).to_pylist()
         valid = chunk.is_valid().to_pylist()
         chunk_replacements = {
