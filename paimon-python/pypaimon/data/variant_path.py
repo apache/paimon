@@ -171,6 +171,21 @@ def _checked_object_layout(value, pos, limit):
     )
 
 
+def _checked_object_child_bounds(
+        value, data_start, offsets, slot, end_by_offset=None):
+    child_offset = offsets[slot]
+    next_offset = (
+        min(offset for offset in offsets if offset > child_offset)
+        if end_by_offset is None else end_by_offset[child_offset]
+    )
+    child_start = data_start + child_offset
+    child_end = data_start + next_offset
+    if _checked_value_size(value, child_start, child_end) != (
+            child_end - child_start):
+        _malformed("child size does not match container offsets")
+    return child_start, child_end
+
+
 def _checked_array_layout(value, pos, limit):
     _require_range(pos, 2, limit)
     type_info = (value[pos] >> 2) & 0x3F
@@ -293,10 +308,8 @@ def _path_positions(
             if slot is None:
                 bounds.append(None)
                 continue
-            child_start = data_start + offsets[slot]
-            child_size = _checked_value_size(
-                value, child_start, data_start + offsets[-1])
-            child_end = child_start + child_size
+            child_start, child_end = _checked_object_child_bounds(
+                value, data_start, offsets, slot)
         else:
             if basic_type != _ARRAY:
                 bounds.append(None)
@@ -339,7 +352,7 @@ def _replace_path(
         key_id = _metadata_key_ids(metadata).get(segment)
         if key_id is None:
             raise ValueError(f"VARIANT path does not exist: {segment}")
-        size, id_size, id_start, data_start, offsets, container_end = (
+        size, id_size, id_start, data_start, offsets, _ = (
             _checked_object_layout(value, pos, value_end))
         ids = [
             _read_unsigned(value, id_start + i * id_size, id_size)
@@ -349,11 +362,12 @@ def _replace_path(
             slot = ids.index(key_id)
         except ValueError:
             raise ValueError(f"VARIANT path does not exist: {segment}")
+        ordered_offsets = sorted(offsets)
+        end_by_offset = dict(zip(ordered_offsets, ordered_offsets[1:]))
         children = []
         for i in range(size):
-            child_pos = data_start + offsets[i]
-            child_end = child_pos + _checked_value_size(
-                value, child_pos, container_end)
+            child_pos, child_end = _checked_object_child_bounds(
+                value, data_start, offsets, i, end_by_offset)
             child = value[child_pos:child_end]
             if i == slot:
                 child = _replace_path(

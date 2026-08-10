@@ -23,13 +23,16 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from pypaimon.data._variant_binary import _primitive_header
-from pypaimon.data.generic_variant import _DECIMAL4, GenericVariant
+from pypaimon.data.generic_variant import _DECIMAL4, _DOUBLE, GenericVariant
 from pypaimon.data.variant_path import (
     _path_positions,
     variant_get,
     variant_replace,
 )
-from pypaimon.data.variant_shredding import _encode_scalar_to_value_bytes
+from pypaimon.data.variant_shredding import (
+    _build_object_value,
+    _encode_scalar_to_value_bytes,
+)
 
 
 def _variants(values):
@@ -398,6 +401,20 @@ class TestVariantReplace(unittest.TestCase):
             GenericVariant.from_arrow_struct(column[1].as_py()).to_python(),
             {'value': 2.0},
         )
+
+    def test_truncated_object_child_does_not_cross_sibling_boundary(self):
+        valid = GenericVariant.from_python({'a': 1.0, 'b': 2.0})
+        value = _build_object_value([
+            (0, bytes([_primitive_header(_DOUBLE)])),
+            (1, _encode_scalar_to_value_bytes(2.0, pa.float64())),
+        ])
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(value, valid.metadata())])
+
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_get(column, '$.a', pa.float64())
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_replace(column, '$.a', pa.scalar(3.0))
 
     def test_equal_length_uses_copy_on_write(self):
         column = _variants([
