@@ -16,10 +16,15 @@
 
 """Read and replace paths in Arrow VARIANT columns."""
 
+import base64
+import datetime
+import decimal
 import functools
+import json
+import math
 import re
 import struct
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pyarrow as pa
@@ -27,17 +32,18 @@ import pyarrow as pa
 from pypaimon.data._variant_binary import (
     _ARRAY,
     _OBJECT,
+    _SHORT_STR,
     _U32_SIZE,
     _primitive_header,
     _read_unsigned,
 )
 from pypaimon.data.generic_variant import (
+    _BINARY,
     GenericVariant,
     _DOUBLE,
     _FLOAT,
-    _Type,
-    _value_size,
-    _variant_get_type,
+    _LONG_STR,
+    _PRIMITIVE_FIXED_SIZES,
 )
 from pypaimon.data.variant_shredding import (
     _build_array_value,
@@ -49,8 +55,6 @@ from pypaimon.data.variant_shredding import (
 _INDEX_PATTERN = re.compile(r"\[(\d+)]")
 _KEY_PATTERN = re.compile(r"\.([^\.\[]+)|\['([^']+)']|\[\"([^\"]+)\"]")
 _Path = Tuple[Tuple[str, object], ...]
-_ObjectLayout = Tuple[int, int, int, int, int, int]
-_ArrayLayout = Tuple[int, int, int, int]
 
 
 @functools.lru_cache(maxsize=256)
@@ -96,32 +100,93 @@ def _metadata_key_ids(metadata: bytes) -> Dict[str, int]:
     return result
 
 
-def _object_layout(value: bytes, pos: int) -> _ObjectLayout:
-    header = value[pos]
-    if (header & 0x3) != _OBJECT:
-        raise ValueError("VARIANT path expects an object")
-    type_info = (header >> 2) & 0x3F
-    size_bytes = _U32_SIZE if ((type_info >> 4) & 0x1) else 1
-    size = _read_unsigned(value, pos + 1, size_bytes)
-    id_size = ((type_info >> 2) & 0x3) + 1
-    offset_size = (type_info & 0x3) + 1
-    id_start = pos + 1 + size_bytes
-    offset_start = id_start + size * id_size
-    data_start = offset_start + (size + 1) * offset_size
-    return size, id_size, offset_size, id_start, offset_start, data_start
+def _malformed(message):
+    raise ValueError(f"MALFORMED_VARIANT: {message}")
 
 
-def _array_layout(value: bytes, pos: int) -> _ArrayLayout:
+def _require_range(pos, size, limit):
+    if pos < 0 or size < 0 or pos + size > limit:
+        _malformed("value is truncated")
+
+
+def _checked_object_layout(value, pos, limit):
+    _require_range(pos, 2, limit)
+    type_info = (value[pos] >> 2) & 0x3F
+    size_width = _U32_SIZE if ((type_info >> 4) & 0x1) else 1
+    _require_range(pos + 1, size_width, limit)
+    size = _read_unsigned(value, pos + 1, size_width)
+    id_width = ((type_info >> 2) & 0x3) + 1
+    offset_width = (type_info & 0x3) + 1
+    id_start = pos + 1 + size_width
+    offset_start = id_start + size * id_width
+    data_start = offset_start + (size + 1) * offset_width
+    _require_range(pos, data_start - pos, limit)
+    offsets = []
+    for index in range(size + 1):
+        offset = _read_unsigned(
+            value, offset_start + index * offset_width, offset_width)
+        offsets.append(offset)
+    sentinel = offsets[-1]
+    if ((size and (min(offsets[:-1]) != 0
+                   or len(set(offsets[:-1])) != size))
+            or any(offset >= sentinel for offset in offsets[:-1])):
+        _malformed("invalid object offsets")
+    _require_range(data_start, sentinel, limit)
+    return (
+        size, id_width, id_start, data_start, offsets,
+        data_start + offsets[-1],
+    )
+
+
+def _checked_array_layout(value, pos, limit):
+    _require_range(pos, 2, limit)
+    type_info = (value[pos] >> 2) & 0x3F
+    size_width = _U32_SIZE if ((type_info >> 2) & 0x1) else 1
+    _require_range(pos + 1, size_width, limit)
+    size = _read_unsigned(value, pos + 1, size_width)
+    offset_width = (type_info & 0x3) + 1
+    offset_start = pos + 1 + size_width
+    data_start = offset_start + (size + 1) * offset_width
+    _require_range(pos, data_start - pos, limit)
+    offsets = []
+    previous = 0
+    for index in range(size + 1):
+        offset = _read_unsigned(
+            value, offset_start + index * offset_width, offset_width)
+        if (index == 0 and offset != 0) or offset < previous:
+            _malformed("invalid array offsets")
+        offsets.append(offset)
+        previous = offset
+    _require_range(data_start, offsets[-1], limit)
+    return size, data_start, offsets, data_start + offsets[-1]
+
+
+def _checked_value_size(value, pos, limit=None):
+    limit = len(value) if limit is None else limit
+    _require_range(pos, 1, limit)
     header = value[pos]
-    if (header & 0x3) != _ARRAY:
-        raise ValueError("VARIANT path expects an array")
+    basic_type = header & 0x3
     type_info = (header >> 2) & 0x3F
-    size_bytes = _U32_SIZE if ((type_info >> 2) & 0x1) else 1
-    size = _read_unsigned(value, pos + 1, size_bytes)
-    offset_size = (type_info & 0x3) + 1
-    offset_start = pos + 1 + size_bytes
-    data_start = offset_start + (size + 1) * offset_size
-    return size, offset_size, offset_start, data_start
+    if basic_type == _OBJECT:
+        end = _checked_object_layout(value, pos, limit)[-1]
+    elif basic_type == _ARRAY:
+        end = _checked_array_layout(value, pos, limit)[-1]
+    elif basic_type == _SHORT_STR:
+        end = pos + 1 + type_info
+    else:
+        fixed_size = _PRIMITIVE_FIXED_SIZES.get(type_info)
+        if fixed_size is not None:
+            end = pos + fixed_size
+        elif type_info in (_BINARY, _LONG_STR):
+            _require_range(pos + 1, _U32_SIZE, limit)
+            end = (
+                pos + 1 + _U32_SIZE
+                + _read_unsigned(value, pos + 1, _U32_SIZE)
+            )
+        else:
+            _malformed(f"unknown primitive type {type_info}")
+    _require_range(pos, end - pos, limit)
+    return end - pos
 
 
 @functools.lru_cache(maxsize=2048)
@@ -130,29 +195,6 @@ def _field_slot(id_table: bytes, id_size: int, key_id: int) -> Optional[int]:
         if _read_unsigned(id_table, slot * id_size, id_size) == key_id:
             return slot
     return None
-
-
-def _object_field_position(
-        value: bytes, pos: int, key_id: int) -> Optional[int]:
-    size, id_size, offset_size, id_start, offset_start, data_start = (
-        _object_layout(value, pos))
-    id_table = bytes(value[id_start:id_start + size * id_size])
-    slot = _field_slot(id_table, id_size, key_id)
-    if slot is None:
-        return None
-    offset = _read_unsigned(
-        value, offset_start + slot * offset_size, offset_size)
-    return data_start + offset
-
-
-def _array_element_position(
-        value: bytes, pos: int, index: int) -> Optional[int]:
-    size, offset_size, offset_start, data_start = _array_layout(value, pos)
-    if index >= size:
-        return None
-    offset = _read_unsigned(
-        value, offset_start + index * offset_size, offset_size)
-    return data_start + offset
 
 
 @functools.lru_cache(maxsize=256)
@@ -170,79 +212,62 @@ def _compile_paths(paths: Tuple[_Path, ...]):
     return tuple(nodes), tuple(results)
 
 
-class _PositionPlan:
-
-    def __init__(self, metadata, checks, positions):
-        self.metadata = metadata
-        self.checks = checks
-        self.positions = positions
-
-    def matches(self, value: bytes, metadata: bytes) -> bool:
-        return metadata == self.metadata and all(
-            value[pos:pos + len(expected)] == expected
-            for pos, expected in self.checks
-        )
-
-
-def _position_plan(
-        value: bytes,
-        metadata: bytes,
-        paths: Sequence[_Path],
-) -> _PositionPlan:
-    key_ids = _metadata_key_ids(metadata)
-    nodes, result_nodes = _compile_paths(tuple(paths))
-    positions = [0]
-    checks = []
-    checked = set()
-    for parent_node, kind, segment in nodes[1:]:
-        parent = positions[parent_node]
-        if parent is None:
-            positions.append(None)
-            continue
-        if parent not in checked:
-            basic_type = value[parent] & 0x3
-            if basic_type == _OBJECT:
-                data_start = _object_layout(value, parent)[-1]
-            elif basic_type == _ARRAY:
-                data_start = _array_layout(value, parent)[-1]
-            else:
-                data_start = parent + 1
-            checks.append((parent, value[parent:data_start]))
-            checked.add(parent)
-        if kind == 'key':
-            key_id = key_ids.get(segment)
-            if key_id is None or (value[parent] & 0x3) != _OBJECT:
-                positions.append(None)
-            else:
-                positions.append(_object_field_position(
-                    value, parent, key_id))
-        elif (value[parent] & 0x3) != _ARRAY:
-            positions.append(None)
-        else:
-            positions.append(_array_element_position(
-                value, parent, segment))
-    return _PositionPlan(
-        metadata,
-        tuple(checks),
-        tuple(positions[node] for node in result_nodes),
-    )
-
-
 def _path_positions(
         value: bytes,
         metadata: bytes,
         paths: Sequence[_Path],
-        plans: List[_PositionPlan],
+        plans,
 ) -> Sequence[Optional[int]]:
-    for index, plan in enumerate(plans):
-        if plan.matches(value, metadata):
-            if index:
-                plans.insert(0, plans.pop(index))
-            return plan.positions
-    plan = _position_plan(value, metadata, paths)
-    plans.insert(0, plan)
-    del plans[8:]
-    return plan.positions
+    del plans
+    root_size = _checked_value_size(value, 0)
+    if root_size != len(value):
+        _malformed("trailing bytes after root value")
+    key_ids = _metadata_key_ids(metadata)
+    nodes, result_nodes = _compile_paths(tuple(paths))
+    bounds = [(0, len(value))]
+    for parent_node, kind, segment in nodes[1:]:
+        parent = bounds[parent_node]
+        if parent is None:
+            bounds.append(None)
+            continue
+        parent_pos, parent_end = parent
+        basic_type = value[parent_pos] & 0x3
+        if kind == 'key':
+            key_id = key_ids.get(segment)
+            if key_id is None or basic_type != _OBJECT:
+                bounds.append(None)
+                continue
+            size, id_width, id_start, data_start, offsets, _ = (
+                _checked_object_layout(value, parent_pos, parent_end))
+            id_table = bytes(value[id_start:id_start + size * id_width])
+            slot = _field_slot(id_table, id_width, key_id)
+            if slot is None:
+                bounds.append(None)
+                continue
+            child_start = data_start + offsets[slot]
+            child_size = _checked_value_size(
+                value, child_start, data_start + offsets[-1])
+            child_end = child_start + child_size
+        else:
+            if basic_type != _ARRAY:
+                bounds.append(None)
+                continue
+            size, data_start, offsets, _ = _checked_array_layout(
+                value, parent_pos, parent_end)
+            if segment >= size:
+                bounds.append(None)
+                continue
+            slot = segment
+            child_start = data_start + offsets[slot]
+            child_end = data_start + offsets[slot + 1]
+        if _checked_value_size(value, child_start, child_end) != (
+                child_end - child_start):
+            _malformed("child size does not match container offsets")
+        bounds.append((child_start, child_end))
+    return tuple(
+        None if bounds[node] is None else bounds[node][0]
+        for node in result_nodes
+    )
 
 
 def _replace_path(
@@ -251,7 +276,10 @@ def _replace_path(
         pos: int,
         path: _Path,
         replacement: bytes,
+        limit=None,
 ) -> bytes:
+    limit = len(value) if limit is None else limit
+    value_end = pos + _checked_value_size(value, pos, limit)
     if not path:
         return replacement
 
@@ -262,8 +290,8 @@ def _replace_path(
         key_id = _metadata_key_ids(metadata).get(segment)
         if key_id is None:
             raise ValueError(f"VARIANT path does not exist: {segment}")
-        size, id_size, offset_size, id_start, offset_start, data_start = (
-            _object_layout(value, pos))
+        size, id_size, id_start, data_start, offsets, container_end = (
+            _checked_object_layout(value, pos, value_end))
         ids = [
             _read_unsigned(value, id_start + i * id_size, id_size)
             for i in range(size)
@@ -274,28 +302,32 @@ def _replace_path(
             raise ValueError(f"VARIANT path does not exist: {segment}")
         children = []
         for i in range(size):
-            child_pos = data_start + _read_unsigned(
-                value, offset_start + i * offset_size, offset_size)
-            child = value[child_pos:child_pos + _value_size(value, child_pos)]
+            child_pos = data_start + offsets[i]
+            child_end = child_pos + _checked_value_size(
+                value, child_pos, container_end)
+            child = value[child_pos:child_end]
             if i == slot:
                 child = _replace_path(
-                    value, metadata, child_pos, path[1:], replacement)
+                    value, metadata, child_pos, path[1:], replacement,
+                    child_end)
             children.append(child)
         return _build_object_value(list(zip(ids, children)))
 
     if (value[pos] & 0x3) != _ARRAY:
         raise ValueError("VARIANT path expects an array")
-    size, offset_size, offset_start, data_start = _array_layout(value, pos)
+    size, data_start, offsets, _ = _checked_array_layout(
+        value, pos, value_end)
     if segment >= size:
         raise ValueError(f"VARIANT array index does not exist: {segment}")
     children = []
     for i in range(size):
-        child_pos = data_start + _read_unsigned(
-            value, offset_start + i * offset_size, offset_size)
-        child = value[child_pos:child_pos + _value_size(value, child_pos)]
+        child_pos = data_start + offsets[i]
+        child_end = data_start + offsets[i + 1]
+        child = value[child_pos:child_end]
         if i == segment:
             child = _replace_path(
-                value, metadata, child_pos, path[1:], replacement)
+                value, metadata, child_pos, path[1:], replacement,
+                child_end)
         children.append(child)
     return _build_array_value(children)
 
@@ -410,6 +442,19 @@ class _BinaryValues:
 
 
 def _take_unsigned(data, positions, widths):
+    if len(positions) and np.all(widths == widths[0]):
+        width = int(widths[0])
+        if (width < 1 or width > 4
+                or np.any(positions < 0)
+                or np.any(positions + width > len(data))):
+            raise ValueError("Invalid VARIANT offset")
+        if width == 1:
+            return data[positions].astype(np.int64, copy=False)
+        indices = positions[:, None] + np.arange(width)
+        values = data[indices].astype(np.int64, copy=False)
+        return np.sum(
+            values << (np.arange(width, dtype=np.int64) * 8), axis=1)
+
     result = np.empty(len(positions), dtype=np.int64)
     for width in range(1, 5):
         selected = widths == width
@@ -471,13 +516,15 @@ def _vectorized_path_positions(
     data = np.frombuffer(values.data, dtype=np.uint8)
     first_value = values.view(0)
     positions = [np.zeros(len(values.array), dtype=np.int64)]
+    limits = [row_ends - row_starts]
 
     try:
         for parent_node, kind, segment in nodes[1:]:
             parent = positions[parent_node]
+            parent_ends = row_starts + limits[parent_node]
             absolute_parent = row_starts + parent
             if (np.any(absolute_parent < row_starts)
-                    or np.any(absolute_parent >= row_ends)):
+                    or np.any(absolute_parent >= parent_ends)):
                 return None
             headers = data[absolute_parent]
             type_info = (headers >> 2).astype(np.int64, copy=False)
@@ -488,66 +535,98 @@ def _vectorized_path_positions(
                 key_id = key_ids.get(segment)
                 if key_id is None:
                     return None
-                first_layout = _object_layout(
-                    first_value, int(parent[0]))
-                size, id_size, _, id_start, _, _ = first_layout
+                first_layout = _checked_object_layout(
+                    first_value, int(parent[0]), int(limits[parent_node][0]))
+                size, id_size, id_start, _, first_offsets, _ = first_layout
                 id_table = bytes(
                     first_value[id_start:id_start + size * id_size])
                 slot = _field_slot(id_table, id_size, key_id)
                 if slot is None:
                     return None
+                successor_slot = min(
+                    (
+                        index for index in range(size + 1)
+                        if first_offsets[index] > first_offsets[slot]
+                    ),
+                    key=lambda index: first_offsets[index],
+                )
 
                 size_widths = np.where(
                     ((type_info >> 4) & 0x1) != 0, _U32_SIZE, 1)
+                if np.any(absolute_parent + 1 + size_widths > parent_ends):
+                    return None
                 sizes = _take_unsigned(
                     data, absolute_parent + 1, size_widths)
                 id_widths = ((type_info >> 2) & 0x3) + 1
                 offset_widths = (type_info & 0x3) + 1
-                if np.any(sizes <= slot):
+                if np.any(sizes != size):
                     return None
                 id_starts = absolute_parent + 1 + size_widths
+                offset_starts = id_starts + sizes * id_widths
+                data_starts = offset_starts + (sizes + 1) * offset_widths
+                if np.any(data_starts > parent_ends):
+                    return None
                 ids = _take_unsigned(
                     data, id_starts + slot * id_widths, id_widths)
                 if np.any(ids != key_id):
                     return None
-                offset_starts = id_starts + sizes * id_widths
-                offsets = _take_unsigned(
-                    data,
-                    offset_starts + slot * offset_widths,
-                    offset_widths,
-                )
-                data_starts = offset_starts + (sizes + 1) * offset_widths
-                child = data_starts + offsets - row_starts
             else:
                 if np.any((headers & 0x3) != _ARRAY):
                     return None
+                size = _checked_array_layout(
+                    first_value, int(parent[0]),
+                    int(limits[parent_node][0]))[0]
+                if segment >= size:
+                    return None
                 size_widths = np.where(
                     ((type_info >> 2) & 0x1) != 0, _U32_SIZE, 1)
+                if np.any(absolute_parent + 1 + size_widths > parent_ends):
+                    return None
                 sizes = _take_unsigned(
                     data, absolute_parent + 1, size_widths)
-                if np.any(sizes <= segment):
+                if np.any(sizes != size):
                     return None
+                slot = segment
+                successor_slot = slot + 1
                 offset_widths = (type_info & 0x3) + 1
                 offset_starts = absolute_parent + 1 + size_widths
-                offsets = _take_unsigned(
-                    data,
-                    offset_starts + segment * offset_widths,
-                    offset_widths,
-                )
                 data_starts = offset_starts + (sizes + 1) * offset_widths
-                child = data_starts + offsets - row_starts
+                if np.any(data_starts > parent_ends):
+                    return None
+            offsets = _take_unsigned(
+                data,
+                offset_starts + slot * offset_widths,
+                offset_widths,
+            )
+            next_offsets = _take_unsigned(
+                data,
+                offset_starts + successor_slot * offset_widths,
+                offset_widths,
+            )
+            final_offsets = _take_unsigned(
+                data,
+                offset_starts + sizes * offset_widths,
+                offset_widths,
+            )
 
-            if np.any(child < 0) or np.any(row_starts + child >= row_ends):
+            child = data_starts + offsets - row_starts
+            child_ends = data_starts + next_offsets - row_starts
+            if (np.any(offsets >= next_offsets)
+                    or np.any(next_offsets > final_offsets)
+                    or np.any(data_starts + final_offsets != parent_ends)
+                    or np.any(child < 0)
+                    or np.any(child >= child_ends)):
                 return None
             positions.append(child)
+            limits.append(child_ends)
     except (IndexError, ValueError):
         return None
 
     return (
         row_starts,
-        row_ends,
         data,
         tuple(positions[node] for node in result_nodes),
+        tuple(limits[node] for node in result_nodes),
     )
 
 
@@ -557,9 +636,9 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
         parsed_paths)
     if planned is None:
         return None
-    row_starts, row_ends, data, positions = planned
+    row_starts, data, positions, limits = planned
     results = []
-    for pos, target_type in zip(positions, target_types):
+    for pos, limit, target_type in zip(positions, limits, target_types):
         if not (pa.types.is_float32(target_type)
                 or pa.types.is_float64(target_type)):
             return None
@@ -571,7 +650,7 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
             value_size, data_type = 4, np.dtype('<f4')
         else:
             return None
-        if np.any(absolute + 1 + value_size > row_ends):
+        if np.any(absolute + 1 + value_size != row_starts + limit):
             return None
         indices = absolute[:, None] + 1 + np.arange(value_size)
         raw = np.ascontiguousarray(data[indices])
@@ -580,13 +659,165 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
     return results
 
 
-def _decode_scalar(value, metadata: bytes, pos: int):
-    value_type = _variant_get_type(value, pos)
-    if value_type == _Type.DOUBLE:
-        return struct.unpack_from('<d', value, pos + 1)[0]
-    if value_type == _Type.FLOAT:
-        return struct.unpack_from('<f', value, pos + 1)[0]
-    return GenericVariant(bytes(value), metadata, pos).to_python()
+def _decimal_text(value):
+    text = format(value, 'f')
+    if '.' in text:
+        text = text.rstrip('0').rstrip('.')
+    return '0' if text in ('', '-0') else text
+
+
+def _json_text(value):
+    if value is None:
+        return 'null'
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, decimal.Decimal):
+        return _decimal_text(value)
+    if isinstance(value, float):
+        return str(value) if math.isfinite(value) else json.dumps(str(value))
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+    if isinstance(value, bytes):
+        return json.dumps(base64.b64encode(value).decode('ascii'))
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return json.dumps(value.isoformat())
+    if isinstance(value, dict):
+        return '{' + ','.join(
+            f'{json.dumps(key, ensure_ascii=False)}:{_json_text(child)}'
+            for key, child in value.items()
+        ) + '}'
+    if isinstance(value, (list, tuple)):
+        return '[' + ','.join(_json_text(child) for child in value) + ']'
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _cast_decimal(value, target_type):
+    if isinstance(value, bool):
+        value = decimal.Decimal(1 if value else 0)
+    elif not isinstance(value, decimal.Decimal):
+        value = decimal.Decimal(str(value))
+    quantum = decimal.Decimal((0, (1,), -target_type.scale))
+    with decimal.localcontext() as context:
+        context.prec = max(50, target_type.precision + abs(target_type.scale))
+        result = value.quantize(quantum, rounding=decimal.ROUND_HALF_UP)
+    digits = len(result.as_tuple().digits)
+    if digits > target_type.precision:
+        raise ValueError("decimal precision overflow")
+    return result
+
+
+def _cast_integer(value, target_type):
+    number = int(value)
+    bits = target_type.bit_width
+    return ((number + (1 << (bits - 1))) % (1 << bits)) - (1 << (bits - 1))
+
+
+def _cast_python(value, target_type):
+    if value is None or pa.types.is_null(target_type):
+        return None
+    try:
+        if pa.types.is_struct(target_type):
+            if isinstance(value, str):
+                value = json.loads(value)
+            if not isinstance(value, dict):
+                raise TypeError
+            return {
+                field.name: (
+                    None if field.name not in value
+                    else _cast_python(value[field.name], field.type)
+                )
+                for field in target_type
+            }
+        if (pa.types.is_list(target_type)
+                or pa.types.is_large_list(target_type)
+                or pa.types.is_fixed_size_list(target_type)):
+            if isinstance(value, str):
+                value = json.loads(value)
+            if not isinstance(value, list):
+                raise TypeError
+            return [
+                _cast_python(child, target_type.value_type)
+                for child in value
+            ]
+        if pa.types.is_map(target_type):
+            if isinstance(value, str):
+                value = json.loads(value)
+            if not isinstance(value, dict) or not (
+                    pa.types.is_string(target_type.key_type)
+                    or pa.types.is_large_string(target_type.key_type)):
+                raise TypeError
+            return [
+                (key, _cast_python(child, target_type.item_type))
+                for key, child in value.items()
+            ]
+        if pa.types.is_string(target_type) or pa.types.is_large_string(
+                target_type):
+            if isinstance(value, (dict, list)):
+                return _json_text(value)
+            if isinstance(value, bool):
+                return str(value).lower()
+            if isinstance(value, decimal.Decimal):
+                return _decimal_text(value)
+            if isinstance(value, (datetime.date, datetime.datetime)):
+                return value.isoformat()
+            return str(value)
+        if pa.types.is_boolean(target_type):
+            if isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered not in ('true', 'false'):
+                    raise ValueError
+                return lowered == 'true'
+            if isinstance(value, (bool, int, decimal.Decimal)):
+                return value != 0
+            raise TypeError
+        if pa.types.is_signed_integer(target_type):
+            if not isinstance(value, (bool, int, float, decimal.Decimal, str)):
+                raise TypeError
+            return _cast_integer(value, target_type)
+        if pa.types.is_floating(target_type):
+            if not isinstance(value, (bool, int, float, decimal.Decimal, str)):
+                raise TypeError
+            return float(value)
+        if pa.types.is_decimal(target_type):
+            if not isinstance(value, (bool, int, float, decimal.Decimal, str)):
+                raise TypeError
+            return _cast_decimal(value, target_type)
+        if pa.types.is_binary(target_type) or pa.types.is_large_binary(
+                target_type):
+            if not isinstance(value, str):
+                raise TypeError
+            return value.encode('utf-8')
+        if pa.types.is_date32(target_type):
+            if isinstance(value, datetime.datetime):
+                return value.date()
+            if isinstance(value, datetime.date):
+                return value
+            if isinstance(value, str):
+                return datetime.date.fromisoformat(value)
+            raise TypeError
+        if pa.types.is_timestamp(target_type):
+            if isinstance(value, datetime.datetime):
+                return value
+            if isinstance(value, datetime.date):
+                return datetime.datetime.combine(value, datetime.time())
+            if isinstance(value, str):
+                return datetime.datetime.fromisoformat(value)
+            if isinstance(value, (int, float)):
+                return datetime.datetime.fromtimestamp(
+                    value, tz=datetime.timezone.utc)
+            raise TypeError
+    except (ArithmeticError, TypeError, ValueError):
+        pass
+    raise ValueError(f"Invalid cast {value!r} to {target_type}")
+
+
+def _decode_scalar(value, metadata: bytes, pos: int, target_type):
+    size = _checked_value_size(value, pos)
+    selected = bytes(value[pos:pos + size])
+    decoded = GenericVariant(selected, metadata).to_python()
+    return _cast_python(decoded, target_type)
 
 
 def _patched_chunk(
@@ -714,10 +945,10 @@ def _vectorized_replace_chunk(
     )
     if planned is None:
         return None
-    row_starts, row_ends, input_data, positions = planned
+    row_starts, input_data, positions, limits = planned
 
     replacements = []
-    for (_, _, provider), pos in zip(parsed, positions):
+    for (_, _, provider), pos, limit in zip(parsed, positions, limits):
         replacement = provider.numpy_values(global_row, len(chunk))
         if replacement is None:
             return None
@@ -725,7 +956,8 @@ def _vectorized_replace_chunk(
         expected_header = provider._type_header
         if not np.all(input_data[absolute] == expected_header):
             return None
-        if np.any(absolute + provider._fixed_size > row_ends):
+        if np.any(
+                absolute + provider._fixed_size != row_starts + limit):
             return None
         replacements.append((pos, provider, replacement))
 
@@ -798,10 +1030,11 @@ def _variant_get(column, paths: Mapping[str, pa.DataType]):
                 parsed_paths,
                 plans,
             )
-            for (path, _, _), pos in zip(parsed, positions):
+            for (path, _, target_type), pos in zip(parsed, positions):
                 results[path].append(
                     None if pos is None
-                    else _decode_scalar(value, metadata[row], pos)
+                    else _decode_scalar(
+                        value, metadata[row], pos, target_type)
                 )
         for path, _, target_type in parsed:
             result_chunks[path].append(
@@ -916,7 +1149,7 @@ def variant_replace(
                 )
                 if new_size is None:
                     new_size = len(encoded)
-                if new_size != _value_size(value, pos):
+                if new_size != _checked_value_size(value, pos):
                     rebuild = True
                     break
                 if patched_data is None:

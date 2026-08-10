@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import unittest
+from decimal import Decimal
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -88,6 +89,69 @@ class TestVariantGet(unittest.TestCase):
         self.assertEqual(result['$.velocity.y'].to_pylist(), [1.0, 3.0])
         self.assertEqual(result['$.velocity.z'].to_pylist(), [-2.0, -4.0])
 
+    def test_get_matches_java_cast_semantics(self):
+        column = _variants([{
+            'long': 123,
+            'object': {'age': 2},
+            'array': [1, '2'],
+        }])
+
+        self.assertEqual(
+            variant_get(column, '$.long', pa.string()).to_pylist(), ['123'])
+        self.assertEqual(
+            variant_get(column, '$.object', pa.string()).to_pylist(),
+            ['{"age":2}'],
+        )
+        self.assertEqual(
+            variant_get(column, '$.array', pa.string()).to_pylist(),
+            ['[1,"2"]'],
+        )
+        self.assertEqual(
+            variant_get(
+                column,
+                '$.object',
+                pa.struct([('age', pa.int32()), ('name', pa.string())]),
+            ).to_pylist(),
+            [{'age': 2, 'name': None}],
+        )
+        self.assertEqual(
+            variant_get(
+                column, '$.array', pa.list_(pa.int32())).to_pylist(),
+            [[1, 2]],
+        )
+        self.assertEqual(
+            variant_get(
+                column, '$.object',
+                pa.map_(pa.string(), pa.int32())).to_pylist(),
+            [[('age', 2)]],
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid cast"):
+            variant_get(column, '$.object', pa.int32())
+
+    def test_get_decimal_is_exact(self):
+        expected = Decimal('12345678901234567890123456789012345678')
+        column = _variants([{'value': expected}])
+
+        result = variant_get(
+            column, '$.value', pa.decimal128(38, 0))
+
+        self.assertEqual(result.to_pylist(), [expected])
+
+    def test_get_copies_only_selected_subtree(self):
+        column = _variants([{'small': 'x', 'large': b'x' * (2 * 1024 * 1024)}])
+        decoded_sizes = []
+        original = GenericVariant.to_python
+
+        def decode(selected):
+            decoded_sizes.append(len(selected.value()))
+            return original(selected)
+
+        with patch.object(GenericVariant, 'to_python', decode):
+            result = variant_get(column, '$.small', pa.string())
+
+        self.assertEqual(result.to_pylist(), ['x'])
+        self.assertEqual(decoded_sizes, [2])
+
     def test_get_rejects_invalid_arguments(self):
         column = _variants([{'value': 1}])
         with self.assertRaisesRegex(ValueError, "Invalid VARIANT path"):
@@ -97,6 +161,26 @@ class TestVariantGet(unittest.TestCase):
 
 
 class TestVariantReplace(unittest.TestCase):
+
+    def test_truncated_value_does_not_cross_row_boundary(self):
+        first = GenericVariant.from_python({'value': 1.0})
+        second = GenericVariant.from_python({'value': 2.0})
+        column = pa.StructArray.from_arrays(
+            [
+                pa.array([first.value()[:-8], second.value()]),
+                pa.array([first.metadata(), second.metadata()]),
+            ],
+            names=['value', 'metadata'],
+        )
+
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_replace(
+                column, '$.value',
+                pa.array([3.0, 4.0], type=pa.float64()))
+        self.assertEqual(
+            GenericVariant.from_arrow_struct(column[1].as_py()).to_python(),
+            {'value': 2.0},
+        )
 
     def test_equal_length_uses_copy_on_write(self):
         column = _variants([
@@ -270,6 +354,24 @@ class TestVariantReplace(unittest.TestCase):
             column.field('value').buffers()[1].address,
             result.field('value').buffers()[1].address,
         )
+
+    def test_decimal_replacement_preserves_arrow_value(self):
+        for data_type, value, expected_exponent in (
+                (pa.decimal128(10, 2), Decimal('100.00'), -2),
+                (pa.decimal128(10, -2), Decimal('1E+2'), 0)):
+            with self.subTest(data_type=data_type):
+                column = _variants([{'value': 0}])
+
+                result = variant_replace(
+                    column,
+                    '$.value',
+                    pa.array([value], type=data_type),
+                )
+
+                decoded = _decode(result)[0]['value']
+                self.assertEqual(decoded, Decimal('100.00'))
+                self.assertEqual(
+                    decoded.as_tuple().exponent, expected_exponent)
 
     def test_different_length_rebuilds_offsets(self):
         column = _variants([

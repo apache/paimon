@@ -261,10 +261,32 @@ def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
         else:
             builder.append_timestamp_ntz(int(value))
     elif pa.types.is_decimal(arrow_type):
-        if isinstance(value, _decimal.Decimal):
-            builder.append_decimal(value)
-        else:
-            builder.append_decimal(_decimal.Decimal(str(value)))
+        decimal = (
+            value if isinstance(value, _decimal.Decimal)
+            else _decimal.Decimal(str(value))
+        )
+        sign, digits, exponent = decimal.as_tuple()
+        unscaled = int(''.join(str(digit) for digit in digits))
+        if sign:
+            unscaled = -unscaled
+        shift = exponent + arrow_type.scale
+        if shift < 0 and unscaled % (10 ** -shift):
+            raise ValueError(
+                f'{decimal} does not have Arrow scale {arrow_type.scale}')
+        unscaled = (
+            unscaled * (10 ** shift) if shift >= 0
+            else unscaled // (10 ** -shift)
+        )
+        scale = arrow_type.scale
+        precision = max(1, len(str(abs(unscaled))))
+        if precision > arrow_type.precision:
+            raise ValueError(
+                f'{decimal} exceeds Arrow precision {arrow_type.precision}')
+        if scale < 0:
+            unscaled *= 10 ** -scale
+            scale = 0
+            precision = max(1, len(str(abs(unscaled))))
+        builder.append_decimal_unscaled(unscaled, precision, scale)
     else:
         # Fallback: encode as string
         builder.append_string(str(value))
