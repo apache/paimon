@@ -379,13 +379,11 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "\"snapshot.num-retained.min\":\"18\"}, ]]");
 
         // check with not exist schema id
-        assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "SELECT schema_id, fields, partition_keys, "
-                                                + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5"))
-                .hasCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage("schema id: 5 should not greater than max schema id: 4");
+        assertThat(
+                        sql(
+                                "SELECT schema_id, fields, partition_keys, "
+                                        + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5"))
+                .isEmpty();
 
         // check with not exist schema id
         assertThatThrownBy(
