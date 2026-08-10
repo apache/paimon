@@ -107,8 +107,6 @@ class _HdfsReaderAdapter:
     is closed — hdfs-native's own FileReader.__exit__ is a no-op.
     """
 
-    supports_concurrent_pread = True
-
     def __init__(self, fr):
         self._fr = fr
         self._closed = False
@@ -118,14 +116,6 @@ class _HdfsReaderAdapter:
 
     def read1(self, size: int = -1) -> bytes:
         return self.read(size)
-
-    def read_at(self, nbytes: int, offset: int) -> bytes:
-        if offset < 0:
-            raise ValueError("offset must be non-negative")
-        file_size = len(self._fr)
-        if nbytes <= 0 or offset >= file_size:
-            return b''
-        return self._fr.read_range(offset, min(nbytes, file_size - offset))
 
     def seek(self, pos: int, whence: int = 0) -> int:
         self._fr.seek(pos, whence)

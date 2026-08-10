@@ -18,77 +18,13 @@
 import os
 import unittest
 import uuid
-from unittest.mock import MagicMock
 
 import pyarrow.fs as pafs
 
 from pyarrow.fs import PyFileSystem
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
-from pypaimon.filesystem.jindo_file_system_handler import (
-    JindoFileSystemHandler, JindoInputFile, JINDO_AVAILABLE)
-from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
-
-
-class JindoInputStreamTest(unittest.TestCase):
-
-    def test_native_stream_is_opened_lazily_for_pread(self):
-        handler = MagicMock()
-        handler._normalize_path.return_value = "oss://bucket/blob"
-        native_stream = MagicMock()
-        native_stream.pread.return_value = b"data"
-        handler._jindo_fs.open.return_value = native_stream
-
-        result = JindoFileSystemHandler.new_input_stream(
-            handler, "blob")
-
-        self.assertIsInstance(result, JindoInputFile)
-        self.assertFalse(result.supports_concurrent_pread)
-        handler._jindo_fs.open.assert_not_called()
-        self.assertEqual(b"data", result.read_at(4, 7))
-        native_stream.pread.assert_called_once_with(4, 7)
-        handler._jindo_fs.open.assert_called_once_with(
-            "oss://bucket/blob", "rb")
-        result.close()
-        native_stream.close.assert_called_once()
-
-    def test_regular_stream_methods_use_one_lazy_native_stream(self):
-        native_stream = MagicMock()
-        native_stream.read.return_value = b"data"
-        native_stream.tell.return_value = 4
-        stream = JindoInputFile(lambda: native_stream)
-
-        self.assertEqual(b"data", stream.read(4))
-        stream.seek(2)
-        self.assertEqual(4, stream.tell())
-
-        native_stream.read.assert_called_once_with(4)
-        native_stream.seek.assert_called_once_with(2, 0)
-        native_stream.tell.assert_called_once()
-
-    def test_close_before_read_does_not_open_native_stream(self):
-        stream_factory = MagicMock()
-        stream = JindoInputFile(stream_factory)
-
-        stream.close()
-
-        stream_factory.assert_not_called()
-        with self.assertRaisesRegex(ValueError, "closed file"):
-            stream.read(1)
-
-    def test_pyarrow_file_io_exposes_jindo_adapter_directly(self):
-        file_io = object.__new__(PyArrowFileIO)
-        file_io._use_jindo = True
-        file_io.filesystem = MagicMock()
-        stream = object()
-        file_io.filesystem.handler.new_input_stream.return_value = stream
-
-        self.assertIs(
-            stream,
-            file_io.new_input_stream("oss://bucket/blob"),
-        )
-        file_io.filesystem.handler.new_input_stream.assert_called_once_with(
-            "oss://bucket/blob")
+from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
 
 
 class JindoFileSystemTest(unittest.TestCase):

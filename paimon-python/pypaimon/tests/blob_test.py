@@ -2424,8 +2424,6 @@ class BlobEndToEndTest(unittest.TestCase):
             stream = original_open(path)
 
             class TrackingStream:
-                supports_concurrent_pread = True
-
                 def read(self, length=-1):
                     return stream.read(length)
 
@@ -3709,8 +3707,6 @@ class CoalesceRangesTest(unittest.TestCase):
                 stream = original_open(file_path)
 
                 class TrackingStream:
-                    supports_concurrent_pread = True
-
                     def read_at(self, length, offset):
                         reads.append((file_path, offset, length))
                         return os.pread(stream.fileno(), length, offset)
@@ -3744,59 +3740,6 @@ class CoalesceRangesTest(unittest.TestCase):
             self.assertEqual(reads, [(path, 0, 1010)])
             self.assertIs(shared[0].obj, shared[1].obj)
 
-    def test_fetch_bodies_reuses_bounded_streams_for_same_uri(self):
-        from pypaimon.common.file_io import FileIO
-        from pypaimon.multimodal.query import ScanQuery
-        from pypaimon.table.row.blob import BlobDescriptor
-
-        span_count = 64
-        span_gap = 2 << 20
-        payloads = [("blob-%02d" % i).encode() for i in range(span_count)]
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            path = os.path.join(tmp_dir, "blobs.bin")
-            with open(path, "wb") as output:
-                for i, payload in enumerate(payloads):
-                    output.seek(i * span_gap)
-                    output.write(payload)
-
-            file_io = FileIO.get(f"file://{tmp_dir}", {})
-            original_open = file_io.new_input_stream
-            opens = []
-            reads = []
-            closes = []
-
-            def new_input_stream(file_path):
-                opens.append(file_path)
-                stream = original_open(file_path)
-
-                class TrackingStream:
-                    supports_concurrent_pread = True
-
-                    def read_at(self, length, offset):
-                        reads.append((offset, length))
-                        return os.pread(stream.fileno(), length, offset)
-
-                    def close(self):
-                        closes.append(file_path)
-                        stream.close()
-
-                return TrackingStream()
-
-            file_io.new_input_stream = new_input_stream
-            cells = [
-                BlobDescriptor(
-                    path, i * span_gap, len(payload)).serialize()
-                for i, payload in enumerate(payloads)
-            ]
-
-            bodies = ScanQuery._fetch_bodies(
-                file_io, {"image": cells}, ["image"], parallelism=16)
-
-            self.assertEqual(payloads, bodies["image"])
-            self.assertEqual([path] * 16, opens)
-            self.assertEqual(span_count, len(reads))
-            self.assertEqual([path] * 16, closes)
-
     def test_lane_stream_failure_reopens_range(self):
         from pypaimon.common.file_io import FileIO
 
@@ -3809,8 +3752,6 @@ class CoalesceRangesTest(unittest.TestCase):
             fallbacks = []
 
             class FailingStream:
-                supports_concurrent_pread = True
-
                 def read_at(self, length, offset):
                     raise IOError("shared stream failed")
 
@@ -3854,8 +3795,6 @@ class CoalesceRangesTest(unittest.TestCase):
                 open_streams -= 1
 
         class FailingStream:
-            supports_concurrent_pread = True
-
             def __init__(self):
                 self.closed = False
                 opened()
@@ -3991,7 +3930,7 @@ class CoalesceRangesTest(unittest.TestCase):
         self.assertGreater(len(streams), 1)
         self.assertLessEqual(len(streams), 8)
 
-    def test_same_path_uses_bounded_exclusive_lanes(self):
+    def test_same_path_uses_requested_exclusive_lanes(self):
         from pypaimon.common.file_io import FileIO
 
         data = bytes(range(256)) * 64
@@ -3999,8 +3938,6 @@ class CoalesceRangesTest(unittest.TestCase):
         streams = []
 
         class PositionalStream:
-            supports_concurrent_pread = False
-
             def __init__(self):
                 self.reading = False
                 self.reads = 0
@@ -4035,7 +3972,7 @@ class CoalesceRangesTest(unittest.TestCase):
                 ranges, parallelism=32, max_gap=0),
         )
         self.assertGreater(len(streams), 1)
-        self.assertLessEqual(len(streams), 16)
+        self.assertLessEqual(len(streams), 32)
         self.assertEqual(64, sum(stream.reads for stream in streams))
         self.assertTrue(all(stream.closed for stream in streams))
 
@@ -4049,8 +3986,6 @@ class CoalesceRangesTest(unittest.TestCase):
         total_streams = 0
 
         class PositionalStream:
-            supports_concurrent_pread = False
-
             def read_at(self, length, offset):
                 time.sleep(0.03 if offset == 0 else 0.001)
                 return bytes([offset]) * length
@@ -4157,8 +4092,6 @@ class CoalesceRangesTest(unittest.TestCase):
         fallbacks = []
 
         class FailingStream:
-            supports_concurrent_pread = False
-
             def read_at(self, length, offset):
                 raise IOError("pooled read failed")
 

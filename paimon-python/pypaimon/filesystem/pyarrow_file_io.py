@@ -355,8 +355,6 @@ class PyArrowFileIO(FileIO):
         return _kerberos.get_ticket_cache_path()
 
     def new_input_stream(self, path: str):
-        if self._use_jindo:
-            return self.filesystem.handler.new_input_stream(path)
         path_str = self.to_filesystem_path(path)
         return self.filesystem.open_input_file(path_str)
 

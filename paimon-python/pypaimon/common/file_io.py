@@ -30,31 +30,24 @@ from pypaimon.common.options import Options
 _LOG = logging.getLogger(__name__)
 
 
-def _fileno(stream):
-    if not hasattr(stream, 'fileno'):
-        return None
-    try:
-        return stream.fileno()
-    except Exception:
-        return None
-
-
 def supports_pread(stream) -> bool:
-    """Check if the stream supports position-based reads."""
-    # Unlike read_at, Python pread methods have no common argument order.
+    """Check if the stream supports position-based reads (thread-safe I/O)."""
     if hasattr(stream, 'read_at'):
         return True
-    return _fileno(stream) is not None
+    if hasattr(stream, 'fileno'):
+        try:
+            stream.fileno()
+            return True
+        except Exception:
+            pass
+    return False
 
 
 def pread(stream, length: int, offset: int) -> bytes:
-    """Position-based read without changing the stream cursor."""
-    fd = _fileno(stream)
-    if fd is not None:
-        return os.pread(fd, length, offset)
+    """Position-based read without changing the stream cursor. Thread-safe."""
     if hasattr(stream, 'read_at'):
         return stream.read_at(length, offset)
-    raise AttributeError("stream does not support positional reads")
+    return os.pread(stream.fileno(), length, offset)
 
 
 # Coalescing bounds: merge same-file ranges whose gap is within GAP, capping a
@@ -62,7 +55,6 @@ def pread(stream, length: int, offset: int) -> bytes:
 _COALESCE_GAP = 1 << 20
 _COALESCE_SPAN = 8 << 20
 _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION = 2.0
-_MAX_RANGE_LANES_PER_PATH = 16
 
 
 def create_temp_path(path: str) -> str:
@@ -263,9 +255,7 @@ class FileIO(ABC):
                 1,
                 (workers * len(path_tasks) + task_count - 1) // task_count,
             )
-            path_lanes = min(
-                len(path_tasks), proportional_lanes,
-                _MAX_RANGE_LANES_PER_PATH)
+            path_lanes = min(len(path_tasks), proportional_lanes)
             selected = sorted(
                 range(workers), key=lane_loads.__getitem__)[:path_lanes]
             for index, task in enumerate(path_tasks):
