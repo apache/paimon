@@ -519,7 +519,7 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
         sql(
                 "CALL sys.data_evolution_merge_into("
                         + "'default.T_REFRESH', '', '', 'S_REFRESH', "
-                        + "'T_REFRESH._ROW_ID=S_REFRESH.id', 'v=S_REFRESH.v', 2)");
+                        + "'T_REFRESH.id=S_REFRESH.id', 'v=S_REFRESH.v', 2)");
         assertThat(sql("SELECT id FROM T_REFRESH WHERE id = 1 AND v IS NOT NULL")).hasSize(1);
 
         long updatedSnapshotId = table.snapshotManager().latestSnapshot().id();
