@@ -247,10 +247,9 @@ def _variant_chunks(column):
     return chunks, chunked, data_type
 
 
-def _variant_array(values, metadatas, nulls, data_type):
+def _variant_array(values, metadata, nulls, data_type):
     return pa.StructArray.from_arrays(
-        [pa.array(values, type=data_type[0].type),
-         pa.array(metadatas, type=data_type[1].type)],
+        [pa.array(values, type=data_type[0].type), metadata],
         fields=list(data_type),
         mask=pa.array(nulls, type=pa.bool_()),
     )
@@ -274,13 +273,13 @@ def variant_transform(column, transforms: Mapping[str, object]):
     result_chunks = []
     for chunk in chunks:
         input_values = chunk.field(0).to_pylist()
-        input_metadatas = chunk.field(1).to_pylist()
+        metadata_array = chunk.field(1)
+        input_metadatas = metadata_array.to_pylist()
         valid = chunk.is_valid().to_pylist()
-        values, metadatas, nulls = [], [], []
+        values, nulls = [], []
         for row in range(len(chunk)):
             if not valid[row]:
                 values.append(b'')
-                metadatas.append(b'')
                 nulls.append(True)
                 continue
 
@@ -294,18 +293,20 @@ def variant_transform(column, transforms: Mapping[str, object]):
                 if _variant_get_type(value, pos) != _Type.DOUBLE:
                     raise TypeError(f"VARIANT path is not DOUBLE: {path}")
                 current = struct.unpack_from('<d', value, pos + 1)[0]
+                updated = transform(current)
+                if not isinstance(updated, float):
+                    raise TypeError(
+                        f"VARIANT transform for {path} must return DOUBLE")
                 try:
-                    struct.pack_into('<d', result, pos + 1,
-                                     transform(current))
+                    struct.pack_into('<d', result, pos + 1, updated)
                 except (TypeError, struct.error, OverflowError) as error:
                     raise TypeError(
                         f"VARIANT transform for {path} must return DOUBLE"
                     ) from error
             values.append(bytes(result))
-            metadatas.append(metadata)
             nulls.append(False)
         result_chunks.append(
-            _variant_array(values, metadatas, nulls, data_type))
+            _variant_array(values, metadata_array, nulls, data_type))
 
     if not chunked:
         return result_chunks[0]

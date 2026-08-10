@@ -79,6 +79,10 @@ class TestVariantTransform(unittest.TestCase):
             },
         ])
         self.assertEqual(result.field('metadata').to_pylist(), metadata)
+        self.assertEqual(
+            result.field('metadata').buffers()[2].address,
+            column.field('metadata').buffers()[2].address,
+        )
 
     def test_array_path_null_and_chunks(self):
         first = _variants([{'a.b': [{'value': 1.0}]}, None])
@@ -103,7 +107,7 @@ class TestVariantTransform(unittest.TestCase):
             ({'$.missing': operator.neg}, ValueError, "path does not exist"),
             ({'$.text': operator.neg}, TypeError, "path is not DOUBLE"),
             ({'$.number': 'negate'}, TypeError, "must be callable"),
-            ({'$.number': lambda value: 'wrong'}, TypeError,
+            ({'$.number': lambda value: 1}, TypeError,
              "must return DOUBLE"),
         ]
         for transforms, error_type, message in cases:
