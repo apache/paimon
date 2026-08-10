@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Transform existing DOUBLE paths in Arrow VARIANT columns."""
+"""Transform existing FLOAT and DOUBLE paths in Arrow VARIANT columns."""
 
 import functools
 import re
@@ -256,7 +256,7 @@ def _variant_array(values, metadata, nulls, data_type):
 
 
 def variant_transform(column, transforms: Mapping[str, object]):
-    """Transform existing DOUBLE paths without decoding the whole VARIANT."""
+    """Transform existing FLOAT and DOUBLE paths without full decoding."""
     parsed = [
         (path, _parse_path(path), transform)
         for path, transform in transforms.items()
@@ -292,18 +292,28 @@ def variant_transform(column, transforms: Mapping[str, object]):
             for (path, _, transform), pos in zip(parsed, positions):
                 if pos is None:
                     raise ValueError(f"VARIANT path does not exist: {path}")
-                if _variant_get_type(value, pos) != _Type.DOUBLE:
-                    raise TypeError(f"VARIANT path is not DOUBLE: {path}")
-                current = struct.unpack_from('<d', value, pos + 1)[0]
+                value_type = _variant_get_type(value, pos)
+                if value_type == _Type.DOUBLE:
+                    value_format, type_name = '<d', 'DOUBLE'
+                elif value_type == _Type.FLOAT:
+                    value_format, type_name = '<f', 'FLOAT'
+                else:
+                    raise TypeError(
+                        f"VARIANT path is not FLOAT or DOUBLE: {path}")
+                current = struct.unpack_from(
+                    value_format, value, pos + 1)[0]
                 updated = transform(current)
                 if not isinstance(updated, float):
                     raise TypeError(
-                        f"VARIANT transform for {path} must return DOUBLE")
+                        f"VARIANT transform for {path} must return "
+                        f"{type_name}")
                 try:
-                    struct.pack_into('<d', result, pos + 1, updated)
+                    struct.pack_into(
+                        value_format, result, pos + 1, updated)
                 except (TypeError, struct.error, OverflowError) as error:
                     raise TypeError(
-                        f"VARIANT transform for {path} must return DOUBLE"
+                        f"VARIANT transform for {path} must return "
+                        f"{type_name}"
                     ) from error
             values.append(bytes(result))
             nulls.append(False)

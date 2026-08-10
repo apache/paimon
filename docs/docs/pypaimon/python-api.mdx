@@ -1126,9 +1126,9 @@ Supported Paimon type strings for shredded sub-fields: `BOOLEAN`, `INT`, `BIGINT
 
 </Tabs>
 
-### VARIANT DOUBLE Updates
+### VARIANT Numeric Updates
 
-Transform existing DOUBLE paths without decoding unrelated fields:
+Transform existing FLOAT or DOUBLE paths without decoding unrelated fields:
 
 ```python
 import operator
@@ -1141,7 +1141,8 @@ updated_payload = variant_transform(payload, {
 })
 ```
 
-The paths must exist and contain DOUBLE values. The metadata is unchanged.
+The paths must exist and contain FLOAT or DOUBLE values. Each transform must
+return a `float`; the original numeric type and metadata are unchanged.
 
 
 **`GenericVariant` API:**

@@ -22,6 +22,7 @@ import pyarrow as pa
 
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.data.variant_path import variant_transform
+from pypaimon.data.variant_shredding import _encode_scalar_to_value_bytes
 
 
 def _variants(values):
@@ -37,6 +38,15 @@ def _decode(column):
         else GenericVariant.from_arrow_struct(value).to_python()
         for value in column.to_pylist()
     ]
+
+
+def _float_variants(values):
+    metadata = b'\x01\x00'
+    return GenericVariant.to_arrow_array([
+        GenericVariant(
+            _encode_scalar_to_value_bytes(value, pa.float32()), metadata)
+        for value in values
+    ])
 
 
 class TestVariantTransform(unittest.TestCase):
@@ -100,6 +110,35 @@ class TestVariantTransform(unittest.TestCase):
             {'a.b': [{'value': -2.0}]},
         ])
 
+    def test_transform_float_path(self):
+        column = _float_variants([1.25, -2.5])
+
+        result = variant_transform(column, {'$': operator.neg})
+
+        self.assertEqual(_decode(result), [-1.25, 2.5])
+
+    def test_transform_preserves_mixed_float_and_double_types(self):
+        float_value = GenericVariant.from_arrow_struct(
+            _float_variants([1.25])[0].as_py())
+        double_value = GenericVariant.from_python(2.5)
+        column = GenericVariant.to_arrow_array([float_value, double_value])
+
+        result = variant_transform(column, {'$': operator.neg})
+
+        self.assertEqual(_decode(result), [-1.25, -2.5])
+        self.assertEqual(
+            [len(value) for value in result.field('value').to_pylist()],
+            [len(float_value.value()), len(double_value.value())],
+        )
+
+    def test_float_transform_rejects_invalid_result(self):
+        column = _float_variants([1.0])
+
+        with self.assertRaisesRegex(TypeError, "must return FLOAT"):
+            variant_transform(column, {'$': lambda value: 1})
+        with self.assertRaisesRegex(TypeError, "must return FLOAT"):
+            variant_transform(column, {'$': lambda value: 1e100})
+
     def test_rejects_invalid_transform(self):
         column = _variants([{'number': 1.0, 'text': 'value'}])
         cases = [
@@ -107,7 +146,8 @@ class TestVariantTransform(unittest.TestCase):
             ({'$.number': operator.neg, "$['number']": operator.neg},
              ValueError, "paths must be unique"),
             ({'$.missing': operator.neg}, ValueError, "path does not exist"),
-            ({'$.text': operator.neg}, TypeError, "path is not DOUBLE"),
+            ({'$.text': operator.neg}, TypeError,
+             "path is not FLOAT or DOUBLE"),
             ({'$.number': 'negate'}, TypeError, "must be callable"),
             ({'$.number': lambda value: 1}, TypeError,
              "must return DOUBLE"),
