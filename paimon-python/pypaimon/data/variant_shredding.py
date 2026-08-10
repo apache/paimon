@@ -252,11 +252,19 @@ def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
         if isinstance(value, datetime.datetime):
             if value.tzinfo is not None:
                 epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-                micros = int((value - epoch).total_seconds() * 1_000_000)
+                delta = value - epoch
+                micros = (
+                    (delta.days * 86400 + delta.seconds) * 1_000_000
+                    + delta.microseconds
+                )
                 builder.append_timestamp(micros)
             else:
                 epoch = datetime.datetime(1970, 1, 1)
-                micros = int((value - epoch).total_seconds() * 1_000_000)
+                delta = value - epoch
+                micros = (
+                    (delta.days * 86400 + delta.seconds) * 1_000_000
+                    + delta.microseconds
+                )
                 builder.append_timestamp_ntz(micros)
         else:
             builder.append_timestamp_ntz(int(value))

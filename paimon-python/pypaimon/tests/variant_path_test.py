@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
 import unittest
 from decimal import Decimal
 from unittest.mock import patch
@@ -21,8 +22,13 @@ from unittest.mock import patch
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from pypaimon.data.generic_variant import GenericVariant
-from pypaimon.data.variant_path import variant_get, variant_replace
+from pypaimon.data._variant_binary import _primitive_header
+from pypaimon.data.generic_variant import _DECIMAL4, GenericVariant
+from pypaimon.data.variant_path import (
+    _path_positions,
+    variant_get,
+    variant_replace,
+)
 from pypaimon.data.variant_shredding import _encode_scalar_to_value_bytes
 
 
@@ -128,6 +134,32 @@ class TestVariantGet(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid cast"):
             variant_get(column, '$.object', pa.int32())
 
+    def test_get_matches_java_string_and_binary_casts(self):
+        column = _variants([{
+            'decimal': '1.9',
+            'overflow': '2147483648',
+            'truthy': 'yes',
+            'falsey': '0',
+            'binary': b'abc',
+        }])
+
+        self.assertEqual(
+            variant_get(column, '$.decimal', pa.int32()).to_pylist(), [1])
+        self.assertEqual(
+            variant_get(column, '$.truthy', pa.bool_()).to_pylist(), [True])
+        self.assertEqual(
+            variant_get(column, '$.falsey', pa.bool_()).to_pylist(), [False])
+        self.assertEqual(
+            variant_get(column, '$.binary', pa.binary()).to_pylist(),
+            [b'abc'],
+        )
+        self.assertEqual(
+            variant_get(column, '$.binary', pa.string()).to_pylist(),
+            ['abc'],
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid cast"):
+            variant_get(column, '$.overflow', pa.int32())
+
     def test_get_decimal_is_exact(self):
         expected = Decimal('12345678901234567890123456789012345678')
         column = _variants([{'value': expected}])
@@ -136,6 +168,28 @@ class TestVariantGet(unittest.TestCase):
             column, '$.value', pa.decimal128(38, 0))
 
         self.assertEqual(result.to_pylist(), [expected])
+
+    def test_get_rejects_malformed_metadata_and_decimal(self):
+        valid = GenericVariant.from_python({'value': 1.0})
+        bad_metadata = bytes([2]) + valid.metadata()[1:]
+        column = pa.StructArray.from_arrays([
+            pa.array([valid.value()]),
+            pa.array([bad_metadata]),
+        ], names=['value', 'metadata'])
+        with self.assertRaisesRegex(ValueError, "metadata version"):
+            variant_get(column, '$.value', pa.float64())
+
+        for scale, unscaled in ((10, 1), (0, 2147483647)):
+            with self.subTest(scale=scale, unscaled=unscaled):
+                value = (
+                    bytes([_primitive_header(_DECIMAL4), scale])
+                    + unscaled.to_bytes(4, 'little', signed=True)
+                )
+                malformed = GenericVariant.to_arrow_array([
+                    GenericVariant(value, b'\x01\x00')])
+                with self.assertRaisesRegex(
+                        ValueError, "decimal precision or scale"):
+                    variant_get(malformed, '$', pa.decimal128(38, 0))
 
     def test_get_copies_only_selected_subtree(self):
         column = _variants([{'small': 'x', 'large': b'x' * (2 * 1024 * 1024)}])
@@ -161,6 +215,79 @@ class TestVariantGet(unittest.TestCase):
 
 
 class TestVariantReplace(unittest.TestCase):
+
+    def test_timestamp_replacement_is_exact(self):
+        for arrow_type, value in (
+                (pa.timestamp('us'),
+                 datetime.datetime(9999, 12, 31, 23, 59, 59, 999999)),
+                (pa.timestamp('us', tz='UTC'),
+                 datetime.datetime(
+                     2500, 1, 1, 0, 0, 0, 1,
+                     tzinfo=datetime.timezone.utc))):
+            with self.subTest(arrow_type=arrow_type):
+                column = _variants([{'value': 0}])
+                result = variant_replace(
+                    column, '$.value', pa.scalar(value, type=arrow_type))
+                self.assertEqual(_decode(result), [{'value': value}])
+
+    def test_nullable_fast_path_does_not_devectorize_chunk(self):
+        size = 50000
+        column = _variants(
+            [None] + [{'value': float(index)} for index in range(1, size)])
+        replacement = pa.scalar(-1.0)
+
+        with patch(
+                'pypaimon.data.variant_path._path_positions',
+                wraps=_path_positions,
+        ) as slow_path:
+            current = variant_get(column, '$.value', pa.float64())
+            result = variant_replace(column, '$.value', replacement)
+
+        self.assertEqual(current[0].as_py(), None)
+        self.assertEqual(current[-1].as_py(), float(size - 1))
+        self.assertIsNone(result[0].as_py())
+        self.assertEqual(_decode(result.slice(size - 1, 1)),
+                         [{'value': -1.0}])
+        slow_path.assert_not_called()
+
+    def test_sparse_layout_anomalies_keep_slow_path_bounded(self):
+        size = 4096
+        uniform = _variants([
+            {'value': float(index)} for index in range(1, size)
+        ])
+        cases = (
+            (_variants([{'extra': 1, 'value': 0.0}]), False),
+            (_variants([{'other': 0.0}]), True),
+        )
+        for first, missing in cases:
+            with self.subTest(missing=missing):
+                column = pa.concat_arrays([first, uniform])
+                with patch(
+                        'pypaimon.data.variant_path._path_positions',
+                        wraps=_path_positions,
+                ) as slow_path:
+                    current = variant_get(
+                        column, '$.value', pa.float64())
+                    self.assertLessEqual(
+                        slow_path.call_count, 64)
+                self.assertEqual(current[0].as_py(), None if missing else 0.0)
+                self.assertEqual(current[-1].as_py(), float(size - 1))
+
+                with patch(
+                        'pypaimon.data.variant_path._path_positions',
+                        wraps=_path_positions,
+                ) as slow_path:
+                    result = variant_replace(
+                        column, '$.value', pa.scalar(-1.0))
+                    self.assertLessEqual(
+                        slow_path.call_count, 64)
+                expected_first = {'other': 0.0} if missing else {
+                    'extra': 1, 'value': -1.0,
+                }
+                self.assertEqual(_decode(result.slice(0, 1)),
+                                 [expected_first])
+                self.assertEqual(_decode(result.slice(size - 1, 1)),
+                                 [{'value': -1.0}])
 
     def test_truncated_value_does_not_cross_row_boundary(self):
         first = GenericVariant.from_python({'value': 1.0})
