@@ -343,9 +343,61 @@ class _BinaryValues:
                 (index + 1) * self.width)[0],
         )
 
+    def used_bounds(self) -> Tuple[int, int]:
+        first = self.array.offset
+        last = first + len(self.array)
+        return (
+            struct.unpack_from(
+                self.value_format, self.offsets, first * self.width)[0],
+            struct.unpack_from(
+                self.value_format, self.offsets, last * self.width)[0],
+        )
+
     def view(self, row: int) -> memoryview:
         start, end = self.bounds(row)
         return self.data[start:end]
+
+    def row(self, row: int) -> Tuple[int, memoryview]:
+        start, end = self.bounds(row)
+        return start, self.data[start:end]
+
+    def copy_used_data(self) -> Tuple[bytearray, int]:
+        start, end = self.used_bounds()
+        return bytearray(self.data[start:end]), start
+
+    def array_from_data(self, data: bytearray, start: int) -> pa.Array:
+        buffers = list(self.array.buffers())
+        offset = self.array.offset
+        if offset == 0 and start == 0:
+            buffers[2] = pa.py_buffer(data)
+        else:
+            offsets = bytearray((len(self.array) + 1) * self.width)
+            for index in range(len(self.array) + 1):
+                value = struct.unpack_from(
+                    self.value_format,
+                    self.offsets,
+                    (self.array.offset + index) * self.width,
+                )[0]
+                struct.pack_into(
+                    self.value_format,
+                    offsets,
+                    index * self.width,
+                    value - start,
+                )
+            buffers = [
+                (None if self.array.null_count == 0
+                 else self.array.is_valid().buffers()[1]),
+                pa.py_buffer(offsets),
+                pa.py_buffer(data),
+            ]
+            offset = 0
+        return pa.Array.from_buffers(
+            self.array.type,
+            len(self.array),
+            buffers,
+            null_count=self.array.null_count,
+            offset=offset,
+        )
 
 
 def _decode_scalar(value, metadata: bytes, pos: int):
@@ -357,24 +409,15 @@ def _decode_scalar(value, metadata: bytes, pos: int):
     return GenericVariant(bytes(value), metadata, pos).to_python()
 
 
-def _patched_chunk(chunk: pa.StructArray, patches) -> pa.StructArray:
-    values = chunk.field(0)
-    data_buffer = values.buffers()[2]
-    data = bytearray(data_buffer) if data_buffer is not None else bytearray()
-    for absolute_pos, replacement in patches:
-        data[absolute_pos:absolute_pos + len(replacement)] = replacement
-
-    buffers = list(values.buffers())
-    buffers[2] = pa.py_buffer(data)
-    patched_values = pa.Array.from_buffers(
-        values.type,
-        len(values),
-        buffers,
-        null_count=values.null_count,
-        offset=values.offset,
-    )
+def _patched_chunk(
+        chunk: pa.StructArray,
+        values: _BinaryValues,
+        data: bytearray,
+        start: int,
+) -> pa.StructArray:
+    patched_values = values.array_from_data(data, start)
     metadata = chunk.field(1)
-    if chunk.offset == 0:
+    if chunk.offset == 0 and patched_values.offset == 0:
         return pa.Array.from_buffers(
             chunk.type,
             len(chunk),
@@ -429,11 +472,25 @@ class _Replacement:
         else:
             self._value_format = None
             self._type_header = None
+        self._fixed_size = (
+            struct.calcsize(self._value_format)
+            if self._value_format is not None else None
+        )
 
     def values(self, offset: int, length: int):
         if self._array is None:
-            return [self._value.as_py()] * length
+            return self._value.as_py()
         return self._array.slice(offset, length).to_pylist()
+
+    def value_at(self, values, row: int):
+        return values if self._array is None else values[row]
+
+    def fixed_size(self, value) -> Optional[int]:
+        return self._fixed_size if value is not None else None
+
+    def patch(self, data: bytearray, pos: int, value) -> None:
+        struct.pack_into(
+            self._value_format, data, pos, self._type_header, value)
 
     def encode(self, value) -> bytes:
         if value is not None and self._value_format is not None:
@@ -564,14 +621,13 @@ def variant_replace(
             path: provider.values(global_row, len(chunk))
             for path, _, provider in parsed
         }
-        row_replacements = [[] for _ in range(len(chunk))]
-        patches = []
+        patched_data = None
+        data_start = 0
         rebuild = False
         for row in range(len(chunk)):
             if not valid[row]:
                 continue
-            value = values.view(row)
-            row_start, _ = values.bounds(row)
+            row_start, value = values.row(row)
             positions = _path_positions(
                 value,
                 metadata[row],
@@ -585,24 +641,59 @@ def variant_replace(
                         raise ValueError(
                             f"VARIANT path does not exist: {path}")
                     continue
-                encoded = provider.encode(chunk_replacements[path][row])
-                row_replacements[row].append((parsed_path, encoded))
-                if len(encoded) == _value_size(value, pos):
-                    patches.append((row_start + pos, encoded))
-                else:
+                replacement_value = provider.value_at(
+                    chunk_replacements[path], row)
+                new_size = provider.fixed_size(replacement_value)
+                encoded = (
+                    None if new_size is not None
+                    else provider.encode(replacement_value)
+                )
+                if new_size is None:
+                    new_size = len(encoded)
+                if new_size != _value_size(value, pos):
                     rebuild = True
+                    break
+                if patched_data is None:
+                    patched_data, data_start = values.copy_used_data()
+                patch_pos = row_start - data_start + pos
+                if encoded is None:
+                    provider.patch(
+                        patched_data, patch_pos, replacement_value)
+                else:
+                    patched_data[patch_pos:patch_pos + new_size] = encoded
+            if rebuild:
+                break
 
         if rebuild:
             rebuilt_values = []
-            for row, replacements_for_row in enumerate(row_replacements):
+            for row in range(len(chunk)):
                 value = bytes(values.view(row))
-                for parsed_path, encoded in replacements_for_row:
+                if not valid[row]:
+                    rebuilt_values.append(value)
+                    continue
+                positions = _path_positions(
+                    value,
+                    metadata[row],
+                    parsed_paths,
+                    plans,
+                )
+                for (path, parsed_path, provider), pos in zip(
+                        parsed, positions):
+                    if pos is None:
+                        if strict:
+                            raise ValueError(
+                                f"VARIANT path does not exist: {path}")
+                        continue
+                    replacement_value = provider.value_at(
+                        chunk_replacements[path], row)
+                    encoded = provider.encode(replacement_value)
                     value = _replace_path(
                         value, metadata[row], 0, parsed_path, encoded)
                 rebuilt_values.append(value)
             result_chunks.append(_rebuilt_chunk(chunk, rebuilt_values))
-        elif patches:
-            result_chunks.append(_patched_chunk(chunk, patches))
+        elif patched_data is not None:
+            result_chunks.append(_patched_chunk(
+                chunk, values, patched_data, data_start))
         else:
             result_chunks.append(chunk)
         global_row += len(chunk)

@@ -136,6 +136,41 @@ class TestVariantReplace(unittest.TestCase):
             result.buffers()[0].address,
         )
 
+    def test_sliced_input_copies_only_visible_values(self):
+        base = _variants([
+            {'number': float(i), 'padding': 'x' * 1000}
+            for i in range(100)
+        ])
+
+        for binary_type in (pa.binary(), pa.large_binary()):
+            with self.subTest(binary_type=binary_type):
+                values = base.field('value').cast(binary_type)
+                converted = pa.StructArray.from_arrays(
+                    [values, base.field('metadata')],
+                    names=['value', 'metadata'],
+                )
+                column = converted.slice(50, 3)
+
+                result = variant_replace(
+                    column,
+                    '$.number',
+                    pa.scalar(-1.0, type=pa.float64()),
+                )
+
+                expected_size = sum(
+                    len(value)
+                    for value in column.field('value').to_pylist()
+                )
+                self.assertEqual(
+                    result.field('value').buffers()[2].size,
+                    expected_size,
+                )
+                self.assertEqual(result.field('value').offset, 0)
+                self.assertEqual(
+                    [row['number'] for row in _decode(result)],
+                    [-1.0, -1.0, -1.0],
+                )
+
     def test_get_compute_replace_pipeline(self):
         column = pa.chunked_array([
             _variants([{'y': 1.0, 'z': -2.0}, None]),
