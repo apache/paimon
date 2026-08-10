@@ -104,6 +104,8 @@ class TestVariantTransform(unittest.TestCase):
         column = _variants([{'number': 1.0, 'text': 'value'}])
         cases = [
             ({'number': operator.neg}, ValueError, "Invalid VARIANT path"),
+            ({'$.number': operator.neg, "$['number']": operator.neg},
+             ValueError, "paths must be unique"),
             ({'$.missing': operator.neg}, ValueError, "path does not exist"),
             ({'$.text': operator.neg}, TypeError, "path is not DOUBLE"),
             ({'$.number': 'negate'}, TypeError, "must be callable"),

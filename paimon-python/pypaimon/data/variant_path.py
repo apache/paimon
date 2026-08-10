@@ -261,6 +261,8 @@ def variant_transform(column, transforms: Mapping[str, object]):
         (path, _parse_path(path), transform)
         for path, transform in transforms.items()
     ]
+    if len({path for _, path, _ in parsed}) != len(parsed):
+        raise ValueError("VARIANT transform paths must be unique")
     for path, _, transform in parsed:
         if not callable(transform):
             raise TypeError(f"VARIANT transform for {path} must be callable")
