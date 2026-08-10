@@ -1126,23 +1126,26 @@ Supported Paimon type strings for shredded sub-fields: `BOOLEAN`, `INT`, `BIGINT
 
 </Tabs>
 
-### VARIANT Numeric Updates
+### VARIANT Path Updates
 
-Transform existing FLOAT or DOUBLE paths without decoding unrelated fields:
+Read a path as an Arrow array, use Arrow compute, and replace its existing
+values without decoding unrelated fields:
 
 ```python
-import operator
+import pyarrow as pa
+import pyarrow.compute as pc
 
-from pypaimon.data import variant_transform
+from pypaimon.data import variant_get, variant_replace
 
-updated_payload = variant_transform(payload, {
-    '$.velocity.y': operator.neg,
-    '$.velocity.z': operator.neg,
-})
+current = variant_get(payload, '$.velocity.y', pa.float64())
+updated_payload = variant_replace(
+    payload, '$.velocity.y', pc.negate(current))
 ```
 
-The paths must exist and contain FLOAT or DOUBLE values. Each transform must
-return a `float`; the original numeric type and metadata are unchanged.
+`variant_get` returns NULL for a missing path. `variant_replace` accepts an
+Arrow Scalar, Array, or ChunkedArray. A missing path is unchanged unless
+`strict=True` is specified. Pass `{path: type}` to `variant_get` and
+`{path: values}` to `variant_replace` to process multiple paths in one pass.
 
 
 **`GenericVariant` API:**

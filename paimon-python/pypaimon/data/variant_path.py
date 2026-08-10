@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Transform existing FLOAT and DOUBLE paths in Arrow VARIANT columns."""
+"""Read and replace paths in Arrow VARIANT columns."""
 
 import functools
 import re
@@ -27,9 +27,22 @@ from pypaimon.data._variant_binary import (
     _ARRAY,
     _OBJECT,
     _U32_SIZE,
+    _primitive_header,
     _read_unsigned,
 )
-from pypaimon.data.generic_variant import _Type, _variant_get_type
+from pypaimon.data.generic_variant import (
+    GenericVariant,
+    _DOUBLE,
+    _FLOAT,
+    _Type,
+    _value_size,
+    _variant_get_type,
+)
+from pypaimon.data.variant_shredding import (
+    _build_array_value,
+    _build_object_value,
+    _encode_scalar_to_value_bytes,
+)
 
 
 _INDEX_PATTERN = re.compile(r"\[(\d+)]")
@@ -122,7 +135,7 @@ def _object_field_position(
         value: bytes, pos: int, key_id: int) -> Optional[int]:
     size, id_size, offset_size, id_start, offset_start, data_start = (
         _object_layout(value, pos))
-    id_table = value[id_start:id_start + size * id_size]
+    id_table = bytes(value[id_start:id_start + size * id_size])
     slot = _field_slot(id_table, id_size, key_id)
     if slot is None:
         return None
@@ -231,6 +244,61 @@ def _path_positions(
     return plan.positions
 
 
+def _replace_path(
+        value: bytes,
+        metadata: bytes,
+        pos: int,
+        path: _Path,
+        replacement: bytes,
+) -> bytes:
+    if not path:
+        return replacement
+
+    kind, segment = path[0]
+    if kind == 'key':
+        if (value[pos] & 0x3) != _OBJECT:
+            raise ValueError("VARIANT path expects an object")
+        key_id = _metadata_key_ids(metadata).get(segment)
+        if key_id is None:
+            raise ValueError(f"VARIANT path does not exist: {segment}")
+        size, id_size, offset_size, id_start, offset_start, data_start = (
+            _object_layout(value, pos))
+        ids = [
+            _read_unsigned(value, id_start + i * id_size, id_size)
+            for i in range(size)
+        ]
+        try:
+            slot = ids.index(key_id)
+        except ValueError:
+            raise ValueError(f"VARIANT path does not exist: {segment}")
+        children = []
+        for i in range(size):
+            child_pos = data_start + _read_unsigned(
+                value, offset_start + i * offset_size, offset_size)
+            child = value[child_pos:child_pos + _value_size(value, child_pos)]
+            if i == slot:
+                child = _replace_path(
+                    value, metadata, child_pos, path[1:], replacement)
+            children.append(child)
+        return _build_object_value(list(zip(ids, children)))
+
+    if (value[pos] & 0x3) != _ARRAY:
+        raise ValueError("VARIANT path expects an array")
+    size, offset_size, offset_start, data_start = _array_layout(value, pos)
+    if segment >= size:
+        raise ValueError(f"VARIANT array index does not exist: {segment}")
+    children = []
+    for i in range(size):
+        child_pos = data_start + _read_unsigned(
+            value, offset_start + i * offset_size, offset_size)
+        child = value[child_pos:child_pos + _value_size(value, child_pos)]
+        if i == segment:
+            child = _replace_path(
+                value, metadata, child_pos, path[1:], replacement)
+        children.append(child)
+    return _build_array_value(children)
+
+
 def _variant_chunks(column):
     if isinstance(column, pa.ChunkedArray):
         chunks, chunked, data_type = column.chunks, True, column.type
@@ -244,81 +312,300 @@ def _variant_chunks(column):
             != ['value', 'metadata']):
         raise TypeError(
             "VARIANT input must contain value and metadata fields")
+    if not (pa.types.is_binary(data_type[0].type)
+            or pa.types.is_large_binary(data_type[0].type)):
+        raise TypeError("VARIANT value field must be binary")
     return chunks, chunked, data_type
 
 
-def _variant_array(values, metadata, nulls, data_type):
+class _BinaryValues:
+
+    def __init__(self, array: pa.Array):
+        self.array = array
+        if pa.types.is_binary(array.type):
+            self.width, self.value_format = 4, '<i'
+        elif pa.types.is_large_binary(array.type):
+            self.width, self.value_format = 8, '<q'
+        else:
+            raise TypeError("VARIANT binary field has an unsupported type")
+        self.offsets = array.buffers()[1]
+        data_buffer = array.buffers()[2]
+        self.data = (memoryview(data_buffer) if data_buffer is not None
+                     else memoryview(b''))
+
+    def bounds(self, row: int) -> Tuple[int, int]:
+        index = self.array.offset + row
+        return (
+            struct.unpack_from(
+                self.value_format, self.offsets, index * self.width)[0],
+            struct.unpack_from(
+                self.value_format, self.offsets,
+                (index + 1) * self.width)[0],
+        )
+
+    def view(self, row: int) -> memoryview:
+        start, end = self.bounds(row)
+        return self.data[start:end]
+
+
+def _decode_scalar(value, metadata: bytes, pos: int):
+    value_type = _variant_get_type(value, pos)
+    if value_type == _Type.DOUBLE:
+        return struct.unpack_from('<d', value, pos + 1)[0]
+    if value_type == _Type.FLOAT:
+        return struct.unpack_from('<f', value, pos + 1)[0]
+    return GenericVariant(bytes(value), metadata, pos).to_python()
+
+
+def _patched_chunk(chunk: pa.StructArray, patches) -> pa.StructArray:
+    values = chunk.field(0)
+    data_buffer = values.buffers()[2]
+    data = bytearray(data_buffer) if data_buffer is not None else bytearray()
+    for absolute_pos, replacement in patches:
+        data[absolute_pos:absolute_pos + len(replacement)] = replacement
+
+    buffers = list(values.buffers())
+    buffers[2] = pa.py_buffer(data)
+    patched_values = pa.Array.from_buffers(
+        values.type,
+        len(values),
+        buffers,
+        null_count=values.null_count,
+        offset=values.offset,
+    )
+    metadata = chunk.field(1)
+    if chunk.offset == 0:
+        return pa.Array.from_buffers(
+            chunk.type,
+            len(chunk),
+            [chunk.buffers()[0]],
+            children=[patched_values, metadata],
+            null_count=chunk.null_count,
+        )
     return pa.StructArray.from_arrays(
-        [pa.array(values, type=data_type[0].type), metadata],
-        fields=list(data_type),
-        mask=pa.array(nulls, type=pa.bool_()),
+        [patched_values, metadata],
+        fields=list(chunk.type),
+        mask=chunk.is_null(),
     )
 
 
-def variant_transform(column, transforms: Mapping[str, object]):
-    """Transform existing FLOAT and DOUBLE paths without full decoding."""
-    parsed = [
-        (path, _parse_path(path), transform)
-        for path, transform in transforms.items()
-    ]
-    if len({path for _, path, _ in parsed}) != len(parsed):
-        raise ValueError("VARIANT transform paths must be unique")
-    for path, _, transform in parsed:
-        if not callable(transform):
-            raise TypeError(f"VARIANT transform for {path} must be callable")
-    if not parsed:
-        return column
+def _rebuilt_chunk(
+        chunk: pa.StructArray,
+        values: Sequence[bytes],
+) -> pa.StructArray:
+    return pa.StructArray.from_arrays(
+        [pa.array(values, type=chunk.type[0].type), chunk.field(1)],
+        fields=list(chunk.type),
+        mask=chunk.is_null(),
+    )
 
-    chunks, chunked, data_type = _variant_chunks(column)
-    paths = [path for _, path, _ in parsed]
+
+class _Replacement:
+
+    def __init__(self, value, length: int):
+        if isinstance(value, pa.Scalar):
+            self._value = value
+            self._array = None
+            self.type = value.type
+        elif isinstance(value, (pa.Array, pa.ChunkedArray)):
+            if len(value) != length:
+                raise ValueError(
+                    "VARIANT replacement length must match the input column")
+            self._value = None
+            self._array = value
+            self.type = value.type
+        else:
+            raise TypeError(
+                "VARIANT replacement must be an Arrow Scalar or Array")
+        if not _supported_replacement_type(self.type):
+            raise TypeError(
+                f"Unsupported VARIANT replacement type: {self.type}")
+        if pa.types.is_float64(self.type):
+            self._value_format = '<Bd'
+            self._type_header = _primitive_header(_DOUBLE)
+        elif pa.types.is_float32(self.type):
+            self._value_format = '<Bf'
+            self._type_header = _primitive_header(_FLOAT)
+        else:
+            self._value_format = None
+            self._type_header = None
+
+    def values(self, offset: int, length: int):
+        if self._array is None:
+            return [self._value.as_py()] * length
+        return self._array.slice(offset, length).to_pylist()
+
+    def encode(self, value) -> bytes:
+        if value is not None and self._value_format is not None:
+            return struct.pack(
+                self._value_format, self._type_header, value)
+        return _encode_scalar_to_value_bytes(value, self.type)
+
+
+def _supported_replacement_type(data_type: pa.DataType) -> bool:
+    return (
+        pa.types.is_null(data_type)
+        or pa.types.is_boolean(data_type)
+        or pa.types.is_signed_integer(data_type)
+        or pa.types.is_float32(data_type)
+        or pa.types.is_float64(data_type)
+        or pa.types.is_string(data_type)
+        or pa.types.is_large_string(data_type)
+        or pa.types.is_binary(data_type)
+        or pa.types.is_large_binary(data_type)
+        or pa.types.is_date32(data_type)
+        or pa.types.is_timestamp(data_type)
+        or pa.types.is_decimal128(data_type)
+    )
+
+
+def _variant_get(column, paths: Mapping[str, pa.DataType]):
+    parsed = []
+    for path, target_type in paths.items():
+        if not isinstance(target_type, pa.DataType):
+            raise TypeError("VARIANT target_type must be a PyArrow data type")
+        parsed.append((path, _parse_path(path), target_type))
+    parsed_paths = [parsed_path for _, parsed_path, _ in parsed]
+    chunks, chunked, _ = _variant_chunks(column)
     plans = []
-    result_chunks = []
+    result_chunks = {path: [] for path in paths}
     for chunk in chunks:
-        input_values = chunk.field(0).to_pylist()
-        metadata_array = chunk.field(1)
-        input_metadatas = metadata_array.to_pylist()
+        values = _BinaryValues(chunk.field(0))
+        metadata = chunk.field(1).to_pylist()
         valid = chunk.is_valid().to_pylist()
-        values, nulls = [], []
+        results = {path: [] for path in paths}
         for row in range(len(chunk)):
             if not valid[row]:
-                values.append(b'')
-                nulls.append(True)
+                for path in paths:
+                    results[path].append(None)
                 continue
+            value = values.view(row)
+            positions = _path_positions(
+                value,
+                metadata[row],
+                parsed_paths,
+                plans,
+            )
+            for (path, _, _), pos in zip(parsed, positions):
+                results[path].append(
+                    None if pos is None
+                    else _decode_scalar(value, metadata[row], pos)
+                )
+        for path, _, target_type in parsed:
+            result_chunks[path].append(
+                pa.array(results[path], type=target_type))
+    if not chunked:
+        return {path: chunks[0] for path, chunks in result_chunks.items()}
+    return {
+        path: pa.chunked_array(chunks, type=paths[path])
+        for path, chunks in result_chunks.items()
+    }
 
-            value = input_values[row]
-            metadata = input_metadatas[row]
-            result = bytearray(value)
-            positions = _path_positions(value, metadata, paths, plans)
-            for (path, _, transform), pos in zip(parsed, positions):
+
+def variant_get(column, path, target_type=None):
+    """Read one or more VARIANT paths into Arrow arrays."""
+    if isinstance(path, Mapping):
+        if target_type is not None:
+            raise TypeError(
+                "VARIANT target_type must be omitted for path mappings")
+        return _variant_get(column, path)
+    if target_type is None:
+        raise TypeError("VARIANT target_type must be a PyArrow data type")
+    return _variant_get(column, {path: target_type})[path]
+
+
+def _paths_overlap(first: _Path, second: _Path) -> bool:
+    limit = min(len(first), len(second))
+    return first[:limit] == second[:limit]
+
+
+def _validate_distinct_paths(parsed) -> None:
+    for index, (_, first, _) in enumerate(parsed):
+        for _, second, _ in parsed[index + 1:]:
+            if _paths_overlap(first, second):
+                raise ValueError(
+                    "VARIANT replacement paths must not overlap")
+
+
+def variant_replace(
+        column,
+        path,
+        replacement=None,
+        strict: bool = False,
+):
+    """Replace one or more existing VARIANT paths with Arrow values."""
+    if not isinstance(strict, bool):
+        raise TypeError("VARIANT strict must be a boolean")
+    if isinstance(path, Mapping):
+        if replacement is not None:
+            raise TypeError(
+                "VARIANT replacement must be omitted for path mappings")
+        replacements = path
+    else:
+        replacements = {path: replacement}
+    parsed = [
+        (path, _parse_path(path), _Replacement(value, len(column)))
+        for path, value in replacements.items()
+    ]
+    _validate_distinct_paths(parsed)
+    if not parsed:
+        return column
+    parsed_paths = [parsed_path for _, parsed_path, _ in parsed]
+
+    chunks, chunked, data_type = _variant_chunks(column)
+    plans = []
+    result_chunks = []
+    global_row = 0
+    for chunk in chunks:
+        values = _BinaryValues(chunk.field(0))
+        metadata = chunk.field(1).to_pylist()
+        valid = chunk.is_valid().to_pylist()
+        chunk_replacements = {
+            path: provider.values(global_row, len(chunk))
+            for path, _, provider in parsed
+        }
+        row_replacements = [[] for _ in range(len(chunk))]
+        patches = []
+        rebuild = False
+        for row in range(len(chunk)):
+            if not valid[row]:
+                continue
+            value = values.view(row)
+            row_start, _ = values.bounds(row)
+            positions = _path_positions(
+                value,
+                metadata[row],
+                parsed_paths,
+                plans,
+            )
+            for (path, parsed_path, provider), pos in zip(
+                    parsed, positions):
                 if pos is None:
-                    raise ValueError(f"VARIANT path does not exist: {path}")
-                value_type = _variant_get_type(value, pos)
-                if value_type == _Type.DOUBLE:
-                    value_format, type_name = '<d', 'DOUBLE'
-                elif value_type == _Type.FLOAT:
-                    value_format, type_name = '<f', 'FLOAT'
+                    if strict:
+                        raise ValueError(
+                            f"VARIANT path does not exist: {path}")
+                    continue
+                encoded = provider.encode(chunk_replacements[path][row])
+                row_replacements[row].append((parsed_path, encoded))
+                if len(encoded) == _value_size(value, pos):
+                    patches.append((row_start + pos, encoded))
                 else:
-                    raise TypeError(
-                        f"VARIANT path is not FLOAT or DOUBLE: {path}")
-                current = struct.unpack_from(
-                    value_format, value, pos + 1)[0]
-                updated = transform(current)
-                if not isinstance(updated, float):
-                    raise TypeError(
-                        f"VARIANT transform for {path} must return "
-                        f"{type_name}")
-                try:
-                    struct.pack_into(
-                        value_format, result, pos + 1, updated)
-                except (TypeError, struct.error, OverflowError) as error:
-                    raise TypeError(
-                        f"VARIANT transform for {path} must return "
-                        f"{type_name}"
-                    ) from error
-            values.append(bytes(result))
-            nulls.append(False)
-        result_chunks.append(
-            _variant_array(values, metadata_array, nulls, data_type))
+                    rebuild = True
+
+        if rebuild:
+            rebuilt_values = []
+            for row, replacements_for_row in enumerate(row_replacements):
+                value = bytes(values.view(row))
+                for parsed_path, encoded in replacements_for_row:
+                    value = _replace_path(
+                        value, metadata[row], 0, parsed_path, encoded)
+                rebuilt_values.append(value)
+            result_chunks.append(_rebuilt_chunk(chunk, rebuilt_values))
+        elif patches:
+            result_chunks.append(_patched_chunk(chunk, patches))
+        else:
+            result_chunks.append(chunk)
+        global_row += len(chunk)
 
     if not chunked:
         return result_chunks[0]

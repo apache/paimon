@@ -14,14 +14,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import operator
 import unittest
 from unittest.mock import patch
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from pypaimon.data.generic_variant import GenericVariant
-from pypaimon.data.variant_path import variant_transform
+from pypaimon.data.variant_path import variant_get, variant_replace
 from pypaimon.data.variant_shredding import _encode_scalar_to_value_bytes
 
 
@@ -49,113 +49,234 @@ def _float_variants(values):
     ])
 
 
-class TestVariantTransform(unittest.TestCase):
+class TestVariantGet(unittest.TestCase):
 
-    def test_transform_double_paths(self):
-        column = _variants([
-            {
-                'a_prefix': 'x',
-                'angular': {'y': 1.0, 'z': -2.0},
-                'linear': {'y': 3.0, 'z': -4.0},
-            },
-            {
-                'a_prefix': 'x' * 200,
-                'angular': {'y': 5.0, 'z': -6.0},
-                'linear': {'y': 7.0, 'z': -8.0},
-            },
+    def test_get_nested_path_and_missing_values(self):
+        column = pa.chunked_array([
+            _variants([{'a.b': [{'value': 1.5}]}, None]),
+            _variants([{'other': 2.0}, {'a.b': [{'value': -3.5}]}]),
         ])
-        metadata = column.field('metadata').to_pylist()
+
+        result = variant_get(
+            column, '$["a.b"][0].value', pa.float64())
+
+        self.assertIsInstance(result, pa.ChunkedArray)
+        self.assertEqual(result.num_chunks, 2)
+        self.assertEqual(result.to_pylist(), [1.5, None, None, -3.5])
+
+    def test_get_float_without_full_decode(self):
+        column = _float_variants([1.25, -2.5])
 
         with patch.object(
                 GenericVariant, 'to_python',
                 side_effect=AssertionError("full decode is not allowed")):
-            result = variant_transform(column, {
-                '$.angular.y': operator.neg,
-                '$.angular.z': operator.neg,
-                '$.linear.y': operator.neg,
-                '$.linear.z': operator.neg,
-            })
+            result = variant_get(column, '$', pa.float32())
 
-        self.assertEqual(_decode(result), [
-            {
-                'a_prefix': 'x',
-                'angular': {'y': -1.0, 'z': 2.0},
-                'linear': {'y': -3.0, 'z': 4.0},
-            },
-            {
-                'a_prefix': 'x' * 200,
-                'angular': {'y': -5.0, 'z': 6.0},
-                'linear': {'y': -7.0, 'z': 8.0},
-            },
+        self.assertEqual(result.to_pylist(), [1.25, -2.5])
+
+    def test_get_path_mapping_in_one_pass(self):
+        column = _variants([
+            {'velocity': {'y': 1.0, 'z': -2.0}},
+            {'velocity': {'y': 3.0, 'z': -4.0}},
         ])
-        self.assertEqual(result.field('metadata').to_pylist(), metadata)
+
+        result = variant_get(column, {
+            '$.velocity.y': pa.float64(),
+            '$.velocity.z': pa.float64(),
+        })
+
+        self.assertEqual(result['$.velocity.y'].to_pylist(), [1.0, 3.0])
+        self.assertEqual(result['$.velocity.z'].to_pylist(), [-2.0, -4.0])
+
+    def test_get_rejects_invalid_arguments(self):
+        column = _variants([{'value': 1}])
+        with self.assertRaisesRegex(ValueError, "Invalid VARIANT path"):
+            variant_get(column, 'value', pa.int64())
+        with self.assertRaisesRegex(TypeError, "PyArrow data type"):
+            variant_get(column, '$.value', 'BIGINT')
+
+
+class TestVariantReplace(unittest.TestCase):
+
+    def test_equal_length_uses_copy_on_write(self):
+        column = _variants([
+            {'number': 1.0, 'text': 'keep'},
+            None,
+            {'number': -2.0, 'text': 'also keep'},
+        ])
+        original = column.to_pylist()
+        replacement = pa.array([-1.0, 0.0, 2.0], type=pa.float64())
+
+        with patch.object(
+                GenericVariant, 'to_python',
+                side_effect=AssertionError("full decode is not allowed")):
+            result = variant_replace(
+                column, '$.number', replacement)
+
+        self.assertEqual(column.to_pylist(), original)
+        self.assertEqual(_decode(result), [
+            {'number': -1.0, 'text': 'keep'},
+            None,
+            {'number': 2.0, 'text': 'also keep'},
+        ])
         self.assertEqual(
-            result.field('metadata').buffers()[2].address,
+            column.field('value').buffers()[1].address,
+            result.field('value').buffers()[1].address,
+        )
+        self.assertNotEqual(
+            column.field('value').buffers()[2].address,
+            result.field('value').buffers()[2].address,
+        )
+        self.assertEqual(
             column.field('metadata').buffers()[2].address,
+            result.field('metadata').buffers()[2].address,
+        )
+        self.assertEqual(
+            column.buffers()[0].address,
+            result.buffers()[0].address,
         )
 
-    def test_array_path_null_and_chunks(self):
-        first = _variants([{'a.b': [{'value': 1.0}]}, None])
-        second = _variants([{'a.b': [{'value': 2.0}]}])
-        column = pa.chunked_array([first, second])
+    def test_get_compute_replace_pipeline(self):
+        column = pa.chunked_array([
+            _variants([{'y': 1.0, 'z': -2.0}, None]),
+            _variants([{'y': -3.0, 'z': 4.0}]),
+        ])
+        current = variant_get(column, {
+            '$.y': pa.float64(),
+            '$.z': pa.float64(),
+        })
 
-        result = variant_transform(
-            column, {'$["a.b"][0].value': operator.neg})
+        result = variant_replace(column, {
+            '$.y': pc.negate(current['$.y']),
+            '$.z': pc.negate(current['$.z']),
+        })
 
         self.assertIsInstance(result, pa.ChunkedArray)
         self.assertEqual(result.num_chunks, 2)
         self.assertEqual(_decode(result), [
-            {'a.b': [{'value': -1.0}]},
-            None,
-            {'a.b': [{'value': -2.0}]},
+            {'y': -1.0, 'z': 2.0}, None,
+            {'y': 3.0, 'z': -4.0},
         ])
 
-    def test_transform_float_path(self):
-        column = _float_variants([1.25, -2.5])
+    def test_scalar_and_same_length_string_replacement(self):
+        column = _variants([{'text': 'aa'}, {'text': 'bb'}])
 
-        result = variant_transform(column, {'$': operator.neg})
+        result = variant_replace(
+            column, '$.text', pa.scalar('xy', type=pa.string()))
 
-        self.assertEqual(_decode(result), [-1.25, 2.5])
-
-    def test_transform_preserves_mixed_float_and_double_types(self):
-        float_value = GenericVariant.from_arrow_struct(
-            _float_variants([1.25])[0].as_py())
-        double_value = GenericVariant.from_python(2.5)
-        column = GenericVariant.to_arrow_array([float_value, double_value])
-
-        result = variant_transform(column, {'$': operator.neg})
-
-        self.assertEqual(_decode(result), [-1.25, -2.5])
+        self.assertEqual(_decode(result), [{'text': 'xy'}, {'text': 'xy'}])
         self.assertEqual(
-            [len(value) for value in result.field('value').to_pylist()],
-            [len(float_value.value()), len(double_value.value())],
+            column.field('value').buffers()[1].address,
+            result.field('value').buffers()[1].address,
         )
 
-    def test_float_transform_rejects_invalid_result(self):
-        column = _float_variants([1.0])
+    def test_different_length_rebuilds_offsets(self):
+        column = _variants([
+            {
+                'before': 1,
+                'nested': {'items': [0, {'text': 'a'}]},
+                'after': 2,
+            },
+            {
+                'before': 3,
+                'nested': {'items': [0, {'text': 'bb'}]},
+                'after': 4,
+            },
+        ])
 
-        with self.assertRaisesRegex(TypeError, "must return FLOAT"):
-            variant_transform(column, {'$': lambda value: 1})
-        with self.assertRaisesRegex(TypeError, "must return FLOAT"):
-            variant_transform(column, {'$': lambda value: 1e100})
+        result = variant_replace(
+            column,
+            '$.nested.items[1].text',
+            pa.array(['a much longer value', 'x'], type=pa.string()),
+        )
 
-    def test_rejects_invalid_transform(self):
-        column = _variants([{'number': 1.0, 'text': 'value'}])
+        self.assertEqual(_decode(result), [
+            {
+                'before': 1,
+                'nested': {'items': [0, {'text': 'a much longer value'}]},
+                'after': 2,
+            },
+            {
+                'before': 3,
+                'nested': {'items': [0, {'text': 'x'}]},
+                'after': 4,
+            },
+        ])
+        self.assertEqual(
+            column.field('metadata').buffers()[2].address,
+            result.field('metadata').buffers()[2].address,
+        )
+
+    def test_same_length_type_change_uses_fast_path(self):
+        column = _variants([1000000, -1000000])
+
+        result = variant_replace(
+            column, '$', pa.array([1.25, -2.5], type=pa.float32()))
+
+        self.assertEqual(_decode(result), [1.25, -2.5])
+        self.assertEqual(
+            column.field('value').buffers()[1].address,
+            result.field('value').buffers()[1].address,
+        )
+
+    def test_missing_path_is_noop_or_strict_error(self):
+        column = _variants([{'value': 1}, {'other': 2}])
+        replacement = pa.array([10, 20], type=pa.int64())
+
+        result = variant_replace(column, '$.value', replacement)
+
+        self.assertEqual(_decode(result), [{'value': 10}, {'other': 2}])
+        with self.assertRaisesRegex(ValueError, "path does not exist"):
+            variant_replace(
+                column, '$.value', replacement, strict=True)
+
+    def test_sql_null_replacement_and_sliced_input(self):
+        base = _variants([
+            {'value': 0.0}, {'value': 1.0},
+            {'value': 2.0}, {'value': 3.0},
+        ])
+        column = base.slice(1, 2)
+
+        result = variant_replace(
+            column,
+            '$.value',
+            pa.array([None, -2.0], type=pa.float64()),
+        )
+
+        self.assertEqual(_decode(result), [{'value': None}, {'value': -2.0}])
+        self.assertEqual(result.is_valid().to_pylist(), [True, True])
+
+    def test_rejects_invalid_arguments(self):
+        column = _variants([{'value': 1.0}, {'value': 2.0}])
         cases = [
-            ({'number': operator.neg}, ValueError, "Invalid VARIANT path"),
-            ({'$.number': operator.neg, "$['number']": operator.neg},
-             ValueError, "paths must be unique"),
-            ({'$.missing': operator.neg}, ValueError, "path does not exist"),
-            ({'$.text': operator.neg}, TypeError,
-             "path is not FLOAT or DOUBLE"),
-            ({'$.number': 'negate'}, TypeError, "must be callable"),
-            ({'$.number': lambda value: 1}, TypeError,
-             "must return DOUBLE"),
+            ('value', pa.scalar(1.0), False,
+             ValueError, "Invalid VARIANT path"),
+            ('$.value', pa.array([1.0]), False,
+             ValueError, "length must match"),
+            ('$.value', 1.0, False,
+             TypeError, "Arrow Scalar or Array"),
+            ('$.value', pa.array([{'x': 1}, {'x': 2}]), False,
+             TypeError, "Unsupported VARIANT replacement type"),
+            ('$.value', pa.scalar(1.0), 'yes',
+             TypeError, "strict must be a boolean"),
         ]
-        for transforms, error_type, message in cases:
-            with self.subTest(transforms=transforms):
+        for path, replacement, strict, error_type, message in cases:
+            with self.subTest(path=path, replacement=replacement):
                 with self.assertRaisesRegex(error_type, message):
-                    variant_transform(column, transforms)
+                    variant_replace(
+                        column, path, replacement, strict=strict)
+
+        with self.assertRaisesRegex(TypeError, "must be omitted"):
+            variant_get(
+                column, {'$.value': pa.float64()}, pa.float64())
+        with self.assertRaisesRegex(TypeError, "must be omitted"):
+            variant_replace(
+                column, {'$.value': pa.scalar(1.0)}, pa.scalar(2.0))
+        with self.assertRaisesRegex(ValueError, "must not overlap"):
+            variant_replace(column, {
+                '$.value': pa.scalar(1.0),
+                '$.value.child': pa.scalar(2.0),
+            })
 
 
 if __name__ == '__main__':
