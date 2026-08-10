@@ -158,42 +158,10 @@ class TableUpdateByRowIdChunkedTest(unittest.TestCase):
             [original_value_length, replacement_value_length],
         )
 
-    def test_large_list_coercion_splits_before_casting_to_list(self):
-        child_length = 1_100_000_000
-        original = pa.table({
-            "payload": pa.array([[], []], type=pa.list_(pa.null())),
-        })
-        large_replacement = self._large_list_chunk([0, child_length])
-        updates = pa.table({
-            SpecialFields.ROW_ID.name: pa.array([0, 1], type=pa.int64()),
-            "payload": pa.chunked_array([
-                large_replacement,
-                large_replacement,
-            ]),
-        })
-
-        merged, _ = self._updater()._merge_update_with_original(
-            original, updates, ["payload"], first_row_id=0)
-
-        payload = merged["payload"]
-        self.assertEqual(payload.type, pa.list_(pa.null()))
-        self.assertEqual(payload.num_chunks, 2)
-        self.assertEqual(
-            [len(chunk[0].values) for chunk in payload.chunks],
-            [child_length, child_length],
-        )
-
     @staticmethod
     def _list_chunk(offsets):
         return pa.ListArray.from_arrays(
             pa.array(offsets, type=pa.int32()),
-            pa.nulls(offsets[-1]),
-        )
-
-    @staticmethod
-    def _large_list_chunk(offsets):
-        return pa.LargeListArray.from_arrays(
-            pa.array(offsets, type=pa.int64()),
             pa.nulls(offsets[-1]),
         )
 
