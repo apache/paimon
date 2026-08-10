@@ -293,25 +293,19 @@ Multiple rows can therefore refer to the same index container.
 
 ```sql
 SELECT * FROM my_table$file_indexes;
+
+/*
++-----------+--------+--------------------------------+--------------------+--------------+-----------+-------------+--------------+--------------+--------------------------------+--------------------+----------------------------+----------+
+| partition | bucket |                      file_path | file_size_in_bytes | record_count | schema_id | column_name |  index_type  | storage_type |               index_file_path | index_size_in_bytes | index_container_size_in_bytes | is_empty |
++-----------+--------+--------------------------------+--------------------+--------------+-----------+-------------+--------------+--------------+--------------------------------+--------------------+----------------------------+----------+
+|       {1} |      0 | data-8f64af95-29cc-4342-adc... |                593 |            2 |         0 |          id |      bitmap |     EMBEDDED |                         <NULL> |                 12 |                           48 |    false |
+|       {1} |      0 | data-8f64af95-29cc-4342-adc... |                593 |            2 |         0 |          id | bloom-filter |     EMBEDDED |                         <NULL> |                 16 |                           48 |    false |
+|       {2} |      0 | data-8b369068-0d37-4011-aa5... |                593 |            2 |         0 |          id |      bitmap |         FILE | data-8b369068-0d37-4011-aa5... |                 12 |                           48 |    false |
+|       {2} |      0 | data-8b369068-0d37-4011-aa5... |                593 |            2 |         0 |          id | bloom-filter |         FILE | data-8b369068-0d37-4011-aa5... |                 16 |                           48 |    false |
++-----------+--------+--------------------------------+--------------------+--------------+-----------+-------------+--------------+--------------+--------------------------------+--------------------+----------------------------+----------+
+4 rows in set
+*/
 ```
-
-The table contains the following columns:
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `partition` | STRING | Partition of the data file. |
-| `bucket` | INT | Bucket of the data file. |
-| `file_path` | STRING | Path of the data file. |
-| `file_size_in_bytes` | BIGINT | Size of the data file. |
-| `record_count` | BIGINT | Number of records in the data file. |
-| `schema_id` | BIGINT | Schema ID of the data file. |
-| `column_name` | STRING | Indexed column. Nested map indexes use names such as `attributes[country]`. |
-| `index_type` | STRING | File index type, such as `bitmap`, `bloom-filter`, or `range-bitmap`. |
-| `storage_type` | STRING | `EMBEDDED` when stored in the manifest, otherwise `FILE`. |
-| `index_file_path` | STRING | Path of the external index container, or `NULL` for an embedded index. |
-| `index_size_in_bytes` | BIGINT | Size of this column and index-type payload. |
-| `index_container_size_in_bytes` | BIGINT | Total size of the shared index container. |
-| `is_empty` | BOOLEAN | Whether this index has an empty payload. |
 
 The system table reads only file index headers and does not load index payloads. It lists indexes
 that physically exist in the selected snapshot; data files without file indexes do not produce
