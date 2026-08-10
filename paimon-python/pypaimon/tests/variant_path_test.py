@@ -160,6 +160,39 @@ class TestVariantGet(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid cast"):
             variant_get(column, '$.overflow', pa.int32())
 
+    def test_get_matches_java_numeric_casts(self):
+        column = _variants([
+            {'value': 1e20},
+            {'value': float('nan')},
+            {'value': float('inf')},
+            {'value': float('-inf')},
+        ])
+        self.assertEqual(
+            variant_get(column, '$.value', pa.int32()).to_pylist(),
+            [2147483647, 0, 2147483647, -2147483648],
+        )
+
+        invalid = _variants([
+            {'value': Decimal('1.0')},
+            {'value': 1.5},
+        ])
+        with self.assertRaisesRegex(ValueError, "Invalid cast"):
+            variant_get(invalid.slice(0, 1), '$.value', pa.bool_())
+        with self.assertRaisesRegex(ValueError, "Invalid cast"):
+            variant_get(invalid.slice(1, 1), '$.value', pa.timestamp('us'))
+
+        timestamp = variant_get(
+            _variants([{'value': 1}]), '$.value', pa.timestamp('us'))
+        self.assertEqual(
+            timestamp.to_pylist(), [datetime.datetime(1970, 1, 1, 0, 0, 1)])
+
+    def test_variant_null_remains_arrow_null(self):
+        column = _variants([None, {'value': None}, {'value': 1.0}])
+
+        result = variant_get(column, '$.value', pa.float64())
+
+        self.assertEqual(result.to_pylist(), [None, None, 1.0])
+
     def test_get_decimal_is_exact(self):
         expected = Decimal('12345678901234567890123456789012345678')
         column = _variants([{'value': expected}])
@@ -212,6 +245,17 @@ class TestVariantGet(unittest.TestCase):
             variant_get(column, 'value', pa.int64())
         with self.assertRaisesRegex(TypeError, "PyArrow data type"):
             variant_get(column, '$.value', 'BIGINT')
+
+        invalid_metadata = pa.StructArray.from_arrays(
+            [
+                pa.array([None], type=pa.binary()),
+                pa.array([None], type=pa.string()),
+            ],
+            names=['value', 'metadata'],
+            mask=pa.array([True]),
+        )
+        with self.assertRaisesRegex(TypeError, "metadata field must be binary"):
+            variant_get(invalid_metadata, '$.value', pa.float64())
 
 
 class TestVariantReplace(unittest.TestCase):
@@ -288,6 +332,52 @@ class TestVariantReplace(unittest.TestCase):
                                  [expected_first])
                 self.assertEqual(_decode(result.slice(size - 1, 1)),
                                  [{'value': -1.0}])
+
+    def test_sparse_value_types_keep_slow_path_bounded(self):
+        size = 4096
+        uniform = _variants([
+            {'value': float(index)} for index in range(1, size)
+        ])
+        for exceptional in (None, 1):
+            with self.subTest(exceptional=exceptional):
+                column = pa.concat_arrays([
+                    _variants([{'value': exceptional}]), uniform,
+                ])
+                with patch(
+                        'pypaimon.data.variant_path._path_positions',
+                        wraps=_path_positions,
+                ) as slow_path:
+                    current = variant_get(
+                        column, '$.value', pa.float64())
+                    self.assertLessEqual(slow_path.call_count, 1)
+                self.assertEqual(
+                    current[0].as_py(),
+                    None if exceptional is None else 1.0,
+                )
+
+                with patch(
+                        'pypaimon.data.variant_path._path_positions',
+                        wraps=_path_positions,
+                ) as slow_path:
+                    result = variant_replace(
+                        column, '$.value', pa.scalar(-1.0))
+                    self.assertLessEqual(slow_path.call_count, 1)
+                self.assertEqual(_decode(result.slice(0, 1)),
+                                 [{'value': -1.0}])
+                self.assertEqual(_decode(result.slice(size - 1, 1)),
+                                 [{'value': -1.0}])
+
+        replacement = pa.array(
+            [None] + [-1.0] * (len(uniform) - 1), type=pa.float64())
+        with patch(
+                'pypaimon.data.variant_path._path_positions',
+                wraps=_path_positions,
+        ) as slow_path:
+            result = variant_replace(uniform, '$.value', replacement)
+            self.assertLessEqual(slow_path.call_count, 1)
+        self.assertEqual(_decode(result.slice(0, 1)), [{'value': None}])
+        self.assertEqual(_decode(result.slice(len(uniform) - 1, 1)),
+                         [{'value': -1.0}])
 
     def test_truncated_value_does_not_cross_row_boundary(self):
         first = GenericVariant.from_python({'value': 1.0})

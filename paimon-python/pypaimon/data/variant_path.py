@@ -397,6 +397,9 @@ def _variant_chunks(column):
     if not (pa.types.is_binary(data_type[0].type)
             or pa.types.is_large_binary(data_type[0].type)):
         raise TypeError("VARIANT value field must be binary")
+    if not (pa.types.is_binary(data_type[1].type)
+            or pa.types.is_large_binary(data_type[1].type)):
+        raise TypeError("VARIANT metadata field must be binary")
     return chunks, chunked, data_type
 
 
@@ -736,6 +739,7 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
     if len(valid_rows) == len(chunk) and len(plans) == 1 and not slow_rows:
         _, row_starts, data, positions, limits = plans[0]
         results = []
+        uniform = True
         for pos, limit, target_type in zip(
                 positions, limits, target_types):
             absolute = row_starts + pos
@@ -745,14 +749,17 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
             elif np.all(headers == _primitive_header(_FLOAT)):
                 value_size, data_type = 4, np.dtype('<f4')
             else:
-                return None
+                uniform = False
+                break
             if np.any(absolute + 1 + value_size != row_starts + limit):
-                return None
+                uniform = False
+                break
             indices = absolute[:, None] + 1 + np.arange(value_size)
             raw = np.ascontiguousarray(data[indices])
             result = raw.view(data_type).reshape(-1)
             results.append(pa.array(result, type=target_type))
-        return results
+        if uniform:
+            return results
     outputs = [
         np.empty(
             len(chunk),
@@ -762,41 +769,49 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
         for target_type in target_types
     ]
     masks = [np.ones(len(chunk), dtype=bool) for _ in target_types]
+    slow_by_path = [set(int(row) for row in slow_rows)
+                    for _ in target_types]
     for planned in plans:
         rows, row_starts, data, positions, limits = planned
         for index, (pos, limit) in enumerate(zip(positions, limits)):
             absolute = row_starts + pos
             headers = data[absolute]
-            if np.all(headers == _primitive_header(_DOUBLE)):
-                value_size, data_type = 8, np.dtype('<f8')
-            elif np.all(headers == _primitive_header(_FLOAT)):
-                value_size, data_type = 4, np.dtype('<f4')
-            else:
-                slow_rows.extend(rows)
-                break
-            if np.any(absolute + 1 + value_size != row_starts + limit):
-                slow_rows.extend(rows)
-                break
-            indices = absolute[:, None] + 1 + np.arange(value_size)
-            raw = np.ascontiguousarray(data[indices])
-            result = raw.view(data_type).reshape(-1)
-            outputs[index][rows] = result
-            masks[index][rows] = False
-        else:
-            continue
-        for mask in masks:
-            mask[rows] = True
+            handled = np.zeros(len(rows), dtype=bool)
+            for header, value_size, data_type in (
+                    (_primitive_header(_DOUBLE), 8, np.dtype('<f8')),
+                    (_primitive_header(_FLOAT), 4, np.dtype('<f4'))):
+                selected = (
+                    (headers == header)
+                    & (absolute + 1 + value_size == row_starts + limit)
+                )
+                if not np.any(selected):
+                    continue
+                selected_rows = rows[selected]
+                selected_absolute = absolute[selected]
+                indices = (
+                    selected_absolute[:, None] + 1 + np.arange(value_size)
+                )
+                raw = np.ascontiguousarray(data[indices])
+                result = raw.view(data_type).reshape(-1)
+                outputs[index][selected_rows] = result
+                masks[index][selected_rows] = False
+                handled |= selected
+            slow_by_path[index].update(
+                int(row) for row in rows[~handled])
 
     metadata = _BinaryValues(chunk.field(1))
-    for row in set(int(row) for row in slow_rows):
+    for row in set().union(*slow_by_path):
         value = values.view(row)
         row_metadata = bytes(metadata.view(row))
         positions = _path_positions(value, row_metadata, parsed_paths, None)
         for index, (pos, target_type) in enumerate(
                 zip(positions, target_types)):
-            if pos is not None:
-                outputs[index][row] = _decode_scalar(
-                    value, row_metadata, pos, target_type)
+            if row not in slow_by_path[index] or pos is None:
+                continue
+            decoded = _decode_scalar(
+                value, row_metadata, pos, target_type)
+            if decoded is not None:
+                outputs[index][row] = decoded
                 masks[index][row] = False
     return [
         pa.array(output, mask=mask, type=target_type)
@@ -854,8 +869,21 @@ def _cast_decimal(value, target_type):
 
 
 def _cast_integer(value, target_type):
-    number = int(value)
     bits = target_type.bit_width
+    if isinstance(value, float):
+        base_bits = 64 if bits == 64 else 32
+        minimum = -(1 << (base_bits - 1))
+        maximum = (1 << (base_bits - 1)) - 1
+        if math.isnan(value):
+            number = 0
+        elif value <= minimum:
+            number = minimum
+        elif value >= maximum:
+            number = maximum
+        else:
+            number = int(value)
+    else:
+        number = int(value)
     return ((number + (1 << (bits - 1))) % (1 << bits)) - (1 << (bits - 1))
 
 
@@ -944,7 +972,7 @@ def _cast_python(value, target_type):
                     return False
                 else:
                     raise ValueError
-            if isinstance(value, (bool, int, decimal.Decimal)):
+            if isinstance(value, (bool, int)):
                 return value != 0
             raise TypeError
         if pa.types.is_signed_integer(target_type):
@@ -983,9 +1011,10 @@ def _cast_python(value, target_type):
                 return datetime.datetime.combine(value, datetime.time())
             if isinstance(value, str):
                 return datetime.datetime.fromisoformat(value)
-            if isinstance(value, (int, float)):
-                return datetime.datetime.fromtimestamp(
+            if isinstance(value, int) and not isinstance(value, bool):
+                result = datetime.datetime.fromtimestamp(
                     value, tz=datetime.timezone.utc)
+                return result if target_type.tz else result.replace(tzinfo=None)
             raise TypeError
     except (ArithmeticError, TypeError, ValueError):
         pass
@@ -1028,6 +1057,47 @@ def _rebuilt_chunk(
 ) -> pa.StructArray:
     return pa.StructArray.from_arrays(
         [pa.array(values, type=chunk.type[0].type), chunk.field(1)],
+        fields=list(chunk.type),
+        mask=chunk.is_null(),
+    )
+
+
+def _sparse_rebuilt_chunk(
+        chunk, values, data, data_start, rebuilt_rows):
+    old_offsets = values.numpy_offsets()
+    lengths = old_offsets[1:] - old_offsets[:-1]
+    for row, rebuilt in rebuilt_rows.items():
+        lengths[row] = len(rebuilt)
+    offsets = np.empty(len(chunk) + 1, dtype=np.dtype(values.value_format))
+    offsets[0] = 0
+    np.cumsum(lengths, out=offsets[1:])
+    output = bytearray(int(offsets[-1]))
+    source_start = int(old_offsets[0]) - data_start
+    target_start = 0
+    for row, rebuilt in sorted(rebuilt_rows.items()):
+        row_start = int(old_offsets[row]) - data_start
+        row_end = int(old_offsets[row + 1]) - data_start
+        prefix_size = row_start - source_start
+        output[target_start:target_start + prefix_size] = data[
+            source_start:row_start]
+        target_start += prefix_size
+        output[target_start:target_start + len(rebuilt)] = rebuilt
+        target_start += len(rebuilt)
+        source_start = row_end
+    source_end = int(old_offsets[-1]) - data_start
+    output[target_start:] = data[source_start:source_end]
+    validity = (
+        None if values.array.null_count == 0
+        else values.array.is_valid().buffers()[1]
+    )
+    rebuilt_values = pa.Array.from_buffers(
+        values.array.type,
+        len(chunk),
+        [validity, pa.py_buffer(offsets), pa.py_buffer(output)],
+        null_count=values.array.null_count,
+    )
+    return pa.StructArray.from_arrays(
+        [rebuilt_values, chunk.field(1)],
         fields=list(chunk.type),
         mask=chunk.is_null(),
     )
@@ -1095,20 +1165,26 @@ class _Replacement:
             else np.dtype('<f4')
         )
         if self._array is None:
-            if not self._value.is_valid:
-                return None
             size = length if rows is None else len(rows)
-            return np.full(size, self._value.as_py(), dtype=data_type)
+            if not self._value.is_valid:
+                return np.empty(size, dtype=data_type), np.zeros(
+                    size, dtype=bool)
+            return (
+                np.full(size, self._value.as_py(), dtype=data_type),
+                np.ones(size, dtype=bool),
+            )
 
         values = self._array.slice(offset, length)
         if isinstance(values, pa.ChunkedArray):
             values = values.combine_chunks()
         if rows is not None:
             values = values.take(pa.array(rows, type=pa.int64()))
-        if values.null_count:
-            return None
-        return np.asarray(
-            values.to_numpy(zero_copy_only=False), dtype=data_type)
+        valid = np.asarray(
+            values.is_valid().to_numpy(zero_copy_only=False), dtype=bool)
+        return (
+            np.asarray(values.to_numpy(zero_copy_only=False), dtype=data_type),
+            valid,
+        )
 
     def encode(self, value) -> bytes:
         if value is not None and self._value_format is not None:
@@ -1133,59 +1209,67 @@ def _vectorized_replace_chunk(
         return chunk
     plans, slow_rows = _partition_path_plans(
         values, chunk.field(1), valid_rows, parsed_paths)
+    slow_rows = set(int(row) for row in slow_rows)
     data, data_start = values.copy_used_data()
     output_data = np.frombuffer(data, dtype=np.uint8)
     for planned in plans:
-        rows, row_starts, input_data, positions, limits = planned
+        rows, row_starts, _, positions, limits = planned
         replacements = []
+        compatible = np.ones(len(rows), dtype=bool)
         for (_, _, provider), pos, limit in zip(
                 parsed, positions, limits):
-            replacement = provider.numpy_values(
+            replacement, replacement_valid = provider.numpy_values(
                 global_row,
                 len(chunk),
                 None if len(rows) == len(chunk) else rows,
             )
             absolute = row_starts + pos
-            if (replacement is None
-                    or not np.all(
-                        input_data[absolute] == provider._type_header)
-                    or np.any(
-                        absolute + provider._fixed_size
-                        != row_starts + limit)):
-                slow_rows.extend(rows)
-                break
+            compatible &= (
+                replacement_valid
+                & (absolute + provider._fixed_size == row_starts + limit)
+            )
             replacements.append((pos, provider, replacement))
-        else:
-            relative_starts = row_starts - data_start
-            for pos, provider, replacement in replacements:
-                absolute = relative_starts + pos
-                output_data[absolute] = provider._type_header
-                value_size = provider._fixed_size - 1
-                replacement_bytes = np.ascontiguousarray(
-                    replacement).view(np.uint8).reshape(
-                        len(rows), value_size)
-                indices = absolute[:, None] + 1 + np.arange(value_size)
-                output_data[indices] = replacement_bytes
+        slow_rows.update(int(row) for row in rows[~compatible])
+        if not np.any(compatible):
+            continue
+        relative_starts = row_starts - data_start
+        compatible_rows = rows[compatible]
+        for pos, provider, replacement in replacements:
+            absolute = (relative_starts + pos)[compatible]
+            output_data[absolute] = provider._type_header
+            value_size = provider._fixed_size - 1
+            replacement_bytes = np.ascontiguousarray(
+                replacement[compatible]).view(np.uint8).reshape(
+                    len(compatible_rows), value_size)
+            indices = absolute[:, None] + 1 + np.arange(value_size)
+            output_data[indices] = replacement_bytes
 
     metadata = _BinaryValues(chunk.field(1))
-    for row in set(int(row) for row in slow_rows):
-        value = values.view(row)
+    rebuilt_rows = {}
+    for row in slow_rows:
+        original = bytes(values.view(row))
+        value = original
         row_metadata = bytes(metadata.view(row))
         positions = _path_positions(value, row_metadata, parsed_paths, None)
-        for (path, _, provider), pos in zip(parsed, positions):
+        for (path, parsed_path, provider), pos in zip(parsed, positions):
             if pos is None:
                 if strict:
                     raise ValueError(f"VARIANT path does not exist: {path}")
                 continue
             replacement_value = provider.scalar_at(global_row + row)
-            if replacement_value is None:
-                return None
-            if (provider.fixed_size(replacement_value)
-                    != _checked_value_size(value, pos)):
-                return None
-            patch_pos = values.bounds(row)[0] - data_start + pos
-            provider.patch(data, patch_pos, replacement_value)
+            value = _replace_path(
+                value,
+                row_metadata,
+                0,
+                parsed_path,
+                provider.encode(replacement_value),
+            )
+        if value != original:
+            rebuilt_rows[row] = value
 
+    if rebuilt_rows:
+        return _sparse_rebuilt_chunk(
+            chunk, values, data, data_start, rebuilt_rows)
     return _patched_chunk(chunk, values, data, data_start)
 
 
