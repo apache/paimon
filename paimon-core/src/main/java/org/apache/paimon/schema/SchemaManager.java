@@ -1212,6 +1212,10 @@ public class SchemaManager implements Serializable {
         return fromPath(fileIO, toSchemaPath(id));
     }
 
+    public TableSchema tryGetSchema(long id) throws FileNotFoundException {
+        return tryFromPath(fileIO, toSchemaPath(id));
+    }
+
     /** Check if a schema exists. */
     public boolean schemaExists(long id) {
         Path path = toSchemaPath(id);

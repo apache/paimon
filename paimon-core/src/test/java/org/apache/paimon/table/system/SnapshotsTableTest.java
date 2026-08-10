@@ -55,7 +55,6 @@ import java.util.List;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link SnapshotsTable}. */
 public class SnapshotsTableTest extends TableTestBase {
@@ -122,19 +121,19 @@ public class SnapshotsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testReadSnapshotsWithEqualFilterOnUnknownIdStillFails() {
+    public void testReadSnapshotsWithEqualFilterOnUnknownId() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
         Predicate predicate =
                 builder.equal(snapshotsTable.rowType().getFieldNames().indexOf("snapshot_id"), 99L);
 
         ReadBuilder readBuilder = snapshotsTable.newReadBuilder().withFilter(predicate);
-        assertThatThrownBy(
-                        () ->
-                                readBuilder
-                                        .newRead()
-                                        .createReader(readBuilder.newScan().plan())
-                                        .forEachRemaining(row -> {}))
-                .isInstanceOf(RuntimeException.class);
+        List<InternalRow> result = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(result::add);
+
+        assertThat(result).isEmpty();
     }
 
     private List<InternalRow> getExpectedResult(long[] snapshotIds) {

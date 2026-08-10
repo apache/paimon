@@ -102,6 +102,22 @@ public class SchemasTableTest extends TableTestBase {
         assertThat(result).containsExactlyElementsOf(getExpectedResult());
     }
 
+    @Test
+    public void testReadSchemasWithEqualFilterOnUnknownId() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(schemasTable.rowType());
+        Predicate predicate =
+                builder.equal(schemasTable.rowType().getFieldNames().indexOf("schema_id"), 99L);
+
+        ReadBuilder readBuilder = schemasTable.newReadBuilder().withFilter(predicate);
+        List<InternalRow> result = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(result::add);
+
+        assertThat(result).isEmpty();
+    }
+
     private List<InternalRow> getExpectedResult() {
         List<TableSchema> tableSchemas = schemaManager.listAll();
 

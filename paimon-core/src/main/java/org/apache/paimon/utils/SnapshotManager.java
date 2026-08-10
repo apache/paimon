@@ -550,15 +550,24 @@ public class SnapshotManager implements Serializable {
     }
 
     public Iterator<Snapshot> snapshotsWithId(List<Long> snapshotIds) {
-        return snapshotIds.stream()
-                .filter(this::snapshotExists)
-                .map(this::snapshot)
-                .sorted(Comparator.comparingLong(Snapshot::id))
-                .iterator();
+        List<Snapshot> snapshots = new ArrayList<>();
+        for (long snapshotId : snapshotIds) {
+            try {
+                snapshots.add(tryGetSnapshot(snapshotId));
+            } catch (FileNotFoundException ignored) {
+            }
+        }
+        snapshots.sort(Comparator.comparingLong(Snapshot::id));
+        return snapshots.iterator();
     }
 
     public Iterator<Snapshot> snapshotsWithinRange(
             Optional<Long> optionalMaxSnapshotId, Optional<Long> optionalMinSnapshotId) {
+        if (optionalMaxSnapshotId.isPresent()
+                && optionalMaxSnapshotId.equals(optionalMinSnapshotId)) {
+            return snapshotsWithId(Collections.singletonList(optionalMaxSnapshotId.get()));
+        }
+
         Long lowerBoundSnapshotId = earliestSnapshotId();
         Long upperBoundSnapshotId = latestSnapshotId();
         Long lowerId;

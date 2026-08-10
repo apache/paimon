@@ -62,6 +62,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -310,16 +311,24 @@ public class SchemasTable implements ReadonlyTable {
 
     private static List<TableSchema> schemasWithId(
             SchemaManager schemaManager, List<Long> schemaIds) {
-        return schemaIds.stream()
-                .filter(schemaManager::schemaExists)
-                .map(schemaManager::schema)
-                .collect(Collectors.toList());
+        List<TableSchema> schemas = new ArrayList<>();
+        for (long schemaId : schemaIds) {
+            try {
+                schemas.add(schemaManager.tryGetSchema(schemaId));
+            } catch (FileNotFoundException ignored) {
+            }
+        }
+        return schemas;
     }
 
     private static List<TableSchema> listWithRange(
             SchemaManager schemaManager,
             @Nullable Long optionalMinSchemaId,
             @Nullable Long optionalMaxSchemaId) {
+        if (optionalMinSchemaId != null && optionalMinSchemaId.equals(optionalMaxSchemaId)) {
+            return schemasWithId(schemaManager, Collections.singletonList(optionalMinSchemaId));
+        }
+
         long lowerBoundSchemaId = 0L;
 
         Optional<TableSchema> latest = schemaManager.latest();
