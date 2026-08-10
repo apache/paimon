@@ -36,8 +36,12 @@ import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.Header;
+import org.apache.hc.core5.http.io.HttpClientResponseHandler;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicHeader;
+import org.apache.hc.core5.http.protocol.HttpContext;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -100,7 +104,13 @@ public class HttpClient implements RESTClient {
         }
         Header[] authHeaders = getHeaders(path, "POST", encodedBody, restAuthFunction);
         httpPost.setHeaders(authHeaders);
-        return exec(httpPost, responseType);
+        // A POST the server cannot absorb twice is sent exactly once, whatever the status says.
+        return exec(
+                httpPost,
+                responseType,
+                body != null && !body.isRetrySafe()
+                        ? ExponentialHttpRequestRetryStrategy.retryUnsafeContext()
+                        : null);
     }
 
     @Override
@@ -127,9 +137,13 @@ public class HttpClient implements RESTClient {
     }
 
     private <T extends RESTResponse> T exec(HttpUriRequestBase request, Class<T> responseType) {
+        return exec(request, responseType, null);
+    }
+
+    private <T extends RESTResponse> T exec(
+            HttpUriRequestBase request, Class<T> responseType, @Nullable HttpContext context) {
         try {
-            return DEFAULT_HTTP_CLIENT.execute(
-                    request,
+            HttpClientResponseHandler<T> handler =
                     response -> {
                         String responseBodyStr = RESTUtil.extractResponseBodyAsString(response);
                         if (!RESTUtil.isSuccessful(response)) {
@@ -159,7 +173,10 @@ public class HttpClient implements RESTClient {
                         } else {
                             throw new RESTException("response body is null.");
                         }
-                    });
+                    };
+            return context == null
+                    ? DEFAULT_HTTP_CLIENT.execute(request, handler)
+                    : DEFAULT_HTTP_CLIENT.execute(request, context, handler);
         } catch (IOException e) {
             // No cause: a redirect/protocol error message can echo the target URL (a signed URL).
             throw new RESTException(
