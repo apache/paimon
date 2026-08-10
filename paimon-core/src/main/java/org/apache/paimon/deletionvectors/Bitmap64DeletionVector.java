@@ -95,6 +95,11 @@ public class Bitmap64DeletionVector implements DeletionVector {
         roaringBitmap.forEach(consumer);
     }
 
+    /** Returns a 32-bit copy containing deleted positions lower than {@code maxExclusive}. */
+    public RoaringBitmap32 projectToBitmap32(long maxExclusive) {
+        return roaringBitmap.projectToBitmap32(maxExclusive);
+    }
+
     @Override
     public int serializeTo(DataOutputStream out) throws IOException {
         roaringBitmap.runLengthEncode(); // run-length encode the bitmap before serializing

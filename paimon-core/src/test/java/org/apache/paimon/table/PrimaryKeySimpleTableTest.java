@@ -126,6 +126,7 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
+import static org.apache.paimon.CoreOptions.DELETION_VECTOR_BITMAP64;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PER_LEVEL;
@@ -1369,8 +1370,9 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         }
     }
 
-    @Test
-    public void testTopNPushDownInDeletionVectorMode() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testTopNPushDownInDeletionVectorMode(boolean bitmap64) throws Exception {
         String indexColumnName = "b";
         FileStoreTable table =
                 createFileStoreTable(
@@ -1378,6 +1380,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             conf.set(BUCKET, 1);
                             conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
                             conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(DELETION_VECTOR_BITMAP64, bitmap64);
                             conf.set("parquet.block.size", "524288");
                             conf.set("parquet.page.size.row.check.min", "100");
                             conf.set("parquet.page.row.count.limit", "300");
@@ -1413,7 +1416,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         // test bottom k
         {
-            int k = new Random().nextInt(100);
+            int k = 50;
             RoaringBitmap32 bitmap = RoaringBitmap32.bitmapOfRange(min, min + k);
             DataField field = table.schema().nameToFieldMap().get(indexColumnName);
             FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
@@ -1435,7 +1438,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         // test top k
         {
-            int k = new Random().nextInt(100);
+            int k = 50;
             RoaringBitmap32 bitmap = RoaringBitmap32.bitmapOfRange(max - k, max);
             DataField field = table.schema().nameToFieldMap().get(indexColumnName);
             FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
@@ -1456,14 +1459,16 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         }
     }
 
-    @Test
-    public void testLimitPushDownInDeletionVectorMode() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testLimitPushDownInDeletionVectorMode(boolean bitmap64) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
                             conf.set(BUCKET, 2);
                             conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
                             conf.set(DELETION_VECTORS_ENABLED, true);
+                            conf.set(DELETION_VECTOR_BITMAP64, bitmap64);
                             conf.set(SOURCE_SPLIT_TARGET_SIZE, MemorySize.ofBytes(1));
                             conf.set("parquet.block.size", "524288");
                             conf.set("parquet.page.size.row.check.min", "100");
