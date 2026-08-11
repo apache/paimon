@@ -662,17 +662,21 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
                 row = new GenericRow(mapping.length);
             }
 
-            Object[] values = new Object[fieldReaders.length];
             for (int i = 0; i < fieldReaders.length; i += 1) {
-                if (mappingBack[i] >= 0) {
-                    values[i] = fieldReaders[i].read(decoder, row.getField(mappingBack[i]));
+                int outputPosition = mappingBack[i];
+                if (outputPosition >= 0) {
+                    row.setField(
+                            outputPosition,
+                            fieldReaders[i].read(decoder, row.getField(outputPosition)));
                 } else {
                     fieldReaders[i].skip(decoder);
                 }
             }
 
             for (int i = 0; i < mapping.length; i++) {
-                row.setField(i, mapping[i] >= 0 ? values[mapping[i]] : null);
+                if (mapping[i] < 0) {
+                    row.setField(i, null);
+                }
             }
 
             return row;

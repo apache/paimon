@@ -203,6 +203,40 @@ public class ManifestFileTest {
     }
 
     @Test
+    void testProjectedScanRejectsUnsupportedFormatIdentifier() throws Exception {
+        ManifestEntry entry = gen.next();
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest =
+                writeSingleManifest(manifestFile, Collections.singletonList(entry));
+        Path path = new Path(new Path(tempDir.toUri()), "manifest/" + manifest.fileName());
+        LocalFileIO fileIO = LocalFileIO.create();
+        ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+        InternalRow valid = serializer.toRow(entry);
+
+        try (PositionOutputStream out = fileIO.newOutputStream(path, true);
+                FormatWriter writer =
+                        avro.createWriterFactory(ManifestEntry.MANIFEST_ROW_TYPE)
+                                .create(out, "zstd")) {
+            writer.addElement(
+                    GenericRow.of(
+                            1,
+                            valid.getByte(1),
+                            valid.getBinary(2),
+                            valid.getInt(3),
+                            valid.getInt(4),
+                            valid.getRow(5, DataFileMeta.SCHEMA.getFieldCount())));
+        }
+
+        try (CloseableIterator<BinaryManifestEntry> entries =
+                manifestFile.scan(
+                        manifest.fileName(), null, BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+            assertThatThrownBy(entries::hasNext)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("not compatible");
+        }
+    }
+
+    @Test
     void testAvroReaderReadsLegacyDataFileMetaWithFewerFields() throws Exception {
         ManifestEntry generated = gen.next();
         DataFileMeta sourceFile = generated.file().newFirstRowId(42L);

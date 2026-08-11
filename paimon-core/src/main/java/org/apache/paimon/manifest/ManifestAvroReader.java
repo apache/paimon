@@ -22,17 +22,14 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.avro.AvroBlockReader;
-import org.apache.paimon.format.avro.FieldReader;
-import org.apache.paimon.format.avro.FieldReaderFactory;
+import org.apache.paimon.format.avro.AvroBlockReader.BorrowedBlock;
+import org.apache.paimon.format.avro.AvroRecordDecoder;
+import org.apache.paimon.format.avro.AvroRecordDecoder.FieldDecoder;
+import org.apache.paimon.format.avro.AvroRecordDecoder.FieldType;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.IOUtils;
-
-import org.apache.avro.Schema;
-import org.apache.avro.io.BinaryDecoder;
-import org.apache.avro.io.DecoderFactory;
 
 import javax.annotation.Nullable;
 
@@ -49,9 +46,9 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 final class ManifestAvroReader implements CloseableIterator<InternalRow> {
 
     private final AvroBlockReader blockReader;
+    private final AvroRecordDecoder decoder;
     private final ManifestRecordDecoder recordDecoder;
 
-    private BinaryDecoder decoder;
     private long recordsRemaining;
     private @Nullable InternalRow next;
     private boolean nextReady;
@@ -65,9 +62,11 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
             throws IOException {
         AvroBlockReader blockReader = new AvroBlockReader(input);
         try {
+            AvroRecordDecoder decoder = blockReader.createRecordDecoder();
             this.recordDecoder =
                     new ManifestRecordDecoder(
-                            blockReader.schema(), projectedType, partitionFilter, bucketFilter);
+                            decoder, projectedType, partitionFilter, bucketFilter);
+            this.decoder = decoder;
             this.blockReader = blockReader;
         } catch (RuntimeException | Error e) {
             IOUtils.closeQuietly(blockReader);
@@ -87,7 +86,7 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
         try {
             while (true) {
                 if (recordsRemaining == 0) {
-                    if (decoder != null && !decoder.isEnd()) {
+                    if (decoder.isInitialized() && !decoder.isEnd()) {
                         throw new IOException(
                                 "Manifest Avro block contains trailing undecoded bytes.");
                     }
@@ -95,9 +94,9 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
                         finished = true;
                         return false;
                     }
-                    byte[] block = blockReader.nextBlock();
-                    decoder = DecoderFactory.get().binaryDecoder(block, decoder);
-                    recordsRemaining = blockReader.currentBlockRecordCount();
+                    BorrowedBlock block = blockReader.nextBorrowedBlock();
+                    decoder.reset(block.bytes(), block.offset(), block.length());
+                    recordsRemaining = block.recordCount();
                 }
 
                 InternalRow candidate = recordDecoder.read(decoder);
@@ -151,7 +150,6 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
             ManifestEntry.FILE
         };
 
-        private final int topLevelRecordIndex;
         private final int projectedFieldCount;
         private final int versionPosition;
         private final int kindPosition;
@@ -160,12 +158,7 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
         private final int totalBucketsPosition;
         private final int filePosition;
 
-        private final FieldReader versionReader;
-        private final FieldReader kindReader;
-        private final FieldReader partitionReader;
-        private final FieldReader bucketReader;
-        private final FieldReader totalBucketsReader;
-        private final FieldReader fileReader;
+        private final FieldDecoder fileReader;
 
         private final @Nullable PartitionPredicate partitionFilter;
         private final @Nullable BucketFilter bucketFilter;
@@ -176,7 +169,7 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
         private long skippedDataFiles;
 
         private ManifestRecordDecoder(
-                Schema writerSchema,
+                AvroRecordDecoder decoder,
                 RowType projectedType,
                 @Nullable PartitionPredicate partitionFilter,
                 @Nullable BucketFilter bucketFilter) {
@@ -193,97 +186,28 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
             this.partitionNeededForFilter = partitionFilter != null || bucketFilter != null;
             this.bucketNeededForFilter = bucketFilter != null;
 
-            Schema recordSchema;
-            if (writerSchema.getType() == Schema.Type.UNION) {
-                int recordIndex = -1;
-                Schema record = null;
-                for (int i = 0; i < writerSchema.getTypes().size(); i++) {
-                    Schema branch = writerSchema.getTypes().get(i);
-                    if (branch.getType() == Schema.Type.RECORD) {
-                        if (record != null) {
-                            throw new IllegalArgumentException(
-                                    "Manifest Avro union contains multiple record branches.");
-                        }
-                        record = branch;
-                        recordIndex = i;
-                    }
-                }
-                if (record == null) {
-                    throw new IllegalArgumentException(
-                            "Manifest Avro schema is not a record or record union.");
-                }
-                recordSchema = record;
-                topLevelRecordIndex = recordIndex;
-            } else if (writerSchema.getType() == Schema.Type.RECORD) {
-                recordSchema = writerSchema;
-                topLevelRecordIndex = -1;
-            } else {
-                throw new IllegalArgumentException(
-                        "Manifest Avro schema is not a record or record union.");
-            }
-
-            validateTopLevelFields(recordSchema);
-            FieldReaderFactory factory = new FieldReaderFactory();
-            versionReader =
-                    createReader(factory, recordSchema, 0, projectedType, versionPosition, null);
-            kindReader = createReader(factory, recordSchema, 1, projectedType, kindPosition, null);
-            partitionReader =
-                    createReader(
-                            factory,
-                            recordSchema,
-                            2,
-                            projectedType,
-                            partitionPosition,
-                            partitionNeededForFilter
-                                    ? ManifestEntry.MANIFEST_ROW_TYPE
-                                            .getField(ManifestEntry.PARTITION)
-                                            .type()
-                                    : null);
-            bucketReader =
-                    createReader(
-                            factory,
-                            recordSchema,
-                            3,
-                            projectedType,
-                            bucketPosition,
-                            bucketNeededForFilter
-                                    ? ManifestEntry.MANIFEST_ROW_TYPE
-                                            .getField(ManifestEntry.BUCKET)
-                                            .type()
-                                    : null);
-            totalBucketsReader =
-                    createReader(
-                            factory,
-                            recordSchema,
-                            4,
-                            projectedType,
-                            totalBucketsPosition,
-                            bucketNeededForFilter
-                                    ? ManifestEntry.MANIFEST_ROW_TYPE
-                                            .getField(ManifestEntry.TOTAL_BUCKETS)
-                                            .type()
-                                    : null);
+            validateTopLevelFields(decoder);
             // Manifest v2 has a fixed top-level layout, but DataFileMeta has gained nullable
             // fields. Build this reader from the writer schema so legacy files with fewer nested
             // fields still decode and expose the missing projected fields as null.
-            fileReader = createReader(factory, recordSchema, 5, projectedType, filePosition, null);
+            fileReader =
+                    decoder.createFieldDecoder(
+                            5, filePosition >= 0 ? projectedType.getTypeAt(filePosition) : null);
         }
 
-        private @Nullable InternalRow read(BinaryDecoder decoder) throws IOException {
-            if (topLevelRecordIndex >= 0) {
-                int branch = decoder.readIndex();
-                if (branch != topLevelRecordIndex) {
-                    throw new IOException("Unexpected null or non-record Manifest Avro value.");
-                }
+        private @Nullable InternalRow read(AvroRecordDecoder decoder) throws IOException {
+            if (!decoder.readRecordStart()) {
+                throw new IOException("Unexpected null or non-record Manifest Avro value.");
             }
 
-            Object version = readProjected(versionReader, versionPosition, decoder);
-            Object kind = readProjected(kindReader, kindPosition, decoder);
+            int version = decoder.readInt();
+            ManifestEntrySerializer.checkFormatIdentifier(version);
+            int kind = decoder.readInt();
             byte[] partitionBytes;
             if (partitionPosition >= 0 || partitionNeededForFilter) {
-                partitionBytes = (byte[]) partitionReader.read(decoder, null);
+                partitionBytes = decoder.readBytes();
             } else {
-                partitionReader.skip(decoder);
+                decoder.skipBytes();
                 partitionBytes = null;
             }
 
@@ -294,20 +218,20 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
                 return null;
             }
 
-            Integer bucket;
+            int bucket;
             if (bucketPosition >= 0 || bucketNeededForFilter) {
-                bucket = (Integer) bucketReader.read(decoder, null);
+                bucket = decoder.readInt();
             } else {
-                bucketReader.skip(decoder);
-                bucket = null;
+                decoder.readInt();
+                bucket = 0;
             }
 
-            Integer totalBuckets;
+            int totalBuckets;
             if (totalBucketsPosition >= 0 || bucketNeededForFilter) {
-                totalBuckets = (Integer) totalBucketsReader.read(decoder, null);
+                totalBuckets = decoder.readInt();
             } else {
-                totalBucketsReader.skip(decoder);
-                totalBuckets = null;
+                decoder.readInt();
+                totalBuckets = 0;
             }
 
             if (bucketFilter != null && !bucketFilter.test(partition, bucket, totalBuckets)) {
@@ -327,7 +251,7 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
 
             GenericRow row = new GenericRow(projectedFieldCount);
             setProjected(row, versionPosition, version);
-            setProjected(row, kindPosition, kind);
+            setProjected(row, kindPosition, (byte) kind);
             setProjected(row, partitionPosition, partitionBytes);
             setProjected(row, bucketPosition, bucket);
             setProjected(row, totalBucketsPosition, totalBuckets);
@@ -335,24 +259,15 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
             return row;
         }
 
-        private void skipBucketAndFile(BinaryDecoder decoder) throws IOException {
-            bucketReader.skip(decoder);
-            totalBucketsReader.skip(decoder);
+        private void skipBucketAndFile(AvroRecordDecoder decoder) throws IOException {
+            decoder.readInt();
+            decoder.readInt();
             skipFile(decoder);
         }
 
-        private void skipFile(BinaryDecoder decoder) throws IOException {
+        private void skipFile(AvroRecordDecoder decoder) throws IOException {
             fileReader.skip(decoder);
             skippedDataFiles++;
-        }
-
-        private static @Nullable Object readProjected(
-                FieldReader reader, int outputPosition, BinaryDecoder decoder) throws IOException {
-            if (outputPosition >= 0) {
-                return reader.read(decoder, null);
-            }
-            reader.skip(decoder);
-            return null;
         }
 
         private static void setProjected(
@@ -362,27 +277,15 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
             }
         }
 
-        private static FieldReader createReader(
-                FieldReaderFactory factory,
-                Schema recordSchema,
-                int writerPosition,
-                RowType projectedType,
-                int outputPosition,
-                @Nullable DataType requiredType) {
-            DataType readType =
-                    outputPosition >= 0 ? projectedType.getTypeAt(outputPosition) : requiredType;
-            return factory.visit(recordSchema.getFields().get(writerPosition).schema(), readType);
-        }
-
-        private static void validateTopLevelFields(Schema recordSchema) {
-            if (recordSchema.getFields().size() != TOP_LEVEL_FIELDS.length) {
+        private static void validateTopLevelFields(AvroRecordDecoder decoder) {
+            if (decoder.fieldCount() != TOP_LEVEL_FIELDS.length) {
                 throw new IllegalArgumentException(
                         String.format(
                                 "Manifest Avro schema has %s top-level fields, expected %s.",
-                                recordSchema.getFields().size(), TOP_LEVEL_FIELDS.length));
+                                decoder.fieldCount(), TOP_LEVEL_FIELDS.length));
             }
             for (int i = 0; i < TOP_LEVEL_FIELDS.length; i++) {
-                String actual = recordSchema.getFields().get(i).name();
+                String actual = decoder.fieldName(i);
                 String expected = TOP_LEVEL_FIELDS[i];
                 if (!expected.equals(actual)) {
                     throw new IllegalArgumentException(
@@ -390,6 +293,24 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
                                     "Unexpected Manifest Avro field at position %s: expected %s but found %s.",
                                     i, expected, actual));
                 }
+            }
+
+            validateFieldType(decoder, 0, FieldType.INT);
+            validateFieldType(decoder, 1, FieldType.INT);
+            validateFieldType(decoder, 2, FieldType.BYTES);
+            validateFieldType(decoder, 3, FieldType.INT);
+            validateFieldType(decoder, 4, FieldType.INT);
+            validateFieldType(decoder, 5, FieldType.RECORD);
+        }
+
+        private static void validateFieldType(
+                AvroRecordDecoder decoder, int position, FieldType expectedType) {
+            FieldType actualType = decoder.fieldType(position);
+            if (actualType != expectedType) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Unexpected Manifest Avro type for field %s: expected %s but found %s.",
+                                decoder.fieldName(position), expectedType, actualType));
             }
         }
     }

@@ -51,9 +51,13 @@ public final class AvroBlockReader implements Closeable {
         }
     }
 
-    /** Returns the writer schema stored in the Avro file header. */
-    public Schema schema() {
+    Schema schema() {
         return reader.getSchema();
+    }
+
+    /** Creates a record decoder from the writer schema stored in the Avro file header. */
+    public AvroRecordDecoder createRecordDecoder() {
+        return new AvroRecordDecoder(reader.getSchema());
     }
 
     /** Returns whether another block is available. */
@@ -68,16 +72,29 @@ public final class AvroBlockReader implements Closeable {
      * closes.
      */
     public byte[] nextBlock() throws IOException {
-        ByteBuffer block = replaceAvroRuntimeException(reader::nextBlock);
-        currentBlockRecordCount = reader.getBlockCount();
-
-        ByteBuffer copy = block.duplicate();
-        byte[] bytes = new byte[copy.remaining()];
-        copy.get(bytes);
+        BorrowedBlock block = nextBorrowedBlock();
+        byte[] bytes = new byte[block.length];
+        System.arraycopy(block.bytes, block.offset, bytes, 0, block.length);
         return bytes;
     }
 
-    /** Returns the record count of the last block returned by {@link #nextBlock()}. */
+    /**
+     * Returns a borrowed view of the next decompressed block.
+     *
+     * <p>The returned bytes are owned by this reader and may be overwritten by the next call to
+     * {@link #hasNextBlock()}, {@link #nextBlock()}, or this method, or when this reader is closed.
+     */
+    public BorrowedBlock nextBorrowedBlock() throws IOException {
+        ByteBuffer block = replaceAvroRuntimeException(reader::nextBlock);
+        currentBlockRecordCount = reader.getBlockCount();
+        return new BorrowedBlock(
+                block.array(),
+                block.arrayOffset() + block.position(),
+                block.remaining(),
+                currentBlockRecordCount);
+    }
+
+    /** Returns the record count of the last block returned by a block-reading method. */
     public long currentBlockRecordCount() {
         if (currentBlockRecordCount < 0) {
             throw new IllegalStateException("No block has been read.");
@@ -98,6 +115,38 @@ public final class AvroBlockReader implements Closeable {
                 throw (IOException) e.getCause();
             }
             throw e;
+        }
+    }
+
+    /** Borrowed decompressed block contents and its record count. */
+    public static final class BorrowedBlock {
+
+        private final byte[] bytes;
+        private final int offset;
+        private final int length;
+        private final long recordCount;
+
+        private BorrowedBlock(byte[] bytes, int offset, int length, long recordCount) {
+            this.bytes = bytes;
+            this.offset = offset;
+            this.length = length;
+            this.recordCount = recordCount;
+        }
+
+        public byte[] bytes() {
+            return bytes;
+        }
+
+        public int offset() {
+            return offset;
+        }
+
+        public int length() {
+            return length;
+        }
+
+        public long recordCount() {
+            return recordCount;
         }
     }
 

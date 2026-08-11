@@ -24,6 +24,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.avro.AvroBlockReader.BorrowedBlock;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -35,16 +36,22 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.avro.Schema;
+import org.apache.avro.SchemaBuilder;
 import org.apache.avro.io.BinaryDecoder;
+import org.apache.avro.io.BinaryEncoder;
 import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.io.EncoderFactory;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -204,6 +211,76 @@ public class AvroFileFormatTest {
             assertThat(reader.hasNextBlock()).isFalse();
             assertThatThrownBy(reader::nextBlock).isInstanceOf(NoSuchElementException.class);
         }
+    }
+
+    @Test
+    void testReadBorrowedBlocks() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+        int numRecords = 100_000;
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = fileFormat.createWriterFactory(rowType).create(out, "zstd");
+            for (int i = 0; i < numRecords; i++) {
+                writer.addElement(GenericRow.of(i));
+            }
+            writer.close();
+        }
+
+        int nextValue = 0;
+        try (AvroBlockReader reader = new AvroBlockReader(fileIO.newInputStream(file))) {
+            AvroRecordDecoder decoder = reader.createRecordDecoder();
+            AvroRecordDecoder.FieldDecoder fieldDecoder =
+                    decoder.createFieldDecoder(0, rowType.getTypeAt(0));
+            while (reader.hasNextBlock()) {
+                BorrowedBlock block = reader.nextBorrowedBlock();
+                assertThat(block.recordCount()).isPositive();
+                assertThat(reader.currentBlockRecordCount()).isEqualTo(block.recordCount());
+                decoder.reset(block.bytes(), block.offset(), block.length());
+                for (long i = 0; i < block.recordCount(); i++) {
+                    assertThat(decoder.readRecordStart()).isTrue();
+                    assertThat(fieldDecoder.read(decoder, null)).isEqualTo(nextValue++);
+                }
+                assertThat(decoder.isEnd()).isTrue();
+            }
+            assertThatThrownBy(reader::nextBorrowedBlock)
+                    .isInstanceOf(NoSuchElementException.class);
+        }
+
+        assertThat(nextValue).isEqualTo(numRecords);
+    }
+
+    @Test
+    void testRowReaderProjectsIntoReusedRow() throws IOException {
+        Schema writerSchema =
+                SchemaBuilder.record("record")
+                        .fields()
+                        .requiredInt("first")
+                        .requiredInt("second")
+                        .endRecord();
+        RowType projectedType =
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                new DataField(0, "second", DataTypes.INT().notNull()),
+                                new DataField(1, "missing", DataTypes.INT())));
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(output, null);
+        encoder.writeInt(10);
+        encoder.writeInt(20);
+        encoder.flush();
+
+        AvroRowDatumReader reader = new AvroRowDatumReader(projectedType);
+        reader.setSchema(writerSchema);
+        BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(output.toByteArray(), null);
+        GenericRow reuse = GenericRow.of(100, 200);
+        InternalRow result = reader.read(reuse, decoder);
+
+        assertThat(result).isSameAs(reuse);
+        assertThat(result.getInt(0)).isEqualTo(20);
+        assertThat(result.isNullAt(1)).isTrue();
+        assertThat(decoder.isEnd()).isTrue();
     }
 
     @Test
