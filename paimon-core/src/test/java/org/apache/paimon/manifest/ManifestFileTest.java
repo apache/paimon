@@ -341,7 +341,7 @@ public class ManifestFileTest {
             assertThat(reader.hasNext()).isTrue();
             ManifestAvroReader.RawBlock block = reader.next();
             assertThat(block.rawBlockCopySupported()).isFalse();
-            ManifestAvroReader.RowIterator rows = block.toRow(projection.projectedType());
+            ManifestAvroReader.RowIterator rows = block.toRows(projection.projectedType());
             assertThat(rows.hasNext()).isTrue();
             binaryEntry.replace(rows.next());
             assertThat(binaryEntry.rowCount()).isEqualTo(source.rowCount());
@@ -597,7 +597,7 @@ public class ManifestFileTest {
             while (reader.hasNext()) {
                 ManifestAvroReader.RawBlock block = reader.next();
                 assertThat(block.rawBlockCopySupported()).isTrue();
-                ManifestAvroReader.RowIterator rows = block.toRow(projection.projectedType());
+                ManifestAvroReader.RowIterator rows = block.toRows(projection.projectedType());
                 ByteBuffer reusedPartition = null;
                 ByteBuffer reusedEncodedRecord = null;
                 while (rows.hasNext()) {
@@ -651,7 +651,7 @@ public class ManifestFileTest {
         try (ManifestAvroReader reader = openManifestReader(manifest)) {
             while (reader.hasNext()) {
                 ManifestAvroReader.RowIterator rows =
-                        reader.next().toRow(projection.projectedType());
+                        reader.next().toRows(projection.projectedType());
                 assertThat(rows.hasNext()).isTrue();
                 byte[] currentBlockBytes = rows.next().getByteBuffer(partitionPosition).array();
                 reused |= currentBlockBytes == previousBlockBytes;
@@ -690,7 +690,7 @@ public class ManifestFileTest {
         try (ManifestAvroReader reader = openManifestReader(manifest)) {
             while (reader.hasNext()) {
                 ManifestAvroReader.RowIterator rows =
-                        reader.next().toRow(projection.projectedType());
+                        reader.next().toRows(projection.projectedType());
                 while (rows.hasNext()) {
                     InternalRow row = rows.next();
                     assertThat(row.getRow(0, 2).getLong(0))
@@ -720,7 +720,7 @@ public class ManifestFileTest {
         try (ManifestAvroReader reader = openManifestReader(manifest)) {
             while (reader.hasNext()) {
                 ManifestAvroReader.RowIterator rows =
-                        reader.next().toRow(projection.projectedType());
+                        reader.next().toRows(projection.projectedType());
                 while (rows.hasNext()) {
                     binaryEntry.replace(rows.next());
                     assertThat(serializer.fromRow(binaryEntry.fullRow()))

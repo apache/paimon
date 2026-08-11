@@ -143,11 +143,11 @@ public final class ManifestAvroReader implements AutoCloseable {
         }
 
         /** Lazily decompresses this block and returns an iterator over one reusable row. */
-        public RowIterator toRow(RowType projectRowType) throws IOException {
-            return toRow(projectRowType, null, null, null);
+        public RowIterator toRows(RowType projectRowType) throws IOException {
+            return toRows(projectRowType, null, null, null);
         }
 
-        private RowIterator toRow(
+        private RowIterator toRows(
                 RowType projectRowType,
                 @Nullable PartitionPredicate partitionFilter,
                 @Nullable BucketFilter bucketFilter,
@@ -216,7 +216,7 @@ public final class ManifestAvroReader implements AutoCloseable {
                     rows =
                             ManifestAvroReader.this
                                     .next()
-                                    .toRow(
+                                    .toRows(
                                             projectedType,
                                             partitionFilter,
                                             bucketFilter,
