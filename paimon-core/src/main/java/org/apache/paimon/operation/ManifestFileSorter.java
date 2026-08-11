@@ -26,11 +26,11 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.manifest.BinaryManifestEntry;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -591,10 +591,11 @@ public class ManifestFileSorter {
             CompactFileIdentifierSet identifiers,
             Set<BinaryRow> partitions,
             boolean synchronize) {
-        try (CloseableIterator<BinaryManifestEntry> entries =
-                manifestFile.scan(meta.fileName(), BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+        try (CloseableIterator<ProjectedManifestEntry> entries =
+                manifestFile.scan(
+                        meta.fileName(), ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
             while (entries.hasNext()) {
-                BinaryManifestEntry entry = entries.next();
+                ProjectedManifestEntry entry = entries.next();
                 if (!entry.isDelete()) {
                     continue;
                 }
@@ -1258,8 +1259,8 @@ public class ManifestFileSorter {
             row.setField(1, entry.kind().toByteValue());
             row.setField(
                     2,
-                    entry instanceof BinaryManifestEntry
-                            ? ((BinaryManifestEntry) entry).file().fileNameBinary()
+                    entry instanceof ProjectedManifestEntry
+                            ? ((ProjectedManifestEntry) entry).file().fileNameBinary()
                             : BinaryString.fromString(entry.file().fileName()));
             row.setField(3, binaryManifestRow);
         }
@@ -1359,8 +1360,8 @@ public class ManifestFileSorter {
             row.setField(pos++, Long.MAX_VALUE - entry.file().maxSequenceNumber());
             row.setField(
                     pos++,
-                    entry instanceof BinaryManifestEntry
-                            ? ((BinaryManifestEntry) entry).file().fileNameBinary()
+                    entry instanceof ProjectedManifestEntry
+                            ? ((ProjectedManifestEntry) entry).file().fileNameBinary()
                             : BinaryString.fromString(entry.file().fileName()));
             row.setField(pos, binaryManifestRow);
         }

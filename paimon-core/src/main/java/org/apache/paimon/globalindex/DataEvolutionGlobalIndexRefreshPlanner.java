@@ -22,15 +22,15 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
-import org.apache.paimon.io.BinaryDataFileMeta;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.BinaryManifestEntry;
+import org.apache.paimon.io.ProjectedDataFileMeta;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -97,10 +97,10 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
     }
 
     /**
-     * Scans data manifests through reusable {@link BinaryManifestEntry} views and plans indexes to
-     * refresh. Neither {@link ManifestEntry} nor {@link DataFileMeta} POJOs are materialized: one
-     * narrow DELETE pass tracks removed files in a primitive identifier set, then one projected ADD
-     * pass merges updated row ranges directly into the refresh groups.
+     * Scans data manifests through reusable {@link ProjectedManifestEntry} views and plans indexes
+     * to refresh. Neither {@link ManifestEntry} nor {@link DataFileMeta} POJOs are materialized:
+     * one narrow DELETE pass tracks removed files in a primitive identifier set, then one projected
+     * ADD pass merges updated row ranges directly into the refresh groups.
      */
     public static List<IndexManifestEntry> findIndexesToRefresh(
             FileStoreTable table,
@@ -183,11 +183,11 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             if (manifest.numDeletedFiles() <= 0) {
                 continue;
             }
-            try (CloseableIterator<BinaryManifestEntry> entries =
+            try (CloseableIterator<ProjectedManifestEntry> entries =
                     manifestFile.scan(
-                            manifest.fileName(), BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                            manifest.fileName(), ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
                 while (entries.hasNext()) {
-                    BinaryManifestEntry entry = entries.next();
+                    ProjectedManifestEntry entry = entries.next();
                     if (entry.isDelete() && groupPartitions.contains(entry.partition())) {
                         deleted.add(entry);
                     }
@@ -206,19 +206,19 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             Map<Pair<BinaryRow, Integer>, RefreshGroup> groups,
             Set<Integer> indexedFieldIds) {
         Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache = new HashMap<>();
-        BinaryManifestEntry.Projection projection = addedEntryProjection(!deleted.isEmpty());
+        ProjectedManifestEntry.Projection projection = addedEntryProjection(!deleted.isEmpty());
         for (ManifestFileMeta manifest : manifests) {
             if (manifest.numAddedFiles() <= 0) {
                 continue;
             }
-            try (CloseableIterator<BinaryManifestEntry> entries =
+            try (CloseableIterator<ProjectedManifestEntry> entries =
                     manifestFile.scan(manifest.fileName(), projection)) {
                 while (entries.hasNext()) {
-                    BinaryManifestEntry entry = entries.next();
+                    ProjectedManifestEntry entry = entries.next();
                     if (!entry.isAdd()) {
                         continue;
                     }
-                    BinaryDataFileMeta file = entry.file();
+                    ProjectedDataFileMeta file = entry.file();
                     if (!file.hasFirstRowId()) {
                         continue;
                     }
@@ -257,7 +257,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
      * Projects only the fields the refresh planner consumes; identifier fields are included only
      * when deleted files must be recognized.
      */
-    private static BinaryManifestEntry.Projection addedEntryProjection(
+    private static ProjectedManifestEntry.Projection addedEntryProjection(
             boolean includeIdentifierFields) {
         List<DataField> fileFields = new ArrayList<>();
         fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.ROW_COUNT));
@@ -281,7 +281,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
                 ManifestEntry.MANIFEST_ROW_TYPE
                         .getField(ManifestEntry.FILE)
                         .newType(new RowType(false, fileFields)));
-        return BinaryManifestEntry.Projection.create(new RowType(false, fields));
+        return ProjectedManifestEntry.Projection.create(new RowType(false, fields));
     }
 
     private static Set<Integer> indexedFieldIds(List<DataField> indexedFields) {

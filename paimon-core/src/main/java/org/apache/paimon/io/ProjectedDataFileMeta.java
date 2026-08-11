@@ -48,17 +48,17 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
  * fail explicitly when their fields were not projected. Operations which create a modified data
  * file are not supported.
  */
-public final class BinaryDataFileMeta implements DataFileMeta {
+public final class ProjectedDataFileMeta implements DataFileMeta {
 
     private final Projection projection;
     private @Nullable InternalRow row;
 
-    private BinaryDataFileMeta(Projection projection) {
+    private ProjectedDataFileMeta(Projection projection) {
         this.projection = projection;
     }
 
     /** Replaces the backing row and returns this reusable view. */
-    public BinaryDataFileMeta replace(InternalRow row) {
+    public ProjectedDataFileMeta replace(InternalRow row) {
         checkArgument(row != null, "Data file row cannot be null.");
         if (row.getFieldCount() != projection.fieldCount) {
             throw new IllegalArgumentException(
@@ -413,8 +413,8 @@ public final class BinaryDataFileMeta implements DataFileMeta {
             return new Projection(projectedType.getFieldCount(), fieldPositions);
         }
 
-        public BinaryDataFileMeta createDataFile() {
-            return new BinaryDataFileMeta(this);
+        public ProjectedDataFileMeta createDataFile() {
+            return new ProjectedDataFileMeta(this);
         }
     }
 }

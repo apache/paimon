@@ -59,7 +59,7 @@ class FileEntryReusableIdentifierTest {
     @Test
     void testReusesAndReleasesBuffer() {
         ReusableIdentifier identifier = new ReusableIdentifier();
-        BinaryManifestEntry entry = entry(1, 0, "file", new String[0], null, null);
+        ProjectedManifestEntry entry = entry(1, 0, "file", new String[0], null, null);
 
         identifier.replace(entry);
         byte[] expected = Arrays.copyOf(identifier.bytes(), identifier.length());
@@ -82,8 +82,8 @@ class FileEntryReusableIdentifierTest {
     @Test
     void testCompactFileIdentifierSetReusesIdentifierForEntryLookup() {
         CompactFileIdentifierSet identifiers = new CompactFileIdentifierSet();
-        BinaryManifestEntry first = entry(1, 0, "first", new String[0], null, null);
-        BinaryManifestEntry second = entry(2, 0, "second", new String[0], null, null);
+        ProjectedManifestEntry first = entry(1, 0, "first", new String[0], null, null);
+        ProjectedManifestEntry second = entry(2, 0, "second", new String[0], null, null);
 
         identifiers.add(first);
         assertThat(identifiers.contains(first)).isTrue();
@@ -97,7 +97,7 @@ class FileEntryReusableIdentifierTest {
 
     @Test
     void testCompactAndMaterializedIdentifierSemanticsMatch() {
-        BinaryManifestEntry base =
+        ProjectedManifestEntry base =
                 entry(
                         BinaryRow.EMPTY_ROW,
                         3,
@@ -107,7 +107,7 @@ class FileEntryReusableIdentifierTest {
                         new String[] {"a", "bc"},
                         new byte[] {7, 8},
                         "x");
-        List<BinaryManifestEntry> candidates =
+        List<ProjectedManifestEntry> candidates =
                 Arrays.asList(
                         entry(
                                 BinaryRow.EMPTY_ROW,
@@ -210,13 +210,13 @@ class FileEntryReusableIdentifierTest {
                                 new byte[] {7, 8},
                                 null));
 
-        for (BinaryManifestEntry candidate : candidates) {
+        for (ProjectedManifestEntry candidate : candidates) {
             assertIdentifierSemanticsMatch(base, candidate);
         }
     }
 
     private static void assertIdentifierSemanticsMatch(
-            BinaryManifestEntry left, BinaryManifestEntry right) {
+            ProjectedManifestEntry left, ProjectedManifestEntry right) {
         boolean expected = left.identifier().equals(right.identifier());
 
         CompactFileIdentifierSet completeIdentifiers = new CompactFileIdentifierSet();
@@ -233,7 +233,7 @@ class FileEntryReusableIdentifierTest {
                 .isEqualTo(expected);
     }
 
-    private static BinaryManifestEntry entry(
+    private static ProjectedManifestEntry entry(
             int bucket,
             int level,
             String fileName,
@@ -251,7 +251,7 @@ class FileEntryReusableIdentifierTest {
                 externalPath);
     }
 
-    private static BinaryManifestEntry entry(
+    private static ProjectedManifestEntry entry(
             BinaryRow partition,
             int bucket,
             int totalBuckets,
@@ -278,7 +278,7 @@ class FileEntryReusableIdentifierTest {
         for (int i = 0; i < extraFiles.length; i++) {
             extraFileValues[i] = BinaryString.fromString(extraFiles[i]);
         }
-        return BinaryManifestEntry.Projection.create(new RowType(false, fields))
+        return ProjectedManifestEntry.Projection.create(new RowType(false, fields))
                 .createEntry()
                 .replace(
                         GenericRow.of(

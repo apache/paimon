@@ -166,8 +166,8 @@ public class ManifestFileTest {
                                 fields.get(5).newType(projectedFileType),
                                 fields.get(2),
                                 fields.get(1)));
-        BinaryManifestEntry projectedEntry =
-                BinaryManifestEntry.Projection.create(projectedType).createEntry();
+        ProjectedManifestEntry projectedEntry =
+                ProjectedManifestEntry.Projection.create(projectedType).createEntry();
 
         try (ManifestAvroReader reader =
                 new ManifestAvroReader(fileIO.newInputStream(path), projectedType, null, null)) {
@@ -243,9 +243,9 @@ public class ManifestFileTest {
                             valid.getRow(5, DataFileMeta.SCHEMA.getFieldCount())));
         }
 
-        try (CloseableIterator<BinaryManifestEntry> entries =
+        try (CloseableIterator<ProjectedManifestEntry> entries =
                 manifestFile.scan(
-                        manifest.fileName(), BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                        manifest.fileName(), ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
             assertThatThrownBy(entries::hasNext)
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("not compatible");
@@ -492,11 +492,11 @@ public class ManifestFileTest {
         List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
-        BinaryManifestEntry.Projection projection =
+        ProjectedManifestEntry.Projection projection =
                 projection(DataFileMeta.FILE_NAME, DataFileMeta.ROW_COUNT);
-        List<BinaryManifestEntry> actual = new ArrayList<>();
+        List<ProjectedManifestEntry> actual = new ArrayList<>();
 
-        try (CloseableIterator<BinaryManifestEntry> iterator =
+        try (CloseableIterator<ProjectedManifestEntry> iterator =
                 manifestFile.scan(manifest.fileName(), projection)) {
             while (iterator.hasNext()) {
                 actual.add(iterator.next());
@@ -521,14 +521,14 @@ public class ManifestFileTest {
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
 
-        try (CloseableIterator<BinaryManifestEntry> iterator =
+        try (CloseableIterator<ProjectedManifestEntry> iterator =
                 manifestFile.scan(manifest.fileName(), projection(DataFileMeta.FILE_NAME))) {
             assertThat(iterator.hasNext()).isTrue();
-            BinaryManifestEntry first = iterator.next();
+            ProjectedManifestEntry first = iterator.next();
             assertThat(first.fileName()).isEqualTo(entries.get(0).fileName());
 
             assertThat(iterator.hasNext()).isTrue();
-            BinaryManifestEntry second = iterator.next();
+            ProjectedManifestEntry second = iterator.next();
             assertThat(second).isNotSameAs(first);
             assertThat(second.fileName()).isEqualTo(entries.get(1).fileName());
             assertThat(first.fileName()).isEqualTo(entries.get(0).fileName());
@@ -540,12 +540,12 @@ public class ManifestFileTest {
         List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
-        List<BinaryManifestEntry> retained = new ArrayList<>();
+        List<ProjectedManifestEntry> retained = new ArrayList<>();
 
-        try (CloseableIterator<BinaryManifestEntry> iterator =
+        try (CloseableIterator<ProjectedManifestEntry> iterator =
                 manifestFile.scan(manifest.fileName(), projection(DataFileMeta.FILE_NAME))) {
             while (iterator.hasNext()) {
-                BinaryManifestEntry entry = iterator.next();
+                ProjectedManifestEntry entry = iterator.next();
                 retained.add(entry);
                 break;
             }
@@ -561,16 +561,16 @@ public class ManifestFileTest {
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
         RuntimeException failure = new RuntimeException("Expected processing failure.");
-        List<BinaryManifestEntry> retained = new ArrayList<>();
+        List<ProjectedManifestEntry> retained = new ArrayList<>();
 
         assertThatThrownBy(
                         () -> {
-                            try (CloseableIterator<BinaryManifestEntry> iterator =
+                            try (CloseableIterator<ProjectedManifestEntry> iterator =
                                     manifestFile.scan(
                                             manifest.fileName(),
                                             projection(DataFileMeta.FILE_NAME))) {
                                 assertThat(iterator.hasNext()).isTrue();
-                                BinaryManifestEntry entry = iterator.next();
+                                ProjectedManifestEntry entry = iterator.next();
                                 retained.add(entry);
                                 throw failure;
                             }
@@ -631,7 +631,7 @@ public class ManifestFileTest {
         return manifests.get(0);
     }
 
-    private BinaryManifestEntry.Projection projection(String... projectedFileFields) {
+    private ProjectedManifestEntry.Projection projection(String... projectedFileFields) {
         RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
         List<DataField> fields =
                 Arrays.asList(
@@ -640,7 +640,7 @@ public class ManifestFileTest {
                         manifestType
                                 .getField(ManifestEntry.FILE)
                                 .newType(DataFileMeta.SCHEMA.project(projectedFileFields)));
-        return BinaryManifestEntry.Projection.create(new RowType(false, fields));
+        return ProjectedManifestEntry.Projection.create(new RowType(false, fields));
     }
 
     private void checkRollingFiles(

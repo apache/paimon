@@ -25,12 +25,12 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.RollingFileWriter;
-import org.apache.paimon.manifest.BinaryManifestEntry;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
 import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.utils.CloseableIterator;
@@ -113,8 +113,9 @@ public class ManifestEntryExternalSort {
         if (section.size() <= 1
                 || (manifestReadParallelism != null && manifestReadParallelism <= 1)) {
             for (ManifestFileMeta meta : section) {
-                try (CloseableIterator<BinaryManifestEntry> entries =
-                        manifestFile.scan(meta.fileName(), BinaryManifestEntry.fullProjection())) {
+                try (CloseableIterator<ProjectedManifestEntry> entries =
+                        manifestFile.scan(
+                                meta.fileName(), ProjectedManifestEntry.fullProjection())) {
                     while (entries.hasNext()) {
                         consumer.accept(entries.next());
                     }
@@ -125,7 +126,7 @@ public class ManifestEntryExternalSort {
 
         Function<ManifestFileMeta, List<BinaryRow>> reader =
                 meta -> readBinaryRows(manifestFile, meta);
-        BinaryManifestEntry entry = BinaryManifestEntry.fullProjection().createEntry();
+        ProjectedManifestEntry entry = ProjectedManifestEntry.fullProjection().createEntry();
         for (BinaryRow row : sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
             consumer.accept(entry.replace(row));
         }
@@ -138,8 +139,8 @@ public class ManifestEntryExternalSort {
         List<BinaryRow> rows = new ArrayList<>((int) Math.min(entryCount, 1 << 20));
         InternalRowSerializer serializer =
                 new InternalRowSerializer(ManifestEntry.MANIFEST_ROW_TYPE);
-        try (CloseableIterator<BinaryManifestEntry> entries =
-                manifestFile.scan(meta.fileName(), BinaryManifestEntry.fullProjection())) {
+        try (CloseableIterator<ProjectedManifestEntry> entries =
+                manifestFile.scan(meta.fileName(), ProjectedManifestEntry.fullProjection())) {
             while (entries.hasNext()) {
                 rows.add(serializer.toBinaryRow(entries.next().fullRow()).copy());
             }
@@ -152,7 +153,7 @@ public class ManifestEntryExternalSort {
 
     @FunctionalInterface
     private interface BinaryEntryConsumer {
-        void accept(BinaryManifestEntry entry) throws Exception;
+        void accept(ProjectedManifestEntry entry) throws Exception;
     }
 
     /** Config used by manifest entry external sort. */
@@ -218,7 +219,7 @@ public class ManifestEntryExternalSort {
                             config.maxDiskSize);
         }
 
-        private void write(BinaryManifestEntry entry) throws Exception {
+        private void write(ProjectedManifestEntry entry) throws Exception {
             sortKey.replaceExternalSortRow(externalSortRow, entry, entry.fullRow());
             sortBuffer.write(externalSortRow);
         }
@@ -238,7 +239,8 @@ public class ManifestEntryExternalSort {
             try {
                 MutableObjectIterator<BinaryRow> iterator = sortBuffer.sortedIterator();
                 BinaryRow reuse = new BinaryRow(sortKey.externalSortRowType().getFieldCount());
-                BinaryManifestEntry entry = BinaryManifestEntry.fullProjection().createEntry();
+                ProjectedManifestEntry entry =
+                        ProjectedManifestEntry.fullProjection().createEntry();
                 BinaryRow row;
                 while ((row = iterator.next(reuse)) != null) {
                     writer.write(entry.replace(sortKey.binaryManifestRow(row)));
@@ -276,7 +278,8 @@ public class ManifestEntryExternalSort {
             try {
                 MutableObjectIterator<BinaryRow> iterator = sortBuffer.sortedIterator();
                 BinaryRow reuse = new BinaryRow(sortKey.externalSortRowType().getFieldCount());
-                BinaryManifestEntry entry = BinaryManifestEntry.fullProjection().createEntry();
+                ProjectedManifestEntry entry =
+                        ProjectedManifestEntry.fullProjection().createEntry();
                 BinaryRow row;
                 while ((row = iterator.next(reuse)) != null) {
                     entry.replace(sortKey.binaryManifestRow(row));

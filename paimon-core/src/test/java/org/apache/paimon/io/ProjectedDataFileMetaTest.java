@@ -35,8 +35,8 @@ import java.util.Collections;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link BinaryDataFileMeta}. */
-public class BinaryDataFileMetaTest {
+/** Tests for {@link ProjectedDataFileMeta}. */
+public class ProjectedDataFileMetaTest {
 
     @Test
     void testImplementsProjectedDataFileMeta() {
@@ -56,8 +56,8 @@ public class BinaryDataFileMetaTest {
                         "external/dir/data.parquet",
                         10L,
                         Collections.singletonList("write_col"));
-        BinaryDataFileMeta actual =
-                BinaryDataFileMeta.Projection.create(DataFileMeta.SCHEMA)
+        ProjectedDataFileMeta actual =
+                ProjectedDataFileMeta.Projection.create(DataFileMeta.SCHEMA)
                         .createDataFile()
                         .replace(new DataFileMetaSerializer().toRow(expected));
 
@@ -116,8 +116,8 @@ public class BinaryDataFileMetaTest {
                         DataFileMeta.FILE_NAME,
                         DataFileMeta.ROW_COUNT,
                         DataFileMeta.WRITE_COLS);
-        BinaryDataFileMeta file =
-                BinaryDataFileMeta.Projection.create(projectedType)
+        ProjectedDataFileMeta file =
+                ProjectedDataFileMeta.Projection.create(projectedType)
                         .createDataFile()
                         .replace(
                                 GenericRow.of(null, BinaryString.fromString("data.orc"), 7L, null));
@@ -133,8 +133,8 @@ public class BinaryDataFileMetaTest {
     @Test
     void testReusesAndClearsView() {
         RowType projectedType = DataFileMeta.SCHEMA.project(DataFileMeta.FILE_NAME);
-        BinaryDataFileMeta file =
-                BinaryDataFileMeta.Projection.create(projectedType).createDataFile();
+        ProjectedDataFileMeta file =
+                ProjectedDataFileMeta.Projection.create(projectedType).createDataFile();
 
         file.replace(GenericRow.of(BinaryString.fromString("first.parquet")));
         assertThat(file.fileName()).isEqualTo("first.parquet");
@@ -155,7 +155,7 @@ public class BinaryDataFileMetaTest {
                         .newType(SimpleStats.SCHEMA.project("_MIN_VALUES"));
         RowType projectedType = new RowType(false, Collections.singletonList(partialKeyStats));
 
-        assertThatThrownBy(() -> BinaryDataFileMeta.Projection.create(projectedType))
+        assertThatThrownBy(() -> ProjectedDataFileMeta.Projection.create(projectedType))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(DataFileMeta.KEY_STATS);
     }

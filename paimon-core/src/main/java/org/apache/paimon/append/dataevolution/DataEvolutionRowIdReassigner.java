@@ -26,7 +26,6 @@ import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.manifest.BinaryManifestEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -34,6 +33,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -478,11 +478,11 @@ public class DataEvolutionRowIdReassigner {
             AssignmentPlan assignmentPlan,
             ManifestFile manifestFile,
             ManifestFileMeta manifestMeta) {
-        try (CloseableIterator<BinaryManifestEntry> entries =
+        try (CloseableIterator<ProjectedManifestEntry> entries =
                 manifestFile.scan(
-                        manifestMeta.fileName(), BinaryManifestEntry.ROW_RANGE_PROJECTION)) {
+                        manifestMeta.fileName(), ProjectedManifestEntry.ROW_RANGE_PROJECTION)) {
             while (entries.hasNext()) {
-                BinaryManifestEntry entry = entries.next();
+                ProjectedManifestEntry entry = entries.next();
                 RowRangeMappingIndex mapping =
                         assignmentPlan.relativeRowIdMappings.mappings.get(entry.partition());
                 if (mapping != null && mapping.map(entry.file().nonNullRowIdRange()).isPresent()) {
@@ -504,11 +504,11 @@ public class DataEvolutionRowIdReassigner {
             ManifestFileMeta manifestMeta,
             long appendSnapshotId) {
         boolean needsReassign = false;
-        try (CloseableIterator<BinaryManifestEntry> entries =
+        try (CloseableIterator<ProjectedManifestEntry> entries =
                 manifestFile.scan(
-                        manifestMeta.fileName(), BinaryManifestEntry.ROW_RANGE_PROJECTION)) {
+                        manifestMeta.fileName(), ProjectedManifestEntry.ROW_RANGE_PROJECTION)) {
             while (entries.hasNext()) {
-                BinaryManifestEntry entry = entries.next();
+                ProjectedManifestEntry entry = entries.next();
                 if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {
                     continue;
                 }

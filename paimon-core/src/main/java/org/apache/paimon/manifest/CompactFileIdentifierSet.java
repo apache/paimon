@@ -61,7 +61,7 @@ public final class CompactFileIdentifierSet {
         return arenaSize;
     }
 
-    public void add(BinaryManifestEntry entry) {
+    public void add(ProjectedManifestEntry entry) {
         add(reusableIdentifier().replaceWithPartition(entry));
     }
 
@@ -74,7 +74,7 @@ public final class CompactFileIdentifierSet {
         add(partitionId, identifier.bytes(), identifier.length());
     }
 
-    public boolean contains(BinaryManifestEntry entry) {
+    public boolean contains(ProjectedManifestEntry entry) {
         return contains(reusableIdentifier().replaceWithPartition(entry));
     }
 

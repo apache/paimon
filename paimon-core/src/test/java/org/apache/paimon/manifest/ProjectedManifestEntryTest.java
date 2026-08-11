@@ -23,8 +23,8 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.io.BinaryDataFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.ProjectedDataFileMeta;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
@@ -38,13 +38,13 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link BinaryManifestEntry}. */
-public class BinaryManifestEntryTest {
+/** Tests for {@link ProjectedManifestEntry}. */
+public class ProjectedManifestEntryTest {
 
     @Test
     void testImplementsProjectedManifestEntry() {
         BinaryRow partition = BinaryRow.EMPTY_ROW;
-        BinaryManifestEntry entry =
+        ProjectedManifestEntry entry =
                 projection(
                                 true,
                                 DataFileMeta.FILE_NAME,
@@ -84,7 +84,7 @@ public class BinaryManifestEntryTest {
         assertThat(manifestEntry.rowCount()).isEqualTo(7L);
         assertThat(manifestEntry.firstRowId()).isEqualTo(11L);
         assertThat(manifestEntry.identifier().embeddedIndex).containsExactly(1, 2);
-        BinaryDataFileMeta file = entry.file();
+        ProjectedDataFileMeta file = entry.file();
         assertThat(manifestEntry.file()).isSameAs(file);
         assertThat(file.fileName()).isEqualTo("data.parquet");
         assertThat(file.rowCount()).isEqualTo(7L);
@@ -153,8 +153,8 @@ public class BinaryManifestEntryTest {
                                 manifestType.getField(ManifestEntry.TOTAL_BUCKETS),
                                 manifestType.getField(ManifestEntry.PARTITION),
                                 manifestType.getField(ManifestEntry.KIND)));
-        BinaryManifestEntry entry =
-                BinaryManifestEntry.Projection.create(projectedType)
+        ProjectedManifestEntry entry =
+                ProjectedManifestEntry.Projection.create(projectedType)
                         .createEntry()
                         .replace(
                                 GenericRow.of(
@@ -178,13 +178,13 @@ public class BinaryManifestEntryTest {
 
     @Test
     void testReusesAndClearsBinaryViews() {
-        BinaryManifestEntry entry = projection(false, DataFileMeta.FILE_NAME).createEntry();
+        ProjectedManifestEntry entry = projection(false, DataFileMeta.FILE_NAME).createEntry();
         entry.replace(
                 GenericRow.of(
                         FileKind.ADD.toByteValue(),
                         serializeBinaryRow(BinaryRow.EMPTY_ROW),
                         GenericRow.of(BinaryString.fromString("first.parquet"))));
-        BinaryDataFileMeta file = entry.file();
+        ProjectedDataFileMeta file = entry.file();
         assertThat(file.fileName()).isEqualTo("first.parquet");
 
         entry.replace(
@@ -206,7 +206,7 @@ public class BinaryManifestEntryTest {
 
     @Test
     void testDoesNotReusePartitionAndUpdatesPartitionedIdentifier() {
-        BinaryManifestEntry entry =
+        ProjectedManifestEntry entry =
                 projection(
                                 true,
                                 DataFileMeta.FILE_NAME,
@@ -240,8 +240,8 @@ public class BinaryManifestEntryTest {
                         false,
                         java.util.Collections.singletonList(
                                 manifestType.getField(ManifestEntry.KIND)));
-        BinaryManifestEntry entry =
-                BinaryManifestEntry.Projection.create(projectedType)
+        ProjectedManifestEntry entry =
+                ProjectedManifestEntry.Projection.create(projectedType)
                         .createEntry()
                         .replace(GenericRow.of(FileKind.ADD.toByteValue()));
 
@@ -257,8 +257,8 @@ public class BinaryManifestEntryTest {
                         false,
                         java.util.Collections.singletonList(
                                 manifestType.getField(ManifestEntry.KIND)));
-        BinaryManifestEntry entry =
-                BinaryManifestEntry.Projection.create(projectedType)
+        ProjectedManifestEntry entry =
+                ProjectedManifestEntry.Projection.create(projectedType)
                         .createEntry()
                         .replace(GenericRow.of((byte) 99));
 
@@ -266,7 +266,7 @@ public class BinaryManifestEntryTest {
         assertThat(entry.isDelete()).isFalse();
     }
 
-    private static BinaryManifestEntry.Projection projection(
+    private static ProjectedManifestEntry.Projection projection(
             boolean includeBucket, String... projectedFileFields) {
         RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
         List<DataField> fields = new ArrayList<>();
@@ -279,7 +279,7 @@ public class BinaryManifestEntryTest {
                 manifestType
                         .getField(ManifestEntry.FILE)
                         .newType(DataFileMeta.SCHEMA.project(projectedFileFields)));
-        return BinaryManifestEntry.Projection.create(new RowType(false, fields));
+        return ProjectedManifestEntry.Projection.create(new RowType(false, fields));
     }
 
     private static GenericRow identityRow(BinaryRow partition) {

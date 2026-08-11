@@ -29,7 +29,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.SingleFileWriter;
-import org.apache.paimon.manifest.BinaryManifestEntry.Projection;
+import org.apache.paimon.manifest.ProjectedManifestEntry.Projection;
 import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -155,13 +155,13 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     /**
      * Scans projected manifest entries without materializing {@link PojoManifestEntry}s.
      *
-     * <p>Every returned {@link BinaryManifestEntry} has independent backing data and can be
+     * <p>Every returned {@link ProjectedManifestEntry} has independent backing data and can be
      * retained after the iterator advances or closes. The caller must close the iterator.
      *
      * <p>This method intentionally bypasses the manifest cache because cached entries are
      * materialized with the complete manifest schema.
      */
-    public CloseableIterator<BinaryManifestEntry> scan(String fileName, Projection projection) {
+    public CloseableIterator<ProjectedManifestEntry> scan(String fileName, Projection projection) {
         try {
             CloseableIterator<InternalRow> rows =
                     createManifestIterator(
@@ -170,7 +170,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                             projection.projectedType(),
                             null,
                             null);
-            return new CloseableIterator<BinaryManifestEntry>() {
+            return new CloseableIterator<ProjectedManifestEntry>() {
 
                 @Override
                 public boolean hasNext() {
@@ -178,7 +178,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 }
 
                 @Override
-                public BinaryManifestEntry next() {
+                public ProjectedManifestEntry next() {
                     return projection.createEntry().replace(rows.next());
                 }
 
@@ -215,7 +215,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
     public List<ExpireFileEntry> readExpireFileEntries(String fileName) {
         List<ExpireFileEntry> result = new ArrayList<>();
-        try (CloseableIterator<BinaryManifestEntry> entries =
+        try (CloseableIterator<ProjectedManifestEntry> entries =
                 scan(fileName, EXPIRE_FILE_PROJECTION)) {
             while (entries.hasNext()) {
                 result.add(ExpireFileEntry.from(entries.next()));
@@ -311,8 +311,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
         @Override
         public void write(ManifestEntry entry) throws IOException {
-            if (entry instanceof BinaryManifestEntry) {
-                writeRow(((BinaryManifestEntry) entry).fullRow());
+            if (entry instanceof ProjectedManifestEntry) {
+                writeRow(((ProjectedManifestEntry) entry).fullRow());
             } else {
                 super.write(entry);
             }
