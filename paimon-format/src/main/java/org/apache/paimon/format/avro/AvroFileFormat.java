@@ -89,6 +89,10 @@ public class AvroFileFormat extends FileFormat {
         return AvroSchemaConverter.convertToSchema(rowType, options.get(AVRO_ROW_NAME_MAPPING));
     }
 
+    public boolean supportsRawBlockCopy(RowType rowType, Schema encodedSchema) {
+        return createAvroSchema(rowType).equals(encodedSchema);
+    }
+
     @Override
     public Optional<SimpleStatsExtractor> createStatsExtractor(
             RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
@@ -103,7 +107,7 @@ public class AvroFileFormat extends FileFormat {
         }
     }
 
-    CodecFactory createCodecFactory(String compression) {
+    private CodecFactory createCodecFactory(String compression) {
         if (options.contains(AVRO_OUTPUT_CODEC)) {
             return CodecFactory.fromString(options.get(AVRO_OUTPUT_CODEC));
         }

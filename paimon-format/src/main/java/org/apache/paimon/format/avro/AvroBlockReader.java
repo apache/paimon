@@ -67,10 +67,8 @@ public final class AvroBlockReader implements Closeable {
     }
 
     /** Returns whether blocks can be copied directly to the given Avro format. */
-    public boolean supportsRawBlockCopy(
-            AvroFileFormat fileFormat, RowType rowType, String compression) {
-        return fileFormat.createAvroSchema(rowType).equals(reader.getSchema())
-                && reader.usesCodec(fileFormat.createCodecFactory(compression));
+    public boolean supportsRawBlockCopy(AvroFileFormat fileFormat, RowType rowType) {
+        return fileFormat.supportsRawBlockCopy(rowType, reader.getSchema());
     }
 
     /** Returns whether another block is available. */

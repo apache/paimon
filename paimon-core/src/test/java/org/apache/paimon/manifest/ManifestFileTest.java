@@ -129,9 +129,7 @@ public class ManifestFileTest {
         ManifestEntrySerializer serializer = new ManifestEntrySerializer();
         List<ManifestEntry> actual = new ArrayList<>();
 
-        try (ManifestAvroReader reader =
-                        new ManifestAvroReader(
-                                fileIO.newInputStream(path), avro, MANIFEST_COMPRESSION);
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path), avro);
                 CloseableIterator<InternalRow> rows =
                         reader.read(
                                 ManifestEntry.MANIFEST_ROW_TYPE, partitionFilter, bucketFilter)) {
@@ -154,7 +152,7 @@ public class ManifestFileTest {
                                                         DataFileMeta.FILE_NAME))));
         int blockCount = 0;
         try (ManifestAvroReader blocks =
-                new ManifestAvroReader(fileIO.newInputStream(path), avro, MANIFEST_COMPRESSION)) {
+                new ManifestAvroReader(fileIO.newInputStream(path), avro)) {
             while (blocks.hasNext()) {
                 blocks.next();
                 blockCount++;
@@ -163,8 +161,7 @@ public class ManifestFileTest {
         assertThat(blockCount).isGreaterThan(1);
 
         List<String> projectedFileNames = new ArrayList<>();
-        ManifestAvroReader blockReader =
-                new ManifestAvroReader(fileIO.newInputStream(path), avro, MANIFEST_COMPRESSION);
+        ManifestAvroReader blockReader = new ManifestAvroReader(fileIO.newInputStream(path), avro);
         try (CloseableIterator<InternalRow> rows =
                 blockReader.read(projectedType, partitionFilter, bucketFilter)) {
             while (rows.hasNext()) {
@@ -210,9 +207,7 @@ public class ManifestFileTest {
         ProjectedManifestEntry projectedEntry =
                 ProjectedManifestEntry.Projection.create(projectedType).createEntry();
 
-        try (ManifestAvroReader reader =
-                        new ManifestAvroReader(
-                                fileIO.newInputStream(path), avro, MANIFEST_COMPRESSION);
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path), avro);
                 CloseableIterator<InternalRow> rows = reader.read(projectedType, null, null)) {
             for (ManifestEntry expected : entries) {
                 assertThat(rows.hasNext()).isTrue();
@@ -243,9 +238,7 @@ public class ManifestFileTest {
 
         List<DataField> fields = ManifestEntry.MANIFEST_ROW_TYPE.getFields();
         RowType projectedType = new RowType(false, Arrays.asList(fields.get(2), fields.get(1)));
-        try (ManifestAvroReader reader =
-                        new ManifestAvroReader(
-                                fileIO.newInputStream(path), avro, MANIFEST_COMPRESSION);
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path), avro);
                 CloseableIterator<InternalRow> rows = reader.read(projectedType, null, null)) {
             for (ManifestEntry expected : entries) {
                 assertThat(rows.hasNext()).isTrue();
@@ -272,10 +265,7 @@ public class ManifestFileTest {
         lowerFirstBlockRecordCount(path);
 
         try (ManifestAvroReader reader =
-                        new ManifestAvroReader(
-                                LocalFileIO.create().newInputStream(path),
-                                avro,
-                                MANIFEST_COMPRESSION);
+                        new ManifestAvroReader(LocalFileIO.create().newInputStream(path), avro);
                 CloseableIterator<InternalRow> rows =
                         reader.read(ManifestEntry.MANIFEST_ROW_TYPE, null, null)) {
             assertThat(rows.hasNext()).isTrue();
@@ -356,9 +346,7 @@ public class ManifestFileTest {
         }
 
         ManifestEntry actual;
-        try (ManifestAvroReader reader =
-                        new ManifestAvroReader(
-                                fileIO.newInputStream(path), avro, MANIFEST_COMPRESSION);
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path), avro);
                 CloseableIterator<InternalRow> rows =
                         reader.read(ManifestEntry.MANIFEST_ROW_TYPE, null, null)) {
             assertThat(rows.hasNext()).isTrue();
@@ -373,7 +361,7 @@ public class ManifestFileTest {
         ProjectedManifestEntry.Projection projection = ProjectedManifestEntry.ROW_RANGE_PROJECTION;
         ProjectedManifestEntry binaryEntry = projection.createEntry();
         try (ManifestAvroReader reader =
-                new ManifestAvroReader(fileIO.newInputStream(path), avro, MANIFEST_COMPRESSION)) {
+                new ManifestAvroReader(fileIO.newInputStream(path), avro)) {
             assertThat(reader.hasNext()).isTrue();
             ManifestAvroReader.RawBlock block = reader.next();
             assertThat(block.rawBlockCopySupported()).isFalse();
@@ -422,9 +410,7 @@ public class ManifestFileTest {
                         () -> {
                             try (ManifestAvroReader reader =
                                             new ManifestAvroReader(
-                                                    fileIO.newInputStream(path),
-                                                    avro,
-                                                    MANIFEST_COMPRESSION);
+                                                    fileIO.newInputStream(path), avro);
                                     CloseableIterator<InternalRow> rows =
                                             reader.read(
                                                     ManifestEntry.MANIFEST_ROW_TYPE, null, null)) {
@@ -844,7 +830,7 @@ public class ManifestFileTest {
     private ManifestAvroReader openManifestReader(ManifestFileMeta manifest) throws IOException {
         FileIO fileIO = LocalFileIO.create();
         Path path = new Path(new Path(tempDir.toUri()), "manifest/" + manifest.fileName());
-        return new ManifestAvroReader(fileIO.newInputStream(path), avro, MANIFEST_COMPRESSION);
+        return new ManifestAvroReader(fileIO.newInputStream(path), avro);
     }
 
     private void lowerFirstBlockRecordCount(Path path) throws IOException {

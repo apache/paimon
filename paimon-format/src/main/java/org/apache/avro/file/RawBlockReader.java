@@ -43,11 +43,6 @@ public final class RawBlockReader extends DataFileStream<Void> {
                 : reuse.replace(raw, resolveCodec(), getSchema());
     }
 
-    /** Returns whether this file uses the codec created by the supplied factory. */
-    public boolean usesCodec(CodecFactory codecFactory) {
-        return resolveCodec().equals(codecFactory.createInstance());
-    }
-
     private static final class NoOpDatumReader<D> implements DatumReader<D> {
 
         @Override

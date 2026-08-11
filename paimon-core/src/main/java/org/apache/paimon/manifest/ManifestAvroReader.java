@@ -64,16 +64,14 @@ public final class ManifestAvroReader implements AutoCloseable {
 
     private long blockOrdinal = -1;
 
-    ManifestAvroReader(InputStream input, AvroFileFormat avroFileFormat, String compression)
-            throws IOException {
+    ManifestAvroReader(InputStream input, AvroFileFormat avroFileFormat) throws IOException {
         AvroBlockReader stream = null;
         try {
             stream = new AvroBlockReader(input);
             this.stream = stream;
             this.decoderContext = new DecoderContext(stream.createRecordDecoder());
             this.rawBlockCopySupported =
-                    stream.supportsRawBlockCopy(
-                            avroFileFormat, ManifestEntry.MANIFEST_ROW_TYPE, compression);
+                    stream.supportsRawBlockCopy(avroFileFormat, ManifestEntry.MANIFEST_ROW_TYPE);
         } catch (IOException | RuntimeException | Error failure) {
             IOUtils.closeQuietly(stream == null ? input : stream);
             throw failure;

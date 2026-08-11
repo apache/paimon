@@ -87,7 +87,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                                 fileIO,
                                 path,
                                 avroFileFormat,
-                                compression,
                                 ManifestEntry.MANIFEST_ROW_TYPE,
                                 null,
                                 null),
@@ -154,7 +153,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                             fileIO,
                             path,
                             avroFileFormat,
-                            compression,
                             ManifestEntry.MANIFEST_ROW_TYPE,
                             partitionFilter,
                             bucketFilter);
@@ -182,7 +180,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                             fileIO,
                             pathFactory.toPath(fileName),
                             avroFileFormat,
-                            compression,
                             projection.projectedType(),
                             null,
                             null);
@@ -212,15 +209,13 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             FileIO fileIO,
             Path path,
             AvroFileFormat avroFileFormat,
-            String compression,
             RowType projectedType,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable BucketFilter bucketFilter)
             throws IOException {
         try {
             ManifestAvroReader reader =
-                    new ManifestAvroReader(
-                            fileIO.newInputStream(path), avroFileFormat, compression);
+                    new ManifestAvroReader(fileIO.newInputStream(path), avroFileFormat);
             return reader.read(projectedType, partitionFilter, bucketFilter);
         } catch (IOException e) {
             FileUtils.checkExists(fileIO, path);
