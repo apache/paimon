@@ -22,15 +22,15 @@ import org.apache.paimon.fs.hadoop.HadoopFileIO;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.RawLocalFileSystem;
-import org.junit.jupiter.api.Test;
+import org.apache.hadoop.util.VersionInfo;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URI;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assumptions.assumeThat;
 
 /** Behavior tests for Hadoop Local. */
-class HadoopLocalFileIOBehaviorTest extends FileIOBehaviorTestBase {
+class HadoopLocalFileIOBehaviorTest extends FileIOContractTestBase {
 
     @TempDir private java.nio.file.Path tmp;
 
@@ -48,8 +48,18 @@ class HadoopLocalFileIOBehaviorTest extends FileIOBehaviorTestBase {
         return new Path(tmp.toUri());
     }
 
-    @Test
-    void testIsObjectStoreReturnsFalse() throws Exception {
-        assertThat(getFileSystem().isObjectStore()).isFalse();
+    // ------------------------------------------------------------------------
+
+    /** This test needs to be skipped for earlier Hadoop versions because those have a bug. */
+    @Override
+    protected void testMkdirsFailsForExistingFile() throws Exception {
+        final String versionString = VersionInfo.getVersion();
+        final String prefix = versionString.substring(0, 3);
+        final float version = Float.parseFloat(prefix);
+        assumeThat(version)
+                .describedAs("Cannot execute this test on Hadoop prior to 2.8")
+                .isGreaterThanOrEqualTo(2.8f);
+
+        super.testMkdirsFailsForExistingFile();
     }
 }

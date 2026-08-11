@@ -129,6 +129,24 @@ public class RenamingTwoPhaseOutputStreamTest {
     }
 
     @Test
+    void testDiscard() throws IOException {
+        RenamingTwoPhaseOutputStream stream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+
+        // Write some data
+        stream.write("Some data".getBytes());
+
+        // Close for commit
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+
+        // Discard instead of commit
+        committer.discard(fileIO);
+
+        // Target file should not exist
+        assertThat(fileIO.exists(targetPath)).isFalse();
+    }
+
+    @Test
     void testDiscardRemovesOnlyItsStagedFile() throws IOException {
         RenamingTwoPhaseOutputStream stream =
                 new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);

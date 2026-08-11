@@ -23,10 +23,7 @@ import org.apache.paimon.annotation.Public;
 import javax.annotation.Nullable;
 
 /**
- * A snapshot of provider-neutral metadata for a file or logical directory.
- *
- * <p>The values do not change when the underlying path changes. Owner and access time, as well as
- * directory length and modification time, are not portable across file systems.
+ * Interface that represents the client side information for a file independent of the file system.
  *
  * @since 0.4.0
  */
@@ -34,9 +31,9 @@ import javax.annotation.Nullable;
 public interface FileStatus {
 
     /**
-     * Returns the file length in bytes. The value for a directory is not portable.
+     * Return the length of this file.
      *
-     * @return the file length in bytes
+     * @return the length of this file
      */
     long getLen();
 
@@ -55,27 +52,27 @@ public interface FileStatus {
     Path getPath();
 
     /**
-     * Returns the last modification time in milliseconds since the epoch. The value for a directory
-     * is not portable.
+     * Get the last modification time of the file.
      *
-     * @return the last modification time
+     * @return A long value representing the time the file was last modified, measured in
+     *     milliseconds since the epoch (UTC January 1, 1970).
      */
     long getModificationTime();
 
     /**
-     * Returns the last access time in milliseconds since the epoch, if available. This value is not
-     * portable and may be zero.
+     * Get the last access time of the file.
      *
-     * @return the last access time, or zero when unavailable
+     * @return A long value representing the time the file was last accessed, measured in
+     *     milliseconds since the epoch (UTC January 1, 1970).
      */
     default long getAccessTime() {
         return 0;
     }
 
     /**
-     * Returns the owner, if available. This value is not portable.
+     * Returns the owner of this file.
      *
-     * @return the owner, or null when unavailable
+     * @return the owner of this file
      */
     @Nullable
     default String getOwner() {

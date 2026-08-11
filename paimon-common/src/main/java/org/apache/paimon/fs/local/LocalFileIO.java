@@ -363,16 +363,14 @@ public class LocalFileIO implements FileIO {
 
     private static class LocalFileStatus implements FileStatus {
 
-        private final Path path;
-        private final boolean directory;
+        private final File file;
         private final long length;
-        private final long modificationTime;
+        private final String scheme;
 
         private LocalFileStatus(File file, String scheme) {
-            this.path = new Path(scheme + ":" + file.toURI().getPath());
-            this.directory = file.isDirectory();
+            this.file = file;
             this.length = file.length();
-            this.modificationTime = file.lastModified();
+            this.scheme = scheme;
         }
 
         @Override
@@ -382,22 +380,22 @@ public class LocalFileIO implements FileIO {
 
         @Override
         public boolean isDir() {
-            return directory;
+            return file.isDirectory();
         }
 
         @Override
         public Path getPath() {
-            return path;
+            return new Path(scheme + ":" + file.toURI().getPath());
         }
 
         @Override
         public long getModificationTime() {
-            return modificationTime;
+            return file.lastModified();
         }
 
         @Override
         public String toString() {
-            return "{" + "path=" + path + ", directory=" + directory + ", length=" + length + '}';
+            return "{" + "file=" + file + ", length=" + length + ", scheme='" + scheme + '\'' + '}';
         }
     }
 }

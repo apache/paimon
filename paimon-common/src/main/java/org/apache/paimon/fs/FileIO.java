@@ -59,9 +59,7 @@ import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILE_IO_ENABLED
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * Provider-neutral file I/O for files and logical directories.
- *
- * <p>Implementations are not required to materialize directory markers for logical directories.
+ * File IO to read and write file.
  *
  * @since 0.4.0
  */
@@ -80,49 +78,37 @@ public interface FileIO extends Serializable, Closeable {
     default void setRuntimeContext(Map<String, String> options) {}
 
     /**
-     * Opens a {@link SeekableInputStream} for a file.
-     *
-     * <p>The returned stream starts at position zero and supports seeking from zero through the
-     * file length, inclusive. Behavior for offsets outside that range is unspecified. If the path
-     * is missing or is a directory, this method or the first read from the returned stream throws
-     * an {@link IOException}.
+     * Opens an SeekableInputStream at the indicated Path.
      *
      * @param path the file to open
-     * @return a seekable stream for the file
-     * @throws IOException if the file cannot be read
      */
     SeekableInputStream newInputStream(Path path) throws IOException;
 
     /**
-     * Opens a {@link PositionOutputStream} for a file.
+     * Opens an PositionOutputStream at the indicated Path.
      *
-     * <p>When no ancestor is a file, missing logical parents are created. A successful close makes
-     * the complete written content visible. If the target exists, {@code overwrite=true} replaces
-     * it. With {@code overwrite=false}, the conflict may be reported while opening, writing, or
-     * closing the stream, and the existing content remains unchanged.
-     *
-     * @param path the file to write
-     * @param overwrite whether to replace an existing file
-     * @return a stream whose position tracks the number of bytes written
-     * @throws IOException if the file cannot be written
+     * @param path the file name to open
+     * @param overwrite if a file with this name already exists, then if true, the file will be
+     *     overwritten, and if false an error will be thrown.
+     * @throws IOException Thrown, if the stream could not be opened because of an I/O, or because a
+     *     file already exists at that path and the write mode indicates to not overwrite the file.
      */
     PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException;
 
     /**
-     * Opens a {@link TwoPhaseOutputStream} that stages data for later publication.
+     * Opens a TwoPhaseOutputStream at the indicated Path for transactional writing.
      *
-     * <p>Staged data is not published at the target before commit is invoked. A successful commit
-     * publishes the complete data; if commit fails, the target state is unspecified. If the target
-     * already exists, whether the request is rejected or replaces the target, when a rejection is
-     * reported, and whether replacement is atomic are not specified by this interface. An
-     * implementation may document stronger guarantees. The staging layout is also not specified.
+     * <p>This method creates a stream that supports transactional writing operations. The written
+     * data becomes visible only after calling commit on the returned committer from closeForCommit
+     * method.
      *
      * @param path the file target path
-     * @param overwrite requests replacement of an existing file; existing-target behavior is
-     *     provider-specific
-     * @return a stream that stages data for the target
-     * @throws IOException if the stream cannot be created
-     * @throws UnsupportedOperationException if the file system does not support staged writes
+     * @param overwrite if a file with this name already exists, then if true, the file will be
+     *     overwritten, and if false an error will be thrown.
+     * @return a TwoPhaseOutputStream that supports transactional writes
+     * @throws IOException Thrown, if the stream could not be opened because of an I/O, or because a
+     *     file already exists at that path and the write mode indicates to not overwrite the file.
+     * @throws UnsupportedOperationException if the filesystem does not support transactional writes
      */
     default TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
             throws IOException {
@@ -130,37 +116,30 @@ public interface FileIO extends Serializable, Closeable {
     }
 
     /**
-     * Returns a metadata snapshot for a path.
+     * Return a file status object that represents the path.
      *
-     * @param path the path to inspect
-     * @return a snapshot of the path's status
-     * @throws FileNotFoundException if the path does not exist
-     * @throws IOException if the status cannot be read
+     * @param path The path we want information from
+     * @return a FileStatus object
+     * @throws FileNotFoundException when the path does not exist; IOException see specific
+     *     implementation
      */
     FileStatus getFileStatus(Path path) throws IOException;
 
     /**
-     * Lists the direct children of an existing directory.
+     * List the statuses of the files/directories in the given path if the path is a directory.
      *
-     * <p>The result is non-null and unordered. Each status has the child's path and type; file
-     * statuses also have the file length. Behavior for a missing path or a file path is
-     * unspecified.
-     *
-     * @param path an existing directory
-     * @return the direct child statuses, or an empty array for an empty directory
+     * @param path given path
+     * @return the statuses of the files/directories in the given path
      */
     FileStatus[] listStatus(Path path) throws IOException;
 
     /**
-     * Lists files under an existing directory.
+     * List the statuses of the files in the given path if the path is a directory.
      *
-     * <p>The result is non-null and unordered. It contains the same set of file paths as {@link
-     * #listFilesIterative(Path, boolean)} for the same arguments. Behavior for a missing path or a
-     * file path is unspecified.
-     *
-     * @param path an existing directory
-     * @param recursive whether to descend into subdirectories
-     * @return only file statuses, recursively if requested
+     * @param path given path
+     * @param recursive if set to <code>true</code> will recursively list files in subdirectories,
+     *     otherwise only files in the current directory will be listed
+     * @return the statuses of the files in the given path
      */
     default FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
         List<FileStatus> files = new ArrayList<>();
@@ -172,15 +151,12 @@ public interface FileIO extends Serializable, Closeable {
     }
 
     /**
-     * Iterates over files under an existing directory.
+     * List the statuses of the files iteratively in the given path if the path is a directory.
      *
-     * <p>The iterator is non-null and unordered. It contains the same set of file paths as {@link
-     * #listFiles(Path, boolean)} for the same arguments. Behavior for a missing path or a file path
-     * is unspecified.
-     *
-     * @param path an existing directory
-     * @param recursive whether to descend into subdirectories
-     * @return an iterator containing only file statuses, recursively if requested
+     * @param path given path
+     * @param recursive if set to <code>true</code> will recursively list files in subdirectories,
+     *     otherwise only files in the current directory will be listed
+     * @return an {@link RemoteIterator} over {@link FileStatus} of the files in the given path
      */
     default RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
             throws IOException {
@@ -219,13 +195,12 @@ public interface FileIO extends Serializable, Closeable {
     }
 
     /**
-     * Lists the direct directories under an existing directory.
+     * List the statuses of the directories in the given path if the path is a directory.
      *
-     * <p>The result is non-null and unordered. Behavior for a missing path or a file path is
-     * unspecified.
+     * <p>{@link FileIO} implementation may have optimization for list directories.
      *
-     * @param path an existing directory
-     * @return only direct child directory statuses, or an empty array if there are none
+     * @param path given path
+     * @return the statuses of the directories in the given path
      */
     default FileStatus[] listDirectories(Path path) throws IOException {
         FileStatus[] statuses = listStatus(path);
@@ -236,52 +211,40 @@ public interface FileIO extends Serializable, Closeable {
     }
 
     /**
-     * Checks whether a file or logical directory exists.
+     * Check if exists.
      *
-     * @param path the path to check
-     * @return whether the path exists
+     * @param path source file
      */
     boolean exists(Path path) throws IOException;
 
     /**
-     * Deletes a file or directory.
-     *
-     * <p>An existing file is deleted for either value of {@code recursive}. An empty directory is
-     * deleted, and a non-empty directory is deleted with its subtree when {@code recursive} is
-     * true. These successful deletions return true. Deleting a non-empty directory with {@code
-     * recursive=false} throws an {@link IOException} and preserves the complete tree. A missing
-     * path does not throw solely because it is absent; its return value is unspecified.
+     * Delete a file.
      *
      * @param path the path to delete
-     * @param recursive whether to delete a directory subtree
-     * @return true when an existing target is successfully deleted; unspecified for a missing path
+     * @param recursive if path is a directory and set to <code>true</code>, the directory is
+     *     deleted else throws an exception. In case of a file the recursive can be set to either
+     *     <code>true</code> or <code>false</code>
+     * @return <code>true</code> if delete is successful, <code>false</code> otherwise
      */
     boolean delete(Path path, boolean recursive) throws IOException;
 
     /**
-     * Makes a logical directory and any missing logical parents.
+     * Make the given file and all non-existent parents into directories. Has the semantics of Unix
+     * 'mkdir -p'. Existence of the directory hierarchy is not an error.
      *
-     * <p>When the target and its ancestors are not files, this method returns true and leaves them
-     * as directories. Repeating the call also returns true. Implementations need not materialize
-     * directory markers.
-     *
-     * @param path the directory to create
-     * @return true on successful creation or when the directory already exists
-     * @throws IOException if the directory cannot be created
+     * @param path the directory/directories to be created
+     * @return <code>true</code> if at least one new directory has been created, <code>false</code>
+     *     otherwise
+     * @throws IOException thrown if an I/O error occurs while creating the directory
      */
     boolean mkdirs(Path path) throws IOException;
 
     /**
-     * Renames a file or directory in the guaranteed non-conflicting case.
+     * Renames the file/directory src to dst.
      *
-     * <p>When the source exists, the exact destination is missing, and the destination parent is
-     * valid, this method returns true, removes the source, and preserves the file bytes or
-     * directory tree at the exact destination. Behavior in all other cases, including destination
-     * conflicts, is unspecified. Atomicity is not guaranteed.
-     *
-     * @param src the source file or directory
-     * @param dst the exact destination path
-     * @return true for the guaranteed case; otherwise unspecified
+     * @param src the file/directory to rename
+     * @param dst the new name of the file/directory
+     * @return <code>true</code> if the renaming was successful, <code>false</code> otherwise
      */
     boolean rename(Path src, Path dst) throws IOException;
 
@@ -382,13 +345,10 @@ public interface FileIO extends Serializable, Closeable {
     }
 
     /**
-     * Writes content through a temporary file and then renames it to the target.
+     * Write content to one file atomically, initially writes to temp hidden file and only renames
+     * to the target file once temp file is closed.
      *
-     * <p>If the target is missing and its parent is valid, a true result guarantees the target has
-     * the requested content. This method does not add an atomicity or conflict guarantee beyond
-     * {@link #rename(Path, Path)}.
-     *
-     * @return whether the final rename reported success
+     * @return false if target file exists
      */
     default boolean tryToWriteAtomic(Path path, String content) throws IOException {
         Path tmp = path.createTempPath();
@@ -413,7 +373,10 @@ public interface FileIO extends Serializable, Closeable {
         }
     }
 
-    /** Overwrites a file with UTF-8 content without guaranteeing atomic replacement. */
+    /**
+     * Overwrite file by content atomically, different {@link FileIO}s have different atomic
+     * implementations.
+     */
     default void overwriteFileUtf8(Path path, String content) throws IOException {
         try (PositionOutputStream out = newOutputStream(path, true)) {
             OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
@@ -422,22 +385,21 @@ public interface FileIO extends Serializable, Closeable {
         }
     }
 
-    /** Overwrites a hint file with UTF-8 content without guaranteeing atomic replacement. */
+    /**
+     * Overwrite hint file by content atomically, the characteristic of Hint file is that it can not
+     * exist for a period of time, which allows some file systems to perform overwrite writing by
+     * deleting and renaming.
+     */
     default void overwriteHintFile(Path path, String content) throws IOException {
         overwriteFileUtf8(path, content);
     }
 
     /**
-     * Copies the bytes of a source file to a target file.
+     * Copy content of one file into another.
      *
-     * <p>If the target exists, {@code overwrite=true} replaces it. With {@code overwrite=false},
-     * the copy fails and preserves the existing target content.
-     *
-     * @param sourcePath the source file
-     * @param targetPath the target file
-     * @param overwrite whether to replace an existing target
-     * @throws IOException if the file cannot be copied or overwrite is disabled for an existing
-     *     target
+     * @throws IOException Thrown, if the stream could not be opened because of an I/O, or because
+     *     target file already exists at that path and the write mode indicates to not overwrite the
+     *     file.
      */
     default void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
         try (SeekableInputStream is = newInputStream(sourcePath);
@@ -446,14 +408,7 @@ public interface FileIO extends Serializable, Closeable {
         }
     }
 
-    /**
-     * Copies every direct file from a source directory to a target directory according to {@link
-     * #copyFile(Path, Path, boolean)}.
-     *
-     * <p>{@code sourceDirectory} and {@code targetDirectory} must be directories, and each direct
-     * child of {@code sourceDirectory} must be a file. The method is not recursive and does not
-     * roll back files copied before a later failure.
-     */
+    /** Copy all files in sourceDirectory to directory targetDirectory. */
     default void copyFiles(Path sourceDirectory, Path targetDirectory, boolean overwrite)
             throws IOException {
         FileStatus[] fileStatuses = listStatus(sourceDirectory);
