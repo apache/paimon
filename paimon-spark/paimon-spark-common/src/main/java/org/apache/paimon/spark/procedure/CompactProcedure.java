@@ -604,8 +604,6 @@ public class CompactProcedure extends BaseProcedure {
                             table.fullName());
                     continue;
                 }
-                boolean containsMaterializeDeletion = containsMaterializeDeletion(compactionTasks);
-
                 DataEvolutionCompactTaskSerializer serializer =
                         new DataEvolutionCompactTaskSerializer();
                 List<byte[]> serializedTasks = new ArrayList<>();
@@ -653,9 +651,6 @@ public class CompactProcedure extends BaseProcedure {
 
                 List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
                 try (TableCommitImpl commit = table.newCommit(commitUser)) {
-                    if (containsMaterializeDeletion) {
-                        commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id());
-                    }
                     List<CommitMessage> messages =
                             deserializeCommitMessagesAndReleaseSerializedBytes(
                                     messageSerializerser, serializedMessages);
@@ -674,14 +669,6 @@ public class CompactProcedure extends BaseProcedure {
                     table.fullName(),
                     round);
         }
-    }
-
-    static boolean containsMaterializeDeletion(List<DataEvolutionCompactTask> compactionTasks) {
-        return compactionTasks.stream()
-                .anyMatch(
-                        task ->
-                                task.type()
-                                        == DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
     }
 
     private static List<CommitMessage> deserializeCommitMessagesAndReleaseSerializedBytes(

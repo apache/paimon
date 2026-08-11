@@ -18,12 +18,10 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.TableCommitImpl;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -73,17 +71,7 @@ public class DataEvolutionTableCompactSink extends FlinkSink<DataEvolutionCompac
 
     @Override
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory() {
-        return context -> {
-            TableCommitImpl commit = table.newCommit(context.commitUser());
-            if (shouldCheckMaterializeDvConflict(table.coreOptions())) {
-                commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id());
-            }
-            return new StoreCommitter(table, commit, context);
-        };
-    }
-
-    static boolean shouldCheckMaterializeDvConflict(CoreOptions options) {
-        return options.deletionVectorsEnabled() && options.dataEvolutionCompactionRewriteRowIds();
+        return context -> new StoreCommitter(table, table.newCommit(context.commitUser()), context);
     }
 
     @Override

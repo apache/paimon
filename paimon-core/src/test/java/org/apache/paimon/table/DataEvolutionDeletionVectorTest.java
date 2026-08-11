@@ -26,7 +26,6 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPrepa
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -54,7 +53,6 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -81,7 +79,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
-import static org.apache.paimon.errors.ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
@@ -561,349 +558,28 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testCompactMaterializesDeletionVectors() throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
-        writeBaseRows(table);
-        updateStructuredColumn(table);
-        commitDeletionVectors(table, DEFAULT_DV_SPECS);
-        List<String> oldAnchorFiles = new ArrayList<>(anchorFilesByRange(table).values());
-
-        Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
-        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
-
-        table = getTableDefault();
-        List<String> expectedRows = expectedRows("updated", FULL_RANGE);
-        assertThat(readRows(table.newReadBuilder())).containsExactlyElementsOf(expectedRows);
-        assertThat(readProjectedStrings(table.newReadBuilder().withProjection(new int[] {2})))
-                .containsExactlyElementsOf(expectedProjectedStrings("updated", FULL_RANGE));
-        assertThat(readProjectedBlobValues(table.newReadBuilder().withProjection(new int[] {3})))
-                .containsExactlyElementsOf(expectedBlobValues(FULL_RANGE));
-
-        List<Range> materializedRanges = normalFileRowRanges(table);
-        assertThat(materializedRanges).containsExactly(new Range(15, 24));
-        // blobs should be compacted to a single range too.
-        assertBlobFileRowRanges(table, Collections.singletonList(new Range(15, 24)));
-        DataSplit materializedSplit = planDataSplit(table, materializedRanges.get(0));
-        assertDeletionFileRanges(materializedSplit);
-        assertThat(materializedSplit.mergedRowCount()).hasValue(10L);
-        assertThat(
-                        readRows(
-                                table.newReadBuilder()
-                                        .withRowRanges(
-                                                Collections.singletonList(
-                                                        materializedRanges.get(0)))))
-                .containsExactlyElementsOf(expectedRows);
-        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
-        assertThat(liveDeletionVectorDataFileNames(table))
-                .doesNotContainAnyElementsOf(oldAnchorFiles);
-    }
-
-    @Test
-    public void testStaleMaterializeCompactionRejectedAfterConcurrentUpdate() throws Exception {
+    public void testCompactRejectsRewriteRowIdsOption() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
         writeBaseRows(table);
         commitDeletionVectors(table, DEFAULT_DV_SPECS);
 
         Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
         dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
         FileStoreTable compactTable = table.copy(dynamicOptions);
-        Snapshot compactSnapshot = compactTable.latestSnapshot().get();
-        DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(compactTable, false, false, compactSnapshot);
-        List<CommitMessage> staleMaterializeMessages = new ArrayList<>();
-        try {
-            while (true) {
-                for (DataEvolutionCompactTask task : coordinator.plan()) {
-                    staleMaterializeMessages.add(
-                            task.doCompact(compactTable, "test-stale-materialize"));
-                }
-            }
-        } catch (EndOfScanException ignored) {
-        }
-        assertThat(staleMaterializeMessages).isNotEmpty();
-        staleMaterializeMessages.addAll(
-                new DataEvolutionCompactionCommitPreparation(compactTable, compactSnapshot)
-                        .prepare(staleMaterializeMessages));
-
-        RowType writeType = table.rowType().project(Collections.singletonList("f2"));
-        List<CommitMessage> concurrentUpdateMessages = new ArrayList<>();
-        for (int batch = 0; batch < 3; batch++) {
-            BatchWriteBuilder builder = table.newBatchWriteBuilder();
-            try (BatchTableWrite write = builder.newWrite().withWriteType(writeType)) {
-                for (int rowId = batch * 5; rowId < batch * 5 + 5; rowId++) {
-                    write.write(GenericRow.of(BinaryString.fromString("concurrent-" + rowId)));
-                }
-                List<CommitMessage> messages = write.prepareCommit();
-                setFirstRowId(messages, batch * 5L);
-                concurrentUpdateMessages.addAll(messages);
-            }
-        }
-        commit(table, concurrentUpdateMessages);
-
-        assertThat(readProjectedStrings(table.newReadBuilder().withProjection(new int[] {2})))
-                .containsExactlyElementsOf(expectedProjectedStrings("concurrent", FULL_RANGE));
-        long updateSnapshotId = table.latestSnapshot().get().id();
 
         assertThatThrownBy(
-                        () -> {
-                            try (TableCommitImpl commit =
-                                    compactTable.newCommit("test-stale-materialize")) {
-                                commit.rowIdCheckConflictForMaterializeDvCompaction(
-                                                compactSnapshot.id())
-                                        .commit(staleMaterializeMessages);
-                            }
-                        })
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
-
-        assertThat(table.latestSnapshot().get().id()).isEqualTo(updateSnapshotId);
-        assertThat(readProjectedStrings(table.newReadBuilder().withProjection(new int[] {2})))
-                .containsExactlyElementsOf(expectedProjectedStrings("concurrent", FULL_RANGE));
-    }
-
-    @Test
-    public void testStaleMaterializeCompactionAllowsNonOverlappingConcurrentUpdate()
-            throws Exception {
-        FileStoreTable table =
-                createPartitionedReassignTable("non_overlapping_materialize_update_table", false);
-        writePartitionRows(table, "a", 0, 1, 2, 3, 4);
-        writePartitionRows(table, "b", 5, 6, 7, 8, 9);
-
-        BinaryRow partitionA = partition(table, "a");
-        BinaryRow partitionB = partition(table, "b");
-        assertThat(anchorFilesByRange(table, partitionA).keySet()).containsExactly(new Range(0, 4));
-        assertThat(anchorFilesByRange(table, partitionB).keySet()).containsExactly(new Range(5, 9));
-        commitDeletionVectors(
-                table, partitionA, Collections.singletonList(new DvSpec(new Range(0, 4), 1)));
-
-        Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
-        FileStoreTable compactTable = table.copy(dynamicOptions);
-        Snapshot compactSnapshot = compactTable.latestSnapshot().get();
-        PartitionPredicate partitionPredicate =
-                PartitionPredicate.fromMaps(
-                        table.schema().logicalPartitionType(),
-                        Collections.singletonList(Collections.singletonMap("pt", "a")),
-                        table.coreOptions().partitionDefaultName());
-        DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(
-                        compactTable, partitionPredicate, false, false, compactSnapshot);
-        List<CommitMessage> staleMaterializeMessages = new ArrayList<>();
-        try {
-            while (true) {
-                for (DataEvolutionCompactTask task : coordinator.plan()) {
-                    assertThat(task.type())
-                            .isEqualTo(DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
-                    staleMaterializeMessages.add(
-                            task.doCompact(compactTable, "test-stale-materialize"));
-                }
-            }
-        } catch (EndOfScanException ignored) {
-        }
-        assertThat(staleMaterializeMessages).isNotEmpty();
-        staleMaterializeMessages.addAll(
-                new DataEvolutionCompactionCommitPreparation(compactTable, compactSnapshot)
-                        .prepare(staleMaterializeMessages));
-
-        writePartialStrings(table, "b", 5L, 5, 6, 7, 8, 9);
-        long updateSnapshotId = table.latestSnapshot().get().id();
-
-        try (TableCommitImpl commit = compactTable.newCommit("test-stale-materialize")) {
-            commit.rowIdCheckConflictForMaterializeDvCompaction(compactSnapshot.id())
-                    .commit(staleMaterializeMessages);
-        }
-
-        assertThat(table.latestSnapshot().get().id()).isGreaterThan(updateSnapshotId);
-        assertThat(table.latestSnapshot().get().commitKind())
-                .isEqualTo(Snapshot.CommitKind.COMPACT);
-        assertThat(anchorFilesByRange(table, partitionA).keySet())
-                .containsExactly(new Range(10, 13));
-        assertThat(anchorFilesByRange(table, partitionB).keySet()).containsExactly(new Range(5, 9));
-        assertThat(readPartitionedRows(table))
-                .containsExactlyInAnyOrder(
-                        "a|0|base-0",
-                        "a|2|base-2",
-                        "a|3|base-3",
-                        "a|4|base-4",
-                        "b|5|updated-5",
-                        "b|6|updated-6",
-                        "b|7|updated-7",
-                        "b|8|updated-8",
-                        "b|9|updated-9");
-    }
-
-    @Test
-    public void testMaterializeCompactionDropsGlobalIndexCommittedAfterPreparation()
-            throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
-        writeBaseRows(table);
-        updateStructuredColumn(table);
-        commitDeletionVectors(table, DEFAULT_DV_SPECS);
-
-        Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
-        FileStoreTable compactTable = table.copy(dynamicOptions);
-        List<CommitMessage> compactMessages = prepareDataEvolutionCompaction(compactTable, false);
-
-        String indexFile = "concurrent-global-index";
-        commitGlobalIndex(table, indexFile, FULL_RANGE);
-        assertThat(liveGlobalIndexFileNames(table)).containsExactly(indexFile);
-
-        commit(compactTable, compactMessages);
-
-        assertThat(liveGlobalIndexFileNames(table)).isEmpty();
-        assertThat(normalFileRowRanges(table)).containsExactly(new Range(15, 24));
-    }
-
-    @Test
-    public void testMaterializeCompactionUsesRemainingSizeForLargeDeletedRange() throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
-        writeRowsWithLargeFirstRange(table);
-        commitDeletionVectors(
-                table, Collections.singletonList(new DvSpec(FIRST_RANGE, 1, 2, 3, 4)));
-
-        Map<Range, List<DataFileMeta>> normalFilesByRange = normalFilesByRange(table);
-        List<DataFileMeta> firstRangeFiles = normalFilesByRange.get(FIRST_RANGE);
-        List<DataFileMeta> secondRangeFiles = normalFilesByRange.get(new Range(5, 9));
-        long firstRangeWeight = fileWeight(firstRangeFiles);
-        long estimatedFirstRangeWeight = estimatedFileWeight(firstRangeFiles, 1D / 5);
-        long targetFileSize =
-                estimatedFirstRangeWeight + Math.max(1L, fileWeight(secondRangeFiles) / 2);
-        assertThat(targetFileSize).isLessThan(firstRangeWeight);
-
-        Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        dynamicOptions.put(CoreOptions.TARGET_FILE_SIZE.key(), targetFileSize + " B");
-        dynamicOptions.put(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "1 B");
-        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
-        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
-
-        table = getTableDefault();
-        // The compacted rows are assigned new row-tracking ids, while f0 keeps original values.
-        assertThat(normalFileRowRanges(table))
-                .containsExactly(new Range(10, 14), new Range(15, 20));
-        assertBlobFileRowRanges(
-                table,
-                Arrays.asList(
-                        new Range(10, 10),
-                        new Range(11, 11),
-                        new Range(12, 12),
-                        new Range(13, 13),
-                        new Range(14, 14),
-                        new Range(15, 20)));
-        assertThat(readF0Values(table.newReadBuilder()))
-                .containsExactly(0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
-        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
-    }
-
-    @Test
-    public void testMaterializeCompactionMergesSmallFilesWithInterleavedDeletionVectors()
-            throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
-        writeBaseRows(table);
-        updateStructuredColumn(table);
-        commitDeletionVectors(
-                table,
-                Arrays.asList(new DvSpec(FIRST_RANGE, 1), new DvSpec(new Range(10, 14), 12)));
-
-        Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
-        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
-
-        table = getTableDefault();
-        Range materializedRange = new Range(15, 27);
-        assertThat(normalFileRowRanges(table)).containsExactly(materializedRange);
-        assertBlobFileRowRanges(table, Collections.singletonList(materializedRange));
-        assertThat(readRows(table.newReadBuilder()))
-                .containsExactlyElementsOf(expectedRowsExcluding("updated", FULL_RANGE, 1, 12));
-        DataSplit split = planDataSplit(table, materializedRange);
-        assertDeletionFileRanges(split);
-        assertThat(split.mergedRowCount()).hasValue(13L);
-        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
-    }
-
-    @Test
-    public void testMaterializeCompactionHandlesFullyDeletedRange() throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
-        writeBaseRows(table);
-        updateStructuredColumn(table);
-        commitDeletionVectors(
-                table, Collections.singletonList(new DvSpec(FIRST_RANGE, 0, 1, 2, 3, 4)));
-
-        Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
-        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
-
-        table = getTableDefault();
-        Range materializedRange = new Range(15, 24);
-        assertThat(normalFileRowRanges(table)).containsExactly(materializedRange);
-        assertBlobFileRowRanges(table, Collections.singletonList(materializedRange));
-        assertThat(readRows(table.newReadBuilder()))
-                .containsExactlyElementsOf(
-                        expectedRowsExcluding("updated", FULL_RANGE, 0, 1, 2, 3, 4));
-        DataSplit split = planDataSplit(table, materializedRange);
-        assertDeletionFileRanges(split);
-        assertThat(split.mergedRowCount()).hasValue(10L);
-        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
-    }
-
-    @Test
-    public void testMaterializeCompactionFailsFastForDedicatedVectorFiles() throws Exception {
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.column("f0", DataTypes.INT());
-        schemaBuilder.column("f1", DataTypes.VECTOR(VECTOR_DIM, DataTypes.FLOAT()));
-        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "128 MB");
-        schemaBuilder.option(CoreOptions.VECTOR_TARGET_FILE_SIZE.key(), "128 MB");
-        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.VECTOR_FIELD.key(), "f1");
-        schemaBuilder.option(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
-        schemaBuilder.option(CoreOptions.FILE_COMPRESSION.key(), "none");
-        catalog.createTable(identifier("vector_dv_table"), schemaBuilder.build(), true);
-
-        FileStoreTable table = getTable(identifier("vector_dv_table"));
-        for (int batch = 0; batch < 2; batch++) {
-            BatchWriteBuilder builder = table.newBatchWriteBuilder();
-            try (BatchTableWrite write = builder.newWrite();
-                    BatchTableCommit commit = builder.newCommit()) {
-                for (int rowId = batch * 5; rowId < batch * 5 + 5; rowId++) {
-                    write.write(
-                            GenericRow.of(
-                                    rowId,
-                                    BinaryVector.fromPrimitiveArray(
-                                            new float[] {rowId, rowId + 0.5F})));
-                }
-                commit.commit(write.prepareCommit());
-            }
-        }
-        assertThat(
-                        table.store().newScan().plan().files().stream()
-                                .map(ManifestEntry::file)
-                                .anyMatch(file -> isVectorStoreFile(file.fileName())))
-                .isTrue();
-        commitDeletionVectors(table, Collections.singletonList(new DvSpec(FIRST_RANGE, 1)));
-
-        Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        dynamicOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
-        assertThatThrownBy(() -> compactDataEvolutionTable(table.copy(dynamicOptions), false))
+                        () ->
+                                new DataEvolutionCompactCoordinator(
+                                        compactTable,
+                                        false,
+                                        false,
+                                        compactTable.latestSnapshot().get()))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Materializing deletion vectors for vector-store files is not supported.");
+                .hasMessageContaining(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key())
+                .hasMessageContaining("separate operation");
+
+        assertThat(liveDeletionVectorDataFileNames(table)).isNotEmpty();
     }
 
     @Test

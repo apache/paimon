@@ -22,12 +22,16 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.ProjectedDataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.options.Options;
@@ -40,6 +44,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
@@ -57,11 +62,31 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests for {@link DataEvolutionCompactCoordinator.CompactPlanner}. */
 public class DataEvolutionCompactCoordinatorTest {
+
+    @Test
+    public void testRejectsRewriteRowIdsOption() {
+        FileStoreTable table = mock(FileStoreTable.class);
+        Options options = new Options();
+        options.set(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS, true);
+        when(table.coreOptions()).thenReturn(new CoreOptions(options));
+
+        assertThatThrownBy(
+                        () ->
+                                new DataEvolutionCompactCoordinator(
+                                        table, false, false, mock(Snapshot.class)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key())
+                .hasMessageContaining("separate operation");
+    }
 
     @Test
     public void testCompactPlannerSingleFile() {
@@ -456,6 +481,8 @@ public class DataEvolutionCompactCoordinatorTest {
         ManifestsReader manifestsReader = mock(ManifestsReader.class);
         FileStore fileStore = mock(FileStore.class);
         FileStoreScan scan = mock(FileStoreScan.class);
+        ManifestFile.Factory manifestFileFactory = mock(ManifestFile.Factory.class);
+        ManifestFile manifestFile = mock(ManifestFile.class);
 
         Options options = new Options();
         options.set("target-file-size", "1 kb");
@@ -470,7 +497,11 @@ public class DataEvolutionCompactCoordinatorTest {
         when(snapshotReader.manifestsReader()).thenReturn(manifestsReader);
         when(table.store()).thenReturn(fileStore);
         when(fileStore.newScan()).thenReturn(scan);
+        when(fileStore.manifestFileFactory()).thenReturn(manifestFileFactory);
+        when(manifestFileFactory.create()).thenReturn(manifestFile);
         when(scan.withPartitionFilter((PartitionPredicate) null)).thenReturn(scan);
+        when(scan.dropStats()).thenReturn(scan);
+        when(scan.withRowRanges(any())).thenReturn(scan);
 
         ManifestFileMeta metaWithNullRowId =
                 new ManifestFileMeta(
@@ -506,6 +537,16 @@ public class DataEvolutionCompactCoordinatorTest {
 
         ManifestEntry entry1 = makeEntry("file1.parquet", 0L, 100L, 600);
         ManifestEntry entry2 = makeEntry("file2.parquet", 100L, 100L, 600);
+        ProjectedManifestEntry projectedEntry1 = mockProjectedAdd(entry1);
+        ProjectedManifestEntry projectedEntry2 = mockProjectedAdd(entry2);
+        when(manifestFile.scan(eq(metaWithNullRowId.fileName()), any()))
+                .thenReturn(
+                        CloseableIterator.ofElement(
+                                projectedEntry1, ProjectedManifestEntry::clear));
+        when(manifestFile.scan(eq(metaWithRowId.fileName()), any()))
+                .thenReturn(
+                        CloseableIterator.ofElement(
+                                projectedEntry2, ProjectedManifestEntry::clear));
         when(scan.readFileIterator(Arrays.asList(metaWithNullRowId, metaWithRowId)))
                 .thenReturn(Arrays.asList(entry1, entry2).iterator());
 
@@ -516,6 +557,13 @@ public class DataEvolutionCompactCoordinatorTest {
         assertThat(tasks).hasSize(1);
         assertThat(tasks.get(0).compactBefore().stream().map(DataFileMeta::fileName))
                 .containsExactly(entry1.file().fileName(), entry2.file().fileName());
+        verify(manifestFile)
+                .scan(
+                        eq(metaWithNullRowId.fileName()),
+                        any(ProjectedManifestEntry.Projection.class));
+        verify(manifestFile)
+                .scan(eq(metaWithRowId.fileName()), any(ProjectedManifestEntry.Projection.class));
+        verify(scan).withRowRanges(any());
     }
 
     @Test
@@ -527,6 +575,8 @@ public class DataEvolutionCompactCoordinatorTest {
         ManifestsReader manifestsReader = mock(ManifestsReader.class);
         FileStore fileStore = mock(FileStore.class);
         FileStoreScan scan = mock(FileStoreScan.class);
+        ManifestFile.Factory manifestFileFactory = mock(ManifestFile.Factory.class);
+        ManifestFile manifestFile = mock(ManifestFile.class);
         PartitionPredicate partitionPredicate = mock(PartitionPredicate.class);
         AtomicBoolean entryPartitionFilterApplied = new AtomicBoolean(false);
 
@@ -540,14 +590,19 @@ public class DataEvolutionCompactCoordinatorTest {
         when(snapshotReader.snapshotManager()).thenReturn(snapshotManager);
         when(snapshotManager.latestSnapshot()).thenReturn(snapshot);
         when(snapshotReader.manifestsReader()).thenReturn(manifestsReader);
+        when(manifestsReader.partitionFilter()).thenReturn(partitionPredicate);
         when(table.store()).thenReturn(fileStore);
         when(fileStore.newScan()).thenReturn(scan);
+        when(fileStore.manifestFileFactory()).thenReturn(manifestFileFactory);
+        when(manifestFileFactory.create()).thenReturn(manifestFile);
         when(scan.withPartitionFilter(partitionPredicate))
                 .thenAnswer(
                         invocation -> {
                             entryPartitionFilterApplied.set(true);
                             return scan;
                         });
+        when(scan.dropStats()).thenReturn(scan);
+        when(scan.withRowRanges(any())).thenReturn(scan);
 
         ManifestFileMeta sharedManifest =
                 new ManifestFileMeta(
@@ -561,8 +616,8 @@ public class DataEvolutionCompactCoordinatorTest {
                         null,
                         null,
                         null,
-                        0L,
-                        399L);
+                        null,
+                        null);
         when(manifestsReader.read(snapshot, ScanMode.ALL))
                 .thenReturn(
                         new ManifestsReader.Result(
@@ -576,6 +631,16 @@ public class DataEvolutionCompactCoordinatorTest {
         ManifestEntry a2 = makeEntry(partitionA, "a-2.parquet", 100L, 100L, 600);
         ManifestEntry b1 = makeEntry(partitionB, "b-1.parquet", 0L, 100L, 600);
         ManifestEntry b2 = makeEntry(partitionB, "b-2.parquet", 100L, 100L, 600);
+        List<ProjectedManifestEntry> projectedEntries =
+                Arrays.asList(
+                        mockProjectedAdd(a1),
+                        mockProjectedAdd(a2),
+                        mockProjectedAdd(b1),
+                        mockProjectedAdd(b2));
+        when(manifestFile.scan(eq(sharedManifest.fileName()), any()))
+                .thenReturn(
+                        CloseableIterator.fromList(
+                                projectedEntries, ProjectedManifestEntry::clear));
         when(scan.readFileIterator(Collections.singletonList(sharedManifest)))
                 .thenAnswer(
                         invocation ->
@@ -604,6 +669,20 @@ public class DataEvolutionCompactCoordinatorTest {
             String fileName, long firstRowId, long rowCount, long fileSize) {
         return makeEntryWithSize(
                 BinaryRow.EMPTY_ROW, fileName, firstRowId, rowCount, fileSize, fileSize);
+    }
+
+    private ProjectedManifestEntry mockProjectedAdd(ManifestEntry entry) {
+        ProjectedManifestEntry projected = mock(ProjectedManifestEntry.class);
+        ProjectedDataFileMeta file = mock(ProjectedDataFileMeta.class);
+        when(projected.isAdd()).thenReturn(true);
+        when(projected.partition()).thenReturn(entry.partition());
+        when(projected.file()).thenReturn(file);
+        when(file.hasFirstRowId()).thenReturn(true);
+        when(file.nonNullFirstRowId()).thenReturn(entry.file().nonNullFirstRowId());
+        when(file.rowCount()).thenReturn(entry.file().rowCount());
+        when(file.fileSize()).thenReturn(entry.file().fileSize());
+        when(file.fileNameBinary()).thenReturn(BinaryString.fromString(entry.file().fileName()));
+        return projected;
     }
 
     private ManifestEntry makeEntry(
@@ -744,9 +823,6 @@ public class DataEvolutionCompactCoordinatorTest {
         return new DataEvolutionCompactCoordinator.CompactPlanner(
                 true,
                 false,
-                false,
-                null,
-                null,
                 targetFileSize,
                 targetFileSize,
                 openFileCost,

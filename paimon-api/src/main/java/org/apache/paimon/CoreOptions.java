@@ -2565,9 +2565,10 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether data-evolution compaction may rewrite row IDs while physically applying deletion vectors. "
-                                    + "Enable only when callers do not rely on stable _ROW_ID; "
-                                    + "this invalidates row-id based references and drops global indexes for affected partitions.");
+                            "Legacy compatibility option. Data-evolution compaction does not "
+                                    + "rewrite row IDs or physically apply deletion vectors; "
+                                    + "setting this option to true fails and deletion vectors "
+                                    + "must be materialized in a separate operation.");
 
     public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
             key("blob-compaction.enabled")
