@@ -26,9 +26,6 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.apache.hadoop.fs.s3a.WriteOperationHelper;
 import org.apache.hadoop.fs.s3a.impl.PutObjectOptions;
-import org.apache.hadoop.fs.s3a.statistics.S3AStatisticsContext;
-import org.apache.hadoop.fs.store.audit.AuditSpan;
-import org.apache.hadoop.fs.store.audit.AuditSpanSource;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadResponse;
 import software.amazon.awssdk.services.s3.model.CompletedPart;
@@ -48,17 +45,12 @@ public class S3MultiPartUpload
         implements MultiPartUploadStore<CompletedPart, CompleteMultipartUploadResponse> {
 
     private final S3AFileSystem s3a;
-    private final InternalWriteOperationHelper s3accessHelper;
+    private final WriteOperationHelper s3accessHelper;
 
     public S3MultiPartUpload(S3AFileSystem s3a, Configuration conf) {
         checkNotNull(s3a);
-        this.s3accessHelper =
-                new InternalWriteOperationHelper(
-                        s3a,
-                        checkNotNull(conf),
-                        s3a.createStoreContext().getInstrumentation(),
-                        s3a.getAuditSpanSource(),
-                        s3a.getActiveAuditSpan());
+        checkNotNull(conf);
+        this.s3accessHelper = s3a.createWriteOperationHelper(s3a.getActiveAuditSpan());
         this.s3a = s3a;
     }
 
@@ -116,17 +108,5 @@ public class S3MultiPartUpload
     @Override
     public void abortMultipartUpload(String destKey, String uploadId) throws IOException {
         s3accessHelper.abortMultipartUpload(destKey, uploadId, false, null);
-    }
-
-    private static final class InternalWriteOperationHelper extends WriteOperationHelper {
-
-        InternalWriteOperationHelper(
-                S3AFileSystem owner,
-                Configuration conf,
-                S3AStatisticsContext statisticsContext,
-                AuditSpanSource auditSpanSource,
-                AuditSpan auditSpan) {
-            super(owner, conf, statisticsContext, auditSpanSource, auditSpan, null);
-        }
     }
 }
