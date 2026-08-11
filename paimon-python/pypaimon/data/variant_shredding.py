@@ -250,6 +250,10 @@ def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
     elif pa.types.is_timestamp(arrow_type):
         # PyArrow converts timestamp to datetime.datetime
         if isinstance(value, datetime.datetime):
+            if (arrow_type.unit == 'ns'
+                    and getattr(value, 'nanosecond', 0) != 0):
+                raise ValueError(
+                    "VARIANT timestamps require microsecond-aligned values")
             if value.tzinfo is not None:
                 epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
                 delta = value - epoch
@@ -267,7 +271,16 @@ def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
                 )
                 builder.append_timestamp_ntz(micros)
         else:
-            builder.append_timestamp_ntz(int(value))
+            raw_value = int(value)
+            if arrow_type.unit == 'ns':
+                if raw_value % 1000:
+                    raise ValueError(
+                        "VARIANT timestamps require microsecond-aligned values")
+                micros = raw_value // 1000
+            else:
+                micros = raw_value * {'s': 1_000_000, 'ms': 1000, 'us': 1}[
+                    arrow_type.unit]
+            builder.append_timestamp_ntz(micros)
     elif pa.types.is_decimal(arrow_type):
         decimal = (
             value if isinstance(value, _decimal.Decimal)

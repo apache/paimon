@@ -163,6 +163,29 @@ class TestVariantGet(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid cast"):
             variant_get(column, '$.overflow', pa.int32())
 
+        temporal = _variants(['1', '2026-08-10'])
+        self.assertEqual(
+            variant_get(temporal, '$', pa.date32()).to_pylist(),
+            [datetime.date(1970, 1, 2), datetime.date(2026, 8, 10)],
+        )
+        self.assertEqual(
+            variant_get(temporal.slice(0, 1), '$', pa.timestamp('us'))
+            .to_pylist(),
+            [datetime.datetime(1970, 1, 1, 0, 0, 0, 1)],
+        )
+
+    def test_get_matches_java_numeric_strings(self):
+        column = _variants([
+            Decimal('100.00'), 1e20, 1e-4,
+            float('inf'), float('-inf'), float('nan'),
+        ])
+
+        self.assertEqual(
+            variant_get(column, '$', pa.string()).to_pylist(),
+            ['100.00', '1.0E20', '1.0E-4',
+             'Infinity', '-Infinity', 'NaN'],
+        )
+
     def test_get_matches_java_numeric_casts(self):
         column = _variants([
             {'value': 1e20},
@@ -276,6 +299,28 @@ class TestVariantReplace(unittest.TestCase):
                 result = variant_replace(
                     column, '$.value', pa.scalar(value, type=arrow_type))
                 self.assertEqual(_decode(result), [{'value': value}])
+
+        column = _variants([{'value': 0}])
+        for nanos in (1, -1, 1001, -1001):
+            with self.subTest(nanos=nanos):
+                with self.assertRaisesRegex(ValueError, "microsecond-aligned"):
+                    variant_replace(
+                        column,
+                        '$.value',
+                        pa.scalar(nanos, type=pa.timestamp('ns')),
+                    )
+        for nanos in (1000, -1000):
+            with self.subTest(nanos=nanos):
+                result = variant_replace(
+                    column,
+                    '$.value',
+                    pa.scalar(nanos, type=pa.timestamp('ns')),
+                )
+                self.assertEqual(
+                    _decode(result),
+                    [{'value': datetime.datetime(1970, 1, 1)
+                      + datetime.timedelta(microseconds=nanos // 1000)}],
+                )
 
     def test_nullable_fast_path_does_not_devectorize_chunk(self):
         size = 50000

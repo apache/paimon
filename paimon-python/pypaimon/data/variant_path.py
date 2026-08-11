@@ -835,9 +835,23 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
 
 def _decimal_text(value):
     text = format(value, 'f')
-    if '.' in text:
-        text = text.rstrip('0').rstrip('.')
-    return '0' if text in ('', '-0') else text
+    return text[1:] if value == 0 and text.startswith('-') else text
+
+
+def _floating_text(value):
+    if math.isnan(value):
+        return 'NaN'
+    if math.isinf(value):
+        return 'Infinity' if value > 0 else '-Infinity'
+    number = decimal.Decimal(repr(value))
+    exponent = number.adjusted()
+    if -3 <= exponent < 7:
+        text = format(number, 'f')
+        return text if '.' in text else text + '.0'
+    mantissa, exponent = format(number, 'E').split('E')
+    if '.' not in mantissa:
+        mantissa += '.0'
+    return mantissa + 'E' + str(int(exponent))
 
 
 def _json_text(value):
@@ -926,6 +940,45 @@ def _cast_string_integer(value, target_type):
     return number
 
 
+def _parse_date(value):
+    value = value.strip()
+    if value and (value.isdigit()
+                  or value[0] == '-' and value[1:].isdigit()):
+        return datetime.date(1970, 1, 1) + datetime.timedelta(days=int(value))
+    return datetime.datetime.strptime(value, '%Y-%m-%d').date()
+
+
+def _parse_timestamp(value, target_type):
+    value = value.strip()
+    if value and (value.isdigit()
+                  or value[0] == '-' and value[1:].isdigit()):
+        raw_value = int(value)
+        if target_type.unit == 'ns':
+            if raw_value % 1000:
+                raise ValueError("timestamp is not microsecond-aligned")
+            micros = raw_value // 1000
+        else:
+            micros = raw_value * {
+                's': 1_000_000, 'ms': 1000, 'us': 1,
+            }[target_type.unit]
+        return datetime.datetime(1970, 1, 1) + datetime.timedelta(
+            microseconds=int(micros))
+    formats = (
+        '%Y-%m-%d',
+        '%Y-%m-%d %H:%M:%S',
+        '%Y-%m-%d %H:%M:%S.%f',
+        '%Y-%m-%dT%H:%M',
+        '%Y-%m-%dT%H:%M:%S',
+        '%Y-%m-%dT%H:%M:%S.%f',
+    )
+    for date_format in formats:
+        try:
+            return datetime.datetime.strptime(value, date_format)
+        except ValueError:
+            pass
+    raise ValueError
+
+
 def _cast_python(value, target_type):
     if value is None or pa.types.is_null(target_type):
         return None
@@ -972,6 +1025,8 @@ def _cast_python(value, target_type):
                 return str(value).lower()
             if isinstance(value, decimal.Decimal):
                 return _decimal_text(value)
+            if isinstance(value, float):
+                return _floating_text(value)
             if isinstance(value, (datetime.date, datetime.datetime)):
                 return value.isoformat()
             if isinstance(value, bytes):
@@ -1016,7 +1071,7 @@ def _cast_python(value, target_type):
             if isinstance(value, datetime.date):
                 return value
             if isinstance(value, str):
-                return datetime.date.fromisoformat(value)
+                return _parse_date(value)
             raise TypeError
         if pa.types.is_timestamp(target_type):
             if isinstance(value, datetime.datetime):
@@ -1024,7 +1079,7 @@ def _cast_python(value, target_type):
             if isinstance(value, datetime.date):
                 return datetime.datetime.combine(value, datetime.time())
             if isinstance(value, str):
-                return datetime.datetime.fromisoformat(value)
+                return _parse_timestamp(value, target_type)
             if isinstance(value, int) and not isinstance(value, bool):
                 result = datetime.datetime.fromtimestamp(
                     value, tz=datetime.timezone.utc)
