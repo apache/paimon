@@ -178,6 +178,75 @@ class DataEvolutionCompactRangePlannerTest extends TableTestBase {
     }
 
     @Test
+    void testBatchCarriesOnlyManifestsOverlappingItsRanges() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+
+        List<ManifestFileMeta> firstManifest =
+                manifestFile.write(
+                        Arrays.asList(
+                                add("normal-0.parquet", 0L, 10L, 200L),
+                                add("updated-0.parquet", 0L, 10L, 200L),
+                                blob("spanning.blob", 0L, 30L, 40L, "f0")));
+        List<ManifestFileMeta> secondManifest =
+                manifestFile.write(
+                        Arrays.asList(
+                                add("normal-2.parquet", 20L, 10L, 200L),
+                                add("updated-2.parquet", 20L, 10L, 200L)));
+        List<ManifestFileMeta> manifests = new ArrayList<>();
+        manifests.addAll(firstManifest);
+        manifests.addAll(secondManifest);
+
+        Queue<DataEvolutionCompactRangePlanner.RangeBatch> batches =
+                plan(
+                        new DataEvolutionCompactRangePlanner(
+                                manifestFile, null, 3, candidateOptions(table, false, false)),
+                        manifests);
+
+        assertThat(batches).hasSize(2);
+        DataEvolutionCompactRangePlanner.RangeBatch first = batches.poll();
+        assertThat(first.manifestFiles()).containsExactlyElementsOf(firstManifest);
+        assertThat(first.toRanges()).containsExactly(new Range(0L, 9L));
+        DataEvolutionCompactRangePlanner.RangeBatch second = batches.poll();
+        assertThat(second.manifestFiles()).containsExactlyElementsOf(manifests);
+        assertThat(second.toRanges()).containsExactly(new Range(20L, 29L));
+    }
+
+    @Test
+    void testLegacyManifestsUseOneFullMetadataScan() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+
+        List<ManifestFileMeta> firstManifest =
+                manifestFile.write(
+                        Arrays.asList(
+                                add("normal-0.parquet", 0L, 10L, 200L),
+                                add("updated-0.parquet", 0L, 10L, 200L)));
+        List<ManifestFileMeta> secondManifest =
+                manifestFile.write(
+                        Arrays.asList(
+                                add("normal-2.parquet", 20L, 10L, 200L),
+                                add("updated-2.parquet", 20L, 10L, 200L)));
+        List<ManifestFileMeta> legacyManifests = new ArrayList<>();
+        legacyManifests.add(withoutRowIdBounds(firstManifest.get(0)));
+        legacyManifests.add(withoutRowIdBounds(secondManifest.get(0)));
+
+        Queue<DataEvolutionCompactRangePlanner.RangeBatch> batches =
+                plan(
+                        new DataEvolutionCompactRangePlanner(
+                                manifestFile, null, 2, candidateOptions(table, false, false)),
+                        legacyManifests);
+
+        assertThat(batches).hasSize(1);
+        DataEvolutionCompactRangePlanner.RangeBatch batch = batches.poll();
+        assertThat(batch.fileCount()).isEqualTo(4);
+        assertThat(batch.manifestFiles()).containsExactlyElementsOf(legacyManifests);
+        assertThat(batch.toRanges()).containsExactly(new Range(0L, 9L), new Range(20L, 29L));
+    }
+
+    @Test
     void testPlansOnlyRangesWhichCanProduceNormalCompaction() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -362,6 +431,22 @@ class DataEvolutionCompactRangePlannerTest extends TableTestBase {
     private ManifestEntry delete(ManifestEntry add) {
         return ManifestEntry.create(
                 FileKind.DELETE, add.partition(), add.bucket(), add.totalBuckets(), add.file());
+    }
+
+    private ManifestFileMeta withoutRowIdBounds(ManifestFileMeta meta) {
+        return new ManifestFileMeta(
+                meta.fileName(),
+                meta.fileSize(),
+                meta.numAddedFiles(),
+                meta.numDeletedFiles(),
+                meta.partitionStats(),
+                meta.schemaId(),
+                meta.minBucket(),
+                meta.maxBucket(),
+                meta.minLevel(),
+                meta.maxLevel(),
+                null,
+                null);
     }
 
     private ManifestEntry blob(

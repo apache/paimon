@@ -81,8 +81,8 @@ public class DataEvolutionCompactCoordinator {
         CoreOptions options = table.coreOptions();
         checkArgument(
                 !options.dataEvolutionCompactionRewriteRowIds(),
-                "Option '%s=true' is not supported by data evolution compaction. "
-                        + "Materialize deletion vectors in a separate operation instead.",
+                "Option '%s=true' is no longer supported. Data evolution compaction preserves "
+                        + "row IDs and logical deletions; it does not materialize deleted rows.",
                 CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key());
 
         long targetFileSize = options.targetFileSize(false);
@@ -171,7 +171,7 @@ public class DataEvolutionCompactCoordinator {
                     new DataEvolutionCompactRangePlanner(
                                     manifestFileFactory.create(),
                                     manifestsReader.partitionFilter(),
-                                    DataEvolutionCompactRangePlanner.FILES_BATCH,
+                                    DataEvolutionCompactRangePlanner.CANDIDATE_FILES_PER_BATCH,
                                     candidateOptions)
                             .plan(manifestFileMetas);
         }
@@ -272,7 +272,31 @@ public class DataEvolutionCompactCoordinator {
                     partitionedFiles.entrySet()) {
                 BinaryRow partition = partitionFiles.getKey();
                 List<DataFileMeta> files = partitionFiles.getValue();
-                RangeHelper<DataFileMeta> rangeHelper =
+                List<DataFileMeta> dataFiles = new ArrayList<>();
+                List<DataFileMeta> blobFiles = new ArrayList<>();
+                List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
+                TreeMap<Long, DataFileMeta> treeMap = new TreeMap<>();
+                Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles = new HashMap<>();
+                Map<DataFileMeta, List<DataFileMeta>> dataFileToVectorStoreFiles = new HashMap<>();
+                for (DataFileMeta file : files) {
+                    if (isBlobFile(file.fileName())) {
+                        blobFiles.add(file);
+                    } else if (isVectorStoreFile(file.fileName())) {
+                        vectorStoreFiles.add(file);
+                    } else {
+                        treeMap.put(file.nonNullFirstRowId(), file);
+                        dataFiles.add(file);
+                    }
+                }
+
+                if (compactBlob) {
+                    associateDedicatedFiles(blobFiles, treeMap, dataFileToBlobFiles);
+                }
+                if (compactVector) {
+                    associateDedicatedFiles(vectorStoreFiles, treeMap, dataFileToVectorStoreFiles);
+                }
+
+                RangeHelper<DataFileMeta> continuousDataRangeHelper =
                         new RangeHelper<>(
                                 f ->
                                         new Range(
@@ -280,76 +304,19 @@ public class DataEvolutionCompactCoordinator {
                                                 // merge adjacent files
                                                 f.nonNullFirstRowId() + f.rowCount()));
 
-                List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(files);
-
-                for (List<DataFileMeta> group : ranges) {
-                    List<DataFileMeta> dataFiles = new ArrayList<>();
-                    List<DataFileMeta> blobFiles = new ArrayList<>();
-                    List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
-                    TreeMap<Long, DataFileMeta> treeMap = new TreeMap<>();
-                    Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles = new HashMap<>();
-                    Map<DataFileMeta, List<DataFileMeta>> dataFileToVectorStoreFiles =
-                            new HashMap<>();
-                    for (DataFileMeta f : group) {
-                        if (isBlobFile(f.fileName())) {
-                            blobFiles.add(f);
-                        } else if (isVectorStoreFile(f.fileName())) {
-                            vectorStoreFiles.add(f);
-                        } else {
-                            treeMap.put(f.nonNullFirstRowId(), f);
-                            dataFiles.add(f);
-                        }
-                    }
-
-                    if (compactBlob) {
-                        // associate blob files to data files
-                        for (DataFileMeta blobFile : blobFiles) {
-                            Long key = treeMap.floorKey(blobFile.nonNullFirstRowId());
-                            if (key != null) {
-                                DataFileMeta dataFile = treeMap.get(key);
-                                if (blobFile.nonNullFirstRowId() >= dataFile.nonNullFirstRowId()
-                                        && blobFile.nonNullFirstRowId()
-                                                <= dataFile.nonNullFirstRowId()
-                                                        + dataFile.rowCount()
-                                                        - 1) {
-                                    dataFileToBlobFiles
-                                            .computeIfAbsent(dataFile, k -> new ArrayList<>())
-                                            .add(blobFile);
-                                }
-                            }
-                        }
-                    }
-                    if (compactVector) {
-                        // associate vector-store files to data files
-                        for (DataFileMeta vectorStoreFile : vectorStoreFiles) {
-                            Long key = treeMap.floorKey(vectorStoreFile.nonNullFirstRowId());
-                            if (key != null) {
-                                DataFileMeta dataFile = treeMap.get(key);
-                                if (vectorStoreFile.nonNullFirstRowId()
-                                                >= dataFile.nonNullFirstRowId()
-                                        && vectorStoreFile.nonNullFirstRowId()
-                                                <= dataFile.nonNullFirstRowId()
-                                                        + dataFile.rowCount()
-                                                        - 1) {
-                                    dataFileToVectorStoreFiles
-                                            .computeIfAbsent(dataFile, k -> new ArrayList<>())
-                                            .add(vectorStoreFile);
-                                }
-                            }
-                        }
-                    }
-
-                    RangeHelper<DataFileMeta> rangeHelper2 =
+                for (List<DataFileMeta> continuousDataFiles :
+                        continuousDataRangeHelper.mergeOverlappingRanges(dataFiles)) {
+                    RangeHelper<DataFileMeta> logicalRangeHelper =
                             new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
                     List<List<DataFileMeta>> groupedFiles =
-                            rangeHelper2.mergeOverlappingRanges(dataFiles);
+                            logicalRangeHelper.mergeOverlappingRanges(continuousDataFiles);
 
                     CompactBin compactBin = new CompactBin(targetFileSize);
                     for (List<DataFileMeta> fileGroup : groupedFiles) {
                         checkArgument(
-                                rangeHelper.areAllRangesSame(fileGroup),
+                                logicalRangeHelper.areAllRangesSame(fileGroup),
                                 "Data files %s should be all row id ranges same.",
-                                dataFiles);
+                                continuousDataFiles);
                         long groupWeight = groupWeight(fileGroup);
                         if (groupWeight > targetFileSize) {
                             tasks.addAll(
@@ -386,6 +353,24 @@ public class DataEvolutionCompactCoordinator {
                 }
             }
             return tasks;
+        }
+
+        private void associateDedicatedFiles(
+                List<DataFileMeta> dedicatedFiles,
+                TreeMap<Long, DataFileMeta> dataFilesByFirstRowId,
+                Map<DataFileMeta, List<DataFileMeta>> association) {
+            for (DataFileMeta dedicatedFile : dedicatedFiles) {
+                Long key = dataFilesByFirstRowId.floorKey(dedicatedFile.nonNullFirstRowId());
+                if (key == null) {
+                    continue;
+                }
+                DataFileMeta dataFile = dataFilesByFirstRowId.get(key);
+                if (dedicatedFile.nonNullFirstRowId() <= dataFile.nonNullRowIdRange().to) {
+                    association
+                            .computeIfAbsent(dataFile, ignored -> new ArrayList<>())
+                            .add(dedicatedFile);
+                }
+            }
         }
 
         private List<DataEvolutionCompactTask> triggerTask(

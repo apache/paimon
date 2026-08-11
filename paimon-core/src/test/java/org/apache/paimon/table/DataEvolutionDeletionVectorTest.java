@@ -577,7 +577,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                                         compactTable.latestSnapshot().get()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key())
-                .hasMessageContaining("separate operation");
+                .hasMessageContaining("does not materialize deleted rows");
 
         assertThat(liveDeletionVectorDataFileNames(table)).isNotEmpty();
     }

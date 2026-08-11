@@ -60,6 +60,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongFunction;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -85,7 +86,7 @@ public class DataEvolutionCompactCoordinatorTest {
                                         table, false, false, mock(Snapshot.class)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key())
-                .hasMessageContaining("separate operation");
+                .hasMessageContaining("does not materialize deleted rows");
     }
 
     @Test
@@ -253,6 +254,38 @@ public class DataEvolutionCompactCoordinatorTest {
         assertThat(tasks.get(0).type()).isEqualTo(DataEvolutionCompactTask.TaskType.BLOB);
         assertThat(tasks.get(0).compactBefore())
                 .containsExactly(entries.get(2).file(), entries.get(3).file());
+    }
+
+    @Test
+    public void testSpanningBlobFilesDoNotReconnectDisjointNormalRanges() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("prefix-0.parquet", 0L, 5L, 20));
+        entries.add(makeEntry("prefix-1.parquet", 0L, 5L, 20));
+        entries.add(makeBlobEntry("old.blob", 0L, 13L, 40, 0, "pic"));
+        entries.add(makeBlobEntry("updated.blob", 0L, 13L, 40, 1, "pic"));
+        // The oversized normal file covering [5, 9] is not part of the candidate scan.
+        entries.add(makeEntry("suffix-0.parquet", 10L, 2L, 20));
+        entries.add(makeEntry("suffix-1.parquet", 12L, 2L, 20));
+        entries.add(makeEntry("suffix-2.parquet", 14L, 2L, 20));
+        entries.add(makeEntry("suffix-3.parquet", 16L, 4L, 20));
+
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                blobPlanner(100, 1, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+
+        List<DataEvolutionCompactTask> normalTasks =
+                planner.compactPlan(entries).stream()
+                        .filter(task -> task.type() == DataEvolutionCompactTask.TaskType.NORMAL)
+                        .collect(Collectors.toList());
+
+        assertThat(normalTasks).hasSize(2);
+        assertThat(normalTasks.get(0).compactBefore())
+                .containsExactly(entries.get(0).file(), entries.get(1).file());
+        assertThat(normalTasks.get(1).compactBefore())
+                .containsExactly(
+                        entries.get(4).file(),
+                        entries.get(5).file(),
+                        entries.get(6).file(),
+                        entries.get(7).file());
     }
 
     @Test
@@ -925,6 +958,18 @@ public class DataEvolutionCompactCoordinatorTest {
 
         assertThat(deserialized).isEqualTo(task);
         assertThat(deserialized.partition()).isEqualTo(partition);
+    }
+
+    @Test
+    public void testNormalCompactTaskRejectsDisjointRowRanges() {
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        createDataFileMeta("file1.parquet", 0L, 10L, 0, 1024),
+                        createDataFileMeta("file2.parquet", 20L, 10L, 0, 1024));
+
+        assertThatThrownBy(() -> new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, files))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("contiguous row range");
     }
 
     @Test

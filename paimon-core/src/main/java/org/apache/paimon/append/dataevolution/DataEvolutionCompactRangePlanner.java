@@ -63,7 +63,8 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 /** Plans full-metadata scans only for candidates selected from projected live-file metadata. */
 final class DataEvolutionCompactRangePlanner {
 
-    static final int FILES_BATCH = 100_000;
+    // Soft target. One logical candidate range or a legacy manifest group can exceed it.
+    static final int CANDIDATE_FILES_PER_BATCH = 100_000;
 
     private static final Projection CANDIDATE_ADD_PROJECTION =
             manifestProjection(
@@ -108,18 +109,18 @@ final class DataEvolutionCompactRangePlanner {
 
     private final ManifestFile manifestFile;
     private final @Nullable PartitionPredicate partitionPredicate;
-    private final int filesPerBatch;
+    private final int candidateFilesPerBatch;
     private final CandidateOptions candidateOptions;
 
     DataEvolutionCompactRangePlanner(
             ManifestFile manifestFile,
             @Nullable PartitionPredicate partitionPredicate,
-            int filesPerBatch,
+            int candidateFilesPerBatch,
             CandidateOptions candidateOptions) {
         this.manifestFile = manifestFile;
         this.partitionPredicate = partitionPredicate;
-        checkArgument(filesPerBatch > 0, "Files per batch must be positive.");
-        this.filesPerBatch = filesPerBatch;
+        checkArgument(candidateFilesPerBatch > 0, "Candidate files per batch must be positive.");
+        this.candidateFilesPerBatch = candidateFilesPerBatch;
         this.candidateOptions = Objects.requireNonNull(candidateOptions, "candidateOptions");
     }
 
@@ -147,7 +148,7 @@ final class DataEvolutionCompactRangePlanner {
     }
 
     private Queue<RangeBatch> planManifestGroup(List<ManifestFileMeta> manifestGroup) {
-        RangeBatchBuilder batches = new RangeBatchBuilder(filesPerBatch, manifestGroup);
+        RangeBatchBuilder batches = new RangeBatchBuilder(candidateFilesPerBatch, manifestGroup);
         CompactFileIdentifierSet deletedIdentifiers = new CompactFileIdentifierSet();
         ReusableIdentifier identifier = new ReusableIdentifier();
         CompactCandidateRangeCollector candidateRanges =
@@ -284,7 +285,7 @@ final class DataEvolutionCompactRangePlanner {
             deletedFiles = Math.addExact(deletedFiles, manifestMeta.numDeletedFiles());
         }
         long estimatedLiveFiles = Math.max(0L, addedFiles - deletedFiles);
-        return (int) Math.min(estimatedLiveFiles, filesPerBatch);
+        return (int) Math.min(estimatedLiveFiles, candidateFilesPerBatch);
     }
 
     private static Projection manifestProjection(
@@ -368,25 +369,31 @@ final class DataEvolutionCompactRangePlanner {
 
     private static final class RangeBatchBuilder {
 
-        private final int filesPerBatch;
+        private final int candidateFilesPerBatch;
         private final List<ManifestFileMeta> manifestFiles;
+        private final boolean manifestsHaveRowIdBounds;
         private final Queue<RangeBatch> batches = new ArrayDeque<>();
         private PrimitiveRowRanges current = new PrimitiveRowRanges(16);
         private long currentFileCount;
 
-        private RangeBatchBuilder(int filesPerBatch, List<ManifestFileMeta> manifestFiles) {
-            this.filesPerBatch = filesPerBatch;
+        private RangeBatchBuilder(
+                int candidateFilesPerBatch, List<ManifestFileMeta> manifestFiles) {
+            this.manifestsHaveRowIdBounds = allContainsRowId(manifestFiles);
+            // Legacy manifests cannot be pruned by row-id bounds. Keep their candidate ranges in
+            // one batch so the full manifest group is scanned only once.
+            this.candidateFilesPerBatch =
+                    manifestsHaveRowIdBounds ? candidateFilesPerBatch : Integer.MAX_VALUE;
             this.manifestFiles = manifestFiles;
         }
 
         private void add(long start, long end, int fileCount) {
             checkArgument(fileCount > 0, "Logical range file count must be positive.");
-            if (current.size() > 0 && currentFileCount + fileCount > filesPerBatch) {
+            if (current.size() > 0 && currentFileCount + fileCount > candidateFilesPerBatch) {
                 flush();
             }
             current.add(start, end);
             currentFileCount = Math.addExact(currentFileCount, fileCount);
-            if (currentFileCount >= filesPerBatch) {
+            if (currentFileCount >= candidateFilesPerBatch) {
                 flush();
             }
         }
@@ -400,11 +407,28 @@ final class DataEvolutionCompactRangePlanner {
             if (current.size() == 0) {
                 return;
             }
+            List<ManifestFileMeta> batchManifestFiles = manifestsForCurrentRanges();
             batches.add(
                     new RangeBatch(
-                            current.takeOwned(), manifestFiles, Math.toIntExact(currentFileCount)));
+                            current.takeOwned(),
+                            batchManifestFiles,
+                            Math.toIntExact(currentFileCount)));
             current = new PrimitiveRowRanges(16);
             currentFileCount = 0L;
+        }
+
+        private List<ManifestFileMeta> manifestsForCurrentRanges() {
+            if (!manifestsHaveRowIdBounds) {
+                return manifestFiles;
+            }
+            List<ManifestFileMeta> overlapping = new ArrayList<>();
+            for (ManifestFileMeta manifestFile : manifestFiles) {
+                if (current.overlaps(manifestFile.minRowId(), manifestFile.maxRowId())) {
+                    overlapping.add(manifestFile);
+                }
+            }
+            checkState(!overlapping.isEmpty(), "Candidate ranges must overlap a manifest file.");
+            return overlapping;
         }
     }
 
@@ -433,10 +457,11 @@ final class DataEvolutionCompactRangePlanner {
 
             RangeBatch result = pending;
             pending = null;
-            while (result.fileCount() < filesPerBatch) {
+            while (result.fileCount() < candidateFilesPerBatch) {
                 ensurePending();
                 if (pending == null
-                        || (long) result.fileCount() + pending.fileCount() > filesPerBatch) {
+                        || (long) result.fileCount() + pending.fileCount()
+                                > candidateFilesPerBatch) {
                     break;
                 }
                 result = result.merge(pending);

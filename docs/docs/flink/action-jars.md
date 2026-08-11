@@ -350,9 +350,11 @@ one delete snapshot.
 
 :::warning
 
-- This action performs a logical delete. Physical data and BLOB file
-  reclamation still depends on subsequent Data Evolution compaction with
-  `data-evolution.compaction.rewrite-row-ids=true` and snapshot expiration.
+- This action performs a logical delete. Data Evolution compaction preserves
+  those logical deletions instead of materializing them, and the legacy
+  `data-evolution.compaction.rewrite-row-ids` option is no longer supported.
+  There is currently no standalone action for physically applying these
+  deletion vectors.
 - Do not run multiple delete actions, or concurrent `APPEND`, `COMPACT`, or
   `OVERWRITE` operations, against the same table. A conflicting
   commit causes the action to fail instead of silently overwriting deletion
