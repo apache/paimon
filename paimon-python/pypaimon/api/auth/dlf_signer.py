@@ -24,6 +24,7 @@ import uuid
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from datetime import datetime, timezone
+from email.utils import format_datetime
 from typing import Dict, Optional
 from urllib.parse import unquote
 
@@ -307,7 +308,6 @@ class DLFOpenApiSigner(DLFRequestSigner):
     X_ACS_SECURITY_TOKEN = "x-acs-security-token"
 
     # Values
-    DATE_FORMAT = "%a, %d %b %Y %H:%M:%S GMT"
     ACCEPT_VALUE = "application/json"
     CONTENT_TYPE_VALUE = "application/json"
     SIGNATURE_METHOD_VALUE = "HMAC-SHA1"
@@ -333,7 +333,9 @@ class DLFOpenApiSigner(DLFRequestSigner):
             gmt_time = now.replace(tzinfo=timezone.utc)
         else:
             gmt_time = now.astimezone(timezone.utc)
-        headers[self.DATE_HEADER] = gmt_time.strftime(self.DATE_FORMAT)
+        # RFC 1123 date in English; email.utils is locale-independent,
+        # unlike strftime whose %a/%b follow LC_TIME
+        headers[self.DATE_HEADER] = format_datetime(gmt_time, usegmt=True)
 
         headers[self.ACCEPT_HEADER] = self.ACCEPT_VALUE
 
