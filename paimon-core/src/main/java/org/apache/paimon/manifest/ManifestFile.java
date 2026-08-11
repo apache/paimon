@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsCollector;
+import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
@@ -62,6 +63,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
     private final SchemaManager schemaManager;
     private final RowType partitionType;
+    private final AvroFileFormat avroFileFormat;
     private final FormatWriterFactory writerFactory;
     private final long suggestedFileSize;
 
@@ -69,6 +71,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             FileIO fileIO,
             SchemaManager schemaManager,
             RowType partitionType,
+            AvroFileFormat avroFileFormat,
             ManifestEntrySerializer serializer,
             FormatWriterFactory writerFactory,
             String compression,
@@ -81,13 +84,19 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 ManifestEntry.MANIFEST_ROW_TYPE,
                 (path, ignoredFileSize) ->
                         createManifestIterator(
-                                fileIO, path, ManifestEntry.MANIFEST_ROW_TYPE, null, null),
+                                fileIO,
+                                path,
+                                avroFileFormat,
+                                ManifestEntry.MANIFEST_ROW_TYPE,
+                                null,
+                                null),
                 writerFactory,
                 compression,
                 pathFactory,
                 cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
+        this.avroFileFormat = avroFileFormat;
         this.writerFactory = writerFactory;
         this.suggestedFileSize = suggestedFileSize;
     }
@@ -143,6 +152,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     createManifestIterator(
                             fileIO,
                             path,
+                            avroFileFormat,
                             ManifestEntry.MANIFEST_ROW_TYPE,
                             partitionFilter,
                             bucketFilter);
@@ -155,8 +165,10 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     /**
      * Scans projected manifest entries without materializing {@link PojoManifestEntry}s.
      *
-     * <p>Every returned {@link ProjectedManifestEntry} has independent backing data and can be
-     * retained after the iterator advances or closes. The caller must close the iterator.
+     * <p>Every call to {@code next()} creates a {@link ProjectedManifestEntry} wrapper around the
+     * reader's reusable backing row. The returned entry must be consumed before the iterator
+     * advances and cannot be retained after the iterator advances or closes. The caller must close
+     * the iterator.
      *
      * <p>This method intentionally bypasses the manifest cache because cached entries are
      * materialized with the complete manifest schema.
@@ -167,6 +179,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     createManifestIterator(
                             fileIO,
                             pathFactory.toPath(fileName),
+                            avroFileFormat,
                             projection.projectedType(),
                             null,
                             null);
@@ -195,13 +208,15 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     private static CloseableIterator<InternalRow> createManifestIterator(
             FileIO fileIO,
             Path path,
+            AvroFileFormat avroFileFormat,
             RowType projectedType,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable BucketFilter bucketFilter)
             throws IOException {
         try {
-            return new ManifestAvroReader(
-                    fileIO.newInputStream(path), projectedType, partitionFilter, bucketFilter);
+            ManifestAvroReader reader =
+                    new ManifestAvroReader(fileIO.newInputStream(path), avroFileFormat);
+            return reader.read(projectedType, partitionFilter, bucketFilter);
         } catch (IOException e) {
             FileUtils.checkExists(fileIO, path);
             throw e;
@@ -416,6 +431,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     fileIO,
                     schemaManager,
                     partitionType,
+                    (AvroFileFormat) fileFormat,
                     new ManifestEntrySerializer(),
                     fileFormat.createWriterFactory(entryType),
                     compression,

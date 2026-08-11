@@ -41,8 +41,8 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
  * <p>This class is intended for streaming manifest algorithms which only need a subset of {@link
  * ManifestEntry}. Unlike {@link PojoManifestEntry}, it does not deserialize the nested {@code
  * _FILE} row into a POJO. The view is mutable and remains valid while its backing {@link
- * InternalRow} remains valid. Producers such as {@link ManifestFile#scan(String, Projection)}
- * provide independently backed entries which can be retained.
+ * InternalRow} remains valid. Entries returned by {@link ManifestFile#scan(String, Projection)}
+ * wrap a reusable row and must be consumed before the iterator advances.
  */
 public final class ProjectedManifestEntry implements ManifestEntry {
 
@@ -112,7 +112,8 @@ public final class ProjectedManifestEntry implements ManifestEntry {
                                                         DataFileMeta.LEVEL,
                                                         DataFileMeta.EXTRA_FILES,
                                                         DataFileMeta.EMBEDDED_FILE_INDEX,
-                                                        DataFileMeta.EXTERNAL_PATH)))));
+                                                        DataFileMeta.EXTERNAL_PATH,
+                                                        DataFileMeta.FIRST_ROW_ID)))));
     }
 
     private static Projection createRowRangeProjection() {

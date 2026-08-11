@@ -46,7 +46,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * @since 0.4.0
  */
 @Public
-public final class GenericRow implements InternalRow, Serializable {
+public class GenericRow implements InternalRow, Serializable {
 
     private static final long serialVersionUID = 1L;
 

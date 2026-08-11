@@ -18,12 +18,15 @@
 
 package org.apache.paimon.format.avro;
 
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
-import org.apache.avro.file.DataFileStream;
-import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.file.RawBlock;
+import org.apache.avro.file.RawBlockReader;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -31,27 +34,30 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 
 /**
- * Reader which exposes decompressed blocks from an Avro object container file.
+ * Reader which exposes compressed and decompressed blocks from an Avro object container file.
  *
  * <p>This reader owns the input stream and closes it when construction fails or {@link #close()} is
  * called.
  */
 public final class AvroBlockReader implements Closeable {
 
-    private final DataFileStream<Object> reader;
+    private final RawBlockReader reader;
 
+    private @Nullable AvroRawBlock borrowedRawBlock;
+    private @Nullable ByteBuffer decompressionBuffer;
     private long currentBlockRecordCount = -1;
 
     public AvroBlockReader(InputStream input) throws IOException {
         try {
-            this.reader = new DataFileStream<>(input, new GenericDatumReader<>());
+            this.reader = new RawBlockReader(input);
         } catch (IOException | RuntimeException | Error e) {
             IOUtils.closeQuietly(input);
             throw e;
         }
     }
 
-    Schema schema() {
+    /** Returns the writer schema stored in the Avro file header. */
+    public Schema schema() {
         return reader.getSchema();
     }
 
@@ -60,9 +66,14 @@ public final class AvroBlockReader implements Closeable {
         return new AvroRecordDecoder(reader.getSchema());
     }
 
+    /** Returns whether blocks can be copied directly to the given Avro format. */
+    public boolean supportsRawBlockCopy(AvroFileFormat fileFormat, RowType rowType) {
+        return fileFormat.supportsRawBlockCopy(rowType, reader.getSchema());
+    }
+
     /** Returns whether another block is available. */
     public boolean hasNextBlock() throws IOException {
-        return replaceAvroRuntimeException(reader::hasNext);
+        return replaceAvroRuntimeException(reader::hasNextRawBlock);
     }
 
     /**
@@ -85,13 +96,40 @@ public final class AvroBlockReader implements Closeable {
      * {@link #hasNextBlock()}, {@link #nextBlock()}, or this method, or when this reader is closed.
      */
     public BorrowedBlock nextBorrowedBlock() throws IOException {
-        ByteBuffer block = replaceAvroRuntimeException(reader::nextBlock);
-        currentBlockRecordCount = reader.getBlockCount();
+        ByteBuffer block = nextBorrowedRawBlock().decompress(decompressionBuffer);
+        decompressionBuffer = block;
         return new BorrowedBlock(
                 block.array(),
                 block.arrayOffset() + block.position(),
                 block.remaining(),
                 currentBlockRecordCount);
+    }
+
+    /**
+     * Returns a borrowed view of the next compressed block.
+     *
+     * <p>The returned holder and its storage are owned by this reader and reused by the next call
+     * to this method. Consume the block before advancing this reader.
+     */
+    public AvroRawBlock nextBorrowedRawBlock() throws IOException {
+        borrowedRawBlock = nextRawBlock(borrowedRawBlock);
+        return borrowedRawBlock;
+    }
+
+    /**
+     * Returns the next compressed block, optionally reusing the supplied holder and its storage.
+     *
+     * <p>A block returned with a non-null reuse argument remains valid only until that holder is
+     * reused again. The block can be skipped without decompression, decompressed lazily, or copied
+     * directly to a compatible Avro writer.
+     */
+    public AvroRawBlock nextRawBlock(@Nullable AvroRawBlock reuse) throws IOException {
+        RawBlock block =
+                replaceAvroRuntimeException(
+                        () -> reader.nextRawBlock(reuse == null ? null : reuse.rawBlock()));
+        AvroRawBlock result = reuse == null ? new AvroRawBlock(block) : reuse.replace(block);
+        currentBlockRecordCount = result.recordCount();
+        return result;
     }
 
     /** Returns the record count of the last block returned by a block-reading method. */

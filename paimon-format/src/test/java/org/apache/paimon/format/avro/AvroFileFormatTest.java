@@ -50,6 +50,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.NoSuchElementException;
@@ -252,6 +253,69 @@ public class AvroFileFormatTest {
     }
 
     @Test
+    void testReadBorrowedRawBlocks() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+        int numRecords = 100_000;
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = fileFormat.createWriterFactory(rowType).create(out, "zstd");
+            for (int i = 0; i < numRecords; i++) {
+                writer.addElement(GenericRow.of(i));
+            }
+            writer.close();
+        }
+
+        long records = 0;
+        int blocks = 0;
+        AvroRawBlock previous = null;
+        try (AvroBlockReader reader = new AvroBlockReader(fileIO.newInputStream(file))) {
+            while (reader.hasNextBlock()) {
+                AvroRawBlock block = reader.nextBorrowedRawBlock();
+                if (previous != null) {
+                    assertThat(block).isSameAs(previous);
+                }
+                previous = block;
+                records += block.recordCount();
+                blocks++;
+            }
+            assertThatThrownBy(reader::nextBorrowedRawBlock)
+                    .isInstanceOf(NoSuchElementException.class);
+        }
+
+        assertThat(blocks).isGreaterThan(1);
+        assertThat(records).isEqualTo(numRecords);
+    }
+
+    @Test
+    void testRecordDecoderReturnsReusedBorrowedByteViews() throws IOException {
+        RowType rowType =
+                DataTypes.ROW(DataTypes.BYTES().notNull(), DataTypes.BYTES().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = fileFormat.createWriterFactory(rowType).create(out, "zstd");
+            writer.addElement(GenericRow.of(new byte[] {1, 2}, new byte[] {3, 4, 5}));
+            writer.close();
+        }
+
+        try (AvroBlockReader reader = new AvroBlockReader(fileIO.newInputStream(file))) {
+            AvroRecordDecoder decoder = reader.createRecordDecoder();
+            decoder.reset(reader.nextRawBlock(null).decompress(null));
+            assertThat(decoder.readRecordStart()).isTrue();
+
+            ByteBuffer first = decoder.readBytesView();
+            assertThat(bytes(first)).containsExactly(1, 2);
+            ByteBuffer second = decoder.readBytesView();
+            assertThat(second).isSameAs(first);
+            assertThat(bytes(second)).containsExactly(3, 4, 5);
+            assertThat(decoder.isEnd()).isTrue();
+        }
+    }
+
+    @Test
     void testRowReaderProjectsIntoReusedRow() throws IOException {
         Schema writerSchema =
                 SchemaBuilder.record("record")
@@ -281,6 +345,36 @@ public class AvroFileFormatTest {
         assertThat(result.getInt(0)).isEqualTo(20);
         assertThat(result.isNullAt(1)).isTrue();
         assertThat(decoder.isEnd()).isTrue();
+    }
+
+    @Test
+    void testReadsLargeZstdBlock() throws IOException {
+        RowType rowType =
+                RowType.builder()
+                        .field("payload", DataTypes.VARBINARY(500_000).notNull())
+                        .field("id", DataTypes.INT().notNull())
+                        .build();
+        AvroFileFormat format = new AvroFileFormat(new FormatContext(new Options(), 1024, 1024));
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+        byte[] payload = new byte[400_000];
+        Arrays.fill(payload, (byte) 7);
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
+            writer.addElement(GenericRow.of(payload, 42));
+            writer.close();
+        }
+
+        try (AvroBlockReader blockReader = new AvroBlockReader(fileIO.newInputStream(file))) {
+            AvroRawBlock block = blockReader.nextRawBlock(null);
+            assertThat(block.recordCount()).isEqualTo(1);
+            assertThat(block.compressedSize()).isPositive();
+            ByteBuffer decoded = block.decompress(null);
+            assertThat(decoded.remaining()).isGreaterThan(payload.length);
+            assertThat(decoded.get(10)).isEqualTo((byte) 7);
+            assertThat(block.decompress(ByteBuffer.allocate(1))).isEqualTo(decoded);
+        }
     }
 
     @Test
@@ -358,5 +452,11 @@ public class AvroFileFormatTest {
             assertThatThrownBy(() -> format.createWriterFactory(rowType).create(out, "unsupported"))
                     .hasMessageContaining("Unrecognized codec: unsupported");
         }
+    }
+
+    private static byte[] bytes(ByteBuffer buffer) {
+        byte[] bytes = new byte[buffer.remaining()];
+        buffer.get(bytes);
+        return bytes;
     }
 }

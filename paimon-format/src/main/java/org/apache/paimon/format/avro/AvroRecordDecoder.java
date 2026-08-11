@@ -27,6 +27,7 @@ import org.apache.avro.io.DecoderFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 /**
  * Decoder for sequentially reading records from Avro blocks without exposing Avro classes to
@@ -38,6 +39,9 @@ public final class AvroRecordDecoder {
     private final int recordBranch;
 
     private @Nullable BinaryDecoder decoder;
+    private @Nullable ByteBuffer borrowedView;
+    private int blockOffset;
+    private int blockLength;
 
     AvroRecordDecoder(Schema writerSchema) {
         if (writerSchema.getType() == Schema.Type.UNION) {
@@ -84,15 +88,65 @@ public final class AvroRecordDecoder {
 
     /** Creates a decoder for one writer field. */
     public FieldDecoder createFieldDecoder(int position, @Nullable DataType readType) {
-        FieldReader reader =
-                new FieldReaderFactory()
-                        .visit(recordSchema.getFields().get(position).schema(), readType);
-        return new FieldDecoder(reader);
+        return createFieldDecoder(recordSchema.getFields().get(position).schema(), readType);
+    }
+
+    /** Returns the number of fields in a nested writer record. */
+    public int nestedFieldCount(int position) {
+        return nestedRecordSchema(position).getFields().size();
+    }
+
+    /** Returns a nested writer record field name. */
+    public String nestedFieldName(int position, int nestedPosition) {
+        return nestedRecordSchema(position).getFields().get(nestedPosition).name();
+    }
+
+    /** Creates a decoder for one field in a nested writer record. */
+    public FieldDecoder createNestedFieldDecoder(
+            int position, int nestedPosition, @Nullable DataType readType) {
+        return createFieldDecoder(
+                nestedRecordSchema(position).getFields().get(nestedPosition).schema(), readType);
+    }
+
+    /** Creates a decoder for the supplied writer field schema. */
+    public FieldDecoder createFieldDecoder(Schema fieldSchema, @Nullable DataType readType) {
+        return new FieldDecoder(new FieldReaderFactory().visit(fieldSchema, readType));
+    }
+
+    private Schema nestedRecordSchema(int position) {
+        Schema schema = recordSchema.getFields().get(position).schema();
+        if (schema.getType() != Schema.Type.RECORD) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Avro field %s is not a record: %s.",
+                            recordSchema.getFields().get(position).name(), schema));
+        }
+        return schema;
     }
 
     /** Reuses this decoder for another block. */
     public void reset(byte[] bytes, int offset, int length) {
         decoder = DecoderFactory.get().binaryDecoder(bytes, offset, length, decoder);
+        blockOffset = offset;
+        blockLength = length;
+        if (borrowedView == null || borrowedView.array() != bytes) {
+            borrowedView = ByteBuffer.wrap(bytes);
+        }
+    }
+
+    /** Reuses this decoder for another decompressed block. */
+    public void reset(ByteBuffer block) {
+        int position = block.position();
+        int length = block.remaining();
+        if (block.hasArray()) {
+            reset(block.array(), block.arrayOffset() + position, length);
+            return;
+        }
+
+        byte[] bytes = new byte[length];
+        block.get(bytes);
+        block.position(position);
+        reset(bytes, 0, length);
     }
 
     /** Returns whether a block has been supplied through {@link #reset(byte[], int, int)}. */
@@ -112,6 +166,76 @@ public final class AvroRecordDecoder {
 
     public int readInt() throws IOException {
         return decoder().readInt();
+    }
+
+    public boolean readBoolean() throws IOException {
+        return decoder().readBoolean();
+    }
+
+    public long readLong() throws IOException {
+        return decoder().readLong();
+    }
+
+    public int readIndex() throws IOException {
+        return decoder().readIndex();
+    }
+
+    public void skipFixed(int length) throws IOException {
+        decoder().skipFixed(length);
+    }
+
+    /** Returns the byte position relative to the beginning of the current block. */
+    public int position() throws IOException {
+        return blockLength - decoder().inputStream().available();
+    }
+
+    /** Returns the absolute byte position in the current block's backing array. */
+    public int absolutePosition() throws IOException {
+        return blockOffset + position();
+    }
+
+    /**
+     * Reads an Avro byte sequence and returns a borrowed view of its payload.
+     *
+     * <p>The returned object is reused by this decoder and remains valid only until the next method
+     * which returns a borrowed view is called. Callers which need to retain the range should copy
+     * its array, offset and length rather than retaining the {@link ByteBuffer} object.
+     */
+    public ByteBuffer readBytesView() throws IOException {
+        long length = readLong();
+        if (length < 0 || length > Integer.MAX_VALUE) {
+            throw new IOException("Invalid Avro byte sequence length " + length);
+        }
+        int start = absolutePosition();
+        if (length > blockOffset + blockLength - start) {
+            throw new IOException("Avro byte sequence exceeds the current block.");
+        }
+        int end = start + (int) length;
+        ByteBuffer result = borrowedView(start, end);
+        skipFixed((int) length);
+        return result;
+    }
+
+    /**
+     * Returns a borrowed view of an absolute range in the current block's backing array.
+     *
+     * <p>The returned object follows the same reuse contract as {@link #readBytesView()}.
+     */
+    public ByteBuffer borrowedView(int start, int end) {
+        if (borrowedView == null) {
+            throw new IllegalStateException("No Avro block has been supplied.");
+        }
+        int blockEnd = blockOffset + blockLength;
+        if (start < blockOffset || end < start || end > blockEnd) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Borrowed Avro byte range [%s, %s) is outside block range [%s, %s).",
+                            start, end, blockOffset, blockEnd));
+        }
+        borrowedView.clear();
+        borrowedView.position(start);
+        borrowedView.limit(end);
+        return borrowedView;
     }
 
     public byte[] readBytes() throws IOException {
