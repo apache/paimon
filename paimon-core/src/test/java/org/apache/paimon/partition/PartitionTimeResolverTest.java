@@ -167,20 +167,6 @@ public class PartitionTimeResolverTest {
                                 "$hour:00:00 $date", "HH:mm:ss yyyyMMdd", "date", "extra", "hour"))
                 .isEqualTo(Duration.ofHours(1));
 
-        assertThat(extractMinStep("$dt", "yyyyMMddHHmmssS", "dt"))
-                .isEqualTo(Duration.ofNanos(100_000_000));
-        assertThat(extractMinStep("$dt", "yyyyMMddHHmmssSSS", "dt"))
-                .isEqualTo(Duration.ofNanos(1_000_000));
-        assertThat(extractMinStep("$dt", "yyyyMMddHHmmssSSSSSS", "dt"))
-                .isEqualTo(Duration.ofNanos(1_000));
-        assertThat(extractMinStep("$dt", "yyyyMMddHHmmssSSSSSSSSS", "dt"))
-                .isEqualTo(Duration.ofNanos(1));
-
-        assertThat(extractMinStep("$dt", "yyyy-DDD", "dt")).isEqualTo(Duration.ofDays(1));
-        assertThat(extractMinStep("$dt", "yyyy-QQQ", "dt")).isEqualTo(Period.ofMonths(3));
-        assertThat(extractMinStep("$dt", "YYYY-'W'ww-e", "dt")).isEqualTo(Duration.ofDays(1));
-        assertThat(extractMinStep("$dt", "yyyyMMdd hh a", "dt")).isEqualTo(Duration.ofHours(1));
-
         assertThat(extractMinStep("$a-01-$b", "yyyy-MM-dd", "a", "b"))
                 .isEqualTo(Duration.ofDays(1));
         assertThat(extractMinStep("$a-01", "yyyy-MM-dd", "a")).isEqualTo(Period.ofMonths(1));
@@ -205,6 +191,56 @@ public class PartitionTimeResolverTest {
         assertThat(extractMinStep("$aJan", "yyMMM", "a")).isEqualTo(Period.ofYears(1));
         assertThat(extractMinStep("$a1", "yyM", "a")).isEqualTo(Period.ofYears(1));
         assertThat(extractMinStep("$a12", "yyM", "a")).isEqualTo(Period.ofYears(1));
+
+        assertThat(extractMinStep("$dt", "yyyyMMddHHmmss.S", "dt"))
+                .isEqualTo(Duration.ofNanos(100_000_000));
+        assertThat(extractMinStep("$dt", "yyyyMMddHHmmss.SSS", "dt"))
+                .isEqualTo(Duration.ofNanos(1_000_000));
+        assertThat(extractMinStep("$dt", "yyyyMMddHHmmss.SSSSSS", "dt"))
+                .isEqualTo(Duration.ofNanos(1_000));
+        assertThat(extractMinStep("$dt", "yyyyMMddHHmmss.SSSSSSSSS", "dt"))
+                .isEqualTo(Duration.ofNanos(1));
+        assertThat(extractMinStep("$dt", "yyyyMMddHHmmss.n", "dt")).isEqualTo(Duration.ofNanos(1));
+        assertThat(extractMinStep("$dt", "yyyyMMdd.N", "dt")).isEqualTo(Duration.ofNanos(1));
+
+        assertThat(extractMinStep("$dt", "yyyy-DDD", "dt")).isEqualTo(Duration.ofDays(1));
+
+        // 'a' = ampm-of-day, base unit is half-days
+        assertThat(extractMinStep("$dt $ampm", "yyyyMMdd a", "dt", "ampm"))
+                .isEqualTo(Duration.ofHours(12));
+        assertThat(extractMinStep("$dt", "yyyyMMdd hh a", "dt")).isEqualTo(Duration.ofHours(1));
+
+        // 'F' = aligned-day-of-week-in-month, base unit is days
+        assertThat(extractMinStep("$dt", "yyyy-MM-F", "dt")).isEqualTo(Duration.ofDays(1));
+
+        // 'A' = milli-of-day, base unit is millis
+        assertThat(extractMinStep("$dt $ms", "yyyyMMdd A", "dt", "ms"))
+                .isEqualTo(Duration.ofMillis(1));
+
+        // 'q' / 'Q' = quarter-of-year
+        assertThat(extractMinStep("$dt", "yyyy-'Q'q", "dt")).isEqualTo(Period.ofMonths(3));
+        assertThat(extractMinStep("$dt", "yyyy-QQQ", "dt")).isEqualTo(Period.ofMonths(3));
+
+        // 'W' = week-of-month
+        assertThat(extractMinStep("$dt", "yyyy-MM-W", "dt")).isEqualTo(Duration.ofDays(7));
+        assertThat(extractMinStep("$dt", "YYYY-'W'ww-e", "dt")).isEqualTo(Duration.ofDays(1));
+
+        // 'E' / 'c' = day-of-week
+        assertThat(extractMinStep("$dt", "yyyy-MM-EEE", "dt")).isEqualTo(Duration.ofDays(1));
+        assertThat(extractMinStep("$dt", "yyyy-MM-ccc", "dt")).isEqualTo(Duration.ofDays(1));
+
+        // 'u' = year, same as 'y'
+        assertThat(extractMinStep("$dt", "uuuu0102", "dt")).isEqualTo(Period.ofYears(1));
+
+        // 'L' = month-of-year, same as 'M'
+        assertThat(extractMinStep("$dt", "yyyy-L", "dt")).isEqualTo(Period.ofMonths(1));
+
+        // 'K' = hour-of-am-pm, 'k' = clock-hour-of-day, both base unit is hours
+        assertThat(extractMinStep("$dt", "yyyyMMddKKa", "dt")).isEqualTo(Duration.ofHours(1));
+        assertThat(extractMinStep("$dt", "yyyyMMddkk", "dt")).isEqualTo(Duration.ofHours(1));
+
+        // 'G' = era, step is dominated by the smallest time unit (day)
+        assertThat(extractMinStep("$dt", "Gyyyy0102", "dt")).isEqualTo(Period.ofYears(1));
 
         // Zone offset currently is not support
         assertThatThrownBy(() -> extractMinStep("$dt", "yyyyMMddHHmmssZ", "dt"))
@@ -282,10 +318,104 @@ public class PartitionTimeResolverTest {
                         .resolvePartitionValues(LocalDateTime.of(2026, 8, 9, 0, 0, 0));
         assertEquals(ImmutableMap.of("dt", "2026-W33-1"), partitionValues);
 
+        // 'a' = ampm-of-day
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt", "ampm"), "$dt $ampm", "yyyyMMdd a")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 1, 14, 0));
+        assertEquals(ImmutableMap.of("dt", "20230101", "ampm", "PM"), partitionValues);
         partitionValues =
                 new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "yyyyMMdd hh a")
                         .resolvePartitionValues(LocalDateTime.of(2026, 1, 2, 22, 0, 0));
         assertEquals(ImmutableMap.of("dt", "20260102 10 PM"), partitionValues);
+
+        LocalDateTime dt = LocalDateTime.of(2025, 11, 12, 13, 14, 15, 123456789);
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt", "ns"), "$dt.$ns", "yyyyMMddHHmmss.n")
+                        .resolvePartitionValues(dt);
+        assertEquals(ImmutableMap.of("dt", "20251112131415", "ns", "123456789"), partitionValues);
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt", "ns"), "$dt $ns", "yyyyMMddHHmmss SS")
+                        .resolvePartitionValues(dt);
+        assertEquals(ImmutableMap.of("dt", "20251112131415", "ns", "12"), partitionValues);
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt", "ns"), "$dt $ns", "yyyyMMdd N")
+                        .resolvePartitionValues(dt);
+        assertEquals(ImmutableMap.of("dt", "20251112", "ns", "47655123456789"), partitionValues);
+
+        // 'F' = aligned-day-of-week-in-month (Jan 15, 2023 is the 1st day of the 3rd aligned
+        // week)
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "yyyy-MM-F")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 15, 0, 0));
+        assertEquals(ImmutableMap.of("dt", "2023-01-1"), partitionValues);
+
+        // 'A' = milli-of-day (12:00:00.123 = 43,200,123 ms since midnight)
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt", "ms"), "$dt $ms", "yyyyMMdd A")
+                        .resolvePartitionValues(
+                                LocalDateTime.of(2023, 1, 1, 12, 0, 0, 123_000_000));
+        assertEquals(ImmutableMap.of("dt", "20230101", "ms", "43200123"), partitionValues);
+
+        // 'q' / 'Q' = quarter-of-year (August is Q3)
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "yyyy-'Q'q")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 8, 10, 0, 0));
+        assertEquals(ImmutableMap.of("dt", "2023-Q3"), partitionValues);
+
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "yyyy-QQQ")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 8, 10, 0, 0));
+        assertEquals(ImmutableMap.of("dt", "2023-Q3"), partitionValues);
+
+        // 'W' = week-of-month (Jan 15, 2023 is in the 3rd aligned week)
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "yyyy-MM-W")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 15, 0, 0));
+        assertEquals(ImmutableMap.of("dt", "2023-01-3"), partitionValues);
+
+        // 'E' / 'c' = day-of-week (Jan 15, 2023 is Sunday)
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "yyyy-MM-EEE")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 15, 0, 0));
+        assertEquals(ImmutableMap.of("dt", "2023-01-Sun"), partitionValues);
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "yyyy-MM-ccc")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 15, 0, 0));
+        assertEquals(ImmutableMap.of("dt", "2023-01-Sun"), partitionValues);
+
+        // 'u' = year, same as 'y'
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "uuuuMMdd")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 20, 0, 0));
+        assertEquals(ImmutableMap.of("dt", "20230120"), partitionValues);
+
+        // 'L' = month-of-year, same as 'M'
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "yyyy-L-dd")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 20, 0, 0));
+        assertEquals(ImmutableMap.of("dt", "2023-1-20"), partitionValues);
+
+        // 'K' = hour-of-am-pm
+        partitionValues =
+                new PartitionTimeResolver(
+                                Arrays.asList("dt", "hour", "ampm"),
+                                "$dt $hour $ampm",
+                                "yyyyMMdd KK a")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 1, 12, 0));
+        assertEquals(
+                ImmutableMap.of("dt", "20230101", "hour", "00", "ampm", "PM"), partitionValues);
+
+        // 'k' = clock-hour-of-day
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt", "hour"), "$dt $hour", "yyyyMMdd kk")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 1, 12, 0));
+        assertEquals(ImmutableMap.of("dt", "20230101", "hour", "12"), partitionValues);
+
+        // 'G' = era
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "GyyyyMMdd")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 1, 0, 0));
+        assertEquals(ImmutableMap.of("dt", "AD20230101"), partitionValues);
 
         assertThatThrownBy(
                         () ->

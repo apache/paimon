@@ -365,7 +365,10 @@ public class PartitionTimeResolver {
             return Period.ofMonths(3);
         }
         if (unit == ChronoUnit.NANOS) {
-            return Duration.ofNanos((long) Math.pow(10, 9 - fieldToken.getLength()));
+            if (fieldToken.letter == 'S') {
+                return Duration.ofNanos((long) Math.pow(10, 9 - fieldToken.getLength()));
+            }
+            return Duration.ofNanos(1);
         }
         return unit.getDuration();
     }

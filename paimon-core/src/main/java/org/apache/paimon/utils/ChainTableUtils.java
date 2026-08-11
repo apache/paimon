@@ -102,10 +102,10 @@ public class ChainTableUtils {
                         partitionColumns,
                         options.partitionTimestampPattern(),
                         options.partitionTimestampFormatter());
-        LocalDateTime stratPartitionTime = timeResolver.parsePartitionValues(startPartitionValues);
+        LocalDateTime startPartitionTime = timeResolver.parsePartitionValues(startPartitionValues);
         LocalDateTime endPartitionTime = timeResolver.parsePartitionValues(endPartitionValues);
         TemporalAmount step = timeResolver.extractMinStep();
-        LocalDateTime candidateTime = stratPartitionTime.plus(step);
+        LocalDateTime candidateTime = startPartitionTime.plus(step);
         while (!candidateTime.isAfter(endPartitionTime)) {
             BinaryRow candidatePartition =
                     serializer
