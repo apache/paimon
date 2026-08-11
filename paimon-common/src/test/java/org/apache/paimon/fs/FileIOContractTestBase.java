@@ -18,15 +18,19 @@
 
 package org.apache.paimon.fs;
 
+import org.apache.paimon.utils.InstantiationUtil;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -125,7 +129,9 @@ public abstract class FileIOContractTestBase extends FileIOBehaviorTestBase {
         try (SeekableInputStream in = contractFileIO().newInputStream(file)) {
             in.seek(content.length);
             assertThat(in.read()).isEqualTo(-1);
+            assertThat(in.getPos()).isEqualTo(content.length);
             assertThat(in.read(new byte[2], 0, 2)).isEqualTo(-1);
+            assertThat(in.getPos()).isEqualTo(content.length);
         }
     }
 
@@ -188,6 +194,21 @@ public abstract class FileIOContractTestBase extends FileIOBehaviorTestBase {
         }
 
         assertThat(readBytes(file)).containsExactly(9, 11, 12);
+    }
+
+    @Test
+    void testOutputStreamFlushKeepsPositionAndClosePublishesLaterWrites() throws IOException {
+        Path file = new Path(contractBasePath(), randomName());
+
+        try (PositionOutputStream out = contractFileIO().newOutputStream(file, false)) {
+            out.write(new byte[] {1, 2});
+            out.flush();
+            assertThat(out.getPos()).isEqualTo(2);
+            out.write(3);
+            assertThat(out.getPos()).isEqualTo(3);
+        }
+
+        assertThat(readBytes(file)).containsExactly(1, 2, 3);
     }
 
     @Test
@@ -256,6 +277,36 @@ public abstract class FileIOContractTestBase extends FileIOBehaviorTestBase {
 
         assertThat(status.getPath()).isEqualTo(directory);
         assertThat(status.isDir()).isTrue();
+    }
+
+    @Test
+    void testFileStatusProvidesConsistentModificationTime() throws IOException {
+        Path file = createRandomFileInDirectory(contractBasePath());
+
+        FileStatus directStatus = contractFileIO().getFileStatus(file);
+        FileStatus listedStatus = statusFor(contractFileIO().listStatus(contractBasePath()), file);
+
+        assertThat(directStatus.getModificationTime()).isGreaterThan(1_000_000_000_000L);
+        assertThat(listedStatus.getModificationTime())
+                .isEqualTo(directStatus.getModificationTime());
+    }
+
+    @Test
+    void testExistsRecognizesDirectory() throws IOException {
+        Path directory = new Path(contractBasePath(), randomName());
+        contractFileIO().mkdirs(directory);
+
+        assertThat(contractFileIO().exists(directory)).isTrue();
+    }
+
+    @Test
+    void testStatusHelpersDescribeFilesAndDirectories() throws IOException {
+        byte[] content = new byte[] {1, 4, 9, 16};
+        Path file = createRandomFileInDirectory(contractBasePath(), content);
+
+        assertThat(contractFileIO().getFileSize(file)).isEqualTo(content.length);
+        assertThat(contractFileIO().isDir(file)).isFalse();
+        assertThat(contractFileIO().isDir(contractBasePath())).isTrue();
     }
 
     // ------------------------------------------------------------------------
@@ -470,6 +521,50 @@ public abstract class FileIOContractTestBase extends FileIOBehaviorTestBase {
     }
 
     // ------------------------------------------------------------------------
+    //  Text and atomic helpers
+    // ------------------------------------------------------------------------
+
+    @Test
+    void testUtf8ReadWriteHelpersPreserveContent() throws IOException {
+        Path file = new Path(contractBasePath(), randomName());
+        String content = "Paimon-文件-IO";
+
+        contractFileIO().writeFile(file, content, false);
+
+        assertThat(contractFileIO().readFileUtf8(file)).isEqualTo(content);
+        assertThat(readBytes(file)).containsExactly(content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void testOverwriteHelpersReplaceVisibleContent() throws IOException {
+        Path file = new Path(contractBasePath(), randomName());
+        contractFileIO().writeFile(file, "old", false);
+
+        contractFileIO().overwriteFileUtf8(file, "new");
+        assertThat(contractFileIO().readFileUtf8(file)).isEqualTo("new");
+
+        contractFileIO().overwriteHintFile(file, "hint");
+        assertThat(contractFileIO().readFileUtf8(file)).isEqualTo("hint");
+    }
+
+    @Test
+    void testTryToWriteAtomicPublishesMissingTarget() throws IOException {
+        Path target = new Path(contractBasePath(), randomName());
+
+        assertThat(contractFileIO().tryToWriteAtomic(target, "atomic")).isTrue();
+        assertThat(contractFileIO().readFileUtf8(target)).isEqualTo("atomic");
+    }
+
+    @Test
+    void testTryToWriteAtomicPreservesExistingTarget() throws IOException {
+        Path target = new Path(contractBasePath(), randomName());
+        contractFileIO().writeFile(target, "existing", false);
+
+        assertThat(contractFileIO().tryToWriteAtomic(target, "replacement")).isFalse();
+        assertThat(contractFileIO().readFileUtf8(target)).isEqualTo("existing");
+    }
+
+    // ------------------------------------------------------------------------
     //  Two-phase output
     // ------------------------------------------------------------------------
 
@@ -489,6 +584,44 @@ public abstract class FileIOContractTestBase extends FileIOBehaviorTestBase {
 
         committer.commit(contractFileIO());
         assertThat(readBytes(target)).containsExactly(content);
+    }
+
+    @Test
+    void testTwoPhaseNoOverwritePreservesExistingTarget() throws IOException {
+        Path target = new Path(contractBasePath(), randomName());
+        byte[] existing = new byte[] {9, 8, 7};
+        writeBytes(target, existing, false);
+
+        AtomicReference<TwoPhaseOutputStream.Committer> staged = new AtomicReference<>();
+        try {
+            assertThatThrownBy(
+                            () -> {
+                                TwoPhaseOutputStream out =
+                                        contractFileIO().newTwoPhaseOutputStream(target, false);
+                                out.write(new byte[] {1, 2, 3});
+                                staged.set(out.closeForCommit());
+                                staged.get().commit(contractFileIO());
+                            })
+                    .isInstanceOf(IOException.class);
+        } finally {
+            if (staged.get() != null) {
+                staged.get().discard(contractFileIO());
+            }
+        }
+        assertThat(readBytes(target)).containsExactly(existing);
+    }
+
+    @Test
+    void testTwoPhaseOverwriteReplacesExistingTargetOnCommit() throws IOException {
+        Path target = new Path(contractBasePath(), randomName());
+        writeBytes(target, new byte[] {9, 8, 7}, false);
+        byte[] replacement = new byte[] {1, 2, 3};
+
+        TwoPhaseOutputStream out = contractFileIO().newTwoPhaseOutputStream(target, true);
+        out.write(replacement);
+        out.closeForCommit().commit(contractFileIO());
+
+        assertThat(readBytes(target)).containsExactly(replacement);
     }
 
     @Test
@@ -545,6 +678,49 @@ public abstract class FileIOContractTestBase extends FileIOBehaviorTestBase {
         assertThat(readBytes(target)).containsExactly(content);
     }
 
+    @Test
+    void testTwoPhaseCleanDoesNotAffectAnotherWriter() throws IOException {
+        Path target = new Path(contractBasePath(), randomName());
+        TwoPhaseOutputStream.Committer first = stageTwoPhaseOutput(target, new byte[] {1, 2, 3});
+        byte[] secondContent = new byte[] {4, 5, 6};
+        TwoPhaseOutputStream.Committer second = stageTwoPhaseOutput(target, secondContent);
+
+        first.commit(contractFileIO());
+        assertThat(contractFileIO().delete(target, false)).isTrue();
+        first.clean(contractFileIO());
+        second.commit(contractFileIO());
+
+        assertThat(readBytes(target)).containsExactly(secondContent);
+    }
+
+    @Test
+    void testTwoPhaseCommitterSurvivesSerialization() throws Exception {
+        Path target = new Path(contractBasePath(), randomName());
+        byte[] content = new byte[] {8, 5, 3, 0, 9};
+        TwoPhaseOutputStream.Committer committer = stageTwoPhaseOutput(target, content);
+
+        TwoPhaseOutputStream.Committer restored = InstantiationUtil.clone(committer);
+
+        assertThat(restored.targetPath()).isEqualTo(target);
+        restored.commit(contractFileIO());
+        assertThat(readBytes(target)).containsExactly(content);
+
+        Path discardedTarget = new Path(contractBasePath(), randomName());
+        TwoPhaseOutputStream.Committer discarded =
+                InstantiationUtil.clone(
+                        stageTwoPhaseOutput(discardedTarget, new byte[] {1, 4, 1, 4}));
+        discarded.discard(contractFileIO());
+        assertThat(contractFileIO().exists(discardedTarget)).isFalse();
+
+        Path overwrittenTarget = new Path(contractBasePath(), randomName());
+        writeBytes(overwrittenTarget, new byte[] {9, 9, 9}, false);
+        byte[] replacement = new byte[] {2, 6, 5, 3};
+        TwoPhaseOutputStream.Committer overwriting =
+                InstantiationUtil.clone(stageTwoPhaseOutput(overwrittenTarget, replacement, true));
+        overwriting.commit(contractFileIO());
+        assertThat(readBytes(overwrittenTarget)).containsExactly(replacement);
+    }
+
     private FileIO contractFileIO() throws IOException {
         initializeContractFixture();
         return contractFileIO;
@@ -581,7 +757,12 @@ public abstract class FileIOContractTestBase extends FileIOBehaviorTestBase {
 
     private TwoPhaseOutputStream.Committer stageTwoPhaseOutput(Path target, byte[] content)
             throws IOException {
-        TwoPhaseOutputStream out = contractFileIO().newTwoPhaseOutputStream(target, false);
+        return stageTwoPhaseOutput(target, content, false);
+    }
+
+    private TwoPhaseOutputStream.Committer stageTwoPhaseOutput(
+            Path target, byte[] content, boolean overwrite) throws IOException {
+        TwoPhaseOutputStream out = contractFileIO().newTwoPhaseOutputStream(target, overwrite);
         out.write(content);
         return out.closeForCommit();
     }

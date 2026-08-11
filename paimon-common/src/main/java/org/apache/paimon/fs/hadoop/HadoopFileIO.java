@@ -177,6 +177,14 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
     }
 
     @Override
+    public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+        if ("file".equalsIgnoreCase(path.toUri().getScheme()) && exists(path)) {
+            return false;
+        }
+        return FileIO.super.tryToWriteAtomic(path, content);
+    }
+
+    @Override
     public void overwriteFileUtf8(Path path, String content) throws IOException {
         boolean success = tryAtomicOverwriteViaRename(path, content);
         if (!success) {

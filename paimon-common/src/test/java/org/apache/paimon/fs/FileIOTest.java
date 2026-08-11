@@ -19,12 +19,15 @@
 package org.apache.paimon.fs;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.MockedStatic;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -37,14 +40,20 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
+import java.util.ServiceLoader;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 /** Test static methods and methods with default implementations of {@link FileIO}. */
 public class FileIOTest {
@@ -72,6 +81,91 @@ public class FileIOTest {
                         new Path("require-options://" + tempDir.toString()),
                         CatalogContext.create(options));
         assertThat(fileIO).isInstanceOf(RequireOptionsFileIOLoader.MyFileIO.class);
+    }
+
+    @Test
+    public void testGetSchemelessPathUsesLocalFileIO() throws IOException {
+        Path path = new Path(tempDir.resolve("local").toString());
+
+        FileIO fileIO = FileIO.get(path, CatalogContext.create(new Options()));
+
+        assertThat(fileIO).isInstanceOf(LocalFileIO.class);
+    }
+
+    @Test
+    public void testGetUsesResolvingFileIOWhenEnabled() throws IOException {
+        Options options = new Options();
+        options.set(CatalogOptions.RESOLVING_FILE_IO_ENABLED, true);
+
+        FileIO fileIO =
+                FileIO.get(
+                        new Path(tempDir.resolve("resolving").toUri()),
+                        CatalogContext.create(options));
+
+        assertThat(fileIO).isInstanceOf(ResolvingFileIO.class);
+    }
+
+    @Test
+    public void testGetRejectsLocalPathWithAuthority() {
+        Path malformed = new Path("file://host/tmp/table");
+
+        assertThatThrownBy(() -> FileIO.get(malformed, CatalogContext.create(new Options())))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("authority 'host'")
+                .hasMessageContaining("file:///host/tmp/table");
+    }
+
+    @Test
+    public void testDiscoverLoadersIncludesTestService() {
+        assertThat(FileIO.discoverLoaders().get("require-options"))
+                .isInstanceOf(RequireOptionsFileIOLoader.class);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testDiscoverLoadersRejectsDuplicateSchemes() {
+        FileIOLoader first = new TrackingLoader("duplicate");
+        FileIOLoader second = new TrackingLoader("duplicate");
+        ServiceLoader<FileIOLoader> services = mock(ServiceLoader.class);
+        when(services.iterator()).thenReturn(Arrays.asList(first, second).iterator());
+
+        try (MockedStatic<ServiceLoader> serviceLoader = mockStatic(ServiceLoader.class)) {
+            serviceLoader
+                    .when(
+                            () ->
+                                    ServiceLoader.load(
+                                            FileIOLoader.class,
+                                            FileIOLoader.class.getClassLoader()))
+                    .thenReturn(services);
+
+            assertThatThrownBy(FileIO::discoverLoaders)
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("Multiple FileIO for scheme 'duplicate'");
+        }
+    }
+
+    @Test
+    public void testFailedPreferredLoaderFallsBackToAccessibleLoader() throws IOException {
+        TrackingLoader preferred = new TrackingLoader("preferred", "required-by-preferred");
+        TrackingLoader fallback = new TrackingLoader("fallback");
+        Path path = new Path("unregistered:///warehouse");
+
+        FileIO selected =
+                FileIO.get(path, CatalogContext.create(new Options(), preferred, fallback));
+
+        assertThat(selected).isSameAs(fallback.fileIO);
+    }
+
+    @Test
+    public void testAccessiblePreferredLoaderIsSelectedBeforeFallback() throws IOException {
+        TrackingLoader preferred = new TrackingLoader("preferred");
+        TrackingLoader fallback = new TrackingLoader("fallback");
+        Path path = new Path("unregistered:///warehouse");
+
+        FileIO selected =
+                FileIO.get(path, CatalogContext.create(new Options(), preferred, fallback));
+
+        assertThat(selected).isSameAs(preferred.fileIO);
     }
 
     @Test
@@ -196,6 +290,63 @@ public class FileIOTest {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining(DummyFileIO.class.getName())
                 .hasMessageContaining("unarchive");
+
+        BlobDescriptor descriptor = new BlobDescriptor(path.toString(), 0, 1);
+        assertThatThrownBy(
+                        () ->
+                                fileIO.createBlobPresignedUrl(
+                                        new Path(tempDir.toUri()),
+                                        descriptor,
+                                        Duration.ofMinutes(5)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(DummyFileIO.class.getName())
+                .hasMessageContaining("presigned");
+    }
+
+    private static class TrackingLoader implements FileIOLoader {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String scheme;
+        private final TrackingLocalFileIO fileIO;
+        private final String requiredOption;
+
+        private TrackingLoader(String scheme) {
+            this(scheme, null);
+        }
+
+        private TrackingLoader(String scheme, String requiredOption) {
+            this.scheme = scheme;
+            this.fileIO = new TrackingLocalFileIO();
+            this.requiredOption = requiredOption;
+        }
+
+        @Override
+        public String getScheme() {
+            return scheme;
+        }
+
+        @Override
+        public List<String[]> requiredOptions() {
+            return requiredOption == null
+                    ? Collections.emptyList()
+                    : Collections.singletonList(new String[] {requiredOption});
+        }
+
+        @Override
+        public FileIO load(Path path) {
+            return fileIO;
+        }
+    }
+
+    private static class TrackingLocalFileIO extends LocalFileIO {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean exists(Path path) {
+            return true;
+        }
     }
 
     /** A {@link FileIO} on local filesystem to test various default implementations. */

@@ -106,6 +106,7 @@ public class FormatTableCommit implements BatchTableCommit {
 
     @Override
     public void commit(List<CommitMessage> commitMessages) {
+        List<TwoPhaseOutputStream.Committer> committed = new ArrayList<>();
         try {
             List<TwoPhaseOutputStream.Committer> committers = new ArrayList<>();
             for (CommitMessage commitMessage : commitMessages) {
@@ -154,6 +155,7 @@ public class FormatTableCommit implements BatchTableCommit {
 
             for (TwoPhaseOutputStream.Committer committer : committers) {
                 committer.commit(this.fileIO);
+                committed.add(committer);
                 if (partitionKeys != null
                         && !partitionKeys.isEmpty()
                         && (hiveCatalog != null || partitionManager != null)) {
@@ -190,6 +192,9 @@ public class FormatTableCommit implements BatchTableCommit {
             }
 
         } catch (Exception e) {
+            for (TwoPhaseOutputStream.Committer committer : committed) {
+                fileIO.deleteQuietly(committer.targetPath());
+            }
             this.abort(commitMessages);
             throw new RuntimeException(e);
         }

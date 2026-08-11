@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.StrictContractFileIO;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataTypes;
@@ -49,7 +50,7 @@ class FileSystemBranchManagerTest {
     @BeforeEach
     void before() throws Exception {
         tablePath = new Path(tempDir.toUri().toString());
-        fileIO = FileIOFinder.find(tablePath);
+        fileIO = new StrictContractFileIO(FileIOFinder.find(tablePath));
 
         // Create schema
         Schema schema =
@@ -70,6 +71,7 @@ class FileSystemBranchManagerTest {
         branchManager =
                 new FileSystemBranchManager(
                         fileIO, tablePath, snapshotManager, tagManager, schemaManager, null);
+        assertThat(fileIO).isInstanceOf(StrictContractFileIO.class);
     }
 
     @Test
@@ -146,6 +148,8 @@ class FileSystemBranchManagerTest {
         // Verify the renamed branch exists and the original does not
         assertThat(branchManager.branchExists("test_branch")).isFalse();
         assertThat(branchManager.branchExists("renamed_branch")).isTrue();
+        assertThat(schemaManager.copyWithBranch("renamed_branch").latest())
+                .isEqualTo(schemaManager.latest());
     }
 
     @Test

@@ -20,7 +20,10 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link LocalFileIO}. */
 public class LocalFileIOBehaviorTest extends FileIOContractTestBase {
@@ -35,5 +38,10 @@ public class LocalFileIOBehaviorTest extends FileIOContractTestBase {
     @Override
     protected Path getBasePath() {
         return new Path(tmp.toUri());
+    }
+
+    @Test
+    void testIsNotObjectStore() {
+        assertThat(new LocalFileIO().isObjectStore()).isFalse();
     }
 }

@@ -35,6 +35,7 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
     private final Path targetPath;
     private final Path tempPath;
     private final PositionOutputStream tempOutputStream;
+    private final boolean overwrite;
 
     public RenamingTwoPhaseOutputStream(FileIO fileIO, Path targetPath, boolean overwrite)
             throws IOException {
@@ -43,6 +44,7 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
         }
         this.targetPath = targetPath;
         this.tempPath = generateTempPath(targetPath);
+        this.overwrite = overwrite;
 
         // Create temporary file
         this.tempOutputStream = fileIO.newOutputStream(tempPath, overwrite);
@@ -81,7 +83,7 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
     @Override
     public Committer closeForCommit() throws IOException {
         close();
-        return new TempFileCommitter(tempPath, targetPath);
+        return new TempFileCommitter(tempPath, targetPath, overwrite);
     }
 
     /**
@@ -100,10 +102,12 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
 
         private final Path tempPath;
         private final Path targetPath;
+        private final boolean overwrite;
 
-        private TempFileCommitter(Path tempPath, Path targetPath) {
+        private TempFileCommitter(Path tempPath, Path targetPath, boolean overwrite) {
             this.tempPath = tempPath;
             this.targetPath = targetPath;
+            this.overwrite = overwrite;
         }
 
         @Override
@@ -112,7 +116,12 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
             if (parentDir != null && !fileIO.exists(parentDir)) {
                 fileIO.mkdirs(parentDir);
             }
-            if (!fileIO.rename(tempPath, targetPath)) {
+            boolean renamed = fileIO.rename(tempPath, targetPath);
+            if (!renamed && overwrite && fileIO.exists(tempPath)) {
+                fileIO.delete(targetPath, false);
+                renamed = fileIO.rename(tempPath, targetPath);
+            }
+            if (!renamed) {
                 throw new IOException("Failed to rename " + tempPath + " to " + targetPath);
             }
             if (fileIO.exists(tempPath)) {

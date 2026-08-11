@@ -23,10 +23,12 @@ import org.apache.paimon.fs.hadoop.HadoopFileIO;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.RawLocalFileSystem;
 import org.apache.hadoop.util.VersionInfo;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URI;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assumptions.assumeThat;
 
 /** Behavior tests for Hadoop Local. */
@@ -46,6 +48,11 @@ class HadoopLocalFileIOBehaviorTest extends FileIOContractTestBase {
     @Override
     protected Path getBasePath() {
         return new Path(tmp.toUri());
+    }
+
+    @Test
+    void testIsNotObjectStore() throws Exception {
+        assertThat(getFileSystem().isObjectStore()).isFalse();
     }
 
     // ------------------------------------------------------------------------

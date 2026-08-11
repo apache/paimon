@@ -20,7 +20,10 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.StrictContractFileIO;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -67,6 +70,34 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                         .primaryKey("Pk1", "pk2", "pk3")
                         .build();
         catalog.createTable(identifier, schema, false);
+    }
+
+    @Test
+    public void testCoreFileIOUsageStaysWithinPortableContract() throws Exception {
+        FileIO strictFileIO = new StrictContractFileIO(new LocalFileIO());
+        Path strictWarehouse = new Path(tempFile.resolve("strict-contract").toUri());
+        FileSystemCatalog strictCatalog =
+                new FileSystemCatalog(
+                        strictFileIO, strictWarehouse, CatalogContext.create(new Options()));
+        Identifier source = Identifier.create("contract_db", "source_table");
+        Identifier destination = Identifier.create("contract_db", "destination_table");
+        Schema schema = Schema.newBuilder().column("id", DataTypes.INT()).build();
+
+        try {
+            strictCatalog.createDatabase(source.getDatabaseName(), false);
+            strictCatalog.createTable(source, schema, false);
+            strictCatalog.renameTable(source, destination, false);
+
+            assertThat(strictCatalog.tableExists(source)).isFalse();
+            assertThat(strictCatalog.tableExists(destination)).isTrue();
+
+            strictCatalog.dropTable(destination, false);
+            assertThat(strictCatalog.tableExists(destination)).isFalse();
+            strictCatalog.dropDatabase(source.getDatabaseName(), false, false);
+            assertThat(strictCatalog.listDatabases()).doesNotContain(source.getDatabaseName());
+        } finally {
+            strictCatalog.close();
+        }
     }
 
     @Test
