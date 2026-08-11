@@ -170,6 +170,23 @@ public class RenamingTwoPhaseOutputStreamTest {
     }
 
     @Test
+    void testOverwriteDoesNotDeleteTargetWhenStagedFileIsMissing() throws IOException {
+        fileIO.writeFile(targetPath, "old", false);
+        RenamingTwoPhaseOutputStream stream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, true);
+        stream.write("new".getBytes());
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+
+        Path stagingDir = new Path(targetPath.getParent(), "_temporary");
+        FileStatus[] stagedFiles = fileIO.listStatus(stagingDir);
+        assertThat(stagedFiles).hasSize(1);
+        fileIO.delete(stagedFiles[0].getPath(), false);
+
+        assertThatThrownBy(() -> committer.commit(fileIO)).isInstanceOf(IOException.class);
+        assertThat(fileIO.readFileUtf8(targetPath)).isEqualTo("old");
+    }
+
+    @Test
     void testCloseWithoutCommit() throws IOException {
         RenamingTwoPhaseOutputStream stream =
                 new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);

@@ -50,7 +50,7 @@ class FileSystemBranchManagerTest {
     @BeforeEach
     void before() throws Exception {
         tablePath = new Path(tempDir.toUri().toString());
-        fileIO = new StrictContractFileIO(FileIOFinder.find(tablePath));
+        fileIO = FileIOFinder.find(tablePath);
 
         // Create schema
         Schema schema =
@@ -71,7 +71,6 @@ class FileSystemBranchManagerTest {
         branchManager =
                 new FileSystemBranchManager(
                         fileIO, tablePath, snapshotManager, tagManager, schemaManager, null);
-        assertThat(fileIO).isInstanceOf(StrictContractFileIO.class);
     }
 
     @Test
@@ -138,17 +137,28 @@ class FileSystemBranchManagerTest {
 
     @Test
     void testRenameBranchPreservesData() {
+        FileIO strictFileIO = new StrictContractFileIO(fileIO);
+        SchemaManager strictSchemaManager = new SchemaManager(strictFileIO, tablePath);
+        FileSystemBranchManager strictBranchManager =
+                new FileSystemBranchManager(
+                        strictFileIO,
+                        tablePath,
+                        new SnapshotManager(strictFileIO, tablePath, null, null, null),
+                        new TagManager(strictFileIO, tablePath),
+                        strictSchemaManager,
+                        null);
+
         // Create a branch
-        branchManager.createBranch("test_branch");
-        assertThat(branchManager.branchExists("test_branch")).isTrue();
+        strictBranchManager.createBranch("test_branch");
+        assertThat(strictBranchManager.branchExists("test_branch")).isTrue();
 
         // Rename the branch
-        branchManager.renameBranch("test_branch", "renamed_branch");
+        strictBranchManager.renameBranch("test_branch", "renamed_branch");
 
         // Verify the renamed branch exists and the original does not
-        assertThat(branchManager.branchExists("test_branch")).isFalse();
-        assertThat(branchManager.branchExists("renamed_branch")).isTrue();
-        assertThat(schemaManager.copyWithBranch("renamed_branch").latest())
+        assertThat(strictBranchManager.branchExists("test_branch")).isFalse();
+        assertThat(strictBranchManager.branchExists("renamed_branch")).isTrue();
+        assertThat(strictSchemaManager.copyWithBranch("renamed_branch").latest())
                 .isEqualTo(schemaManager.latest());
     }
 

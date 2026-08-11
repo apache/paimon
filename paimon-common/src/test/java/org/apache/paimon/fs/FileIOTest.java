@@ -96,13 +96,13 @@ public class FileIOTest {
     public void testGetUsesResolvingFileIOWhenEnabled() throws IOException {
         Options options = new Options();
         options.set(CatalogOptions.RESOLVING_FILE_IO_ENABLED, true);
+        Path path = new Path(tempDir.resolve("resolving").toUri());
 
-        FileIO fileIO =
-                FileIO.get(
-                        new Path(tempDir.resolve("resolving").toUri()),
-                        CatalogContext.create(options));
+        FileIO fileIO = FileIO.get(path, CatalogContext.create(options));
 
         assertThat(fileIO).isInstanceOf(ResolvingFileIO.class);
+        fileIO.writeFile(path, "configured", false);
+        assertThat(fileIO.readFileUtf8(path)).isEqualTo("configured");
     }
 
     @Test
@@ -145,15 +145,18 @@ public class FileIOTest {
     }
 
     @Test
-    public void testFailedPreferredLoaderFallsBackToAccessibleLoader() throws IOException {
+    public void testPreferredLoaderWithMissingOptionsFallsBackToAccessibleLoader()
+            throws IOException {
         TrackingLoader preferred = new TrackingLoader("preferred", "required-by-preferred");
         TrackingLoader fallback = new TrackingLoader("fallback");
         Path path = new Path("unregistered:///warehouse");
 
-        FileIO selected =
-                FileIO.get(path, CatalogContext.create(new Options(), preferred, fallback));
+        TrackingLocalFileIO selected =
+                (TrackingLocalFileIO)
+                        FileIO.get(path, CatalogContext.create(new Options(), preferred, fallback));
 
-        assertThat(selected).isSameAs(fallback.fileIO);
+        assertThat(selected.owner).isEqualTo("fallback");
+        assertThat(selected.configured).isTrue();
     }
 
     @Test
@@ -162,10 +165,12 @@ public class FileIOTest {
         TrackingLoader fallback = new TrackingLoader("fallback");
         Path path = new Path("unregistered:///warehouse");
 
-        FileIO selected =
-                FileIO.get(path, CatalogContext.create(new Options(), preferred, fallback));
+        TrackingLocalFileIO selected =
+                (TrackingLocalFileIO)
+                        FileIO.get(path, CatalogContext.create(new Options(), preferred, fallback));
 
-        assertThat(selected).isSameAs(preferred.fileIO);
+        assertThat(selected.owner).isEqualTo("preferred");
+        assertThat(selected.configured).isTrue();
     }
 
     @Test
@@ -308,7 +313,6 @@ public class FileIOTest {
         private static final long serialVersionUID = 1L;
 
         private final String scheme;
-        private final TrackingLocalFileIO fileIO;
         private final String requiredOption;
 
         private TrackingLoader(String scheme) {
@@ -317,7 +321,6 @@ public class FileIOTest {
 
         private TrackingLoader(String scheme, String requiredOption) {
             this.scheme = scheme;
-            this.fileIO = new TrackingLocalFileIO();
             this.requiredOption = requiredOption;
         }
 
@@ -335,13 +338,25 @@ public class FileIOTest {
 
         @Override
         public FileIO load(Path path) {
-            return fileIO;
+            return new TrackingLocalFileIO(scheme);
         }
     }
 
     private static class TrackingLocalFileIO extends LocalFileIO {
 
         private static final long serialVersionUID = 1L;
+
+        private final String owner;
+        private boolean configured;
+
+        private TrackingLocalFileIO(String owner) {
+            this.owner = owner;
+        }
+
+        @Override
+        public void configure(CatalogContext context) {
+            configured = true;
+        }
 
         @Override
         public boolean exists(Path path) {
