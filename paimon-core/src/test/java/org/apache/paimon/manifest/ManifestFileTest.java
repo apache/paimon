@@ -84,6 +84,22 @@ public class ManifestFileTest {
     }
 
     @Test
+    void testReadMissingManifestFile() {
+        ManifestFile manifestFile = createManifestFile(tempDir.toString());
+
+        assertThatThrownBy(
+                        () ->
+                                manifestFile.read(
+                                        "missing-manifest",
+                                        null,
+                                        null,
+                                        null,
+                                        row -> true,
+                                        entry -> true))
+                .hasMessageContaining("not found");
+    }
+
+    @Test
     void testAvroReaderSkipsDataFileMetaBeforeMaterialization() throws Exception {
         List<ManifestEntry> entries = generateData();
         ManifestEntry selected = entries.get(0);

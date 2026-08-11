@@ -37,6 +37,7 @@ import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
@@ -199,8 +200,13 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             @Nullable PartitionPredicate partitionFilter,
             @Nullable BucketFilter bucketFilter)
             throws IOException {
-        return new ManifestAvroReader(
-                fileIO.newInputStream(path), projectedType, partitionFilter, bucketFilter);
+        try {
+            return new ManifestAvroReader(
+                    fileIO.newInputStream(path), projectedType, partitionFilter, bucketFilter);
+        } catch (IOException e) {
+            FileUtils.checkExists(fileIO, path);
+            throw e;
+        }
     }
 
     @VisibleForTesting
