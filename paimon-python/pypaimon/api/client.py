@@ -20,8 +20,6 @@ import logging
 import time
 import urllib.parse
 from abc import ABC, abstractmethod
-from itertools import takewhile
-from random import uniform
 from typing import Callable, Dict, Optional, Type, TypeVar
 
 import requests
@@ -146,24 +144,6 @@ class DefaultErrorHandler(ErrorHandler):
         raise RESTException("Unable to process: %s", message)
 
 
-class ExponentialBackoffRetry(Retry):
-    """urllib3 Retry with the backoff schedule of the Java client's
-    ExponentialHttpRequestRetryStrategy: 2^(n-1) seconds capped at 64s,
-    plus up to 10% jitter. The Retry-After header is still honored by
-    the inherited sleep().
-    """
-
-    _MAX_BACKOFF_SECONDS = 64.0
-
-    def get_backoff_time(self):
-        consecutive_errors_len = len(
-            list(takewhile(lambda x: x.redirect_location is None, reversed(self.history))))
-        if consecutive_errors_len < 1:
-            return 0
-        delay = min(2.0 ** (consecutive_errors_len - 1), self._MAX_BACKOFF_SECONDS)
-        return delay + uniform(0, delay * 0.1)
-
-
 class ExponentialRetry:
 
     adapter: HTTPAdapter
@@ -174,11 +154,11 @@ class ExponentialRetry:
 
     @staticmethod
     def __create_retry_strategy(max_retries: int) -> Retry:
-        # Aligned with the Java client's ExponentialHttpRequestRetryStrategy:
-        # - only 429 / 503 responses are retried; 502 / 504 are not, because
-        #   by then the gateway has consumed the request's signature nonce,
-        #   and retrying with the same signed headers is rejected with
-        #   "Specified signature nonce was used already"
+        # Aligned with the Java client's retry triggers:
+        # - only 429 / 503 responses are retried; 502 / 504 are not,
+        #   because by then the gateway has consumed the request's
+        #   signature nonce, and retrying with the same signed headers is
+        #   rejected with "Specified signature nonce was used already"
         # - read errors (including read timeouts) are not retried for the
         #   same reason: the request has likely reached the server
         # - connect failures are intentionally non-retriable: a connect
@@ -189,17 +169,18 @@ class ExponentialRetry:
             'read': 0,
             'connect': 0,
             'status': max_retries,
+            'backoff_factor': 1,
             'status_forcelist': [429, 503],
             'raise_on_status': False,
             'raise_on_redirect': False,
         }
         retry_methods = ["GET", "HEAD", "PUT", "DELETE", "TRACE", "OPTIONS"]
-        retry_instance = ExponentialBackoffRetry()
+        retry_instance = Retry()
         if hasattr(retry_instance, 'allowed_methods'):
             retry_kwargs['allowed_methods'] = retry_methods
         else:
             retry_kwargs['method_whitelist'] = retry_methods
-        return ExponentialBackoffRetry(**retry_kwargs)
+        return Retry(**retry_kwargs)
 
 
 class RESTClient(ABC):
