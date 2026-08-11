@@ -14,7 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
 import unittest
+from decimal import Decimal
 from unittest.mock import patch
 
 import numpy as np
@@ -24,6 +26,7 @@ import pyarrow.compute as pc
 from pypaimon.data._variant_binary import _primitive_header
 from pypaimon.data.generic_variant import _DOUBLE, GenericVariant
 from pypaimon.data.variant_path import (
+    _metadata_key_ids,
     _path_positions,
     _rebuilt_offsets,
     variant_get,
@@ -57,6 +60,19 @@ def _decode(column):
         else GenericVariant.from_arrow_struct(value).to_python()
         for value in column.to_pylist()
     ]
+
+
+def _typed_object(fields):
+    metadata = GenericVariant.from_python({
+        name: 0 for name in fields
+    }).metadata()
+    key_ids = _metadata_key_ids(metadata)
+    value = _build_object_value([
+        (key_ids[name], _encode_scalar_to_value_bytes(item, data_type))
+        for name, (item, data_type) in fields.items()
+    ])
+    return GenericVariant.to_arrow_array([
+        GenericVariant(value, metadata)])
 
 
 class TestVariantGet(unittest.TestCase):
@@ -98,7 +114,7 @@ class TestVariantGet(unittest.TestCase):
         self.assertEqual(result['$.velocity.x'].to_pylist(), [1.0, 3.0])
         self.assertEqual(result['$.velocity.y'].to_pylist(), [-2.0, -4.0])
 
-    def test_requires_exact_float_type(self):
+    def test_requires_exact_type(self):
         cases = (
             (_float_variants([1.25]), pa.float64()),
             (_variants([1.25]), pa.float32()),
@@ -109,8 +125,100 @@ class TestVariantGet(unittest.TestCase):
                 with self.assertRaisesRegex(TypeError, "does not match"):
                     variant_get(column, '$', data_type)
 
-        with self.assertRaisesRegex(TypeError, "float32 or float64"):
+        with self.assertRaisesRegex(TypeError, "does not match"):
             variant_get(_variants([1.0]), '$', pa.string())
+        with self.assertRaisesRegex(TypeError, "Unsupported exact"):
+            variant_get(_variants([1]), '$', pa.int32())
+
+    def test_reads_exact_primitive_types(self):
+        timestamp = datetime.datetime(2026, 8, 11, 1, 2, 3, 456000)
+        column = _typed_object({
+            'flag': (True, pa.bool_()),
+            'count': (123, pa.int64()),
+            'text': ('hello', pa.string()),
+            'binary': (b'abc', pa.binary()),
+            'decimal': (Decimal('12.30'), pa.decimal128(4, 2)),
+            'date': (datetime.date(2026, 8, 11), pa.date32()),
+            'timestamp': (timestamp, pa.timestamp('us')),
+        })
+        result = variant_get(column, {
+            '$.flag': pa.bool_(),
+            '$.count': pa.int64(),
+            '$.text': pa.string(),
+            '$.binary': pa.binary(),
+            '$.decimal': pa.decimal128(4, 2),
+            '$.date': pa.date32(),
+            '$.timestamp': pa.timestamp('us'),
+        })
+
+        self.assertEqual(
+            {path: array[0].as_py() for path, array in result.items()},
+            {
+                '$.flag': True,
+                '$.count': 123,
+                '$.text': 'hello',
+                '$.binary': b'abc',
+                '$.decimal': Decimal('12.30'),
+                '$.date': datetime.date(2026, 8, 11),
+                '$.timestamp': timestamp,
+            },
+        )
+
+    def test_reads_exact_complex_types(self):
+        column = _variants([{
+            'object': {'count': 2, 'flag': True},
+            'array': [1, 2],
+            'map': {'left': 1, 'right': 2},
+        }])
+        struct_type = pa.struct([
+            ('count', pa.int64()),
+            ('flag', pa.bool_()),
+            ('missing', pa.string()),
+        ])
+
+        self.assertEqual(
+            variant_get(column, '$.object', struct_type).to_pylist(),
+            [{'count': 2, 'flag': True, 'missing': None}],
+        )
+        self.assertEqual(
+            variant_get(
+                column, '$.array', pa.list_(pa.int64())).to_pylist(),
+            [[1, 2]],
+        )
+        self.assertEqual(
+            variant_get(
+                column,
+                '$.map',
+                pa.map_(pa.string(), pa.int64()),
+            ).to_pylist(),
+            [[('left', 1), ('right', 2)]],
+        )
+
+    def test_decimal_extraction_preserves_38_digits(self):
+        expected = Decimal('12345678901234567890123456789012345678')
+        column = _typed_object({
+            'value': (expected, pa.decimal128(38, 0)),
+        })
+
+        result = variant_get(
+            column, '$.value', pa.decimal128(38, 0))
+
+        self.assertEqual(result.to_pylist(), [expected])
+
+    def test_rejects_cross_type_casts(self):
+        column = _variants([{
+            'count': 123,
+            'object': {'value': 1},
+            'array': [1],
+        }])
+        for path, data_type in (
+                ('$.count', pa.string()),
+                ('$.object', pa.string()),
+                ('$.array', pa.string()),
+                ('$.array', pa.list_(pa.string()))):
+            with self.subTest(path=path, data_type=data_type):
+                with self.assertRaisesRegex(TypeError, "does not match"):
+                    variant_get(column, path, data_type)
 
     def test_variant_null_is_arrow_null(self):
         column = _variants([None, {'value': None}, {'value': 1.0}])
@@ -165,6 +273,42 @@ class TestVariantGet(unittest.TestCase):
 
 
 class TestVariantReplace(unittest.TestCase):
+
+    def test_replaces_exact_primitive_types(self):
+        original_timestamp = datetime.datetime(2026, 8, 11)
+        column = _typed_object({
+            'flag': (True, pa.bool_()),
+            'count': (1, pa.int64()),
+            'text': ('old', pa.string()),
+            'binary': (b'old', pa.binary()),
+            'decimal': (Decimal('1.00'), pa.decimal128(3, 2)),
+            'date': (datetime.date(2026, 8, 10), pa.date32()),
+            'timestamp': (original_timestamp, pa.timestamp('us')),
+        })
+        new_timestamp = datetime.datetime(2026, 8, 11, 1, 2, 3, 4)
+
+        result = variant_replace(column, {
+            '$.flag': pa.scalar(False),
+            '$.count': pa.scalar(2, type=pa.int64()),
+            '$.text': pa.scalar('new'),
+            '$.binary': pa.scalar(b'new'),
+            '$.decimal': pa.scalar(
+                Decimal('2.50'), type=pa.decimal128(3, 2)),
+            '$.date': pa.scalar(
+                datetime.date(2026, 8, 11), type=pa.date32()),
+            '$.timestamp': pa.scalar(
+                new_timestamp, type=pa.timestamp('us')),
+        })
+
+        self.assertEqual(_decode(result), [{
+            'flag': False,
+            'count': 2,
+            'text': 'new',
+            'binary': b'new',
+            'decimal': Decimal('2.50'),
+            'date': datetime.date(2026, 8, 11),
+            'timestamp': new_timestamp,
+        }])
 
     def test_get_compute_replace_pipeline(self):
         column = pa.chunked_array([
@@ -223,6 +367,10 @@ class TestVariantReplace(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "does not match"):
             variant_replace(
                 _variants([1.0]), '$', pa.scalar(1.0, type=pa.float32()))
+
+        with self.assertRaisesRegex(TypeError, "does not match"):
+            variant_replace(
+                _variants([1.0]), '$', pa.scalar('1.0', type=pa.string()))
 
     def test_nullable_rows_stay_vectorized(self):
         size = 4096
@@ -355,7 +503,7 @@ class TestVariantReplace(unittest.TestCase):
             ('$.value', 1.0, False,
              TypeError, "Arrow Scalar or Array"),
             ('$.value', pa.array([1, 2]), False,
-             TypeError, "float32 or float64"),
+             TypeError, "does not match"),
             ('$.value', pa.scalar(1.0), 'yes',
              TypeError, "strict must be a boolean"),
         ]
