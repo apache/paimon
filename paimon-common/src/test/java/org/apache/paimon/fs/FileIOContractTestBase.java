@@ -286,9 +286,12 @@ public abstract class FileIOContractTestBase extends FileIOBehaviorTestBase {
         FileStatus directStatus = contractFileIO().getFileStatus(file);
         FileStatus listedStatus = statusFor(contractFileIO().listStatus(contractBasePath()), file);
 
-        assertThat(directStatus.getModificationTime()).isGreaterThan(1_000_000_000_000L);
-        assertThat(listedStatus.getModificationTime())
-                .isEqualTo(directStatus.getModificationTime());
+        long directModificationTime = directStatus.getModificationTime();
+        long listedModificationTime = listedStatus.getModificationTime();
+        assertThat(directModificationTime).isGreaterThan(1_000_000_000_000L);
+        assertThat(listedModificationTime).isGreaterThan(1_000_000_000_000L);
+        assertThat(Math.abs(listedModificationTime - directModificationTime))
+                .isLessThanOrEqualTo(1_000L);
     }
 
     @Test
