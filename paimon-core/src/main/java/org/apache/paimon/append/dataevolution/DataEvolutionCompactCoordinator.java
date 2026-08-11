@@ -570,64 +570,56 @@ public class DataEvolutionCompactCoordinator {
 
             RangeHelper<DataFileMeta> rangeHelper =
                     new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
-            List<DataFileMeta> smallFileCandidates = new ArrayList<>();
+            List<List<DataFileMeta>> continuousOrOverlapFiles = new ArrayList<>();
+            long expectedFirstRowId = -1L;
             for (List<DataFileMeta> rowRangeGroup :
                     rangeHelper.mergeOverlappingRanges(sortedFiles)) {
-                if (rowRangeGroup.size() >= BLOB_COMPACT_MIN_FILE_NUM) {
-                    rowRangeGroup.sort(
-                            comparingLong(DataFileMeta::nonNullFirstRowId)
-                                    .thenComparingLong(DataFileMeta::maxSequenceNumber));
-                    result.add(rowRangeGroup);
-                } else {
-                    smallFileCandidates.add(rowRangeGroup.get(0));
+                List<Range> rowRanges =
+                        rowRangeGroup.stream()
+                                .map(DataFileMeta::nonNullRowIdRange)
+                                .collect(Collectors.toList());
+                Range rowRange = Range.sortAndMergeOverlap(rowRanges).get(0);
+                long firstRowId = rowRange.from;
+                if (!continuousOrOverlapFiles.isEmpty() && firstRowId != expectedFirstRowId) {
+                    addFileGroupsToCompact(result, continuousOrOverlapFiles);
+                    continuousOrOverlapFiles.clear();
                 }
-            }
 
-            result.addAll(smallFileGroupsToCompact(smallFileCandidates));
+                continuousOrOverlapFiles.add(rowRangeGroup);
+                expectedFirstRowId = rowRange.to + 1;
+            }
+            addFileGroupsToCompact(result, continuousOrOverlapFiles);
             result.sort(comparingLong(group -> group.get(0).nonNullFirstRowId()));
             return result;
         }
 
-        private List<List<DataFileMeta>> smallFileGroupsToCompact(List<DataFileMeta> files) {
-            List<List<DataFileMeta>> result = new ArrayList<>();
+        private void addFileGroupsToCompact(
+                List<List<DataFileMeta>> result,
+                List<List<DataFileMeta>> continuousOrOverlapFiles) {
+            int compactFileCount = continuousOrOverlapFiles.stream().mapToInt(List::size).sum();
+            if (compactFileCount < BLOB_COMPACT_MIN_FILE_NUM) {
+                return;
+            }
 
-            List<DataFileMeta> continuousFiles = new ArrayList<>();
-            long expectedFirstRowId = -1;
-            for (DataFileMeta file : files) {
-                if (file.fileSize() >= blobTargetFileSize) {
-                    addFileGroupsToCompact(result, continuousFiles);
-                    continuousFiles.clear();
-                    expectedFirstRowId = -1;
+            List<DataFileMeta> taskFiles = new ArrayList<>();
+            long taskFileSize = 0L;
+            for (List<DataFileMeta> fileGroup : continuousOrOverlapFiles) {
+                if (fileGroup.size() == 1 && fileGroup.get(0).fileSize() >= blobTargetFileSize) {
+                    if (taskFiles.size() >= BLOB_COMPACT_MIN_FILE_NUM) {
+                        result.add(taskFiles);
+                    }
+                    taskFiles = new ArrayList<>();
+                    taskFileSize = 0L;
                     continue;
                 }
 
-                long firstRowId = file.nonNullFirstRowId();
-                if (!continuousFiles.isEmpty() && firstRowId != expectedFirstRowId) {
-                    addFileGroupsToCompact(result, continuousFiles);
-                    continuousFiles.clear();
-                }
-                continuousFiles.add(file);
-                expectedFirstRowId = firstRowId + file.rowCount();
-            }
-            addFileGroupsToCompact(result, continuousFiles);
-            return result;
-        }
-
-        private void addFileGroupsToCompact(
-                List<List<DataFileMeta>> result, List<DataFileMeta> continuousFiles) {
-            if (continuousFiles.size() < BLOB_COMPACT_MIN_FILE_NUM) {
-                return;
-            }
-            List<DataFileMeta> taskFiles = new ArrayList<>();
-            long fileSize = 0L;
-            for (DataFileMeta file : continuousFiles) {
-                taskFiles.add(file);
-                fileSize += file.fileSize();
-                if (fileSize >= blobTargetFileSize
+                taskFiles.addAll(fileGroup);
+                taskFileSize += fileGroup.stream().mapToLong(DataFileMeta::fileSize).sum();
+                if (taskFileSize >= blobTargetFileSize
                         && taskFiles.size() >= BLOB_COMPACT_MIN_FILE_NUM) {
                     result.add(taskFiles);
                     taskFiles = new ArrayList<>();
-                    fileSize = 0L;
+                    taskFileSize = 0L;
                 }
             }
 

@@ -212,6 +212,50 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
+    public void testCompactPlannerMergesAdjacentOverlappingBlobGroups() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 2L, 100));
+        entries.add(makeBlobEntry("old-prefix.blob", 0L, 1L, 100, 0, "pic"));
+        entries.add(makeBlobEntry("updated-prefix.blob", 0L, 1L, 100, 1, "pic"));
+        entries.add(makeBlobEntry("old-suffix.blob", 1L, 1L, 100, 0, "pic"));
+        entries.add(makeBlobEntry("updated-suffix.blob", 1L, 1L, 100, 1, "pic"));
+
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                blobPlanner(250, 1, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).type()).isEqualTo(DataEvolutionCompactTask.TaskType.BLOB);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(
+                        entries.get(1).file(),
+                        entries.get(2).file(),
+                        entries.get(3).file(),
+                        entries.get(4).file());
+    }
+
+    @Test
+    public void testCompactPlannerUsesMergedOverlappingBlobRangeBoundary() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 11L, 100));
+        entries.add(makeBlobEntry("prefix.blob", 0L, 5L, 100, 0, "pic"));
+        entries.add(makeBlobEntry("overlap.blob", 3L, 7L, 100, 1, "pic"));
+        entries.add(makeBlobEntry("suffix.blob", 10L, 1L, 100, 0, "pic"));
+
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                blobPlanner(1024, 1, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).type()).isEqualTo(DataEvolutionCompactTask.TaskType.BLOB);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(
+                        entries.get(1).file(), entries.get(2).file(), entries.get(3).file());
+    }
+
+    @Test
     public void testCompactPlannerDoesNotCompactBlobFilesAcrossDataFiles() {
         List<ManifestEntry> entries = new ArrayList<>();
         entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
