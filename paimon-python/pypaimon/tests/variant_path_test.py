@@ -128,7 +128,17 @@ class TestVariantGet(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "does not match"):
             variant_get(_variants([1.0]), '$', pa.string())
         with self.assertRaisesRegex(TypeError, "Unsupported exact"):
-            variant_get(_variants([1]), '$', pa.int32())
+            variant_get(_variants([1]), '$', pa.uint32())
+
+    def test_reads_all_signed_integer_widths(self):
+        column = _variants([-12, 34])
+
+        for data_type in (pa.int8(), pa.int16(), pa.int32(), pa.int64()):
+            with self.subTest(data_type=data_type):
+                self.assertEqual(
+                    variant_get(column, '$', data_type).to_pylist(),
+                    [-12, 34],
+                )
 
     def test_reads_exact_primitive_types(self):
         timestamp = datetime.datetime(2026, 8, 11, 1, 2, 3, 456000)
@@ -273,6 +283,28 @@ class TestVariantGet(unittest.TestCase):
 
 
 class TestVariantReplace(unittest.TestCase):
+
+    def test_signed_integer_replacement_round_trips(self):
+        column = _variants([1])
+
+        for data_type in (pa.int8(), pa.int16(), pa.int32(), pa.int64()):
+            with self.subTest(data_type=data_type):
+                result = variant_replace(
+                    column, '$', pa.scalar(-12, type=data_type))
+                self.assertEqual(
+                    variant_get(result, '$', data_type).to_pylist(), [-12])
+
+    def test_rejects_negative_decimal_scale(self):
+        data_type = pa.decimal128(3, -2)
+        column = _variants([100])
+
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            variant_get(column, '$', data_type)
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            variant_replace(
+                column, '$', pa.scalar(Decimal('1E+2'), type=data_type))
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            _encode_scalar_to_value_bytes(Decimal('1E+2'), data_type)
 
     def test_replaces_exact_primitive_types(self):
         original_timestamp = datetime.datetime(2026, 8, 11)

@@ -892,7 +892,7 @@ def _variant_array_children(value, pos, end):
 
 def _supports_exact_get(data_type):
     if (pa.types.is_boolean(data_type)
-            or pa.types.is_int64(data_type)
+            or pa.types.is_signed_integer(data_type)
             or pa.types.is_float32(data_type)
             or pa.types.is_float64(data_type)
             or pa.types.is_string(data_type)
@@ -917,13 +917,27 @@ def _supports_exact_get(data_type):
     return False
 
 
+def _validate_decimal_scale(data_type):
+    if pa.types.is_decimal128(data_type) and data_type.scale < 0:
+        raise ValueError("VARIANT decimal scale must be non-negative")
+    if pa.types.is_struct(data_type):
+        for field in data_type:
+            _validate_decimal_scale(field.type)
+    elif (pa.types.is_list(data_type)
+          or pa.types.is_large_list(data_type)
+          or pa.types.is_fixed_size_list(data_type)):
+        _validate_decimal_scale(data_type.value_type)
+    elif pa.types.is_map(data_type):
+        _validate_decimal_scale(data_type.item_type)
+
+
 def _exact_primitive_matches(value, pos, data_type):
     variant_type = _variant_get_type(value, pos)
     if variant_type == _Type.NULL:
         return True
     if pa.types.is_boolean(data_type):
         return variant_type == _Type.BOOLEAN
-    if pa.types.is_int64(data_type):
+    if pa.types.is_signed_integer(data_type):
         return variant_type == _Type.LONG
     if pa.types.is_float32(data_type):
         return variant_type == _Type.FLOAT
@@ -1084,6 +1098,7 @@ class _Replacement:
         else:
             raise TypeError(
                 "VARIANT replacement must be an Arrow Scalar or Array")
+        _validate_decimal_scale(self.type)
         if not _supported_replacement_type(self.type):
             raise TypeError(
                 f"Unsupported exact VARIANT replacement type: {self.type}")
@@ -1331,6 +1346,7 @@ def _variant_get(column, paths: Mapping[str, pa.DataType]):
     for path, target_type in paths.items():
         if not isinstance(target_type, pa.DataType):
             raise TypeError("VARIANT data_type must be a PyArrow data type")
+        _validate_decimal_scale(target_type)
         if not _supports_exact_get(target_type):
             raise TypeError(
                 f"Unsupported exact VARIANT data type: {target_type}")

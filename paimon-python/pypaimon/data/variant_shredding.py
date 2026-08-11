@@ -282,6 +282,8 @@ def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
                     arrow_type.unit]
             builder.append_timestamp_ntz(micros)
     elif pa.types.is_decimal(arrow_type):
+        if arrow_type.scale < 0:
+            raise ValueError('VARIANT decimal scale must be non-negative')
         decimal = (
             value if isinstance(value, _decimal.Decimal)
             else _decimal.Decimal(str(value))
@@ -303,10 +305,6 @@ def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
         if precision > arrow_type.precision:
             raise ValueError(
                 f'{decimal} exceeds Arrow precision {arrow_type.precision}')
-        if scale < 0:
-            unscaled *= 10 ** -scale
-            scale = 0
-            precision = max(1, len(str(abs(unscaled))))
         builder.append_decimal_unscaled(unscaled, precision, scale)
     else:
         # Fallback: encode as string
