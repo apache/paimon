@@ -50,8 +50,7 @@ class S3AtomicWriteTest {
         IOException failure = new IOException("rename failed");
         FailingRenameFileIO fileIO = new FailingRenameFileIO(failure);
 
-        assertThatThrownBy(() -> fileIO.tryToWriteAtomic(target, "replacement"))
-                .isSameAs(failure);
+        assertThatThrownBy(() -> fileIO.tryToWriteAtomic(target, "replacement")).isSameAs(failure);
         assertThat(fileIO.renameDestination).isEqualTo(target);
         assertThat(fileIO.deletedPath).isEqualTo(fileIO.renameSource);
     }
