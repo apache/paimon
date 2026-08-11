@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Format IEEE values like ``Float/Double.toString`` on JDK 8.
+"""Format IEEE values for Paimon VARIANT casts.
 
 Paimon VARIANT casts follow Java cast semantics, but Python's floating-point
 formatting differs for some IEEE values. This module preserves the digit
@@ -25,13 +25,13 @@ it with ``str`` or ``repr`` without cross-checking the JDK 8 output.
 import struct
 
 
-def java_float_to_string(value):
+def format_float32(value):
     """Return the JDK 8 ``Float.toString`` representation."""
     bits = struct.unpack('>I', struct.pack('>f', value))[0]
     return _format_bits(bits, 32, 23, 8, 127)
 
 
-def java_double_to_string(value):
+def format_float64(value):
     """Return the JDK 8 ``Double.toString`` representation."""
     bits = struct.unpack('>Q', struct.pack('>d', value))[0]
     return _format_bits(bits, 64, 52, 11, 1023)

@@ -17,9 +17,9 @@
 import struct
 import unittest
 
-from pypaimon.data._java_float_format import (
-    java_double_to_string,
-    java_float_to_string,
+from pypaimon.data._variant_float_format import (
+    format_float32,
+    format_float64,
 )
 
 
@@ -31,7 +31,7 @@ def _double_from_bits(bits):
     return struct.unpack('>d', struct.pack('>Q', bits))[0]
 
 
-class TestJavaFloatFormat(unittest.TestCase):
+class TestVariantFloatFormat(unittest.TestCase):
 
     def test_float_to_string_matches_jdk8(self):
         # Generated with OpenJDK 8u492 Float.toString.
@@ -52,7 +52,7 @@ class TestJavaFloatFormat(unittest.TestCase):
         for bits, expected in samples:
             with self.subTest(bits=hex(bits)):
                 self.assertEqual(
-                    java_float_to_string(_float_from_bits(bits)), expected)
+                    format_float32(_float_from_bits(bits)), expected)
 
     def test_double_to_string_matches_jdk8(self):
         # Generated with OpenJDK 8u492 Double.toString.
@@ -72,4 +72,4 @@ class TestJavaFloatFormat(unittest.TestCase):
         for bits, expected in samples:
             with self.subTest(bits=hex(bits)):
                 self.assertEqual(
-                    java_double_to_string(_double_from_bits(bits)), expected)
+                    format_float64(_double_from_bits(bits)), expected)

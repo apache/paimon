@@ -29,9 +29,9 @@ from typing import Dict, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pyarrow as pa
 
-from pypaimon.data._java_float_format import (
-    java_double_to_string,
-    java_float_to_string,
+from pypaimon.data._variant_float_format import (
+    format_float32,
+    format_float64,
 )
 from pypaimon.data._variant_binary import (
     _ARRAY,
@@ -849,14 +849,14 @@ def _decimal_text(value):
 
 
 def _floating_text(value):
-    return java_double_to_string(value)
+    return format_float64(value)
 
 
 def _variant_floating_text(value, type_info):
     if type_info == _FLOAT:
-        return java_float_to_string(value)
+        return format_float32(value)
     if type_info == _DOUBLE:
-        return java_double_to_string(value)
+        return format_float64(value)
     raise ValueError("not a floating-point VARIANT")
 
 
