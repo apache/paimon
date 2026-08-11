@@ -29,6 +29,7 @@ from typing import Dict, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pyarrow as pa
 
+from pypaimon.data._java_floating import java_floating_text
 from pypaimon.data._variant_binary import (
     _ARRAY,
     _OBJECT,
@@ -840,21 +841,7 @@ def _decimal_text(value):
 
 
 def _floating_text(value, single_precision=False):
-    if single_precision:
-        value = np.float32(value)
-    if math.isnan(value):
-        return 'NaN'
-    if math.isinf(value):
-        return 'Infinity' if value > 0 else '-Infinity'
-    absolute = abs(value)
-    if value == 0 or 1e-3 <= absolute < 1e7:
-        text = np.format_float_positional(value, unique=True, trim='k')
-        return text + '0' if text.endswith('.') else text
-    text = np.format_float_scientific(value, unique=True, trim='k')
-    mantissa, exponent = text.split('e')
-    if mantissa.endswith('.'):
-        mantissa += '0'
-    return mantissa + 'E' + str(int(exponent))
+    return java_floating_text(value, single_precision)
 
 
 def _json_text(value):
