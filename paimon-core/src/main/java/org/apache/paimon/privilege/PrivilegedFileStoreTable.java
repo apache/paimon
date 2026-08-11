@@ -27,6 +27,7 @@ import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.DelegatedFileStoreTable;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.query.DataFileTableQuery;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -290,6 +291,12 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     public LocalTableQuery newLocalTableQuery() {
         privilegeChecker.assertCanSelect(identifier);
         return wrapped.newLocalTableQuery();
+    }
+
+    @Override
+    public DataFileTableQuery newDataFileTableQuery() {
+        privilegeChecker.assertCanSelect(identifier);
+        return wrapped.newDataFileTableQuery();
     }
 
     // ======================= equals ============================
