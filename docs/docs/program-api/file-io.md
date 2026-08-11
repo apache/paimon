@@ -1,5 +1,5 @@
 ---
-title: "FileIO Behavior"
+title: "FileIO API"
 sidebar_position: 4
 ---
 
@@ -22,107 +22,156 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# FileIO Behavior
+# FileIO API
 
-`FileIO` abstracts local filesystems, distributed filesystems, and object stores. Every
-implementation must provide the behavior below; callers may rely on it when the stated
-preconditions hold. The contract does not require POSIX or Hadoop filesystem compatibility. It also
-does not require a separate metadata lookup when an operation can return the required result
-itself.
+`FileIO` is Paimon's interface for file I/O on local file systems, distributed file systems, and
+object stores. This page is for code that calls `FileIO` directly and for developers implementing a
+new `FileIO` implementation. Most users only need
+[Filesystems](../maintenance/filesystems), which describes the dependencies and options for the
+built-in implementations.
 
-## Required operations
+The behavior below is common to the supported implementations. If a case is not described, callers
+should not assume that all storage systems handle it in the same way.
 
-| API | Required behavior |
-| --- | --- |
-| `isObjectStore` | Identifies whether the implementation has object-store characteristics. Callers must not use it to infer semantics that are not stated here. |
-| `newInputStream` | Returns an independent seekable stream. Reads return the stored bytes, `getPos` tracks the cursor, seeking to a valid offset works, and reads at end of file return `-1` without advancing the cursor. Opening a missing path or a path that names a directory may fail when the stream is created or on its first read. |
-| `newOutputStream` | A successful close publishes exactly the bytes written. `overwrite=false` must not replace an existing file; failure may be reported while opening, writing, or closing. `overwrite=true` replaces the old content. Creating a nested file also makes its logical parent directories available. |
-| `getFileStatus` | Returns the path, type, byte length, and modification time for an existing path. A missing path throws `FileNotFoundException`. Modification time is expressed as epoch milliseconds, but exact precision is implementation-specific. |
-| `exists` | Returns `true` for an existing file or directory and `false` for a missing path. Callers should not invoke it immediately before an operation that already reports the required outcome. |
-| `listStatus` | For a known directory, returns a non-null array containing its direct children. Empty directories return an empty array. Result order is not defined. |
-| `delete` | Deleting an existing file or empty directory returns `true`. Deleting a non-empty directory with `recursive=false` throws `IOException` without changing the tree; with `recursive=true`, it removes the complete tree. The return value for a missing path is not defined. |
-| `mkdirs` | Makes the requested directory hierarchy available and returns `true`, including when the directory already exists. A file at the target or in its parent chain causes an `IOException`. Implementations do not have to materialize object-store directory markers for every parent. |
-| `rename` | The defined success case has an existing source, a distinct missing destination, and an existing destination parent in the same `FileIO`. It returns `true`, removes the source name, and preserves the complete file content or directory tree at the exact destination. |
+## Read and Write Files
 
-## Default methods
+`newInputStream(...)` opens a new `SeekableInputStream`. Each stream has its own position, which
+starts at `0` and is returned by `getPos()`. The stream supports forward and backward seeks from `0`
+through the file length. Reading at the end of the file returns `-1` and does not change the
+position. Opening a missing path or a directory can fail either when the stream is opened or on the
+first read.
 
-The methods below are implemented by `FileIO` itself. Implementations may override them to reduce I/O,
-but the observable result must remain the same.
+`newOutputStream(path, overwrite)` opens a `PositionOutputStream`. Its `getPos()` value is the
+number of bytes written. After the stream closes successfully, the target contains exactly those
+bytes. The `overwrite` argument controls how an existing target is handled:
 
-| API | Required behavior |
-| --- | --- |
-| `listFiles`, `listFilesIterative` | Return files under a known directory. Non-recursive listing returns direct files; recursive listing includes files below nested directories. Iteration may perform work lazily. |
-| `listDirectories` | Returns only the direct child directories of a known directory. |
-| `getFileSize`, `isDir` | Return the corresponding field from `getFileStatus`; they do not require an additional existence check. |
-| `checkOrMkdirs` | Accepts an existing directory or creates a missing one. An existing file is rejected. |
-| `deleteQuietly`, `deleteFilesQuietly`, `deleteDirectoryQuietly` | Attempt the requested deletion and suppress `IOException`. Directory deletion is recursive; file deletion is not. An implementation may avoid probing a missing target. |
-| `readFileUtf8` | Decodes content as UTF-8 and closes the input stream. Preservation of original line separators is not part of this contract. |
-| `writeFile`, `overwriteFileUtf8`, `overwriteHintFile` | Write UTF-8 content and close the output stream. `writeFile` forwards its overwrite intent; the overwrite helpers replace visible content. |
-| `tryToWriteAtomic` | For a missing target, publishes the supplied content and returns `true`. If the target already exists, returns `false`, preserves its content, and cleans up temporary data. Cross-client atomicity requires support from the storage system; a metadata check followed by a write is not sufficient. |
-| `copyFile` | Copies the source bytes to the exact destination. `overwrite=false` preserves an existing destination and reports failure; `overwrite=true` replaces it. |
-| `copyFiles` | If every direct child of the source directory is a file, copies each child to the destination directory and forwards the overwrite mode. |
-| `readOverwrittenFileUtf8` | Returns the current UTF-8 content, returns an empty `Optional` for a missing file, and retries the remote-file-change failures recognized by the implementation. |
-| `newTwoPhaseOutputStream` | When supported, staged data becomes visible at the target only after `commit`. `discard` removes only that writer's staged data, and `clean` does not affect another writer. The overwrite flag has the same meaning as for `newOutputStream`, and a committer remains serializable. |
+- `false` preserves the existing file and reports an `IOException`. The error can occur while
+  opening the stream, writing data, or closing it.
+- `true` replaces the existing content.
 
-## Lifecycle, discovery, and optional capabilities
+`flush()` writes buffered data to the underlying stream, but only a successful `close()` guarantees
+that the data is persistent and visible. Writing a file below a missing directory also makes its
+parent paths visible as directories through `exists(...)` and `getFileStatus(...)`. Object store
+implementations do not need to create a physical directory marker for every parent.
 
-`configure`, `setRuntimeContext`, and `close` manage an implementation's configuration and
-resources. After serialization and deserialization, a `FileIO` must remain usable once any required
-runtime options have been supplied again through `setRuntimeContext`.
+## File Status and Listing
 
-`get`, `discoverLoaders`, and `checkAccess` select and configure a loader for a path. Loader
-selection prefers an accessible configured loader, then a discovered scheme loader, a configured
-fallback, and finally Hadoop. Duplicate loaders for one scheme are rejected. Callers must not
-depend on the number or order of metadata requests used during loader selection.
+`getFileStatus(...)` returns a `FileStatus` for an existing path. `getPath()` returns the path,
+`isDir()` distinguishes a directory from a file, `getLen()` returns a file's length, and
+`getModificationTime()` returns the number of milliseconds since the Unix epoch. Modification-time
+precision depends on the storage system. `getAccessTime()` and `getOwner()` may be unavailable; their
+default values are `0` and `null`. A missing path throws `FileNotFoundException`.
 
-`archive`, `restoreArchive`, `unarchive`, and `createBlobPresignedUrl` are optional capabilities.
-Their default methods throw `UnsupportedOperationException`; implementations must document the behavior
-of capabilities they implement.
+The listing methods are defined for existing directories:
 
-## Intentionally unspecified behavior
+- `listStatus(...)` returns the direct files and directories. It returns an empty array for an empty
+  directory.
+- `listFiles(...)` and `listFilesIterative(...)` return files only. With recursive listing enabled,
+  they also return files in nested directories. The iterator may load entries as it is consumed.
+- `listDirectories(...)` returns direct directories only.
 
-Paimon code must not depend on the following behavior unless a narrower API or capability defines
-it:
+Listing order is not guaranteed. `getFileSize(...)` and `isDir(...)` return the corresponding value
+from `getFileStatus(...)`, without requiring a separate `exists(...)` call.
 
-- listing a missing path, a file, or the filesystem root;
-- listing order or a snapshot-consistent listing during concurrent mutation;
-- `rename` atomicity, a missing source, an existing destination, identical paths, a missing
-  destination parent, or cross-filesystem rename;
-- Hadoop's move-into-directory behavior when the destination is an existing directory;
-- `copyFiles` when a direct child of the source is a directory;
-- physical object-store directory markers, stable directory modification times, or file and prefix
-  collision rules;
-- exact exception subclasses where the API declares only `IOException`;
-- visibility before a stream closes, or the exact point at which a deferred operation reports an
-  error;
-- consistency, durability, or recovery after a network failure with an unknown remote outcome.
+## File and Directory Operations
 
-These omissions are intentional. Adding a dependency on one of them requires an explicit FileIO
-contract change and tests for every supported implementation; it must not be inferred from one
-implementation.
+- `exists(...)` returns `true` for an existing file or directory and `false` for a missing path.
+- `mkdirs(...)` creates the requested directory and any missing parents. It returns `true` when the
+  directory already exists. A file at the target path or in its parent path causes an
+  `IOException`.
+- `delete(path, recursive)` returns `true` after deleting an existing file or empty directory.
+  Deleting a non-empty directory with `recursive=false` throws `IOException` and leaves the
+  directory unchanged. With `recursive=true`, it deletes the complete directory tree. The return
+  value for a missing path is implementation-specific.
+- `rename(...)` moves a file or directory to the exact destination path. Call it with an existing
+  source, a different destination that does not exist, and an existing destination parent in the
+  same underlying file system. On success, it returns `true`, removes the source path, and preserves
+  the file content or complete directory tree.
+- `copyFile(...)` copies the source bytes to the exact destination. An existing destination is
+  replaced only when `overwrite=true`. When a source directory contains files only,
+  `copyFiles(...)` applies the same behavior to each direct file.
 
-## Object-store request cost
+`checkOrMkdirs(...)` accepts an existing directory or creates a missing one, but throws
+`IllegalArgumentException` for an existing file. `deleteQuietly(...)`, `deleteFilesQuietly(...)`,
+and `deleteDirectoryQuietly(...)` suppress `IOException`; directory deletion is recursive, while
+file deletion is not.
 
-The contract constrains results, not an implementation sequence. Implementations may use conditional
-writes, known file length, status returned by a listing, or native batch operations to avoid
-redundant `HEAD` and `LIST` requests. Contract tests must keep setup and postcondition checks outside
-any implementation-specific request-counting window.
+## UTF-8 File Helpers
 
-## Related filesystem models
+`writeFile(...)` writes UTF-8 text using the requested overwrite mode. `overwriteFileUtf8(...)` and
+`overwriteHintFile(...)` replace the current content. All three methods close the output stream.
+Use `overwriteHintFile(...)` only for hint files whose temporary absence during an overwrite is
+acceptable.
 
-- [Hadoop's filesystem contract tests](https://hadoop.apache.org/docs/r3.4.0/hadoop-project-dist/hadoop-common/filesystem/testing.html)
-  provide operation-oriented suites and explicit filesystem differences. Passing them does not prove
-  distributed consistency, atomicity, idempotency, scalability, or durability.
-- [Iceberg FileIO](https://iceberg.apache.org/docs/latest/fileio/) uses a narrower file-level model
-  and does not require rename for table state changes. Its
-  [OutputFile](https://iceberg.apache.org/javadoc/latest/org/apache/iceberg/io/OutputFile.html)
-  separates create from create-or-overwrite intent.
-- [POSIX rename](https://pubs.opengroup.org/onlinepubs/9799919799/functions/rename.html) defines
-  atomic namespace replacement. POSIX inode, link, permission, and open-file semantics are not part
-  of the `FileIO` contract.
+`readFileUtf8(...)` reads UTF-8 text and closes the input stream. It reads the file line by line and
+does not preserve line separators. `readOverwrittenFileUtf8(...)` returns an empty `Optional` for a
+missing file and retries the remote-file-change errors recognized by the implementation.
 
-`FileIOContractTestBase` covers required operations. `FileIODefaultMethodTest`, `FileIOTest`, and
-`FileIOReturnTypeTest` cover default methods, lifecycle and discovery, default optional-capability
-failures, and returned types. `FileIOContractCoverageTest` fails if a public `FileIO` method is not
-assigned to a test group. These tests define single-operation preconditions and postconditions;
-concurrency and fault recovery require separate tests.
+`tryToWriteAtomic(...)` returns `true` when it publishes content to a missing target. If the target
+already exists, it returns `false`, keeps the existing content, and removes temporary data. Its
+default implementation writes to a temporary file and then renames it, while storage implementations
+may use native conditional writes. Atomicity between clients therefore depends on the storage
+system.
+
+## Two-Phase Writes
+
+`newTwoPhaseOutputStream(...)` writes data to a staging path. `closeForCommit()` returns a
+serializable committer. The staged data is not visible at the target before `commit(...)` is called;
+a successful `commit(...)` publishes it. If the commit throws an exception, the target state is not
+guaranteed. The `overwrite` argument has the same meaning as it does for `newOutputStream(...)`.
+
+`discard(...)` removes only the data staged by that writer. After a successful commit, `clean(...)`
+can remove resources that the committer no longer needs, but it must not remove another writer's
+data.
+
+The default implementation stages a temporary file and commits it with `rename(...)`. A storage
+system can override the method, for example to use multipart upload.
+
+## Loading and Configuration
+
+`FileIO.get(...)` selects and configures an implementation from a path and `CatalogContext`. When
+`resolving-file-io.enabled` is enabled, it returns a `ResolvingFileIO`, which selects an underlying
+`FileIO` for each path. Otherwise, a path without a URI scheme uses `LocalFileIO`. For a path with a
+scheme, selection considers an accessible configured preferred loader, a discovered loader for the
+scheme, a configured fallback, and finally Hadoop.
+
+Applications can obtain the storage for an existing table through `Table.fileIO()`. Code that only
+has a path and a `CatalogContext` can call `FileIO.get(...)`. `discoverLoaders()` and
+`checkAccess(...)` support this selection and are not normally called directly.
+
+`configure(...)` receives catalog-level settings, `setRuntimeContext(...)` receives runtime
+settings, and `close()` releases resources owned by the implementation. The default implementations
+of `setRuntimeContext(...)` and `close()` do nothing. `isObjectStore()` is an
+implementation-specific hint; callers should not use it to infer the behavior of other methods.
+
+`FileIO` implementations are serializable and thread-safe. Runtime-only state must be restored by
+`setRuntimeContext(...)` after deserialization when an implementation requires it.
+
+## Optional Operations
+
+`archive(...)`, `restoreArchive(...)`, `unarchive(...)`, and `createBlobPresignedUrl(...)` are
+optional. Their default implementations throw `UnsupportedOperationException`.
+
+## Behavior Not Defined by FileIO
+
+`FileIO` does not define the following behavior. Code intended to work with multiple storage systems
+must not depend on:
+
+- listing a missing path, a file, or the file system root;
+- listing order or a consistent listing while another client changes the directory;
+- `rename(...)` with a missing source, an existing or identical destination, a missing destination
+  parent, or paths from different file systems;
+- atomic `rename(...)` or Hadoop's behavior of moving an item into an existing destination
+  directory;
+- `copyFiles(...)` when the source directory contains another directory;
+- physical directory markers, stable directory modification times, or file and prefix collisions
+  on object stores;
+- an exception subtype more specific than the type declared by the method, or the point at which a
+  deferred operation reports an error; or
+- visibility before an output stream closes, or recovery after a network failure whose result is
+  unknown.
+
+The API defines results, not the storage requests used to produce them. Implementations can use
+conditional writes, known file lengths, status values returned by listings, and batch operations to
+avoid unnecessary metadata requests on object stores. The API does not require a preliminary
+`exists(...)` or `getFileStatus(...)` call when an operation can provide the required result itself.
