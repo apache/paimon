@@ -30,7 +30,6 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -43,43 +42,34 @@ import static org.mockito.Mockito.when;
  * places. Seven of them re-assert the interrupt before rethrowing; these tests cover the two that
  * did not, so the thread does not silently come back out of them looking un-cancelled.
  *
- * <p>No mocking is needed for the catalog constructor: {@code ClientPoolImpl.run} waits on {@code
- * LinkedBlockingDeque.pollFirst(10, SECONDS)}, whose {@code lockInterruptibly()} throws immediately
- * when the calling thread already carries the flag. Setting the flag first is therefore enough to
- * drive the real code down its real interrupt path.
+ * <p>Both cases drive the interrupt through a stubbed {@link JdbcClientPool} rather than through a
+ * real one. For the constructor that means seeding {@link CachedJdbcClientPool}'s shared cache, so
+ * no real connection is ever opened and the interrupt cannot be consumed by driver initialisation
+ * before the code under test runs.
  */
 class JdbcInterruptStatusTest {
 
     @TempDir Path tempDir;
 
     @AfterEach
-    void clearInterruptFlag() {
+    void tearDown() {
+        CachedJdbcClientPool.resetCache();
         // These tests deliberately leave the flag set; clear it so it cannot leak into whatever
         // JUnit runs next on this thread.
         Thread.interrupted();
     }
 
     @Test
-    void catalogConstructorKeepsTheInterruptStatus() {
-        Map<String, String> properties = new HashMap<>();
-        properties.put(
-                CatalogOptions.URI.key(),
-                "jdbc:sqlite:file:"
-                        + UUID.randomUUID().toString().replace("-", "")
-                        + "?mode=memory&cache=shared");
-        properties.put(JdbcCatalog.PROPERTY_PREFIX + "username", "user");
-        properties.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
-        properties.put(CatalogOptions.WAREHOUSE.key(), tempDir.toString());
-        CatalogContext context = CatalogContext.create(Options.fromMap(properties));
-
-        Thread.currentThread().interrupt();
+    void catalogConstructorKeepsTheInterruptStatus() throws Exception {
+        Options options = catalogOptions();
+        seedPoolCache(options, interruptingPool());
 
         assertThatThrownBy(
                         () ->
                                 new JdbcCatalog(
                                         LocalFileIO.create(),
                                         "interrupt-test-catalog",
-                                        context,
+                                        CatalogContext.create(options),
                                         tempDir.toString()))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Interrupted in call to initialize");
@@ -89,16 +79,43 @@ class JdbcInterruptStatusTest {
 
     @Test
     void insertTableKeepsTheInterruptStatus() throws Exception {
-        JdbcClientPool connections = mock(JdbcClientPool.class);
-        when(connections.run(any())).thenThrow(new InterruptedException("interrupted"));
-
         assertThatThrownBy(
                         () ->
                                 JdbcUtils.insertTable(
-                                        connections, "catalog-key", "some_db", "some_table"))
+                                        interruptingPool(), "catalog-key", "some_db", "some_table"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Failed to insert table: some_table");
 
         assertThat(Thread.currentThread().isInterrupted()).isTrue();
+    }
+
+    private static JdbcClientPool interruptingPool() throws Exception {
+        JdbcClientPool connections = mock(JdbcClientPool.class);
+        when(connections.run(any())).thenThrow(new InterruptedException("interrupted"));
+        return connections;
+    }
+
+    private Options catalogOptions() {
+        Map<String, String> properties = new HashMap<>();
+        properties.put(CatalogOptions.URI.key(), "jdbc:sqlite:file:interrupt-test?mode=memory");
+        properties.put(JdbcCatalog.PROPERTY_PREFIX + "username", "user");
+        properties.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
+        properties.put(CatalogOptions.WAREHOUSE.key(), tempDir.toString());
+        return Options.fromMap(properties);
+    }
+
+    /**
+     * Mirrors how {@link CachedJdbcClientPool} derives its key, so {@code get()} finds this pool.
+     */
+    private static void seedPoolCache(Options options, JdbcClientPool pool) {
+        CachedJdbcClientPool.clientPools()
+                .put(
+                        CachedJdbcClientPool.Key.of(
+                                options.get(CatalogOptions.URI),
+                                options.get(JdbcCatalogOptions.CATALOG_KEY),
+                                options.get(CatalogOptions.CLIENT_POOL_SIZE),
+                                JdbcUtils.extractJdbcConfiguration(
+                                        options.toMap(), JdbcCatalog.PROPERTY_PREFIX)),
+                        pool);
     }
 }
