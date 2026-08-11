@@ -418,10 +418,6 @@ public class CompactProcedure extends BaseProcedure {
             List<CommitMessage> messages =
                     deserializeCommitMessagesAndReleaseSerializedBytes(
                             serializer, serializedMessages);
-            LOG.info(
-                    "Committing {} commit messages for table {}.",
-                    messages.size(),
-                    table.fullName());
             commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -544,10 +540,6 @@ public class CompactProcedure extends BaseProcedure {
             List<CommitMessage> messages =
                     deserializeCommitMessagesAndReleaseSerializedBytes(
                             messageSerializerser, serializedMessages);
-            LOG.info(
-                    "Committing {} commit messages for table {}.",
-                    messages.size(),
-                    table.fullName());
             commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -666,11 +658,6 @@ public class CompactProcedure extends BaseProcedure {
                     messages.addAll(
                             new DataEvolutionCompactionCommitPreparation(table, snapshot)
                                     .prepare(messages));
-                    LOG.info(
-                            "Committing {} commit messages for table {} in round {}.",
-                            messages.size(),
-                            table.fullName(),
-                            round);
                     commit.commit(messages);
                 } catch (Exception e) {
                     throw new RuntimeException("Deserialize commit message failed", e);
@@ -892,10 +879,6 @@ public class CompactProcedure extends BaseProcedure {
                 LOG.debug("Commit messages after reorganizing:{}", clusterMessages);
             }
 
-            LOG.info(
-                    "Committing {} cluster commit messages for table {}.",
-                    clusterMessages.size(),
-                    table.fullName());
             writer.commit(JavaConverters.asScalaBuffer(clusterMessages).toSeq());
         } else {
             LOG.info(
