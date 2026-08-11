@@ -32,6 +32,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -42,10 +43,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.function.LongConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link DeletionVectorsIndexFile}. */
 public class DeletionVectorsIndexFileTest {
@@ -393,6 +396,85 @@ public class DeletionVectorsIndexFileTest {
 
     private DeletionVector createEmptyDV(boolean bitmap64) {
         return bitmap64 ? new Bitmap64DeletionVector() : new BitmapDeletionVector();
+    }
+
+    @Test
+    public void testWriteSingleFileFailureDeletesPartialFile() {
+        IndexPathFactory pathFactory = getPathFactory();
+        DeletionVectorsIndexFile deletionVectorsIndexFile =
+                deletionVectorsIndexFile(pathFactory, false);
+
+        Map<String, DeletionVector> deleteMap = new LinkedHashMap<>();
+        deleteMap.put("file1.parquet", createEmptyDV(false));
+        deleteMap.put("file2.parquet", new FailingSerializeDeletionVector(createEmptyDV(false)));
+
+        assertThatThrownBy(() -> deletionVectorsIndexFile.writeSingleFile(deleteMap))
+                .hasMessageContaining("Failed to write deletion vectors");
+        // The partial index file must be deleted; its meta is never returned to the caller.
+        assertThat(tempPath.toFile().listFiles()).isEmpty();
+    }
+
+    @Test
+    public void testWriteWithRollingFailureDeletesWrittenFiles() {
+        IndexPathFactory pathFactory = getPathFactory();
+        // Tiny target size so every deletion vector rolls into its own index file.
+        DeletionVectorsIndexFile deletionVectorsIndexFile =
+                deletionVectorsIndexFile(pathFactory, MemorySize.ofBytes(1), false);
+
+        Map<String, DeletionVector> deleteMap = new LinkedHashMap<>();
+        deleteMap.put("file1.parquet", createEmptyDV(false));
+        deleteMap.put("file2.parquet", createEmptyDV(false));
+        deleteMap.put("file3.parquet", new FailingSerializeDeletionVector(createEmptyDV(false)));
+
+        assertThatThrownBy(() -> deletionVectorsIndexFile.writeWithRolling(deleteMap))
+                .hasMessageContaining("Failed to write deletion vectors");
+        // Both the in-flight file and the already-rolled files must be deleted.
+        assertThat(tempPath.toFile().listFiles()).isEmpty();
+    }
+
+    /** A {@link DeletionVector} that fails on serialization to simulate an interrupted write. */
+    private static class FailingSerializeDeletionVector implements DeletionVector {
+
+        private final DeletionVector delegate;
+
+        private FailingSerializeDeletionVector(DeletionVector delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void delete(long position) {
+            delegate.delete(position);
+        }
+
+        @Override
+        public void merge(DeletionVector deletionVector) {
+            delegate.merge(deletionVector);
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return delegate.isEmpty();
+        }
+
+        @Override
+        public long getCardinality() {
+            return delegate.getCardinality();
+        }
+
+        @Override
+        public void forEachDeletedPosition(LongConsumer consumer) {
+            delegate.forEachDeletedPosition(consumer);
+        }
+
+        @Override
+        public boolean isDeleted(long position) {
+            return delegate.isDeleted(position);
+        }
+
+        @Override
+        public int serializeTo(DataOutputStream out) throws IOException {
+            throw new IOException("injected serialize failure");
+        }
     }
 
     private DeletionVectorsIndexFile deletionVectorsIndexFile(

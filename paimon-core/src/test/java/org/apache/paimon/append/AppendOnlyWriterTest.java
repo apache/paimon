@@ -768,6 +768,66 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
+    public void testCloseDeletesFlushedButUnpreparedFiles() throws Exception {
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
+        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
+
+        char[] s = new char[990];
+        Arrays.fill(s, 'a');
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+        writer.flush(false, false);
+        List<DataFileMeta> flushed = new ArrayList<>(writer.getNewFiles());
+        Assertions.assertThat(flushed).isNotEmpty();
+        for (DataFileMeta meta : flushed) {
+            for (Path path : meta.collectFiles(pathFactory)) {
+                Assertions.assertThat(LocalFileIO.create().exists(path)).isTrue();
+            }
+        }
+
+        writer.close();
+
+        for (DataFileMeta meta : flushed) {
+            for (Path path : meta.collectFiles(pathFactory)) {
+                Assertions.assertThat(LocalFileIO.create().exists(path)).isFalse();
+            }
+        }
+        Assertions.assertThat(writer.getNewFiles()).isEmpty();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
+    public void testCloseDeletesFlushedUnpreparedAuxiliaryFiles(String fileFormat)
+            throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        rawOptions.setString("file-index.bloom-filter.columns", "id");
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, rawOptions);
+        AppendOnlyWriter writer =
+                createSharedShreddingAppendWriter(
+                        writeType, context, SCHEMA_ID, -1L, new FileIndexOptions(context.options));
+
+        writer.write(sharedShreddingRow(1, "a", 10L));
+        writer.write(sharedShreddingRow(2, "b", 20L));
+        writer.flush(false, false);
+        List<DataFileMeta> flushed = new ArrayList<>(writer.getNewFiles());
+        assertThat(flushed).isNotEmpty();
+        DataFileMeta meta = flushed.get(0);
+        assertThat(meta.embeddedIndex() != null || !meta.extraFiles().isEmpty()).isTrue();
+        for (Path path : meta.collectFiles(context.pathFactory)) {
+            assertThat(context.fileIO.exists(path)).isTrue();
+        }
+
+        writer.close();
+
+        for (Path path : meta.collectFiles(context.pathFactory)) {
+            assertThat(context.fileIO.exists(path)).isFalse();
+        }
+    }
+
+    @Test
     public void testClose() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
 

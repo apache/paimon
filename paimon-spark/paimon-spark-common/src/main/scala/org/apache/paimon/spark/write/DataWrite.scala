@@ -35,12 +35,35 @@ trait DataWrite[T] extends AutoCloseable {
 
   def write(record: T): Unit
 
+  /**
+   * Optional task-side cleanup for Spark speculative execution. When set, prepared/unprepared files
+   * of a killed (loser) attempt are aborted before the attempt returns a successful result.
+   * Defaults to None so non-inner-table writers are unaffected.
+   */
+  protected def attemptCleanup: Option[SparkAttemptCleanup] = None
+
+  /**
+   * Register prepared commit messages incrementally so a mid-attempt kill can abort already drained
+   * files. Call this immediately after each prepareCommit increment (per bucket / per writer)
+   * inside {@link #commitImpl()}.
+   */
+  protected def registerPrepared(messages: Seq[CommitMessage]): Unit = {
+    attemptCleanup.foreach(_.addPrepared(messages))
+  }
+
   def commit: WriteTaskResult = {
+    val cleanup = attemptCleanup
     try {
+      cleanup.foreach(_.checkInterrupted("before prepareCommit"))
       preCommit()
       val commitMessages = commitImpl()
+      // commitImpl() must register prepared messages incrementally via registerPrepared().
+      cleanup.foreach(_.checkInterrupted("after prepareCommit"))
       postCommit(commitMessages)
-      buildWriteTaskResult(commitMessages)
+      val result = buildWriteTaskResult(commitMessages)
+      cleanup.foreach(_.checkInterrupted("before return"))
+      cleanup.foreach(_.markReturned())
+      result
     } finally {
       close()
     }

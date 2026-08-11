@@ -108,6 +108,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -336,6 +337,54 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                     .hasMessageContaining("new bucket num 3")
                     .hasMessageContaining("previous bucket num is 2");
         }
+    }
+
+    @Test
+    public void testPostponeBucketCloseDeletesUnpreparedFlushedFiles() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
+
+        BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
+        List<DataFileMeta> flushedFiles = Collections.emptyList();
+        try {
+            write.write(rowData(0, 0, 0L));
+            PostponeBucketFileStoreWrite fileStoreWrite =
+                    (PostponeBucketFileStoreWrite) ((TableWriteImpl<?>) write).getWrite();
+            PostponeBucketWriter writer =
+                    (PostponeBucketWriter)
+                            fileStoreWrite
+                                    .writers()
+                                    .values()
+                                    .iterator()
+                                    .next()
+                                    .values()
+                                    .iterator()
+                                    .next()
+                                    .writer;
+
+            // DirectSinkWriter cannot release memory, so this forces an on-disk flush before
+            // prepareCommit and reproduces the speculative-attempt cleanup path.
+            writer.flushMemory();
+            flushedFiles = new ArrayList<>(writer.dataFiles());
+            assertThat(flushedFiles).isNotEmpty();
+            assertThat(
+                            Arrays.stream(table.fileIO().listFiles(table.location(), true))
+                                    .map(status -> status.getPath().getName())
+                                    .collect(Collectors.toSet()))
+                    .contains(flushedFiles.get(0).fileName());
+        } finally {
+            write.close();
+        }
+
+        Set<String> remainingFiles =
+                Arrays.stream(table.fileIO().listFiles(table.location(), true))
+                        .map(status -> status.getPath().getName())
+                        .collect(Collectors.toSet());
+        assertThat(remainingFiles)
+                .doesNotContainAnyElementsOf(
+                        flushedFiles.stream()
+                                .map(DataFileMeta::fileName)
+                                .collect(Collectors.toList()));
     }
 
     @ParameterizedTest(name = "format-{0}")

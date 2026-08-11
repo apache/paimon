@@ -55,6 +55,18 @@ public interface BatchWriteBuilder extends WriteBuilder {
 
     long COMMIT_IDENTIFIER = Long.MAX_VALUE;
 
+    /** Get commit user, set by {@link #withCommitUser}. */
+    default String commitUser() {
+        throw new UnsupportedOperationException(
+                String.format("%s does not expose commit user.", getClass().getName()));
+    }
+
+    /** Set commit user. */
+    default BatchWriteBuilder withCommitUser(String commitUser) {
+        throw new UnsupportedOperationException(
+                String.format("%s does not support setting commit user.", getClass().getName()));
+    }
+
     /** Overwrite writing, same as the 'INSERT OVERWRITE' semantics of SQL. */
     default BatchWriteBuilder withOverwrite() {
         withOverwrite(Collections.emptyMap());

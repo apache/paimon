@@ -28,7 +28,7 @@ import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.sql.Row
 
-import scala.collection.JavaConverters._
+import java.util.function.Consumer
 
 case class PaimonDataWrite(
     writeBuilder: BatchWriteBuilder,
@@ -57,11 +57,26 @@ case class PaimonDataWrite(
     SparkRowUtils.toPaimonRow(writeType, rowKindColIdx, uriReaderFactory)
   }
 
+  private val cleanup = new SparkAttemptCleanup(
+    writeBuilder.tableName(),
+    SparkAttemptCleanup.commitUserOrUnknown(writeBuilder),
+    writeBuilder,
+    () => closeLocalResources())
+
+  override protected def attemptCleanup: Option[SparkAttemptCleanup] = Some(cleanup)
+
+  private def closeLocalResources(): Unit = {
+    write.close()
+    ioManager.close()
+  }
+
   def write(row: Row): Unit = {
+    cleanup.checkInterruptedPeriodically()
     postWrite(write.writeAndReturn(toPaimonRow(row)))
   }
 
   def write(row: Row, bucket: Int): Unit = {
+    cleanup.checkInterruptedPeriodically()
     val paimonRow = toPaimonRow(row)
     val sinkRecord = postponePartitionBucketComputer match {
       case Some(numBuckets) =>
@@ -72,11 +87,34 @@ case class PaimonDataWrite(
   }
 
   override def commitImpl(): Seq[CommitMessage] = {
-    write.prepareCommit().asScala.toSeq
+    val messages = scala.collection.mutable.ListBuffer[CommitMessage]()
+    write.prepareCommit(new Consumer[CommitMessage] {
+      override def accept(msg: CommitMessage): Unit = {
+        val transformed = transformCommitMessage(msg)
+        registerPrepared(Seq(transformed))
+        messages += transformed
+      }
+    })
+    messages.toSeq
   }
 
-  override def close(): Unit = {
-    write.close()
-    ioManager.close()
+  private def transformCommitMessage(message: CommitMessage): CommitMessage = {
+    if (postponePartitionBucketComputer.isDefined) {
+      message match {
+        case m: CommitMessageImpl =>
+          new CommitMessageImpl(
+            m.partition(),
+            m.bucket(),
+            postponePartitionBucketComputer.get.apply(m.partition()),
+            m.newFilesIncrement(),
+            m.compactIncrement()
+          )
+        case _ => throw new RuntimeException()
+      }
+    } else {
+      message
+    }
   }
+
+  override def close(): Unit = cleanup.close()
 }

@@ -22,18 +22,28 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -42,6 +52,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentMatchers;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
@@ -49,8 +60,15 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.apache.paimon.CoreOptions.PAGE_SIZE;
+import static org.apache.paimon.CoreOptions.WRITE_BUFFER_SIZE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.spy;
 
 /** Tests BTree and Bitmap primary-key index wiring through the file-store writer. */
 class PrimaryKeyIndexWriteTest {
@@ -184,6 +202,135 @@ class PrimaryKeyIndexWriteTest {
 
         assertThat(compactContainer.primaryKeyIndexMaintainer).isNotNull();
         compactWrite.close();
+    }
+
+    @Test
+    void testOnPreparedBeforeMaintainerFailureCanAbortDrainedFiles() throws Exception {
+        Map<String, String> options = onPreparedTestOptions();
+        TestFileStore store = createStore(options);
+        KeyValueFileStoreWrite write = (KeyValueFileStoreWrite) store.newWrite();
+        write.withIOManager(ioManager);
+        TestKeyValueGenerator generator = new TestKeyValueGenerator();
+        KeyValue record = generator.next();
+        BinaryRow partition = generator.getPartition(record);
+        int bucket = 1;
+        registerWrittenRecord(write, partition, bucket, record);
+
+        AbstractFileStoreWrite.WriterContainer<KeyValue> container =
+                write.writers().get(partition).get(bucket);
+        BucketedPrimaryKeyIndexMaintainer failingMaintainer =
+                spy(container.primaryKeyIndexMaintainer);
+        doThrow(new RuntimeException("injected maintainer failure"))
+                .when(failingMaintainer)
+                .prepareCommit(
+                        ArgumentMatchers.any(DataIncrement.class),
+                        ArgumentMatchers.any(CompactIncrement.class),
+                        ArgumentMatchers.anyBoolean());
+        setField(container, "primaryKeyIndexMaintainer", failingMaintainer);
+
+        List<CommitMessage> prepared = new ArrayList<>();
+        assertThatThrownBy(() -> write.prepareCommit(false, 1, prepared::add))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("injected maintainer failure");
+        assertThat(prepared).hasSize(1);
+
+        CommitMessageImpl preparedMessage = (CommitMessageImpl) prepared.get(0);
+        List<DataFileMeta> drainedFiles = preparedMessage.newFilesIncrement().newFiles();
+        assertThat(drainedFiles).isNotEmpty();
+        DataFilePathFactory pathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, bucket);
+        for (DataFileMeta file : drainedFiles) {
+            assertThat(store.fileIO().exists(pathFactory.toPath(file))).isTrue();
+        }
+
+        deletePreparedDataFiles(store, pathFactory, drainedFiles);
+        write.close();
+        for (DataFileMeta file : drainedFiles) {
+            assertThat(store.fileIO().exists(pathFactory.toPath(file))).isFalse();
+        }
+    }
+
+    @Test
+    void testOnPreparedRunsBeforeMaintainerPrepareCommit() throws Exception {
+        Map<String, String> options = onPreparedTestOptions();
+        TestFileStore store = createStore(options);
+        KeyValueFileStoreWrite write = (KeyValueFileStoreWrite) store.newWrite();
+        write.withIOManager(ioManager);
+        TestKeyValueGenerator generator = new TestKeyValueGenerator();
+        KeyValue record = generator.next();
+        BinaryRow partition = generator.getPartition(record);
+        int bucket = 1;
+        registerWrittenRecord(write, partition, bucket, record);
+
+        AbstractFileStoreWrite.WriterContainer<KeyValue> container =
+                write.writers().get(partition).get(bucket);
+        AtomicBoolean onPreparedCalled = new AtomicBoolean(false);
+        BucketedPrimaryKeyIndexMaintainer maintainer = spy(container.primaryKeyIndexMaintainer);
+        doAnswer(
+                        invocation -> {
+                            assertThat(onPreparedCalled)
+                                    .as("onPrepared must run before maintainer prepareCommit")
+                                    .isTrue();
+                            return invocation.callRealMethod();
+                        })
+                .when(maintainer)
+                .prepareCommit(
+                        ArgumentMatchers.any(DataIncrement.class),
+                        ArgumentMatchers.any(CompactIncrement.class),
+                        ArgumentMatchers.anyBoolean());
+        setField(container, "primaryKeyIndexMaintainer", maintainer);
+
+        List<CommitMessage> prepared = new ArrayList<>();
+        write.prepareCommit(
+                false,
+                1,
+                message -> {
+                    onPreparedCalled.set(true);
+                    prepared.add(message);
+                });
+        assertThat(prepared).hasSize(1);
+
+        deletePreparedDataFiles(
+                store,
+                store.pathFactory().createDataFilePathFactory(partition, bucket),
+                ((CommitMessageImpl) prepared.get(0)).newFilesIncrement().newFiles());
+        write.close();
+    }
+
+    private static Map<String, String> onPreparedTestOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "10");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "itemId");
+        return options;
+    }
+
+    private static void deletePreparedDataFiles(
+            TestFileStore store, DataFilePathFactory pathFactory, List<DataFileMeta> files) {
+        for (DataFileMeta file : files) {
+            file.collectFiles(pathFactory).forEach(store.fileIO()::deleteQuietly);
+        }
+    }
+
+    private void registerWrittenRecord(
+            KeyValueFileStoreWrite write, BinaryRow partition, int bucket, KeyValue record)
+            throws Exception {
+        AbstractFileStoreWrite.WriterContainer<KeyValue> container =
+                write.createWriterContainer(partition, bucket);
+        ((MemoryOwner) container.writer)
+                .setMemoryPool(
+                        new HeapMemorySegmentPool(
+                                WRITE_BUFFER_SIZE.defaultValue().getBytes(),
+                                (int) PAGE_SIZE.defaultValue().getBytes()));
+        container.writer.write(record);
+        write.writers().computeIfAbsent(partition, k -> new HashMap<>()).put(bucket, container);
+    }
+
+    private static void setField(Object target, String name, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 
     private TestFileStore createStore(Map<String, String> options) throws Exception {
