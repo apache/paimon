@@ -269,6 +269,7 @@ const sidebars = {
       "program-api/rest-api",
       "program-api/flink-api",
       "program-api/java-api",
+      "program-api/file-io",
       "program-api/catalog-api",
       "program-api/cpp-api",
       "program-api/rust-api",

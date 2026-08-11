@@ -49,6 +49,6 @@ public class S3MultiPartUploadCommitter
         S3FileIO s3FileIO = (S3FileIO) fileIO;
         org.apache.hadoop.fs.Path hadoopPath = s3FileIO.path(targetPath);
         S3AFileSystem fs = (S3AFileSystem) s3FileIO.getFileSystem(hadoopPath);
-        return new S3MultiPartUpload(fs);
+        return new S3MultiPartUpload(fs, fs.getConf());
     }
 }

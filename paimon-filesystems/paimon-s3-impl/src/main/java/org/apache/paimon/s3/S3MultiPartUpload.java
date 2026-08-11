@@ -47,15 +47,11 @@ public class S3MultiPartUpload
     private final S3AFileSystem s3a;
     private final WriteOperationHelper s3accessHelper;
 
-    public S3MultiPartUpload(S3AFileSystem s3a) {
+    public S3MultiPartUpload(S3AFileSystem s3a, Configuration conf) {
         checkNotNull(s3a);
+        checkNotNull(conf);
         this.s3accessHelper = s3a.createWriteOperationHelper(s3a.getActiveAuditSpan());
         this.s3a = s3a;
-    }
-
-    public S3MultiPartUpload(S3AFileSystem s3a, Configuration conf) {
-        this(s3a);
-        checkNotNull(conf);
     }
 
     @Override

@@ -77,7 +77,7 @@ class S3MultiPartUploadTest {
     private static UploadPartRequest newUploadPartRequest(Configuration conf) throws IOException {
         try (S3AFileSystem fs = new S3AFileSystem()) {
             fs.initialize(URI.create("s3a://" + BUCKET + "/"), conf);
-            S3MultiPartUpload upload = new S3MultiPartUpload(fs);
+            S3MultiPartUpload upload = new S3MultiPartUpload(fs, conf);
             return upload.newUploadPartRequest(OBJECT_NAME, UPLOAD_ID, 3, 1024);
         }
     }

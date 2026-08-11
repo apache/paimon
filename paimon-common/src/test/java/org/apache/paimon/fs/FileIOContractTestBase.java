@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Opt-in provider-neutral contract tests for {@link FileIO}. */
+/** Contract tests shared by {@link FileIO} implementations. */
 public abstract class FileIOContractTestBase extends FileIOBehaviorTestBase {
 
     private static final byte[] DEFAULT_CONTENT = new byte[] {1, 2, 3, 4, 5, 6, 7, 8};
