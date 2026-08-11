@@ -271,6 +271,8 @@ public class AvroFileFormatTest {
         int blocks = 0;
         AvroRawBlock previous = null;
         try (AvroBlockReader reader = new AvroBlockReader(fileIO.newInputStream(file))) {
+            assertThat(reader.supportsRawBlockCopy(fileFormat, rowType, "zstd")).isTrue();
+            assertThat(reader.supportsRawBlockCopy(fileFormat, rowType, "snappy")).isFalse();
             while (reader.hasNextBlock()) {
                 AvroRawBlock block = reader.nextBorrowedRawBlock();
                 if (previous != null) {

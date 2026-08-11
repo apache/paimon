@@ -64,14 +64,16 @@ public final class ManifestAvroReader implements AutoCloseable {
 
     private long blockOrdinal = -1;
 
-    ManifestAvroReader(InputStream input, AvroFileFormat avroFileFormat) throws IOException {
+    ManifestAvroReader(InputStream input, AvroFileFormat avroFileFormat, String compression)
+            throws IOException {
         AvroBlockReader stream = null;
         try {
             stream = new AvroBlockReader(input);
             this.stream = stream;
             this.decoderContext = new DecoderContext(stream.createRecordDecoder());
             this.rawBlockCopySupported =
-                    stream.supportsRawBlockCopy(avroFileFormat, ManifestEntry.MANIFEST_ROW_TYPE);
+                    stream.supportsRawBlockCopy(
+                            avroFileFormat, ManifestEntry.MANIFEST_ROW_TYPE, compression);
         } catch (IOException | RuntimeException | Error failure) {
             IOUtils.closeQuietly(stream == null ? input : stream);
             throw failure;
@@ -305,13 +307,14 @@ public final class ManifestAvroReader implements AutoCloseable {
 
         @Override
         public boolean hasNext() {
-            if (!filtered) {
-                return blockRemaining > 0;
-            }
-            if (nextReady) {
-                return true;
-            }
             try {
+                if (!filtered) {
+                    ensureBlockFullyConsumed();
+                    return blockRemaining > 0;
+                }
+                if (nextReady) {
+                    return true;
+                }
                 while (blockRemaining > 0) {
                     blockRecordIndex++;
                     boolean selected =
@@ -323,6 +326,7 @@ public final class ManifestAvroReader implements AutoCloseable {
                         return true;
                     }
                 }
+                ensureBlockFullyConsumed();
                 return false;
             } catch (IOException e) {
                 throw new UncheckedIOException(
@@ -366,6 +370,12 @@ public final class ManifestAvroReader implements AutoCloseable {
                 } else {
                     readStatistics.skippedDataFiles++;
                 }
+            }
+        }
+
+        private void ensureBlockFullyConsumed() throws IOException {
+            if (blockRemaining == 0 && !decoder.isEnd()) {
+                throw new IOException("Manifest Avro block contains trailing undecoded bytes.");
             }
         }
 
