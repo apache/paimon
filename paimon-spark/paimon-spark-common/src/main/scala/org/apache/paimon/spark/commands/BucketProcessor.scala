@@ -151,7 +151,9 @@ case class DynamicBucketProcessor(
       numAssigners,
       TaskContext.getPartitionId(),
       targetBucketRowNumber,
-      fileStoreTable.coreOptions.dynamicBucketMaxBuckets
+      fileStoreTable.coreOptions.dynamicBucketMaxBuckets,
+      fileStoreTable.coreOptions.dynamicBucketEmptyBucketThreshold,
+      fileStoreTable.coreOptions.dynamicBucketMinRefreshInterval
     )
 
     new Iterator[Row]() {
