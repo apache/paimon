@@ -34,6 +34,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.DataEvolutionFileReader;
@@ -72,6 +73,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** Test for table with data evolution. */
 public class DataEvolutionTableTest extends DataEvolutionTestBase {
@@ -1125,6 +1127,261 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(allTasks.size()).isEqualTo(1);
         DataEvolutionCompactTask task = allTasks.get(0);
         assertThat(task.compactBefore().size()).isEqualTo(20);
+    }
+
+    @Test
+    public void testCompactOnlyCandidateRowIdRange() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeFullRows(table, 0);
+        long candidateStart = writeFullRows(table, 10, 11);
+        updateF2(table, candidateStart, 10, 11);
+        writeFullRows(table, 20);
+
+        Range firstRange = new Range(0L, 0L);
+        Range candidateRange = new Range(1L, 2L);
+        Range lastRange = new Range(3L, 3L);
+        Map<Range, List<String>> filesBefore = currentFileNamesByRange(table);
+        assertThat(filesBefore.get(firstRange).size()).isEqualTo(1);
+        assertThat(filesBefore.get(candidateRange).size()).isEqualTo(2);
+        assertThat(filesBefore.get(lastRange).size()).isEqualTo(1);
+
+        Map<String, String> compactOptions = new HashMap<>();
+        compactOptions.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 B");
+        compactOptions.put(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "1 B");
+        compactOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        FileStoreTable compactTable = table.copy(compactOptions);
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        compactTable, false, false, compactTable.latestSnapshot().get());
+
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isEqualTo(1);
+        List<String> compactedFileNames =
+                tasks.get(0).compactBefore().stream()
+                        .map(DataFileMeta::fileName)
+                        .sorted()
+                        .collect(Collectors.toList());
+        assertThat(compactedFileNames).isEqualTo(filesBefore.get(candidateRange));
+
+        CommitMessage message = tasks.get(0).doCompact(compactTable, "test-candidate-range");
+        try (BatchTableCommit commit = compactTable.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+
+        Map<Range, List<String>> filesAfter = currentFileNamesByRange(getTableDefault());
+        assertThat(filesAfter.get(firstRange)).isEqualTo(filesBefore.get(firstRange));
+        assertThat(filesAfter.get(lastRange)).isEqualTo(filesBefore.get(lastRange));
+        assertThat(filesAfter.get(candidateRange).size()).isEqualTo(1);
+        assertThat(filesAfter.get(candidateRange)).isNotEqualTo(filesBefore.get(candidateRange));
+        assertThat(readF0AndF2(getTableDefault()))
+                .isEqualTo(
+                        Arrays.asList("0|base-0", "10|updated-10", "11|updated-11", "20|base-20"));
+    }
+
+    @Test
+    public void testCompactWithNoCandidateReturnsEmptyOnce() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeFullRows(table, 1);
+        List<String> filesBefore = currentFileNames(table);
+
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        table, false, false, table.latestSnapshot().get());
+
+        assertThat(coordinator.plan().isEmpty()).isTrue();
+        assertThatThrownBy(coordinator::plan).isInstanceOf(EndOfScanException.class);
+        assertThat(currentFileNames(table)).isEqualTo(filesBefore);
+    }
+
+    @Test
+    public void testCompactWithPartitionFilter() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.STRING())
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.STRING())
+                        .column("f2", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.ROW_TRACKING_PARTITION_GROUP_ON_COMMIT.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2")
+                        .build();
+        catalog.createTable(identifier(), schema, true);
+        FileStoreTable table = getTableDefault();
+        long p1Start = writePartitionRows(table, "p1", 1, 2);
+        updatePartitionF2(table, "p1", p1Start, 1, 2);
+        long p2Start = writePartitionRows(table, "p2", 3, 4);
+        updatePartitionF2(table, "p2", p2Start, 3, 4);
+        Map<String, List<String>> filesBefore = currentFileNamesByPartition(table);
+        assertThat(filesBefore.get("p1").size()).isEqualTo(2);
+        assertThat(filesBefore.get("p2").size()).isEqualTo(2);
+
+        PartitionPredicate onlyP1 =
+                PartitionPredicate.fromMaps(
+                        table.schema().logicalPartitionType(),
+                        Collections.singletonList(Collections.singletonMap("pt", "p1")),
+                        table.coreOptions().partitionDefaultName());
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        table, onlyP1, false, false, table.latestSnapshot().get());
+
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isEqualTo(1);
+        assertThat(tasks.get(0).partition().getString(0).toString()).isEqualTo("p1");
+        List<String> compactedFileNames =
+                tasks.get(0).compactBefore().stream()
+                        .map(DataFileMeta::fileName)
+                        .sorted()
+                        .collect(Collectors.toList());
+        assertThat(compactedFileNames).isEqualTo(filesBefore.get("p1"));
+
+        CommitMessage message = tasks.get(0).doCompact(table, "test-partition-filter");
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+
+        Map<String, List<String>> filesAfter = currentFileNamesByPartition(getTableDefault());
+        assertThat(filesAfter.get("p1").size()).isEqualTo(1);
+        assertThat(filesAfter.get("p2")).isEqualTo(filesBefore.get("p2"));
+        assertThat(readPartitionRows(getTableDefault()))
+                .isEqualTo(
+                        Arrays.asList(
+                                "p1|1|updated-1",
+                                "p1|2|updated-2",
+                                "p2|3|updated-3",
+                                "p2|4|updated-4"));
+    }
+
+    private long writeFullRows(FileStoreTable table, int... values) throws Exception {
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int value : values) {
+                write.write(
+                        GenericRow.of(
+                                value,
+                                BinaryString.fromString("name-" + value),
+                                BinaryString.fromString("base-" + value)));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        return table.snapshotManager().latestSnapshot().nextRowId() - values.length;
+    }
+
+    private void updateF2(FileStoreTable table, long firstRowId, int... values) throws Exception {
+        RowType writeType = table.rowType().project(Collections.singletonList("f2"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int value : values) {
+                write.write(GenericRow.of(BinaryString.fromString("updated-" + value)));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, firstRowId);
+            commit.commit(messages);
+        }
+    }
+
+    private long writePartitionRows(FileStoreTable table, String partition, int... values)
+            throws Exception {
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int value : values) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString(partition),
+                                value,
+                                BinaryString.fromString("name-" + value),
+                                BinaryString.fromString("base-" + value)));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        return table.snapshotManager().latestSnapshot().nextRowId() - values.length;
+    }
+
+    private void updatePartitionF2(
+            FileStoreTable table, String partition, long firstRowId, int... values)
+            throws Exception {
+        RowType writeType = table.rowType().project(Arrays.asList("pt", "f2"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int value : values) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString(partition),
+                                BinaryString.fromString("updated-" + value)));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, firstRowId);
+            commit.commit(messages);
+        }
+    }
+
+    private Map<Range, List<String>> currentFileNamesByRange(FileStoreTable table) {
+        Map<Range, List<String>> result = new HashMap<>();
+        for (ManifestEntry entry : table.store().newScan().plan().files()) {
+            DataFileMeta file = entry.file();
+            Range range =
+                    new Range(
+                            file.nonNullFirstRowId(),
+                            file.nonNullFirstRowId() + file.rowCount() - 1L);
+            result.computeIfAbsent(range, ignored -> new ArrayList<>()).add(file.fileName());
+        }
+        result.values().forEach(Collections::sort);
+        return result;
+    }
+
+    private List<String> currentFileNames(FileStoreTable table) {
+        return table.store().newScan().plan().files().stream()
+                .map(entry -> entry.file().fileName())
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    private Map<String, List<String>> currentFileNamesByPartition(FileStoreTable table) {
+        Map<String, List<String>> result = new HashMap<>();
+        for (ManifestEntry entry : table.store().newScan().plan().files()) {
+            String partition = entry.partition().getString(0).toString();
+            result.computeIfAbsent(partition, ignored -> new ArrayList<>())
+                    .add(entry.file().fileName());
+        }
+        result.values().forEach(Collections::sort);
+        return result;
+    }
+
+    private List<String> readF0AndF2(FileStoreTable table) throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<String> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row -> result.add(row.getInt(0) + "|" + row.getString(2).toString()));
+        }
+        Collections.sort(result);
+        return result;
+    }
+
+    private List<String> readPartitionRows(FileStoreTable table) throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<String> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row ->
+                            result.add(
+                                    row.getString(0).toString()
+                                            + "|"
+                                            + row.getInt(1)
+                                            + "|"
+                                            + row.getString(3).toString()));
+        }
+        Collections.sort(result);
+        return result;
     }
 
     @Test
