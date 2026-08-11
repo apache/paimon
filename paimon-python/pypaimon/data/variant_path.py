@@ -64,6 +64,11 @@ from pypaimon.data.variant_shredding import (
 
 _INDEX_PATTERN = re.compile(r"\[(\d+)]")
 _KEY_PATTERN = re.compile(r"\.([^\.\[]+)|\['([^']+)']|\[\"([^\"]+)\"]")
+_TIMESTAMP_PATTERN = re.compile(
+    r'^(\d{4})-(\d{1,2})-(\d{1,2})'
+    r'(?:(?: (\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,9}))?)'
+    r'|(?:T(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,9}))?)?))?$'
+)
 _Path = Tuple[Tuple[str, object], ...]
 _SLOW_PATH_ROWS = 64
 
@@ -995,31 +1000,42 @@ def _parse_timestamp(value, target_type):
                   or value[0] == '-' and value[1:].isdigit()):
         raw_value = int(value)
         if target_type.unit == 'ns':
-            return pa.scalar(raw_value, type=target_type).as_py()
-        else:
-            micros = raw_value * {
-                's': 1_000_000, 'ms': 1000, 'us': 1,
-            }[target_type.unit]
+            if raw_value < -(1 << 63) or raw_value > (1 << 63) - 1:
+                raise ValueError
+            return raw_value
+        micros = raw_value * {
+            's': 1_000_000, 'ms': 1000, 'us': 1,
+        }[target_type.unit]
         return datetime.datetime(1970, 1, 1) + datetime.timedelta(
             microseconds=int(micros))
+
+    match = _TIMESTAMP_PATTERN.match(value)
+    if match is None:
+        raise ValueError
+    groups = match.groups()
+    year, month, day = (int(part) for part in groups[:3])
+    if groups[3] is not None:
+        hour, minute, second, fraction = groups[3:7]
+    else:
+        hour, minute, second, fraction = groups[7:11]
+    hour = int(hour or 0)
+    minute = int(minute or 0)
+    second = int(second or 0)
+    nanos = int((fraction or '').ljust(9, '0') or 0)
+    base = datetime.datetime(year, month, day, hour, minute, second)
+
     if target_type.unit == 'ns':
-        nanos = int(np.datetime64(value.replace(' ', 'T'), 'ns').astype(
-            np.int64))
-        return pa.scalar(nanos, type=target_type).as_py()
-    formats = (
-        '%Y-%m-%d',
-        '%Y-%m-%d %H:%M:%S',
-        '%Y-%m-%d %H:%M:%S.%f',
-        '%Y-%m-%dT%H:%M',
-        '%Y-%m-%dT%H:%M:%S',
-        '%Y-%m-%dT%H:%M:%S.%f',
-    )
-    for date_format in formats:
-        try:
-            return datetime.datetime.strptime(value, date_format)
-        except ValueError:
-            pass
-    raise ValueError
+        delta = base - datetime.datetime(1970, 1, 1)
+        epoch_nanos = (
+            (delta.days * 86400 + delta.seconds) * 1_000_000_000 + nanos
+        )
+        if epoch_nanos < -(1 << 63) or epoch_nanos > (1 << 63) - 1:
+            raise ValueError
+        return epoch_nanos
+
+    precision = {'s': 0, 'ms': 3, 'us': 6}[target_type.unit]
+    nanos = nanos // (10 ** (9 - precision)) * (10 ** (9 - precision))
+    return base + datetime.timedelta(microseconds=nanos // 1000)
 
 
 def _cast_python(value, target_type):

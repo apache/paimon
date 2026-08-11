@@ -280,6 +280,30 @@ class TestVariantGet(unittest.TestCase):
             ],
         )
 
+    def test_get_timestamp_ns_checks_range_and_format(self):
+        boundaries = _variants([
+            '1677-09-21 00:12:43.145224192',
+            '2262-04-11 23:47:16.854775807',
+        ])
+        self.assertEqual(
+            variant_get(boundaries, '$', pa.timestamp('ns'))
+            .cast(pa.int64()).to_pylist(),
+            [-(1 << 63), (1 << 63) - 1],
+        )
+
+        invalid = (
+            '1677-09-21 00:12:43.145224191',
+            '2262-04-11 23:47:16.854775808',
+            '9999-12-31 23:59:59.999999999',
+            'today',
+            'now',
+        )
+        for value in invalid:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "Invalid cast"):
+                    variant_get(
+                        _variants([value]), '$', pa.timestamp('ns'))
+
     def test_variant_null_remains_arrow_null(self):
         column = _variants([None, {'value': None}, {'value': 1.0}])
 
