@@ -305,6 +305,8 @@ class TestVariantReplace(unittest.TestCase):
                 column, '$', pa.scalar(Decimal('1E+2'), type=data_type))
         with self.assertRaisesRegex(ValueError, "non-negative"):
             _encode_scalar_to_value_bytes(Decimal('1E+2'), data_type)
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            _encode_scalar_to_value_bytes(None, data_type)
 
     def test_replaces_exact_primitive_types(self):
         original_timestamp = datetime.datetime(2026, 8, 11)
