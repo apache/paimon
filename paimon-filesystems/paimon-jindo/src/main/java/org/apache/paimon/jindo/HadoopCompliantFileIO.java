@@ -27,9 +27,8 @@ import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.FileType;
 import org.apache.paimon.utils.Pair;
-
-import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.types.JindoHadoopFileStatus;
@@ -46,8 +45,10 @@ import java.io.UncheckedIOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -55,7 +56,7 @@ import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST;
 
 /**
  * Hadoop {@link FileIO}.
@@ -67,7 +68,9 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
     private static final long serialVersionUID = 1L;
 
-    /// Detailed cache strategies are retrieved from REST server.
+    // Cache policy values select operation types. In particular, policy "meta" controls metadata
+    // operations such as getFileStatus and exists. It is independent from whitelist "meta", which
+    // selects paths classified as FileType.META.
     private static final String META_CACHE_ENABLED_TAG = "meta";
     private static final String READ_CACHE_ENABLED_TAG = "read";
     private static final String WRITE_CACHE_ENABLED_TAG = "write";
@@ -80,20 +83,12 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> fsMap;
     protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> jindoCacheFsMap;
 
-    // Only enable cache for path which is generated with uuid
-    private List<String> cacheWhitelistPaths = new ArrayList<>();
+    private Set<FileType> cacheWhitelist = EnumSet.noneOf(FileType.class);
 
     boolean shouldCache(Path path) {
-        if (cacheWhitelistPaths.isEmpty()) {
-            return true;
-        }
-        String pathStr = path.toUri().getPath();
-        for (String pattern : cacheWhitelistPaths) {
-            if (pathStr.contains(pattern)) {
-                return true;
-            }
-        }
-        return false;
+        return cacheWhitelist != null
+                && !FileType.isMutable(path)
+                && cacheWhitelist.contains(FileType.classify(path));
     }
 
     @Override
@@ -101,6 +96,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         metaCacheEnabled = false;
         readCacheEnabled = false;
         writeCacheEnabled = false;
+        cacheWhitelist = EnumSet.noneOf(FileType.class);
 
         // Process file io cache configuration
         Options options = context.options();
@@ -124,16 +120,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         metaCacheEnabled = cachePolicy.contains(META_CACHE_ENABLED_TAG);
         readCacheEnabled = cachePolicy.contains(READ_CACHE_ENABLED_TAG);
         writeCacheEnabled = cachePolicy.contains(WRITE_CACHE_ENABLED_TAG);
-        String whitelist = options.get(IO_CACHE_WHITELIST_PATH);
-        if (!whitelist.equals("*")) {
-            cacheWhitelistPaths = Lists.newArrayList(whitelist.split(","));
-        }
+        String whitelist = options.get(IO_CACHE_WHITELIST);
+        cacheWhitelist = FileType.parseWhitelist(IO_CACHE_WHITELIST.key(), whitelist);
         LOG.info(
-                "Cache enabled with cache policy: meta cache enabled {}, read cache enabled {}, write cache enabled {}, whitelist path: {}",
+                "Cache enabled with cache policy: meta cache enabled {}, read cache enabled {}, write cache enabled {}, whitelist file types: {}",
                 metaCacheEnabled,
                 readCacheEnabled,
                 writeCacheEnabled,
-                whitelist);
+                cacheWhitelist);
     }
 
     @Override

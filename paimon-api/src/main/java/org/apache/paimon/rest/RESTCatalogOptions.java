@@ -149,12 +149,22 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("The original OSS endpoint used when cache is bypassed.");
 
+    public static final ConfigOption<String> IO_CACHE_WHITELIST =
+            ConfigOptions.key("io-cache.whitelist")
+                    .stringType()
+                    .defaultValue("meta,global-index")
+                    .withDescription(
+                            "Comma-separated list of file types allowed to use the cache endpoint. "
+                                    + "Supported values: meta, global-index, bucket-index, data, file-index.");
+
+    /** @deprecated Use {@link #IO_CACHE_WHITELIST}. Path patterns are no longer supported. */
+    @Deprecated
     public static final ConfigOption<String> IO_CACHE_WHITELIST_PATH =
             ConfigOptions.key("io-cache.whitelist-path")
                     .stringType()
                     .defaultValue("bucket,manifest,index")
                     .withDescription(
-                            "Cache is only applied to paths which contain the specified pattern, and * means all paths.");
+                            "Deprecated. Use io-cache.whitelist to select cacheable file types.");
 
     public static final ConfigOption<String> IO_CACHE_POLICY =
             ConfigOptions.key("io-cache.policy")

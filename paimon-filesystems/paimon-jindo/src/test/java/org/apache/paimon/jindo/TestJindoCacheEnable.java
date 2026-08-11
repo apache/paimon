@@ -33,6 +33,7 @@ import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_IGNORE_VPC_VALI
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ORIGIN_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,6 +41,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TestJindoCacheEnable {
 
     private static final String JINDO_CACHE_RPC_ADDRESS = "fs.jindocache.namespace.rpc.address";
+    private static final String TABLE_ROOT = "oss://test-bucket/database/table";
+
+    private static final Path META_PATH = new Path(TABLE_ROOT + "/snapshot/snapshot-1");
+    private static final Path GLOBAL_INDEX_PATH =
+            new Path(TABLE_ROOT + "/index/btree-global-index-a1b2c3d4.index");
+    private static final Path BUCKET_INDEX_PATH = new Path(TABLE_ROOT + "/index/index-a1b2c3d4-0");
+    private static final Path DATA_PATH = new Path(TABLE_ROOT + "/bucket-0/data-a1b2c3d4-0.orc");
+    private static final Path FILE_INDEX_PATH =
+            new Path(TABLE_ROOT + "/bucket-0/data-a1b2c3d4-0.orc.index");
 
     private CatalogContext createCatalogContext(
             boolean cacheEnabled,
@@ -58,7 +68,7 @@ public class TestJindoCacheEnable {
             options.set(IO_CACHE_ORIGIN_ENDPOINT, "test-oss-endpoint");
         }
         if (cacheWhitelist != null) {
-            options.set(IO_CACHE_WHITELIST_PATH, cacheWhitelist);
+            options.set(IO_CACHE_WHITELIST, cacheWhitelist);
         }
         return CatalogContext.create(options);
     }
@@ -80,6 +90,7 @@ public class TestJindoCacheEnable {
             options.set(IO_CACHE_VPC_VALIDATED, vpcValidated);
         }
         options.set(IO_CACHE_IGNORE_VPC_VALIDATE, ignoreVpcValidate);
+        options.set(IO_CACHE_WHITELIST, "data");
         return CatalogContext.create(options);
     }
 
@@ -254,48 +265,122 @@ public class TestJindoCacheEnable {
     }
 
     @Test
-    public void testCacheWhitelist() {
-        // default config
+    public void testDefaultCacheWhitelist() {
         CatalogContext context = createCatalogContext(true, "meta,read,write", true, null);
         JindoFileIO fileIO = new JindoFileIO();
         fileIO.configure(context);
-        assertThat(
-                        fileIO.shouldCache(
-                                new Path("oss://test-bucket/database/table/bucket-0/file.orc")))
-                .isTrue();
-        assertThat(
-                        fileIO.shouldCache(
-                                new Path("oss://test-bucket/database/table/manifest/manifest-111")))
-                .isTrue();
-        assertThat(
-                        fileIO.shouldCache(
-                                new Path("oss://test-bucket/database/table/snapshot/snapshot-1")))
-                .isFalse();
 
-        // set whitelist config as *
-        context = createCatalogContext(true, "meta,read,write", true, "*");
-        fileIO = new JindoFileIO();
+        assertThat(fileIO.shouldCache(META_PATH)).isTrue();
+        assertThat(fileIO.shouldCache(GLOBAL_INDEX_PATH)).isTrue();
+        assertThat(fileIO.shouldCache(BUCKET_INDEX_PATH)).isFalse();
+        assertThat(fileIO.shouldCache(DATA_PATH)).isFalse();
+        assertThat(fileIO.shouldCache(FILE_INDEX_PATH)).isFalse();
+    }
+
+    @Test
+    public void testAllSupportedCacheWhitelistFileTypes() {
+        CatalogContext context =
+                createCatalogContext(
+                        true,
+                        "meta,read,write",
+                        true,
+                        "meta,global-index,bucket-index,data,file-index");
+        JindoFileIO fileIO = new JindoFileIO();
         fileIO.configure(context);
-        assertThat(
-                        fileIO.shouldCache(
-                                new Path("oss://test-bucket/database/table/snapshot/snapshot-1")))
-                .isTrue();
-        assertThat(fileIO.shouldCache(new Path("oss://test-bucket/database/table/dir/file")))
-                .isTrue();
+
+        assertThat(fileIO.shouldCache(META_PATH)).isTrue();
+        assertThat(fileIO.shouldCache(GLOBAL_INDEX_PATH)).isTrue();
+        assertThat(fileIO.shouldCache(BUCKET_INDEX_PATH)).isTrue();
+        assertThat(fileIO.shouldCache(DATA_PATH)).isTrue();
+        assertThat(fileIO.shouldCache(FILE_INDEX_PATH)).isTrue();
+    }
+
+    @Test
+    public void testCustomCacheWhitelist() {
+        CatalogContext context =
+                createCatalogContext(true, "meta,read,write", true, "data,file-index");
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(context);
+
+        assertThat(fileIO.shouldCache(META_PATH)).isFalse();
+        assertThat(fileIO.shouldCache(GLOBAL_INDEX_PATH)).isFalse();
+        assertThat(fileIO.shouldCache(BUCKET_INDEX_PATH)).isFalse();
+        assertThat(fileIO.shouldCache(DATA_PATH)).isTrue();
+        assertThat(fileIO.shouldCache(FILE_INDEX_PATH)).isTrue();
+    }
+
+    @Test
+    public void testEmptyAndInvalidCacheWhitelistFailClosed() {
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(createCatalogContext(true, "meta,read,write", true, ""));
+
+        assertThat(fileIO.shouldCache(META_PATH)).isFalse();
+        assertThat(fileIO.shouldCache(DATA_PATH)).isFalse();
+
+        fileIO.configure(createCatalogContext(true, "meta,read,write", true, "manifest,unknown"));
+
+        assertThat(fileIO.shouldCache(META_PATH)).isFalse();
+        assertThat(fileIO.shouldCache(DATA_PATH)).isFalse();
+    }
+
+    @SuppressWarnings("deprecation")
+    @Test
+    public void testDeprecatedWhitelistPathIsIgnored() {
+        Options options = new Options();
+        options.set(IO_CACHE_POLICY, "meta,read,write");
+        options.set(JINDO_CACHE_RPC_ADDRESS, "test-rpc-address:8080");
+        options.set(IO_CACHE_WHITELIST_PATH, "*");
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(CatalogContext.create(options));
+
+        assertThat(fileIO.shouldCache(META_PATH)).isTrue();
+        assertThat(fileIO.shouldCache(DATA_PATH)).isFalse();
+    }
+
+    @Test
+    public void testMutableMetaFilesAreNotCached() {
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(createCatalogContext(true, "meta,read,write", true, "meta"));
+
+        assertThat(fileIO.shouldCache(META_PATH)).isTrue();
+        assertThat(fileIO.shouldCache(new Path(TABLE_ROOT + "/snapshot/EARLIEST"))).isFalse();
+        assertThat(fileIO.shouldCache(new Path(TABLE_ROOT + "/snapshot/LATEST"))).isFalse();
+    }
+
+    @Test
+    public void testConfigureResetsCacheWhitelistAndPolicy() {
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(createCatalogContext(true, "read", true, "data"));
+
+        verifyCacheFlags(fileIO, false, true, false);
+        assertThat(fileIO.shouldCache(DATA_PATH)).isTrue();
+        assertThat(fileIO.shouldCache(META_PATH)).isFalse();
+
+        fileIO.configure(createCatalogContext(true, "read", true, "meta"));
+
+        verifyCacheFlags(fileIO, false, true, false);
+        assertThat(fileIO.shouldCache(DATA_PATH)).isFalse();
+        assertThat(fileIO.shouldCache(META_PATH)).isTrue();
+
+        fileIO.configure(createCatalogContext(true, "none", true, "data"));
+
+        verifyCacheFlags(fileIO, false, false, false);
+        assertThat(fileIO.shouldCache(DATA_PATH)).isFalse();
     }
 
     @Test
     public void testSerialization() throws Exception {
-        CatalogContext context = createCatalogContext(true, "read", false, null);
+        CatalogContext context = createCatalogContext(true, "read", false, "data");
         JindoFileIO fileIO = new JindoFileIO();
         fileIO.configure(context);
 
         JindoFileIO cloned = InstantiationUtil.clone(fileIO);
-        Path path = new Path("oss://test-bucket/database/table/bucket-0/file.orc");
 
-        assertThat(cloned.hadoopOptions(path, "read").get("fs.oss.endpoint"))
+        assertThat(cloned.shouldCache(DATA_PATH)).isTrue();
+        assertThat(cloned.shouldCache(META_PATH)).isFalse();
+        assertThat(cloned.hadoopOptions(DATA_PATH, "read").get("fs.oss.endpoint"))
                 .isEqualTo("test-dlf-cache-endpoint");
-        assertThat(cloned.hadoopOptions(path, "meta").get("fs.oss.endpoint"))
+        assertThat(cloned.hadoopOptions(META_PATH, "read").get("fs.oss.endpoint"))
                 .isEqualTo("test-oss-endpoint");
     }
 }
