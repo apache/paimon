@@ -233,6 +233,57 @@ class DataEvolutionCompactRangePlannerTest extends TableTestBase {
     }
 
     @Test
+    void testPlansUpdatedBlobFilesSpanningAdjacentNormalRanges() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+
+        List<ManifestFileMeta> manifests =
+                manifestFile.write(
+                        Arrays.asList(
+                                add("normal-0.parquet", 0L, 10L, 200L),
+                                add("normal-1.parquet", 10L, 10L, 200L),
+                                blob("old.blob", 5L, 10L, 40L, "f0"),
+                                blob("updated.blob", 5L, 10L, 40L, "f0")));
+
+        Queue<DataEvolutionCompactRangePlanner.RangeBatch> batches =
+                plan(
+                        new DataEvolutionCompactRangePlanner(
+                                manifestFile, null, 10, candidateOptions(table, true, false)),
+                        manifests);
+
+        assertThat(batches).hasSize(1);
+        DataEvolutionCompactRangePlanner.RangeBatch batch = batches.poll();
+        assertThat(batch.fileCount()).isEqualTo(3);
+        assertThat(batch.toRanges()).containsExactly(new Range(0L, 9L));
+    }
+
+    @Test
+    void testPlansNormalCompactionWithIgnoredBlobSpanningAdjacentRanges() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        ManifestFile manifestFile = table.store().manifestFileFactory().create();
+
+        List<ManifestFileMeta> manifests =
+                manifestFile.write(
+                        Arrays.asList(
+                                add("normal-0.parquet", 0L, 10L, 40L),
+                                add("normal-1.parquet", 10L, 10L, 40L),
+                                blob("ignored.blob", 5L, 10L, 40L, "f0")));
+
+        Queue<DataEvolutionCompactRangePlanner.RangeBatch> batches =
+                plan(
+                        new DataEvolutionCompactRangePlanner(
+                                manifestFile, null, 10, candidateOptions(table, false, false)),
+                        manifests);
+
+        assertThat(batches).hasSize(1);
+        DataEvolutionCompactRangePlanner.RangeBatch batch = batches.poll();
+        assertThat(batch.fileCount()).isEqualTo(3);
+        assertThat(batch.toRanges()).containsExactly(new Range(0L, 19L));
+    }
+
+    @Test
     void testDeletedFileCannotCreateCandidate() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();

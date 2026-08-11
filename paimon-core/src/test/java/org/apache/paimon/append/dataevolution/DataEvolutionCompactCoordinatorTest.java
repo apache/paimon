@@ -237,6 +237,25 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
+    public void testCompactPlannerWithUpdatedBlobFilesSpanningAdjacentDataFiles() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 10L, 200));
+        entries.add(makeEntry("file2.parquet", 10L, 10L, 200));
+        entries.add(makeBlobEntry("old.blob", 5L, 10L, 40, 0, "pic"));
+        entries.add(makeBlobEntry("updated.blob", 5L, 10L, 40, 1, "pic"));
+
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                blobPlanner(100, 100, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).type()).isEqualTo(DataEvolutionCompactTask.TaskType.BLOB);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(2).file(), entries.get(3).file());
+    }
+
+    @Test
     public void testCompactPlannerMergesAdjacentOverlappingBlobGroups() {
         List<ManifestEntry> entries = new ArrayList<>();
         entries.add(makeEntry("file1.parquet", 0L, 2L, 100));

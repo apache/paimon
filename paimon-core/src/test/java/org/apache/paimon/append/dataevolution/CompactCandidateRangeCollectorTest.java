@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.append.dataevolution.CompactCandidateRangeCollector.IGNORED_DEDICATED_FILE;
 import static org.apache.paimon.append.dataevolution.CompactCandidateRangeCollector.NORMAL_FILE;
 import static org.apache.paimon.append.dataevolution.CompactCandidateRangeCollector.VECTOR_FILE;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -105,6 +106,48 @@ class CompactCandidateRangeCollectorTest {
         collector.add(0, VECTOR_FILE, 20L, 10L, 10L);
 
         assertThat(finish(collector)).containsExactly("0-9:3");
+    }
+
+    @Test
+    void testSelectsUpdatedBlobFilesSpanningAdjacentNormalRanges() {
+        CompactCandidateRangeCollector collector = collector(100L, 100L, 1L, 2L);
+        collector.add(0, NORMAL_FILE, 0L, 10L, 200L);
+        collector.add(0, NORMAL_FILE, 10L, 10L, 200L);
+        collector.add(0, 3, 5L, 10L, 40L);
+        collector.add(0, 3, 5L, 10L, 40L);
+
+        assertThat(finish(collector)).containsExactly("0-9:3");
+    }
+
+    @Test
+    void testAssociatesDedicatedFilesBeforeNormalFileAtSameStart() {
+        CompactCandidateRangeCollector collector = collector(100L, 100L, 1L, 2L);
+        collector.add(0, 3, 0L, 5L, 40L);
+        collector.add(0, 3, 0L, 5L, 40L);
+        collector.add(0, NORMAL_FILE, 0L, 10L, 200L);
+
+        assertThat(finish(collector)).containsExactly("0-9:3");
+    }
+
+    @Test
+    void testSelectsVectorFilesSpanningAdjacentNormalRanges() {
+        CompactCandidateRangeCollector collector = collector(100L, 100L, 1L, 2L);
+        collector.add(0, NORMAL_FILE, 0L, 10L, 200L);
+        collector.add(0, NORMAL_FILE, 10L, 10L, 200L);
+        collector.add(0, VECTOR_FILE, 5L, 10L, 40L);
+        collector.add(0, VECTOR_FILE, 5L, 10L, 40L);
+
+        assertThat(finish(collector)).containsExactly("0-9:3");
+    }
+
+    @Test
+    void testIgnoredDedicatedFileCanSpanAdjacentNormalRanges() {
+        CompactCandidateRangeCollector collector = collector(100L, 100L, 1L, 2L);
+        collector.add(0, NORMAL_FILE, 0L, 10L, 40L);
+        collector.add(0, NORMAL_FILE, 10L, 10L, 40L);
+        collector.add(0, IGNORED_DEDICATED_FILE, 5L, 10L, 40L);
+
+        assertThat(finish(collector)).containsExactly("0-19:3");
     }
 
     private CompactCandidateRangeCollector collector(

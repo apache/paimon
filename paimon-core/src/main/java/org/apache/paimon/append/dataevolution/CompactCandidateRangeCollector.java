@@ -277,7 +277,11 @@ final class CompactCandidateRangeCollector {
     }
 
     /**
-     * Stable LSD radix sort by unsigned partition id, signed first row id, and signed last row id.
+     * Stable LSD radix sort by unsigned partition id, signed first row id, and file role.
+     *
+     * <p>Normal files sort before dedicated files at the same first row id. This lets the streaming
+     * accumulator associate a dedicated file with the normal range containing its first row id,
+     * matching {@link DataEvolutionCompactCoordinator.CompactPlanner}.
      */
     private static void radixSort(long[] words, int size) {
         if (size <= 1) {
@@ -321,7 +325,7 @@ final class CompactCandidateRangeCollector {
         long value;
         int shift;
         if (pass < 4) {
-            value = (words[offset + 1] + words[offset + 2] - 1L) ^ Long.MIN_VALUE;
+            value = fileRoleOrder(words[offset]);
             shift = pass * RADIX_BITS;
         } else if (pass < 8) {
             value = words[offset + 1] ^ Long.MIN_VALUE;
@@ -349,9 +353,13 @@ final class CompactCandidateRangeCollector {
         if (result != 0) {
             return result;
         }
-        long leftEnd = leftWords[leftOffset + 1] + leftWords[leftOffset + 2] - 1L;
-        long rightEnd = rightWords[rightOffset + 1] + rightWords[rightOffset + 2] - 1L;
-        return Long.compare(leftEnd, rightEnd);
+        return Long.compare(
+                fileRoleOrder(leftWords[leftOffset]), fileRoleOrder(rightWords[rightOffset]));
+    }
+
+    private static long fileRoleOrder(long metadata) {
+        int fileKind = (int) (metadata >> 32);
+        return fileKind == NORMAL_FILE ? 0L : 1L;
     }
 
     private void release() {
@@ -400,9 +408,6 @@ final class CompactCandidateRangeCollector {
 
         private int partitionId = -1;
         private boolean hasComponent;
-        private long spanningStart;
-        private long spanningEnd;
-        private boolean hasNormalFile;
         private long normalStart;
         private long normalEnd;
         private long normalFileCount;
@@ -427,23 +432,19 @@ final class CompactCandidateRangeCollector {
 
         private void add(
                 int incomingPartitionId, int fileKind, long start, long end, long fileSize) {
-            if (!hasComponent) {
+            if (partitionId < 0) {
                 startPartition(incomingPartitionId);
-                startComponent(fileKind, start, end, fileSize);
-                return;
-            }
-            if (incomingPartitionId == partitionId && start <= spanningEnd) {
-                spanningEnd = Math.max(spanningEnd, end);
-                addToComponent(fileKind, start, end, fileSize);
-                return;
-            }
-
-            finishComponent();
-            if (incomingPartitionId != partitionId) {
+            } else if (incomingPartitionId != partitionId) {
+                finishComponent();
                 finishPartition();
                 startPartition(incomingPartitionId);
             }
-            startComponent(fileKind, start, end, fileSize);
+
+            if (fileKind == NORMAL_FILE) {
+                addNormalFile(start, end, fileSize);
+            } else if (hasComponent && start >= normalStart && start <= normalEnd) {
+                addDedicatedFile(fileKind, start, end, fileSize);
+            }
         }
 
         private void startPartition(int incomingPartitionId) {
@@ -451,33 +452,42 @@ final class CompactCandidateRangeCollector {
             hasPreviousLogicalRange = false;
         }
 
-        private void startComponent(int fileKind, long start, long end, long fileSize) {
-            spanningStart = start;
-            spanningEnd = end;
-            hasNormalFile = false;
+        private void startComponent(long start, long end, long fileSize) {
             normalStart = start;
             normalEnd = end;
-            normalFileCount = 0L;
-            normalWeight = 0L;
+            normalFileCount = 1L;
+            normalWeight = Math.max(fileSize, openFileCost);
             vectorFileCount = 0L;
-            componentFileCount = 0;
+            componentFileCount = 1;
             blobFields.clear();
-            addToComponent(fileKind, start, end, fileSize);
             hasComponent = true;
         }
 
-        private void addToComponent(int fileKind, long start, long end, long fileSize) {
-            componentFileCount = Math.addExact(componentFileCount, 1);
-            if (fileKind == NORMAL_FILE) {
+        private void addNormalFile(long start, long end, long fileSize) {
+            if (!hasComponent) {
+                startComponent(start, end, fileSize);
+                return;
+            }
+            if (start == normalStart) {
                 checkState(
-                        !hasNormalFile || (normalStart == start && normalEnd == end),
+                        normalEnd == end,
                         "Normal files in one overlapping row-id group must have the same row-id range.");
-                hasNormalFile = true;
-                normalStart = start;
-                normalEnd = end;
                 normalFileCount = Math.addExact(normalFileCount, 1L);
                 normalWeight = Math.addExact(normalWeight, Math.max(fileSize, openFileCost));
-            } else if (fileKind == VECTOR_FILE) {
+                componentFileCount = Math.addExact(componentFileCount, 1);
+                return;
+            }
+
+            checkState(
+                    start > normalEnd,
+                    "Normal files in one overlapping row-id group must have the same row-id range.");
+            finishComponent();
+            startComponent(start, end, fileSize);
+        }
+
+        private void addDedicatedFile(int fileKind, long start, long end, long fileSize) {
+            componentFileCount = Math.addExact(componentFileCount, 1);
+            if (fileKind == VECTOR_FILE) {
                 vectorFileCount = Math.addExact(vectorFileCount, 1L);
             } else if (fileKind >= 0) {
                 blobFields
@@ -489,18 +499,6 @@ final class CompactCandidateRangeCollector {
 
         private void finishComponent() {
             if (!hasComponent) {
-                return;
-            }
-            long logicalStart = hasNormalFile ? normalStart : spanningStart;
-            long logicalEnd = hasNormalFile ? normalEnd : spanningEnd;
-            checkState(
-                    spanningStart >= logicalStart && spanningEnd <= logicalEnd,
-                    "File row-id range is outside its logical row-id range.");
-
-            if (!hasNormalFile) {
-                flushBin();
-                hasPreviousLogicalRange = false;
-                hasComponent = false;
                 return;
             }
 
@@ -516,14 +514,14 @@ final class CompactCandidateRangeCollector {
 
             if (hasPreviousLogicalRange
                     && (previousLogicalEnd == Long.MAX_VALUE
-                            || logicalStart != previousLogicalEnd + 1L)) {
+                            || normalStart != previousLogicalEnd + 1L)) {
                 flushBin();
             }
 
             Component component =
                     new Component(
-                            logicalStart,
-                            logicalEnd,
+                            normalStart,
+                            normalEnd,
                             componentFileCount,
                             normalFileCount,
                             normalWeight,
@@ -537,7 +535,7 @@ final class CompactCandidateRangeCollector {
                     flushBin();
                 }
             }
-            previousLogicalEnd = logicalEnd;
+            previousLogicalEnd = normalEnd;
             hasPreviousLogicalRange = true;
             hasComponent = false;
         }
@@ -559,7 +557,9 @@ final class CompactCandidateRangeCollector {
 
         private void finish() {
             finishComponent();
-            finishPartition();
+            if (partitionId >= 0) {
+                finishPartition();
+            }
         }
     }
 
