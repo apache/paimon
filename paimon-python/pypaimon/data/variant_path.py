@@ -32,6 +32,7 @@ import pyarrow as pa
 from pypaimon.data._variant_binary import (
     _ARRAY,
     _OBJECT,
+    _PRIMITIVE,
     _SHORT_STR,
     _U32_SIZE,
     _VERSION,
@@ -883,6 +884,57 @@ def _json_text(value):
     return json.dumps(str(value), ensure_ascii=False)
 
 
+def _variant_json(value, metadata, pos, limit, keys=None):
+    size = _checked_value_size(value, pos, limit)
+    if pos + size != limit:
+        _malformed("child size does not match container offsets")
+    header = value[pos]
+    basic_type = header & 0x3
+    type_info = (header >> 2) & 0x3F
+    if basic_type == _OBJECT:
+        object_size, id_size, id_start, data_start, offsets, _ = (
+            _checked_object_layout(value, pos, limit))
+        if keys is None:
+            keys = {
+                key_id: key
+                for key, key_id in _metadata_key_ids(metadata).items()
+            }
+        fields = []
+        for slot in range(object_size):
+            key_id = _read_unsigned(
+                value, id_start + slot * id_size, id_size)
+            if key_id not in keys:
+                _malformed("object key is missing from metadata")
+            child_start, child_end = _checked_object_child_bounds(
+                value, data_start, offsets, slot)
+            fields.append(
+                json.dumps(keys[key_id], ensure_ascii=False)
+                + ':'
+                + _variant_json(
+                    value, metadata, child_start, child_end, keys)
+            )
+        return '{' + ','.join(fields) + '}'
+    if basic_type == _ARRAY:
+        array_size, data_start, offsets, _ = _checked_array_layout(
+            value, pos, limit)
+        return '[' + ','.join(
+            _variant_json(
+                value,
+                metadata,
+                data_start + offsets[slot],
+                data_start + offsets[slot + 1],
+                keys,
+            )
+            for slot in range(array_size)
+        ) + ']'
+
+    decoded = GenericVariant(bytes(value[pos:limit]), metadata).to_python()
+    if basic_type == _PRIMITIVE and type_info in (_FLOAT, _DOUBLE):
+        text = _floating_text(decoded, type_info == _FLOAT)
+        return text if math.isfinite(decoded) else json.dumps(text)
+    return _json_text(decoded)
+
+
 def _cast_decimal(value, target_type):
     if isinstance(value, bool):
         value = decimal.Decimal(1 if value else 0)
@@ -956,15 +1008,17 @@ def _parse_timestamp(value, target_type):
                   or value[0] == '-' and value[1:].isdigit()):
         raw_value = int(value)
         if target_type.unit == 'ns':
-            if raw_value % 1000:
-                raise ValueError("timestamp is not microsecond-aligned")
-            micros = raw_value // 1000
+            return pa.scalar(raw_value, type=target_type).as_py()
         else:
             micros = raw_value * {
                 's': 1_000_000, 'ms': 1000, 'us': 1,
             }[target_type.unit]
         return datetime.datetime(1970, 1, 1) + datetime.timedelta(
             microseconds=int(micros))
+    if target_type.unit == 'ns':
+        nanos = int(np.datetime64(value.replace(' ', 'T'), 'ns').astype(
+            np.int64))
+        return pa.scalar(nanos, type=target_type).as_py()
     formats = (
         '%Y-%m-%d',
         '%Y-%m-%d %H:%M:%S',
@@ -1094,11 +1148,18 @@ def _cast_python(value, target_type):
 
 def _decode_scalar(value, metadata: bytes, pos: int, target_type):
     size = _checked_value_size(value, pos)
-    selected = bytes(value[pos:pos + size])
-    decoded = GenericVariant(selected, metadata).to_python()
+    end = pos + size
     type_info = (value[pos] >> 2) & 0x3F
+    if (pa.types.is_string(target_type)
+            or pa.types.is_large_string(target_type)):
+        basic_type = value[pos] & 0x3
+        if basic_type in (_OBJECT, _ARRAY):
+            return _variant_json(value, metadata, pos, end)
+    selected = bytes(value[pos:end])
+    decoded = GenericVariant(selected, metadata).to_python()
     if ((pa.types.is_string(target_type)
          or pa.types.is_large_string(target_type))
+            and (value[pos] & 0x3) == _PRIMITIVE
             and type_info in (_FLOAT, _DOUBLE)):
         return _floating_text(decoded, type_info == _FLOAT)
     return _cast_python(decoded, target_type)

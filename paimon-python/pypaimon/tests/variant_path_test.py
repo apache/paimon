@@ -19,6 +19,7 @@ import unittest
 from decimal import Decimal
 from unittest.mock import patch
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
@@ -30,6 +31,7 @@ from pypaimon.data.variant_path import (
     variant_replace,
 )
 from pypaimon.data.variant_shredding import (
+    _build_array_value,
     _build_object_value,
     _encode_scalar_to_value_bytes,
 )
@@ -198,6 +200,26 @@ class TestVariantGet(unittest.TestCase):
             ['1.2', '1.0E20', '1.0E-4'],
         )
 
+        nested = GenericVariant.to_arrow_array([
+            GenericVariant(
+                _build_object_value([(0, floats[0].as_py()['value'])]),
+                GenericVariant.from_python({'value': 0}).metadata(),
+            ),
+            GenericVariant(
+                _build_array_value([floats[0].as_py()['value']]),
+                b'\x01\x00',
+            ),
+        ])
+        self.assertEqual(
+            variant_get(nested, '$', pa.string()).to_pylist(),
+            ['{"value":1.2}', '[1.2]'],
+        )
+        strings = _variants(['1234567', '12345678901234'])
+        self.assertEqual(
+            variant_get(strings, '$', pa.string()).to_pylist(),
+            ['1234567', '12345678901234'],
+        )
+
     def test_get_matches_java_numeric_casts(self):
         column = _variants([
             {'value': 1e20},
@@ -223,6 +245,21 @@ class TestVariantGet(unittest.TestCase):
             _variants([{'value': 1}]), '$.value', pa.timestamp('us'))
         self.assertEqual(
             timestamp.to_pylist(), [datetime.datetime(1970, 1, 1, 0, 0, 1)])
+
+        nanos = variant_get(
+            _variants(['1', '-1', '2026-08-10 12:34:56.123456789']),
+            '$',
+            pa.timestamp('ns'),
+        )
+        self.assertEqual(
+            nanos.cast(pa.int64()).to_pylist(),
+            [
+                1,
+                -1,
+                int(np.datetime64(
+                    '2026-08-10T12:34:56.123456789', 'ns').astype(np.int64)),
+            ],
+        )
 
     def test_variant_null_remains_arrow_null(self):
         column = _variants([None, {'value': None}, {'value': 1.0}])
