@@ -479,7 +479,10 @@ public class IcebergRestMetadataCommitterTest {
                         + localMeta.currentSnapshot().schemaId());
         System.out.println(
                 "PROBE schemaLatest="
-                        + new FileSystemSchemaManager(table.fileIO(), table.location()).latest().get().id());
+                        + new FileSystemSchemaManager(table.fileIO(), table.location())
+                                .latest()
+                                .get()
+                                .id());
         for (org.apache.paimon.fs.FileStatus st :
                 table.fileIO()
                         .listStatus(
