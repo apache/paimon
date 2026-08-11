@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import datetime
+import struct
 import unittest
 from decimal import Decimal
 from unittest.mock import patch
@@ -27,6 +28,7 @@ from pypaimon.data._variant_binary import _primitive_header
 from pypaimon.data.generic_variant import _DECIMAL4, _DOUBLE, GenericVariant
 from pypaimon.data.variant_path import (
     _path_positions,
+    _rebuilt_offsets,
     variant_get,
     variant_replace,
 )
@@ -220,6 +222,23 @@ class TestVariantGet(unittest.TestCase):
             ['1234567', '12345678901234'],
         )
 
+    def test_nested_json_uses_variant_float_text(self):
+        value = struct.unpack(
+            '>d', struct.pack('>Q', 0x439F4B86CD6A5E0C))[0]
+        column = _variants([{
+            'nested': {'finite': value, 'infinite': float('inf')},
+        }])
+
+        result = variant_get(
+            column, '$', pa.struct([('nested', pa.string())]))
+
+        self.assertEqual(result.to_pylist(), [{
+            'nested': (
+                '{"finite":5.6376106381000781E17,'
+                '"infinite":"Infinity"}'
+            ),
+        }])
+
     def test_get_matches_java_numeric_casts(self):
         column = _variants([
             {'value': 1e20},
@@ -241,6 +260,8 @@ class TestVariantGet(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid cast"):
             variant_get(invalid.slice(1, 1), '$.value', pa.timestamp('us'))
 
+        # Java casts LONG as epoch seconds, but parses numeric STRING using
+        # the target timestamp precision.
         timestamp = variant_get(
             _variants([{'value': 1}]), '$.value', pa.timestamp('us'))
         self.assertEqual(
@@ -784,6 +805,22 @@ class TestVariantReplace(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "path does not exist"):
             variant_replace(
                 column, '$.value', replacement, strict=True)
+
+    def test_all_missing_paths_reuse_input_buffers(self):
+        column = _variants([{'other': 1.0}, {'other': 2.0}])
+
+        result = variant_replace(
+            column, '$.missing', pa.scalar(3.0, type=pa.float64()))
+
+        self.assertIs(result, column)
+
+    def test_rebuilt_binary_offsets_reject_overflow(self):
+        self.assertEqual(
+            _rebuilt_offsets(np.array([2, 3]), '<i').tolist(),
+            [0, 2, 5],
+        )
+        with self.assertRaisesRegex(ValueError, "use LargeBinary"):
+            _rebuilt_offsets(np.array([(1 << 31) - 1, 1]), '<i')
 
     def test_sql_null_replacement_and_sliced_input(self):
         base = _variants([

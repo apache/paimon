@@ -327,10 +327,11 @@ class _GenericVariantBuilder:
     def append_decimal_unscaled(self, unscaled, precision, scale):
         if not 0 <= scale <= _MAX_DECIMAL16_PRECISION:
             raise ValueError(f'Unsupported VARIANT decimal scale: {scale}')
-        if (not 0 < precision <= _MAX_DECIMAL16_PRECISION
-                or not -(1 << 127) <= unscaled < (1 << 127)):
+        if not 0 < precision <= _MAX_DECIMAL16_PRECISION:
             raise ValueError(
                 f'Unsupported VARIANT decimal precision: {precision}')
+        if not -(1 << 127) <= unscaled < (1 << 127):
+            raise ValueError('VARIANT decimal value exceeds 128 bits')
 
         if scale <= _MAX_DECIMAL4_PRECISION and precision <= _MAX_DECIMAL4_PRECISION:
             self._write_byte(_primitive_header(_DECIMAL4))

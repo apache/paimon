@@ -19,7 +19,8 @@
 Paimon VARIANT casts follow Java cast semantics, but Python's floating-point
 formatting differs for some IEEE values. This module preserves the digit
 generation behavior of OpenJDK 8 ``sun.misc.FloatingDecimal``. Do not replace
-it with ``str`` or ``repr`` without cross-checking the JDK 8 output.
+it with ``str``, ``repr``, or newer JDK output: JDK 8 is the compatibility
+contract.
 """
 
 import struct

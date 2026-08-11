@@ -286,9 +286,7 @@ def _path_positions(
         value: bytes,
         metadata: bytes,
         paths: Sequence[_Path],
-        plans,
 ) -> Sequence[Optional[int]]:
-    del plans
     root_size = _checked_value_size(value, 0)
     if root_size != len(value):
         _malformed("trailing bytes after root value")
@@ -349,6 +347,7 @@ def _replace_path(
         path: _Path,
         replacement: bytes,
         limit=None,
+        key_ids=None,
 ) -> bytes:
     limit = len(value) if limit is None else limit
     value_end = pos + _checked_value_size(value, pos, limit)
@@ -359,7 +358,9 @@ def _replace_path(
     if kind == 'key':
         if (value[pos] & 0x3) != _OBJECT:
             raise ValueError("VARIANT path expects an object")
-        key_id = _metadata_key_ids(metadata).get(segment)
+        if key_ids is None:
+            key_ids = _metadata_key_ids(metadata)
+        key_id = key_ids.get(segment)
         if key_id is None:
             raise ValueError(f"VARIANT path does not exist: {segment}")
         size, id_size, id_start, data_start, offsets, _ = (
@@ -382,7 +383,7 @@ def _replace_path(
             if i == slot:
                 child = _replace_path(
                     value, metadata, child_pos, path[1:], replacement,
-                    child_end)
+                    child_end, key_ids)
             children.append(child)
         return _build_object_value(list(zip(ids, children)))
 
@@ -400,7 +401,7 @@ def _replace_path(
         if i == segment:
             child = _replace_path(
                 value, metadata, child_pos, path[1:], replacement,
-                child_end)
+                child_end, key_ids)
         children.append(child)
     return _build_array_value(children)
 
@@ -827,7 +828,7 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
     for row in set().union(*slow_by_path):
         value = values.view(row)
         row_metadata = bytes(metadata.view(row))
-        positions = _path_positions(value, row_metadata, parsed_paths, None)
+        positions = _path_positions(value, row_metadata, parsed_paths)
         for index, (pos, target_type) in enumerate(
                 zip(positions, target_types)):
             if row not in slow_by_path[index] or pos is None:
@@ -868,7 +869,8 @@ def _json_text(value):
     if isinstance(value, decimal.Decimal):
         return _decimal_text(value)
     if isinstance(value, float):
-        return str(value) if math.isfinite(value) else json.dumps(str(value))
+        text = _floating_text(value)
+        return text if math.isfinite(value) else json.dumps(text)
     if isinstance(value, int):
         return str(value)
     if isinstance(value, str):
@@ -1213,15 +1215,27 @@ def _rebuilt_chunk(
     )
 
 
+def _rebuilt_offsets(lengths, value_format):
+    total = sum(int(length) for length in lengths)
+    maximum = np.iinfo(np.dtype(value_format)).max
+    if total > maximum:
+        kind = 'Binary' if value_format == '<i' else 'LargeBinary'
+        suffix = '; use LargeBinary' if kind == 'Binary' else ''
+        raise ValueError(
+            f'Rebuilt VARIANT values exceed the {kind} offset limit{suffix}')
+    offsets = np.empty(len(lengths) + 1, dtype=np.dtype(value_format))
+    offsets[0] = 0
+    np.cumsum(lengths, out=offsets[1:])
+    return offsets
+
+
 def _sparse_rebuilt_chunk(
         chunk, values, data, data_start, rebuilt_rows):
     old_offsets = values.numpy_offsets()
     lengths = old_offsets[1:] - old_offsets[:-1]
     for row, rebuilt in rebuilt_rows.items():
         lengths[row] = len(rebuilt)
-    offsets = np.empty(len(chunk) + 1, dtype=np.dtype(values.value_format))
-    offsets[0] = 0
-    np.cumsum(lengths, out=offsets[1:])
+    offsets = _rebuilt_offsets(lengths, values.value_format)
     output = bytearray(int(offsets[-1]))
     source_start = int(old_offsets[0]) - data_start
     target_start = 0
@@ -1361,8 +1375,9 @@ def _vectorized_replace_chunk(
     plans, slow_rows = _partition_path_plans(
         values, chunk.field(1), valid_rows, parsed_paths)
     slow_rows = set(int(row) for row in slow_rows)
-    data, data_start = values.copy_used_data()
-    output_data = np.frombuffer(data, dtype=np.uint8)
+    data = None
+    data_start = 0
+    output_data = None
     for planned in plans:
         rows, row_starts, _, positions, limits = planned
         replacements = []
@@ -1383,6 +1398,9 @@ def _vectorized_replace_chunk(
         slow_rows.update(int(row) for row in rows[~compatible])
         if not np.any(compatible):
             continue
+        if data is None:
+            data, data_start = values.copy_used_data()
+            output_data = np.frombuffer(data, dtype=np.uint8)
         relative_starts = row_starts - data_start
         compatible_rows = rows[compatible]
         for pos, provider, replacement in replacements:
@@ -1401,7 +1419,7 @@ def _vectorized_replace_chunk(
         original = bytes(values.view(row))
         value = original
         row_metadata = bytes(metadata.view(row))
-        positions = _path_positions(value, row_metadata, parsed_paths, None)
+        positions = _path_positions(value, row_metadata, parsed_paths)
         for (path, parsed_path, provider), pos in zip(parsed, positions):
             if pos is None:
                 if strict:
@@ -1419,8 +1437,12 @@ def _vectorized_replace_chunk(
             rebuilt_rows[row] = value
 
     if rebuilt_rows:
+        if data is None:
+            data, data_start = values.copy_used_data()
         return _sparse_rebuilt_chunk(
             chunk, values, data, data_start, rebuilt_rows)
+    if data is None:
+        return chunk
     return _patched_chunk(chunk, values, data, data_start)
 
 
@@ -1449,7 +1471,6 @@ def _variant_get(column, paths: Mapping[str, pa.DataType]):
         parsed.append((path, _parse_path(path), target_type))
     parsed_paths = [parsed_path for _, parsed_path, _ in parsed]
     chunks, chunked, _ = _variant_chunks(column)
-    plans = []
     result_chunks = {path: [] for path in paths}
     for chunk in chunks:
         values = _BinaryValues(chunk.field(0))
@@ -1463,7 +1484,7 @@ def _variant_get(column, paths: Mapping[str, pa.DataType]):
             for (path, _, _), result in zip(parsed, vectorized):
                 result_chunks[path].append(result)
             continue
-        metadata = chunk.field(1).to_pylist()
+        metadata = _BinaryValues(chunk.field(1))
         valid = chunk.is_valid().to_pylist()
         results = {path: [] for path in paths}
         for row in range(len(chunk)):
@@ -1472,17 +1493,17 @@ def _variant_get(column, paths: Mapping[str, pa.DataType]):
                     results[path].append(None)
                 continue
             value = values.view(row)
+            row_metadata = bytes(metadata.view(row))
             positions = _path_positions(
                 value,
-                metadata[row],
+                row_metadata,
                 parsed_paths,
-                plans,
             )
             for (path, _, target_type), pos in zip(parsed, positions):
                 results[path].append(
                     None if pos is None
                     else _decode_scalar(
-                        value, metadata[row], pos, target_type)
+                        value, row_metadata, pos, target_type)
                 )
         for path, _, target_type in parsed:
             result_chunks[path].append(
@@ -1546,7 +1567,6 @@ def variant_replace(
     parsed_paths = [parsed_path for _, parsed_path, _ in parsed]
 
     chunks, chunked, data_type = _variant_chunks(column)
-    plans = []
     result_chunks = []
     global_row = 0
     for chunk in chunks:
@@ -1563,7 +1583,7 @@ def variant_replace(
             result_chunks.append(vectorized)
             global_row += len(chunk)
             continue
-        metadata = chunk.field(1).to_pylist()
+        metadata = _BinaryValues(chunk.field(1))
         valid = chunk.is_valid().to_pylist()
         chunk_replacements = {
             path: provider.values(global_row, len(chunk))
@@ -1576,11 +1596,11 @@ def variant_replace(
             if not valid[row]:
                 continue
             row_start, value = values.row(row)
+            row_metadata = bytes(metadata.view(row))
             positions = _path_positions(
                 value,
-                metadata[row],
+                row_metadata,
                 parsed_paths,
-                plans,
             )
             for (path, parsed_path, provider), pos in zip(
                     parsed, positions):
@@ -1619,11 +1639,11 @@ def variant_replace(
                 if not valid[row]:
                     rebuilt_values.append(value)
                     continue
+                row_metadata = bytes(metadata.view(row))
                 positions = _path_positions(
                     value,
-                    metadata[row],
+                    row_metadata,
                     parsed_paths,
-                    plans,
                 )
                 for (path, parsed_path, provider), pos in zip(
                         parsed, positions):
@@ -1636,7 +1656,7 @@ def variant_replace(
                         chunk_replacements[path], row)
                     encoded = provider.encode(replacement_value)
                     value = _replace_path(
-                        value, metadata[row], 0, parsed_path, encoded)
+                        value, row_metadata, 0, parsed_path, encoded)
                 rebuilt_values.append(value)
             result_chunks.append(_rebuilt_chunk(chunk, rebuilt_values))
         elif patched_data is not None:
