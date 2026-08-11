@@ -21,7 +21,6 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.fs.FileIO;
@@ -38,7 +37,6 @@ import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
@@ -50,7 +48,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
 
@@ -64,8 +61,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
     private final SchemaManager schemaManager;
     private final RowType partitionType;
-    private final FileFormat fileFormat;
-    private final RowType manifestType;
     private final FormatWriterFactory writerFactory;
     private final long suggestedFileSize;
 
@@ -73,10 +68,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             FileIO fileIO,
             SchemaManager schemaManager,
             RowType partitionType,
-            FileFormat fileFormat,
             ManifestEntrySerializer serializer,
-            RowType manifestType,
-            FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
             String compression,
             PathFactory pathFactory,
@@ -85,16 +77,16 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         super(
                 fileIO,
                 serializer,
-                manifestType,
-                readerFactory,
+                ManifestEntry.MANIFEST_ROW_TYPE,
+                (path, ignoredFileSize) ->
+                        createManifestIterator(
+                                fileIO, path, ManifestEntry.MANIFEST_ROW_TYPE, null, null),
                 writerFactory,
                 compression,
                 pathFactory,
                 cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
-        this.fileFormat = fileFormat;
-        this.manifestType = manifestType;
         this.writerFactory = writerFactory;
         this.suggestedFileSize = suggestedFileSize;
     }
@@ -103,7 +95,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     protected ManifestEntryCache createCache(
             @Nullable SegmentsCache<Path> cache, RowType formatType) {
         return new ManifestEntryCache(
-                cache, serializer, formatType, super::fileSize, super::createIterator);
+                cache, serializer, formatType, super::fileSize, this::createIterator);
     }
 
     @Override
@@ -146,8 +138,14 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 return cache.read(path, fileSize, filters, convertor);
             }
 
-            return readFromIterator(
-                    createIterator(path, fileSize), serializer, readFilter, readTFilter, convertor);
+            CloseableIterator<InternalRow> iterator =
+                    createManifestIterator(
+                            fileIO,
+                            path,
+                            ManifestEntry.MANIFEST_ROW_TYPE,
+                            partitionFilter,
+                            bucketFilter);
+            return readFromIterator(iterator, serializer, readFilter, readTFilter, convertor);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -156,52 +154,53 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     /**
      * Scans projected manifest entries without materializing {@link PojoManifestEntry}s.
      *
-     * <p>The returned iterator reuses the same mutable {@link BinaryManifestEntry} for all records.
-     * An entry is only valid until the next call to {@link CloseableIterator#hasNext()}, {@link
-     * CloseableIterator#next()}, or {@link CloseableIterator#close()}, and must not be retained.
-     * The caller must close the iterator.
+     * <p>Every returned {@link BinaryManifestEntry} has independent backing data and can be
+     * retained after the iterator advances or closes. The caller must close the iterator.
      *
      * <p>This method intentionally bypasses the manifest cache because cached entries are
      * materialized with the complete manifest schema.
      */
     public CloseableIterator<BinaryManifestEntry> scan(
             String fileName, @Nullable Long fileSize, Projection projection) {
-        BinaryManifestEntry entry = projection.createEntry();
         try {
             CloseableIterator<InternalRow> rows =
-                    FileUtils.createFormatReader(
-                                    fileIO,
-                                    fileFormat.createReaderFactory(
-                                            manifestType,
-                                            projection.projectedType(),
-                                            Collections.emptyList()),
-                                    pathFactory.toPath(fileName),
-                                    fileSize)
-                            .toCloseableIterator();
+                    createManifestIterator(
+                            fileIO,
+                            pathFactory.toPath(fileName),
+                            projection.projectedType(),
+                            null,
+                            null);
             return new CloseableIterator<BinaryManifestEntry>() {
 
                 @Override
                 public boolean hasNext() {
-                    entry.clear();
                     return rows.hasNext();
                 }
 
                 @Override
                 public BinaryManifestEntry next() {
-                    entry.clear();
-                    InternalRow row = rows.next();
-                    return row == null ? null : entry.replace(row);
+                    return projection.createEntry().replace(rows.next());
                 }
 
                 @Override
                 public void close() throws Exception {
-                    entry.clear();
                     rows.close();
                 }
             };
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to read manifest file " + fileName, e);
         }
+    }
+
+    private static CloseableIterator<InternalRow> createManifestIterator(
+            FileIO fileIO,
+            Path path,
+            RowType projectedType,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter)
+            throws IOException {
+        return new ManifestAvroReader(
+                fileIO.newInputStream(path), projectedType, partitionFilter, bucketFilter);
     }
 
     @VisibleForTesting
@@ -412,10 +411,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     fileIO,
                     schemaManager,
                     partitionType,
-                    fileFormat,
                     new ManifestEntrySerializer(),
-                    entryType,
-                    fileFormat.createReaderFactory(entryType, entryType, new ArrayList<>()),
                     fileFormat.createWriterFactory(entryType),
                     compression,
                     pathFactory.manifestFileFactory(),

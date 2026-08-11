@@ -35,6 +35,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.avro.io.BinaryDecoder;
+import org.apache.avro.io.DecoderFactory;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -43,6 +45,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -131,6 +134,75 @@ public class AvroFileFormatTest {
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             reader.forEachRemainingWithPosition(
                     (rowPosition, row) -> assertThat(row.getInt(0) == rowPosition).isTrue());
+        }
+    }
+
+    @Test
+    void testReadDecompressedBlocks() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+        int numRecords = 100_000;
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = fileFormat.createWriterFactory(rowType).create(out, "zstd");
+            for (int i = 0; i < numRecords; i++) {
+                writer.addElement(GenericRow.of(i));
+            }
+            writer.close();
+        }
+
+        int nextValue = 0;
+        int numBlocks = 0;
+        byte[] firstBlock = null;
+        byte[] firstBlockCopy = null;
+        try (AvroBlockReader reader = new AvroBlockReader(fileIO.newInputStream(file))) {
+            assertThat(reader.schema()).isNotNull();
+            assertThatThrownBy(reader::currentBlockRecordCount)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("No block");
+
+            AvroRowDatumReader datumReader = new AvroRowDatumReader(rowType);
+            datumReader.setSchema(reader.schema());
+            BinaryDecoder decoder = null;
+            while (reader.hasNextBlock()) {
+                byte[] block = reader.nextBlock();
+                if (firstBlock == null) {
+                    firstBlock = block;
+                    firstBlockCopy = block.clone();
+                }
+                numBlocks++;
+                decoder = DecoderFactory.get().binaryDecoder(block, decoder);
+                long blockRecordCount = reader.currentBlockRecordCount();
+                assertThat(blockRecordCount).isPositive();
+                for (long i = 0; i < blockRecordCount; i++) {
+                    assertThat(datumReader.read(null, decoder).getInt(0)).isEqualTo(nextValue++);
+                }
+                assertThat(decoder.isEnd()).isTrue();
+            }
+
+            assertThat(reader.hasNextBlock()).isFalse();
+            assertThatThrownBy(reader::nextBlock).isInstanceOf(NoSuchElementException.class);
+        }
+
+        assertThat(numBlocks).isGreaterThan(1);
+        assertThat(nextValue).isEqualTo(numRecords);
+        assertThat(firstBlock).containsExactly(firstBlockCopy);
+    }
+
+    @Test
+    void testReadBlocksFromEmptyFile() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull()).notNull();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            fileFormat.createWriterFactory(rowType).create(out, "zstd").close();
+        }
+
+        try (AvroBlockReader reader = new AvroBlockReader(fileIO.newInputStream(file))) {
+            assertThat(reader.hasNextBlock()).isFalse();
+            assertThatThrownBy(reader::nextBlock).isInstanceOf(NoSuchElementException.class);
         }
     }
 
