@@ -526,7 +526,11 @@ public class CompactProcedure extends BaseProcedure {
         }
         DataEvolutionCompactCoordinator compactCoordinator =
                 new DataEvolutionCompactCoordinator(
-                        table, partitionPredicate, false, false, snapshot);
+                        table,
+                        partitionPredicate,
+                        table.coreOptions().blobCompactionEnabled(),
+                        false,
+                        snapshot);
         CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         try {
