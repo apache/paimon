@@ -24,7 +24,6 @@ import uuid
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from datetime import datetime, timezone
-from email.utils import format_datetime
 from typing import Dict, Optional
 from urllib.parse import unquote
 
@@ -315,6 +314,13 @@ class DLFOpenApiSigner(DLFRequestSigner):
     API_VERSION = "2026-01-18"
     HMAC_SHA1 = "sha1"
 
+    # English weekday/month abbreviations for RFC 1123 dates. strftime's
+    # %a/%b follow LC_TIME and get localized under non-English locales,
+    # which would break the Aliyun OpenAPI signature.
+    WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
     def sign_headers(
             self,
             body: Optional[str],
@@ -333,9 +339,12 @@ class DLFOpenApiSigner(DLFRequestSigner):
             gmt_time = now.replace(tzinfo=timezone.utc)
         else:
             gmt_time = now.astimezone(timezone.utc)
-        # RFC 1123 date in English; email.utils is locale-independent,
-        # unlike strftime whose %a/%b follow LC_TIME
-        headers[self.DATE_HEADER] = format_datetime(gmt_time, usegmt=True)
+        # RFC 1123 date, e.g. "Wed, 16 Apr 2025 03:44:46 GMT"
+        headers[self.DATE_HEADER] = (
+            f"{self.WEEKDAYS[gmt_time.weekday()]}, {gmt_time.day:02d} "
+            f"{self.MONTHS[gmt_time.month - 1]} {gmt_time.year:04d} "
+            f"{gmt_time.hour:02d}:{gmt_time.minute:02d}:{gmt_time.second:02d} GMT"
+        )
 
         headers[self.ACCEPT_HEADER] = self.ACCEPT_VALUE
 
