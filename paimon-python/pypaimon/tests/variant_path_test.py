@@ -239,6 +239,59 @@ class TestVariantGet(unittest.TestCase):
             ),
         }])
 
+        metadata = GenericVariant.from_python({'value': 0}).metadata()
+        nested_float = GenericVariant.to_arrow_array([
+            GenericVariant(
+                _build_object_value([(
+                    0, _encode_scalar_to_value_bytes(1.2, pa.float32()),
+                )]),
+                metadata,
+            ),
+        ])
+        self.assertEqual(
+            variant_get(
+                nested_float,
+                '$',
+                pa.struct([('value', pa.string())]),
+            ).to_pylist(),
+            [{'value': '1.2'}],
+        )
+
+    def test_string_floating_cast_matches_java_parser(self):
+        for target_type in (pa.float32(), pa.float64()):
+            for value in ('inf', 'nan', '1_0'):
+                with self.subTest(target_type=target_type, value=value):
+                    with self.assertRaisesRegex(ValueError, "Invalid cast"):
+                        variant_get(_variants([value]), '$', target_type)
+
+        parsed = variant_get(
+            _variants(['NaN', 'Infinity', '-Infinity', '1.25f', '0x1.0p0']),
+            '$',
+            pa.float64(),
+        ).to_pylist()
+        self.assertTrue(np.isnan(parsed[0]))
+        self.assertEqual(
+            parsed[1:], [float('inf'), float('-inf'), 1.25, 1.0])
+
+    def test_container_timestamp_json_uses_space(self):
+        metadata = GenericVariant.from_python({'ts': 0}).metadata()
+        timestamp = datetime.datetime(2026, 8, 10, 12, 34, 56, 123000)
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(
+                _build_object_value([(
+                    0,
+                    _encode_scalar_to_value_bytes(
+                        timestamp, pa.timestamp('us')),
+                )]),
+                metadata,
+            ),
+        ])
+
+        self.assertEqual(
+            variant_get(column, '$', pa.string()).to_pylist(),
+            ['{"ts":"2026-08-10 12:34:56.123"}'],
+        )
+
     def test_get_matches_java_numeric_casts(self):
         column = _variants([
             {'value': 1e20},
@@ -807,12 +860,39 @@ class TestVariantReplace(unittest.TestCase):
                 column, '$.value', replacement, strict=True)
 
     def test_all_missing_paths_reuse_input_buffers(self):
-        column = _variants([{'other': 1.0}, {'other': 2.0}])
+        column = _variants([
+            {'other': float(index)} for index in range(4096)
+        ])
 
-        result = variant_replace(
-            column, '$.missing', pa.scalar(3.0, type=pa.float64()))
+        with patch(
+                'pypaimon.data.variant_path._path_positions',
+                wraps=_path_positions,
+        ) as slow_path:
+            current = variant_get(column, '$.missing', pa.float64())
+            result = variant_replace(
+                column, '$.missing', pa.scalar(3.0, type=pa.float64()))
 
+        self.assertEqual(current.null_count, len(column))
         self.assertIs(result, column)
+        slow_path.assert_not_called()
+
+        current = variant_get(column, {
+            '$.other': pa.float64(),
+            '$.missing': pa.float64(),
+        })
+        result = variant_replace(column, {
+            '$.other': pa.scalar(-1.0),
+            '$.missing': pa.scalar(3.0),
+        })
+        self.assertEqual(current['$.missing'].null_count, len(column))
+        self.assertEqual(_decode(result.slice(0, 1)), [{'other': -1.0}])
+        with self.assertRaisesRegex(ValueError, "path does not exist"):
+            variant_replace(
+                column,
+                '$.missing',
+                pa.scalar(3.0, type=pa.float64()),
+                strict=True,
+            )
 
     def test_rebuilt_binary_offsets_reject_overflow(self):
         self.assertEqual(

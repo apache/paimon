@@ -72,6 +72,14 @@ _TIMESTAMP_PATTERN = re.compile(
     r'(?:(?: (\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,9}))?)'
     r'|(?:T(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,9}))?)?))?$'
 )
+_JAVA_DECIMAL_FLOAT_PATTERN = re.compile(
+    r'^[+-]?(?:(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)'
+    r'(?:[eE][+-]?[0-9]+)?)[fFdD]?$'
+)
+_JAVA_HEX_FLOAT_PATTERN = re.compile(
+    r'^[+-]?0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?'
+    r'|\.[0-9a-fA-F]+)[pP][+-]?[0-9]+[fFdD]?$'
+)
 _Path = Tuple[Tuple[str, object], ...]
 _SLOW_PATH_ROWS = 64
 
@@ -625,6 +633,10 @@ def _vectorized_path_positions(
     try:
         for parent_node, kind, segment in nodes[1:]:
             parent = positions[parent_node]
+            if parent is None:
+                positions.append(None)
+                limits.append(None)
+                continue
             parent_ends = row_starts + limits[parent_node]
             absolute_parent = row_starts + parent
             if (np.any(absolute_parent < row_starts)
@@ -638,7 +650,9 @@ def _vectorized_path_positions(
                     return None
                 key_id = key_ids.get(segment)
                 if key_id is None:
-                    return None
+                    positions.append(None)
+                    limits.append(None)
+                    continue
                 first_layout = _checked_object_layout(
                     first_value, int(parent[0]), int(limits[parent_node][0]))
                 size, id_size, id_start, _, first_offsets, _ = first_layout
@@ -767,6 +781,9 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
         uniform = True
         for pos, limit, target_type in zip(
                 positions, limits, target_types):
+            if pos is None:
+                results.append(pa.nulls(len(chunk), type=target_type))
+                continue
             absolute = row_starts + pos
             headers = data[absolute]
             if np.all(headers == _primitive_header(_DOUBLE)):
@@ -799,6 +816,8 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
     for planned in plans:
         rows, row_starts, data, positions, limits = planned
         for index, (pos, limit) in enumerate(zip(positions, limits)):
+            if pos is None:
+                continue
             absolute = row_starts + pos
             headers = data[absolute]
             handled = np.zeros(len(rows), dtype=bool)
@@ -861,6 +880,22 @@ def _variant_floating_text(value, type_info):
     raise ValueError("not a floating-point VARIANT")
 
 
+def _timestamp_text(value):
+    text = (
+        f'{value.year:04d}-{value.month:02d}-{value.day:02d} '
+        f'{value.hour:02d}:{value.minute:02d}:{value.second:02d}'
+    )
+    if value.microsecond:
+        text += f'.{value.microsecond:06d}'.rstrip('0')
+    offset = value.utcoffset()
+    if offset is not None:
+        seconds = int(offset.total_seconds())
+        sign = '+' if seconds >= 0 else '-'
+        minutes = abs(seconds) // 60
+        text += f'{sign}{minutes // 60:02d}:{minutes % 60:02d}'
+    return text
+
+
 def _json_text(value):
     if value is None:
         return 'null'
@@ -877,7 +912,9 @@ def _json_text(value):
         return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
     if isinstance(value, bytes):
         return json.dumps(base64.b64encode(value).decode('ascii'))
-    if isinstance(value, (datetime.date, datetime.datetime)):
+    if isinstance(value, datetime.datetime):
+        return json.dumps(_timestamp_text(value))
+    if isinstance(value, datetime.date):
         return json.dumps(value.isoformat())
     if isinstance(value, dict):
         return '{' + ','.join(
@@ -999,6 +1036,22 @@ def _cast_string_integer(value, target_type):
     return number
 
 
+def _cast_string_floating(value):
+    text = value.strip()
+    if re.match(r'^[+-]?(?:NaN|Infinity)$', text):
+        if text.endswith('NaN'):
+            return math.copysign(float('nan'), -1.0 if text[0:1] == '-' else 1.0)
+        return float('-inf') if text.startswith('-') else float('inf')
+    if (_JAVA_DECIMAL_FLOAT_PATTERN.match(text)
+            or _JAVA_HEX_FLOAT_PATTERN.match(text)):
+        if text[-1:] in 'fFdD':
+            text = text[:-1]
+        if '0x' in text.lower():
+            return float.fromhex(text)
+        return float(text)
+    raise ValueError
+
+
 def _parse_date(value):
     value = value.strip()
     if value and (value.isdigit()
@@ -1055,40 +1108,6 @@ def _cast_python(value, target_type):
     if value is None or pa.types.is_null(target_type):
         return None
     try:
-        if pa.types.is_struct(target_type):
-            if isinstance(value, str):
-                value = json.loads(value)
-            if not isinstance(value, dict):
-                raise TypeError
-            return {
-                field.name: (
-                    None if field.name not in value
-                    else _cast_python(value[field.name], field.type)
-                )
-                for field in target_type
-            }
-        if (pa.types.is_list(target_type)
-                or pa.types.is_large_list(target_type)
-                or pa.types.is_fixed_size_list(target_type)):
-            if isinstance(value, str):
-                value = json.loads(value)
-            if not isinstance(value, list):
-                raise TypeError
-            return [
-                _cast_python(child, target_type.value_type)
-                for child in value
-            ]
-        if pa.types.is_map(target_type):
-            if isinstance(value, str):
-                value = json.loads(value)
-            if not isinstance(value, dict) or not (
-                    pa.types.is_string(target_type.key_type)
-                    or pa.types.is_large_string(target_type.key_type)):
-                raise TypeError
-            return [
-                (key, _cast_python(child, target_type.item_type))
-                for key, child in value.items()
-            ]
         if pa.types.is_string(target_type) or pa.types.is_large_string(
                 target_type):
             if isinstance(value, (dict, list)):
@@ -1125,6 +1144,8 @@ def _cast_python(value, target_type):
         if pa.types.is_floating(target_type):
             if not isinstance(value, (bool, int, float, decimal.Decimal, str)):
                 raise TypeError
+            if isinstance(value, str):
+                return _cast_string_floating(value)
             return float(value)
         if pa.types.is_decimal(target_type):
             if not isinstance(value, (bool, int, float, decimal.Decimal, str)):
@@ -1162,13 +1183,78 @@ def _cast_python(value, target_type):
     raise ValueError(f"Invalid cast {value!r} to {target_type}")
 
 
+def _variant_object_children(value, metadata, pos, end):
+    size, id_size, id_start, data_start, offsets, _ = (
+        _checked_object_layout(value, pos, end))
+    keys = {
+        key_id: key for key, key_id in _metadata_key_ids(metadata).items()
+    }
+    children = {}
+    for slot in range(size):
+        key_id = _read_unsigned(value, id_start + slot * id_size, id_size)
+        if key_id not in keys:
+            _malformed("object key is missing from metadata")
+        children[keys[key_id]] = _checked_object_child_bounds(
+            value, data_start, offsets, slot)
+    return children
+
+
+def _variant_array_children(value, pos, end):
+    size, data_start, offsets, _ = _checked_array_layout(
+        value, pos, end)
+    children = []
+    for index in range(size):
+        child_start = data_start + offsets[index]
+        child_end = data_start + offsets[index + 1]
+        if _checked_value_size(value, child_start, child_end) != (
+                child_end - child_start):
+            _malformed("child size does not match container offsets")
+        children.append((child_start, child_end))
+    return children
+
+
 def _decode_scalar(value, metadata: bytes, pos: int, target_type):
     size = _checked_value_size(value, pos)
     end = pos + size
+    basic_type = value[pos] & 0x3
     type_info = (value[pos] >> 2) & 0x3F
+    if pa.types.is_struct(target_type):
+        if basic_type != _OBJECT:
+            raise ValueError(f"Invalid cast VARIANT to {target_type}")
+        children = _variant_object_children(
+            value, metadata, pos, end)
+        return {
+            field.name: (
+                None if field.name not in children
+                else _decode_scalar(
+                    value, metadata, children[field.name][0], field.type)
+            )
+            for field in target_type
+        }
+    if (pa.types.is_list(target_type)
+            or pa.types.is_large_list(target_type)
+            or pa.types.is_fixed_size_list(target_type)):
+        if basic_type != _ARRAY:
+            raise ValueError(f"Invalid cast VARIANT to {target_type}")
+        return [
+            _decode_scalar(value, metadata, child_pos, target_type.value_type)
+            for child_pos, _ in _variant_array_children(
+                value, pos, end)
+        ]
+    if pa.types.is_map(target_type):
+        if (basic_type != _OBJECT
+                or not (pa.types.is_string(target_type.key_type)
+                        or pa.types.is_large_string(target_type.key_type))):
+            raise ValueError(f"Invalid cast VARIANT to {target_type}")
+        children = _variant_object_children(
+            value, metadata, pos, end)
+        return [
+            (key, _decode_scalar(
+                value, metadata, child_pos, target_type.item_type))
+            for key, (child_pos, _) in children.items()
+        ]
     if (pa.types.is_string(target_type)
             or pa.types.is_large_string(target_type)):
-        basic_type = value[pos] & 0x3
         if basic_type in (_OBJECT, _ARRAY):
             return _variant_json(value, metadata, pos, end)
     selected = bytes(value[pos:end])
@@ -1382,8 +1468,16 @@ def _vectorized_replace_chunk(
         rows, row_starts, _, positions, limits = planned
         replacements = []
         compatible = np.ones(len(rows), dtype=bool)
-        for (_, _, provider), pos, limit in zip(
+        has_replacement = False
+        for (path, _, provider), pos, limit in zip(
                 parsed, positions, limits):
+            if pos is None:
+                if strict:
+                    raise ValueError(
+                        f"VARIANT path does not exist: {path}")
+                replacements.append(None)
+                continue
+            has_replacement = True
             replacement, replacement_valid = provider.numpy_values(
                 global_row,
                 len(chunk),
@@ -1395,6 +1489,8 @@ def _vectorized_replace_chunk(
                 & (absolute + provider._fixed_size == row_starts + limit)
             )
             replacements.append((pos, provider, replacement))
+        if not has_replacement:
+            continue
         slow_rows.update(int(row) for row in rows[~compatible])
         if not np.any(compatible):
             continue
@@ -1403,7 +1499,10 @@ def _vectorized_replace_chunk(
             output_data = np.frombuffer(data, dtype=np.uint8)
         relative_starts = row_starts - data_start
         compatible_rows = rows[compatible]
-        for pos, provider, replacement in replacements:
+        for item in replacements:
+            if item is None:
+                continue
+            pos, provider, replacement = item
             absolute = (relative_starts + pos)[compatible]
             output_data[absolute] = provider._type_header
             value_size = provider._fixed_size - 1
