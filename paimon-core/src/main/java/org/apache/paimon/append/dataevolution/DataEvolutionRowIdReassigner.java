@@ -480,9 +480,7 @@ public class DataEvolutionRowIdReassigner {
             ManifestFileMeta manifestMeta) {
         try (CloseableIterator<BinaryManifestEntry> entries =
                 manifestFile.scan(
-                        manifestMeta.fileName(),
-                        manifestMeta.fileSize(),
-                        BinaryManifestEntry.ROW_RANGE_PROJECTION)) {
+                        manifestMeta.fileName(), BinaryManifestEntry.ROW_RANGE_PROJECTION)) {
             while (entries.hasNext()) {
                 BinaryManifestEntry entry = entries.next();
                 RowRangeMappingIndex mapping =
@@ -508,9 +506,7 @@ public class DataEvolutionRowIdReassigner {
         boolean needsReassign = false;
         try (CloseableIterator<BinaryManifestEntry> entries =
                 manifestFile.scan(
-                        manifestMeta.fileName(),
-                        manifestMeta.fileSize(),
-                        BinaryManifestEntry.ROW_RANGE_PROJECTION)) {
+                        manifestMeta.fileName(), BinaryManifestEntry.ROW_RANGE_PROJECTION)) {
             while (entries.hasNext()) {
                 BinaryManifestEntry entry = entries.next();
                 if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {

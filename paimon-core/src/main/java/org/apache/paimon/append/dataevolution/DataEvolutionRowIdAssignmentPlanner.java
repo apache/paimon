@@ -192,9 +192,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
             }
             try (CloseableIterator<BinaryManifestEntry> entries =
                     manifestFile.scan(
-                            manifestMeta.fileName(),
-                            manifestMeta.fileSize(),
-                            BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                            manifestMeta.fileName(), BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
                 while (entries.hasNext()) {
                     BinaryManifestEntry entry = entries.next();
                     if (!entry.isDelete()) {
@@ -228,8 +226,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
             }
             int manifestOrdinal = ordinal(manifestMeta);
             try (CloseableIterator<BinaryManifestEntry> entries =
-                    manifestFile.scan(
-                            manifestMeta.fileName(), manifestMeta.fileSize(), addProjection)) {
+                    manifestFile.scan(manifestMeta.fileName(), addProjection)) {
                 while (entries.hasNext()) {
                     BinaryManifestEntry entry = entries.next();
                     if (!entry.isAdd()) {
@@ -279,8 +276,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
                 continue;
             }
             try (CloseableIterator<BinaryManifestEntry> entries =
-                    manifestFile.scan(
-                            manifestMeta.fileName(), manifestMeta.fileSize(), REWRITE_PROJECTION)) {
+                    manifestFile.scan(manifestMeta.fileName(), REWRITE_PROJECTION)) {
                 while (entries.hasNext()) {
                     BinaryManifestEntry entry = entries.next();
                     lookup.reset(entry.partitionBytes());

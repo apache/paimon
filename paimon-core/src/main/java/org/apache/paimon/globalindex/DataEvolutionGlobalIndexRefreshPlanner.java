@@ -185,9 +185,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             }
             try (CloseableIterator<BinaryManifestEntry> entries =
                     manifestFile.scan(
-                            manifest.fileName(),
-                            manifest.fileSize(),
-                            BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                            manifest.fileName(), BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
                 while (entries.hasNext()) {
                     BinaryManifestEntry entry = entries.next();
                     if (entry.isDelete() && groupPartitions.contains(entry.partition())) {
@@ -214,7 +212,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
                 continue;
             }
             try (CloseableIterator<BinaryManifestEntry> entries =
-                    manifestFile.scan(manifest.fileName(), manifest.fileSize(), projection)) {
+                    manifestFile.scan(manifest.fileName(), projection)) {
                 while (entries.hasNext()) {
                     BinaryManifestEntry entry = entries.next();
                     if (!entry.isAdd()) {

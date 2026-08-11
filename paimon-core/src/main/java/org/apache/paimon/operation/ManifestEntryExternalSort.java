@@ -114,10 +114,7 @@ public class ManifestEntryExternalSort {
                 || (manifestReadParallelism != null && manifestReadParallelism <= 1)) {
             for (ManifestFileMeta meta : section) {
                 try (CloseableIterator<BinaryManifestEntry> entries =
-                        manifestFile.scan(
-                                meta.fileName(),
-                                meta.fileSize(),
-                                BinaryManifestEntry.fullProjection())) {
+                        manifestFile.scan(meta.fileName(), BinaryManifestEntry.fullProjection())) {
                     while (entries.hasNext()) {
                         consumer.accept(entries.next());
                     }
@@ -142,8 +139,7 @@ public class ManifestEntryExternalSort {
         InternalRowSerializer serializer =
                 new InternalRowSerializer(ManifestEntry.MANIFEST_ROW_TYPE);
         try (CloseableIterator<BinaryManifestEntry> entries =
-                manifestFile.scan(
-                        meta.fileName(), meta.fileSize(), BinaryManifestEntry.fullProjection())) {
+                manifestFile.scan(meta.fileName(), BinaryManifestEntry.fullProjection())) {
             while (entries.hasNext()) {
                 rows.add(serializer.toBinaryRow(entries.next().fullRow()).copy());
             }

@@ -592,10 +592,7 @@ public class ManifestFileSorter {
             Set<BinaryRow> partitions,
             boolean synchronize) {
         try (CloseableIterator<BinaryManifestEntry> entries =
-                manifestFile.scan(
-                        meta.fileName(),
-                        meta.fileSize(),
-                        BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                manifestFile.scan(meta.fileName(), BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
             while (entries.hasNext()) {
                 BinaryManifestEntry entry = entries.next();
                 if (!entry.isDelete()) {

@@ -245,7 +245,7 @@ public class ManifestFileTest {
 
         try (CloseableIterator<BinaryManifestEntry> entries =
                 manifestFile.scan(
-                        manifest.fileName(), null, BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                        manifest.fileName(), BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
             assertThatThrownBy(entries::hasNext)
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("not compatible");
@@ -475,8 +475,7 @@ public class ManifestFileTest {
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
 
-        List<ExpireFileEntry> actual =
-                manifestFile.readExpireFileEntries(manifest.fileName(), manifest.fileSize());
+        List<ExpireFileEntry> actual = manifestFile.readExpireFileEntries(manifest.fileName());
         List<ExpireFileEntry> expected =
                 entries.stream().map(ExpireFileEntry::from).collect(Collectors.toList());
 
@@ -498,7 +497,7 @@ public class ManifestFileTest {
         List<BinaryManifestEntry> actual = new ArrayList<>();
 
         try (CloseableIterator<BinaryManifestEntry> iterator =
-                manifestFile.scan(manifest.fileName(), manifest.fileSize(), projection)) {
+                manifestFile.scan(manifest.fileName(), projection)) {
             while (iterator.hasNext()) {
                 actual.add(iterator.next());
             }
@@ -523,10 +522,7 @@ public class ManifestFileTest {
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
 
         try (CloseableIterator<BinaryManifestEntry> iterator =
-                manifestFile.scan(
-                        manifest.fileName(),
-                        manifest.fileSize(),
-                        projection(DataFileMeta.FILE_NAME))) {
+                manifestFile.scan(manifest.fileName(), projection(DataFileMeta.FILE_NAME))) {
             assertThat(iterator.hasNext()).isTrue();
             BinaryManifestEntry first = iterator.next();
             assertThat(first.fileName()).isEqualTo(entries.get(0).fileName());
@@ -547,10 +543,7 @@ public class ManifestFileTest {
         List<BinaryManifestEntry> retained = new ArrayList<>();
 
         try (CloseableIterator<BinaryManifestEntry> iterator =
-                manifestFile.scan(
-                        manifest.fileName(),
-                        manifest.fileSize(),
-                        projection(DataFileMeta.FILE_NAME))) {
+                manifestFile.scan(manifest.fileName(), projection(DataFileMeta.FILE_NAME))) {
             while (iterator.hasNext()) {
                 BinaryManifestEntry entry = iterator.next();
                 retained.add(entry);
@@ -575,7 +568,6 @@ public class ManifestFileTest {
                             try (CloseableIterator<BinaryManifestEntry> iterator =
                                     manifestFile.scan(
                                             manifest.fileName(),
-                                            manifest.fileSize(),
                                             projection(DataFileMeta.FILE_NAME))) {
                                 assertThat(iterator.hasNext()).isTrue();
                                 BinaryManifestEntry entry = iterator.next();
