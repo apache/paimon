@@ -22,7 +22,7 @@ from requests.exceptions import ConnectionError, ConnectTimeout, Timeout
 from urllib3.exceptions import NewConnectionError, MaxRetryError
 from urllib3.util.retry import RequestHistory
 
-from pypaimon.api.client import ExponentialRetry, JavaStyleBackoffRetry
+from pypaimon.api.client import ExponentialBackoffRetry, ExponentialRetry
 
 
 class TestExponentialRetryStrategy(unittest.TestCase):
@@ -48,7 +48,7 @@ class TestExponentialRetryStrategy(unittest.TestCase):
         self.assertNotIn(502, retry.status_forcelist)
         self.assertNotIn(504, retry.status_forcelist)
 
-        self.assertIsInstance(retry, JavaStyleBackoffRetry)
+        self.assertIsInstance(retry, ExponentialBackoffRetry)
 
     def test_backoff_schedule_matches_java(self):
         # Java ExponentialHttpRequestRetryStrategy sleeps

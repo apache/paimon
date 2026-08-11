@@ -146,7 +146,7 @@ class DefaultErrorHandler(ErrorHandler):
         raise RESTException("Unable to process: %s", message)
 
 
-class JavaStyleBackoffRetry(Retry):
+class ExponentialBackoffRetry(Retry):
     """urllib3 Retry with the backoff schedule of the Java client's
     ExponentialHttpRequestRetryStrategy: 2^(n-1) seconds capped at 64s,
     plus up to 10% jitter. The Retry-After header is still honored by
@@ -194,12 +194,12 @@ class ExponentialRetry:
             'raise_on_redirect': False,
         }
         retry_methods = ["GET", "HEAD", "PUT", "DELETE", "TRACE", "OPTIONS"]
-        retry_instance = JavaStyleBackoffRetry()
+        retry_instance = ExponentialBackoffRetry()
         if hasattr(retry_instance, 'allowed_methods'):
             retry_kwargs['allowed_methods'] = retry_methods
         else:
             retry_kwargs['method_whitelist'] = retry_methods
-        return JavaStyleBackoffRetry(**retry_kwargs)
+        return ExponentialBackoffRetry(**retry_kwargs)
 
 
 class RESTClient(ABC):
