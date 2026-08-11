@@ -208,20 +208,20 @@ class CatalogManagedPartitionEdgeParityTest extends PaimonSparkTestWithRestCatal
     }
   }
 
-  test("an empty string partition value is not confused with a null one") {
+  test("an empty string partition value uses the default partition encoding") {
     val tableName = "edge_empty_string"
     withTable(tableName) {
       createTable(tableName)
 
       sql(s"INSERT INTO ${qualified(tableName)} VALUES (1, 'a', '', '00')")
 
-      // Whichever way an empty value is spelled on disk, the row has to read back the way it was
-      // written, and the partition it landed in has to be the one that is registered.
-      val registrations = registered(tableName)
-      assert(registrations.size == 1, registrations.mkString(", "))
-      val Array(dt, _) = registrations.head.split("/", 2)
-      assert(directoryExists(tableName, s"dt=$dt/hour=00"), s"no directory for registered dt=$dt")
-      assert(rowIds(tableName) == Seq(1))
+      // Paimon's partition encoding normalizes a null or empty dynamic partition value to the
+      // configured default partition name, and the reader decodes it as null.
+      assert(registered(tableName) == Set(s"$defaultPartitionName/00"))
+      assert(directoryExists(tableName, s"dt=$defaultPartitionName/hour=00"))
+      checkAnswer(
+        sql(s"SELECT id, payload, dt, hour FROM ${qualified(tableName)}"),
+        Seq(Row(1, "a", null, "00")))
     }
   }
 
