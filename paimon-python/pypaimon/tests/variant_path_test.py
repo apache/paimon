@@ -175,15 +175,27 @@ class TestVariantGet(unittest.TestCase):
         )
 
     def test_get_matches_java_numeric_strings(self):
-        column = _variants([
+        doubles = _variants([
             Decimal('100.00'), 1e20, 1e-4,
             float('inf'), float('-inf'), float('nan'),
         ])
 
         self.assertEqual(
-            variant_get(column, '$', pa.string()).to_pylist(),
+            variant_get(doubles, '$', pa.string()).to_pylist(),
             ['100.00', '1.0E20', '1.0E-4',
              'Infinity', '-Infinity', 'NaN'],
+        )
+
+        floats = GenericVariant.to_arrow_array([
+            GenericVariant(
+                _encode_scalar_to_value_bytes(value, pa.float32()),
+                b'\x01\x00',
+            )
+            for value in (1.2, 1e20, 1e-4)
+        ])
+        self.assertEqual(
+            variant_get(floats, '$', pa.string()).to_pylist(),
+            ['1.2', '1.0E20', '1.0E-4'],
         )
 
     def test_get_matches_java_numeric_casts(self):

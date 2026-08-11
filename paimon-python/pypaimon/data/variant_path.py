@@ -838,19 +838,21 @@ def _decimal_text(value):
     return text[1:] if value == 0 and text.startswith('-') else text
 
 
-def _floating_text(value):
+def _floating_text(value, single_precision=False):
+    if single_precision:
+        value = np.float32(value)
     if math.isnan(value):
         return 'NaN'
     if math.isinf(value):
         return 'Infinity' if value > 0 else '-Infinity'
-    number = decimal.Decimal(repr(value))
-    exponent = number.adjusted()
-    if -3 <= exponent < 7:
-        text = format(number, 'f')
-        return text if '.' in text else text + '.0'
-    mantissa, exponent = format(number, 'E').split('E')
-    if '.' not in mantissa:
-        mantissa += '.0'
+    absolute = abs(value)
+    if value == 0 or 1e-3 <= absolute < 1e7:
+        text = np.format_float_positional(value, unique=True, trim='k')
+        return text + '0' if text.endswith('.') else text
+    text = np.format_float_scientific(value, unique=True, trim='k')
+    mantissa, exponent = text.split('e')
+    if mantissa.endswith('.'):
+        mantissa += '0'
     return mantissa + 'E' + str(int(exponent))
 
 
@@ -1094,6 +1096,11 @@ def _decode_scalar(value, metadata: bytes, pos: int, target_type):
     size = _checked_value_size(value, pos)
     selected = bytes(value[pos:pos + size])
     decoded = GenericVariant(selected, metadata).to_python()
+    type_info = (value[pos] >> 2) & 0x3F
+    if ((pa.types.is_string(target_type)
+         or pa.types.is_large_string(target_type))
+            and type_info in (_FLOAT, _DOUBLE)):
+        return _floating_text(decoded, type_info == _FLOAT)
     return _cast_python(decoded, target_type)
 
 
