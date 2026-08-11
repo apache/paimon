@@ -29,7 +29,10 @@ from typing import Dict, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pyarrow as pa
 
-from pypaimon.data._java_floating import java_floating_text
+from pypaimon.data._java_float_format import (
+    java_double_to_string,
+    java_float_to_string,
+)
 from pypaimon.data._variant_binary import (
     _ARRAY,
     _OBJECT,
@@ -845,8 +848,16 @@ def _decimal_text(value):
     return text[1:] if value == 0 and text.startswith('-') else text
 
 
-def _floating_text(value, single_precision=False):
-    return java_floating_text(value, single_precision)
+def _floating_text(value):
+    return java_double_to_string(value)
+
+
+def _variant_floating_text(value, type_info):
+    if type_info == _FLOAT:
+        return java_float_to_string(value)
+    if type_info == _DOUBLE:
+        return java_double_to_string(value)
+    raise ValueError("not a floating-point VARIANT")
 
 
 def _json_text(value):
@@ -922,7 +933,7 @@ def _variant_json(value, metadata, pos, limit, keys=None):
 
     decoded = GenericVariant(bytes(value[pos:limit]), metadata).to_python()
     if basic_type == _PRIMITIVE and type_info in (_FLOAT, _DOUBLE):
-        text = _floating_text(decoded, type_info == _FLOAT)
+        text = _variant_floating_text(decoded, type_info)
         return text if math.isfinite(decoded) else json.dumps(text)
     return _json_text(decoded)
 
@@ -1164,7 +1175,7 @@ def _decode_scalar(value, metadata: bytes, pos: int, target_type):
          or pa.types.is_large_string(target_type))
             and (value[pos] & 0x3) == _PRIMITIVE
             and type_info in (_FLOAT, _DOUBLE)):
-        return _floating_text(decoded, type_info == _FLOAT)
+        return _variant_floating_text(decoded, type_info)
     return _cast_python(decoded, target_type)
 
 

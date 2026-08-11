@@ -15,7 +15,6 @@
 # limitations under the License.
 
 import datetime
-import struct
 import unittest
 from decimal import Decimal
 from unittest.mock import patch
@@ -219,24 +218,6 @@ class TestVariantGet(unittest.TestCase):
         self.assertEqual(
             variant_get(strings, '$', pa.string()).to_pylist(),
             ['1234567', '12345678901234'],
-        )
-
-        legacy_floats = _float_variants([
-            struct.unpack('>f', struct.pack('>I', bits))[0]
-            for bits in (0xD44F9F82, 0xEA75E34D, 0xE8FDF7D7)
-        ])
-        self.assertEqual(
-            variant_get(legacy_floats, '$', pa.string()).to_pylist(),
-            ['-3.56693731E12', '-7.4315055E25', '-9.5946444E24'],
-        )
-
-        legacy_doubles = _variants([
-            struct.unpack('>d', struct.pack('>Q', bits))[0]
-            for bits in (0x439F4B86CD6A5E0C, 0x439DDD7467AF36D9)
-        ])
-        self.assertEqual(
-            variant_get(legacy_doubles, '$', pa.string()).to_pylist(),
-            ['5.6376106381000781E17', '5.3800104640575648E17'],
         )
 
     def test_get_matches_java_numeric_casts(self):

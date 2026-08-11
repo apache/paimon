@@ -14,20 +14,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Format IEEE floats like ``Float/Double.toString`` on the JDK 8 baseline."""
+"""Format IEEE values like ``Float/Double.toString`` on JDK 8.
+
+Paimon VARIANT casts follow Java cast semantics, but Python's floating-point
+formatting differs for some IEEE values. This module preserves the digit
+generation behavior of OpenJDK 8 ``sun.misc.FloatingDecimal``. Do not replace
+it with ``str`` or ``repr`` without cross-checking the JDK 8 output.
+"""
 
 import struct
 
 
-def java_floating_text(value, single_precision=False):
-    """Return the legacy Java decimal representation of an IEEE value."""
-    if single_precision:
-        bits = struct.unpack('>I', struct.pack('>f', value))[0]
-        width, fraction_width, exponent_width, bias = 32, 23, 8, 127
-    else:
-        bits = struct.unpack('>Q', struct.pack('>d', value))[0]
-        width, fraction_width, exponent_width, bias = 64, 52, 11, 1023
+def java_float_to_string(value):
+    """Return the JDK 8 ``Float.toString`` representation."""
+    bits = struct.unpack('>I', struct.pack('>f', value))[0]
+    return _format_bits(bits, 32, 23, 8, 127)
 
+
+def java_double_to_string(value):
+    """Return the JDK 8 ``Double.toString`` representation."""
+    bits = struct.unpack('>Q', struct.pack('>d', value))[0]
+    return _format_bits(bits, 64, 52, 11, 1023)
+
+
+def _format_bits(bits, width, fraction_width, exponent_width, bias):
     negative = bool(bits >> (width - 1))
     exponent = ((bits >> fraction_width)
                 & ((1 << exponent_width) - 1))
