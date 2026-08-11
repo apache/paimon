@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.options.ConfigOption
 import org.apache.paimon.spark.{SparkCatalogOptions, SparkConnectorOptions}
+import org.apache.paimon.spark.SparkConnectorOptions.DynamicPartitionColumnOrder
 import org.apache.paimon.table.Table
 
 import org.apache.spark.internal.Logging
@@ -29,7 +30,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.internal.StaticSQLConf
 
-import java.util.{HashMap => JHashMap, Map => JMap}
+import java.util.{HashMap => JHashMap, Locale, Map => JMap}
 import java.util.regex.Pattern
 
 import scala.collection.JavaConverters._
@@ -104,6 +105,19 @@ object OptionUtils extends SQLConfHelper with Logging {
     }
 
     configuredValue && isVersionSupported
+  }
+
+  def dynamicPartitionColumnOrder(): DynamicPartitionColumnOrder = {
+    val configuredValue = getOptionString(SparkConnectorOptions.DYNAMIC_PARTITION_COLUMN_ORDER)
+    try {
+      DynamicPartitionColumnOrder.valueOf(configuredValue.trim.toUpperCase(Locale.ROOT))
+    } catch {
+      case _: IllegalArgumentException =>
+        throw new IllegalArgumentException(
+          s"Invalid value '$configuredValue' for " +
+            s"spark.paimon.${SparkConnectorOptions.DYNAMIC_PARTITION_COLUMN_ORDER.key()}. " +
+            "Supported values are AUTO, TABLE, and HIVE.")
+    }
   }
 
   def writeMergeSchemaEnabled(): Boolean = {

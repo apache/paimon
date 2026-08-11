@@ -82,6 +82,15 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE.");
 
+    public static final ConfigOption<DynamicPartitionColumnOrder> DYNAMIC_PARTITION_COLUMN_ORDER =
+            key("sql.dynamic-partition-column-order")
+                    .enumType(DynamicPartitionColumnOrder.class)
+                    .defaultValue(DynamicPartitionColumnOrder.AUTO)
+                    .withDescription(
+                            "Controls how non-BY-NAME Spark SQL dynamic partition writes interpret partition columns. "
+                                    + "TABLE uses table schema order, HIVE expects dynamic partition columns at the end when they are declared in a PARTITION clause or when a dynamic overwrite query matches that Hive-style output, "
+                                    + "and AUTO preserves compatible table and Hive order detection.");
+
     public static final ConfigOption<Integer> DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_MAX_ATTEMPTS =
             key("write.data-evolution.update-conflict-retry.max-attempts")
                     .intType()
@@ -152,4 +161,11 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "Whether to adjust the target split size based on pruned (projected) columns. "
                                     + "If enabled, split size estimation uses only the columns actually being read.");
+
+    /** Column order policy for non-BY-NAME dynamic partition writes. */
+    public enum DynamicPartitionColumnOrder {
+        AUTO,
+        TABLE,
+        HIVE
+    }
 }
