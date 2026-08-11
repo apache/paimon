@@ -30,8 +30,15 @@ new `FileIO` implementation. Most users only need
 [Filesystems](../maintenance/filesystems), which describes the dependencies and options for the
 built-in implementations.
 
-The behavior below is common to the supported implementations. If a case is not described, callers
-should not assume that all storage systems handle it in the same way.
+The method sections below describe behavior common to the supported implementations. The final
+section describes how Paimon currently calls the API. Current usage does not narrow the public
+interface: a call remains valid when its method contract allows it, even if Paimon does not make
+that call today.
+
+These contracts describe observable results, not a required sequence of storage requests. An
+implementation can use conditional writes, metadata returned by listings, known file lengths, or
+batch operations. It does not need a preliminary `exists(...)` or `getFileStatus(...)` call when an
+operation can produce the required result directly.
 
 ## Read and Write Files
 
@@ -94,7 +101,7 @@ from `getFileStatus(...)`, without requiring a separate `exists(...)` call.
 `checkOrMkdirs(...)` accepts an existing directory or creates a missing one, but throws
 `IllegalArgumentException` for an existing file. `deleteQuietly(...)`, `deleteFilesQuietly(...)`,
 and `deleteDirectoryQuietly(...)` suppress `IOException`; directory deletion is recursive, while
-file deletion is not.
+file deletion is not. These quiet helpers are best-effort and do not return a success result.
 
 ## UTF-8 File Helpers
 
@@ -129,49 +136,142 @@ system can override the method, for example to use multipart upload.
 
 ## Loading and Configuration
 
-`FileIO.get(...)` selects and configures an implementation from a path and `CatalogContext`. When
-`resolving-file-io.enabled` is enabled, it returns a `ResolvingFileIO`, which selects an underlying
-`FileIO` for each path. Otherwise, a path without a URI scheme uses `LocalFileIO`. For a path with a
-scheme, selection considers an accessible configured preferred loader, a discovered loader for the
-scheme, a configured fallback, and finally Hadoop.
+`FileIO.get(...)` selects an implementation from a path and `CatalogContext`. When
+`resolving-file-io.enabled` is enabled, it returns a configured `ResolvingFileIO`, which selects an
+underlying `FileIO` for each path. Otherwise, a path without a URI scheme returns `LocalFileIO`
+directly. Its `configure(...)` method is a no-op.
+
+For a path with a scheme, `FileIO.get(...)` first checks the configured preferred loader. If that
+loader is absent or inaccessible, it looks for a discovered loader with the same scheme. Before
+using the preferred or discovered loader, it checks `requiredOptions()`: each returned group lists
+aliases for one required option, and at least one alias from every group must occur in the catalog
+options, matched case-insensitively. A loader with a missing required option is skipped. Selection
+then checks the configured fallback loader and finally Hadoop. The final loader creates a new
+`FileIO`, which `FileIO.get(...)` configures before returning it.
 
 Applications can obtain the storage for an existing table through `Table.fileIO()`. Code that only
 has a path and a `CatalogContext` can call `FileIO.get(...)`. `discoverLoaders()` and
 `checkAccess(...)` support this selection and are not normally called directly.
 
-`configure(...)` receives catalog-level settings, `setRuntimeContext(...)` receives runtime
-settings, and `close()` releases resources owned by the implementation. The default implementations
-of `setRuntimeContext(...)` and `close()` do nothing. `isObjectStore()` is an
-implementation-specific hint; callers should not use it to infer the behavior of other methods.
+Call `configure(...)` on factory- or loader-created instances that have not yet received a
+`CatalogContext`. A `FileIO` returned by `Table.fileIO()` is already configured and must not be
+configured again. Some table-bound implementations, including `RESTTokenFileIO`, reject
+reconfiguration.
 
-`FileIO` implementations are serializable and thread-safe. Runtime-only state must be restored by
-`setRuntimeContext(...)` after deserialization when an implementation requires it.
+`setRuntimeContext(...)` supplies optional job-level file system settings. Paimon's Flink
+integration calls it only when `filesystem.job-level-settings.enabled` is enabled. It is not an
+automatic callback after deserialization, and its default implementation does nothing. `close()`
+releases resources owned by an implementation; its default also does nothing.
+
+`FileIO` implementations are serializable and thread-safe. `isObjectStore()` is an implementation
+hint and does not define the behavior of other methods.
 
 ## Optional Operations
 
 `archive(...)`, `restoreArchive(...)`, `unarchive(...)`, and `createBlobPresignedUrl(...)` are
 optional. Their default implementations throw `UnsupportedOperationException`.
 
-## Behavior Not Defined by FileIO
+## Paimon FileIO Usage
 
-`FileIO` does not define the following behavior. Code intended to work with multiple storage systems
-must not depend on:
+This section records the call shapes and results used by Paimon's production code. It helps new
+callers choose the same preconditions and recovery rules. It does not replace the method contracts
+above or remove behavior from methods that have no current caller.
 
-- listing a missing path, a file, or the file system root;
-- listing order or a consistent listing while another client changes the directory;
-- `rename(...)` with a missing source, an existing or identical destination, a missing destination
-  parent, or paths from different file systems;
-- atomic `rename(...)` or Hadoop's behavior of moving an item into an existing destination
-  directory;
-- `copyFiles(...)` when the source directory contains another directory;
-- physical directory markers, stable directory modification times, or file and prefix collisions
-  on object stores;
-- an exception subtype more specific than the type declared by the method, or the point at which a
-  deferred operation reports an error; or
-- visibility before an output stream closes, or recovery after a network failure whose result is
-  unknown.
+### Status and Listing
 
-The API defines results, not the storage requests used to produce them. Implementations can use
-conditional writes, known file lengths, status values returned by listings, and batch operations to
-avoid unnecessary metadata requests on object stores. The API does not require a preliminary
-`exists(...)` or `getFileStatus(...)` call when an operation can provide the required result itself.
+Paimon lists paths expected to be directories. They usually come from configuration, a previous
+status or listing result, or an `exists(...)` check. A configured warehouse or object-table
+location can itself be the file system root; callers treat that location as an ordinary directory.
+Core paths do not intentionally pass a regular file to a listing method.
+
+Callers do not depend on listing order or on one snapshot-consistent result while another client is
+changing the directory. Correctness-sensitive traversal handles a directory that disappears after
+its parent was listed by accepting an empty result or catching `FileNotFoundException` and skipping
+that subtree; other `IOException` values fail the operation. Best-effort orphan cleanup may instead
+treat any listing `IOException` as an empty result and skip that subtree. Some callers that want a
+missing directory to mean an empty listing check `exists(...)` first. This listing practice is
+separate from the public `getFileStatus(...)` rule: a missing path from `getFileStatus(...)` must
+throw `FileNotFoundException`.
+
+Paimon consumes modification times for both files and directories, including cleanup cutoffs and a
+branch directory's reported creation time. The value must follow the `FileStatus` contract, while
+its precision and changes during concurrent updates remain file-system-specific. Paimon relies on
+logical parent directories being visible, but does not inspect or require physical directory
+marker objects.
+
+### Output and Copying
+
+Both `newOutputStream(...)` modes are used. Paimon uses `overwrite=false` for UUID- or
+version-derived files expected not to exist; a failed create must preserve an existing target. It
+uses `overwrite=true` for replaceable state and copy destinations. Writers rely on exact
+`getPos()` values and successful `close()` as the publication boundary. Some branch-copy paths also
+create output below parents that have not been created explicitly.
+
+Current `copyFiles(...)` callers copy flat snapshot, schema, and tag metadata directories during
+branch fast-forward. They use the same `FileIO` for source and destination and pass
+`overwrite=true`. Files are copied one at a time; callers do not assume that a failure rolls back
+files copied earlier. This call shape does not remove the public `overwrite=false` behavior from
+`copyFile(...)` or `copyFiles(...)`.
+
+### Directories, Deletion, and Rename
+
+Paimon uses `mkdirs(...)` with directory-semantic paths, including paths that may already exist. It
+relies on parent creation and treats `false` as a creation failure where the result is checked.
+Production code does not intentionally pass an existing file or a child of a file.
+
+Strict `delete(...)` callers normally start with an existing, owned path. They use
+`recursive=false` for files or directories expected to be empty and `recursive=true` for complete
+owned trees. No caller relies on one particular return value for a missing path: it either ignores
+that result or combines a `false` result with `exists(...)`. Quiet deletion is used only where
+best-effort cleanup is acceptable.
+
+Raw `rename(...)` calls use an existing source, a distinct exact destination expected not to exist,
+the same `FileIO` and underlying file system, and an existing or pre-created destination parent. A
+`true` result confirms the move, and some callers check that result. Branch rename currently ignores
+the result and assumes that the selected file system provides atomic rename; it has no coordination
+fallback. Existing-destination recovery is handled by the higher-level conditional and two-phase
+write protocols, not by changing this raw rename shape. Core workflows do not intentionally use
+identical paths or move an item into an existing destination directory; those shapes appear only
+through optional virtual file system passthroughs.
+
+Snapshot publication is the workflow that adds external locking and content checks when atomic
+rename is unavailable. Paimon uses `isObjectStore()` when choosing the default catalog-lock setting,
+but the value alone does not change the `rename(...)` contract. The blob-descriptor source-table path
+also calls `isObjectStore()` before serialization to initialize lazy credentials. That side effect is
+implementation-specific and is not part of the `FileIO` contract.
+
+### Conditional and Two-Phase Publication
+
+Schemas, snapshots, and Iceberg metadata use `tryToWriteAtomic(...)` with an absent target as the
+normal case. `true` means this attempt published its content. `false` means the attempt did not
+publish because a target already exists; that target can be concurrent or stale. Callers inspect the
+existing content, retry, or use an external lock as required by their metadata protocol. Iceberg
+metadata may delete a nonmatching stale target and retry. Callers do not use this method as an
+overwrite operation for arbitrary existing state.
+
+Format-table writers are the current production users of `newTwoPhaseOutputStream(...)`. They pass
+`overwrite=false` and use writer-owned UUID target paths. They rely on staged data remaining hidden,
+a serializable committer from `closeForCommit()`, publication by `commit(...)`, and writer-scoped
+`discard(...)` and `clean(...)` operations. The public API still supports `overwrite=true` even
+though this workflow does not use it.
+
+A remote publication can succeed before reporting an exception, so recovery depends on ownership.
+Paimon preserves an ambiguous mutable target when the caller does not own a unique path. The
+format-table commit path records every attempted committer and can delete an attempted target after
+failure only because each UUID path belongs to that failed batch. This is a format-table recovery
+rule, not permission for arbitrary two-phase callers to delete an uncertain target.
+
+### Lifecycle and Optional Operations
+
+Most table code receives an already configured `FileIO` from `Table.fileIO()`. Factory-created
+instances are either retained by an owner or should be closed by the code that owns their resource
+scope. `CachingFileIO.close()` closes its delegate and then releases its shared cache-manager
+reference.
+
+`archive(...)`, `restoreArchive(...)`, and `unarchive(...)` currently have no production caller or
+implementation, so their default `UnsupportedOperationException` behavior remains in effect.
+`createBlobPresignedUrl(...)` is an active optional operation used by the Blob API and Flink and
+Spark SQL functions. Its callers use the `FileIO` and table root from the same loaded table, pass a
+table-owned blob descriptor, and do not assume that every `FileIO` supports the operation. Spark
+validates a positive whole-second validity before the call. Flink forwards the supplied `Duration`,
+so supporting implementations must reject unsupported validity values.
