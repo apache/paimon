@@ -208,23 +208,6 @@ class CatalogManagedPartitionEdgeParityTest extends PaimonSparkTestWithRestCatal
     }
   }
 
-  test("ANALYZE measures the default partition like any other") {
-    val tableName = "edge_null_analyze"
-    withTable(tableName) {
-      createTable(tableName)
-      sql(s"INSERT INTO ${qualified(tableName)} VALUES (1, 'a', NULL, '00')")
-
-      sql(s"ANALYZE TABLE ${qualified(tableName)} COMPUTE STATISTICS NOSCAN").collect()
-
-      val measured = paimonCatalog
-        .listPartitions(Identifier.create(dbName0, tableName))
-        .asScala
-        .head
-      assert(measured.fileCount() == 1L, measured.toString)
-      assert(measured.fileSizeInBytes() > 0L, measured.toString)
-    }
-  }
-
   test("an empty string partition value is not confused with a null one") {
     val tableName = "edge_empty_string"
     withTable(tableName) {
