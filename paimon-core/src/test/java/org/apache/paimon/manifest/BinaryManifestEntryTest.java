@@ -215,8 +215,7 @@ public class BinaryManifestEntryTest {
                                 DataFileMeta.EMBEDDED_FILE_INDEX,
                                 DataFileMeta.EXTERNAL_PATH)
                         .createEntry();
-        BinaryManifestEntry.ReusableIdentifier identifier =
-                new BinaryManifestEntry.ReusableIdentifier();
+        FileEntry.ReusableIdentifier identifier = new FileEntry.ReusableIdentifier();
 
         entry.replace(identityRow(partition(1)));
         BinaryRow firstPartition = entry.partition();

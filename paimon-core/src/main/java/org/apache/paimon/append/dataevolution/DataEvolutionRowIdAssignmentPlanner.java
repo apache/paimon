@@ -26,8 +26,8 @@ import org.apache.paimon.io.BinaryDataFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.BinaryManifestEntry;
 import org.apache.paimon.manifest.BinaryManifestEntry.Projection;
-import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
-import org.apache.paimon.manifest.DeletedIdentifierSet;
+import org.apache.paimon.manifest.CompactFileIdentifierSet;
+import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -556,7 +556,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
     private static final class GroupState {
 
         private final GroupPartitionDictionary partitions;
-        private final DeletedIdentifierSet deletedIdentifiers = new DeletedIdentifierSet();
+        private final CompactFileIdentifierSet deletedIdentifiers = new CompactFileIdentifierSet();
         private final LiveFileRowIdRangeCollector liveFileRanges;
 
         private GroupState(

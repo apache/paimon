@@ -25,7 +25,7 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.io.BinaryDataFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.BinaryManifestEntry;
-import org.apache.paimon.manifest.DeletedIdentifierSet;
+import org.apache.paimon.manifest.CompactFileIdentifierSet;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -127,7 +127,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             groupPartitions.add(key.getLeft());
         }
 
-        DeletedIdentifierSet deleted = new DeletedIdentifierSet();
+        CompactFileIdentifierSet deleted = new CompactFileIdentifierSet();
         try {
             collectDeletedIdentifiers(manifestFile, manifests, groupPartitions, deleted);
             collectUpdatedRanges(
@@ -178,7 +178,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifests,
             Set<BinaryRow> groupPartitions,
-            DeletedIdentifierSet deleted) {
+            CompactFileIdentifierSet deleted) {
         for (ManifestFileMeta manifest : manifests) {
             if (manifest.numDeletedFiles() <= 0) {
                 continue;
@@ -204,7 +204,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             SchemaManager schemaManager,
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifests,
-            DeletedIdentifierSet deleted,
+            CompactFileIdentifierSet deleted,
             Map<Pair<BinaryRow, Integer>, RefreshGroup> groups,
             Set<Integer> indexedFieldIds) {
         Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache = new HashMap<>();

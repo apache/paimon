@@ -23,12 +23,12 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link DeletedIdentifierSet}. */
-class DeletedIdentifierSetTest {
+/** Tests for {@link CompactFileIdentifierSet}. */
+class CompactFileIdentifierSetTest {
 
     @Test
     void testDeduplicatesAndIncludesPartition() {
-        DeletedIdentifierSet identifiers = new DeletedIdentifierSet();
+        CompactFileIdentifierSet identifiers = new CompactFileIdentifierSet();
         byte[] identifier = {1, 2, 3, 4};
 
         identifiers.add(3, identifier, identifier.length);
@@ -46,7 +46,7 @@ class DeletedIdentifierSetTest {
 
     @Test
     void testCopiesOnlyIdentifierPrefix() {
-        DeletedIdentifierSet identifiers = new DeletedIdentifierSet();
+        CompactFileIdentifierSet identifiers = new CompactFileIdentifierSet();
         byte[] identifier = {1, 2, 3};
 
         identifiers.add(0, identifier, 2);
@@ -59,7 +59,7 @@ class DeletedIdentifierSetTest {
 
     @Test
     void testGrowsAndReleases() {
-        DeletedIdentifierSet identifiers = new DeletedIdentifierSet();
+        CompactFileIdentifierSet identifiers = new CompactFileIdentifierSet();
         for (int i = 0; i < 1_000; i++) {
             byte[] identifier = {(byte) i, (byte) (i >>> 8)};
             identifiers.add(i % 7, identifier, identifier.length);
@@ -81,7 +81,7 @@ class DeletedIdentifierSetTest {
 
     @Test
     void testRejectsInvalidIdentifier() {
-        DeletedIdentifierSet identifiers = new DeletedIdentifierSet();
+        CompactFileIdentifierSet identifiers = new CompactFileIdentifierSet();
 
         assertThatThrownBy(() -> identifiers.add(0, (byte[]) null, 0))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -89,7 +89,7 @@ class DeletedIdentifierSetTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> identifiers.contains(0, new byte[1], 2))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> identifiers.add(0, (BinaryManifestEntry.ReusableIdentifier) null))
+        assertThatThrownBy(() -> identifiers.add(0, (FileEntry.ReusableIdentifier) null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

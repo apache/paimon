@@ -26,8 +26,8 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.BinaryManifestEntry;
-import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
-import org.apache.paimon.manifest.DeletedIdentifierSet;
+import org.apache.paimon.manifest.CompactFileIdentifierSet;
+import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -58,7 +58,7 @@ public class ManifestEntryExternalSort {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         try (EntrySorter sorter = new EntrySorter(sortKey, config)) {
-            DeletedIdentifierSet deleteEntries = new DeletedIdentifierSet();
+            CompactFileIdentifierSet deleteEntries = new CompactFileIdentifierSet();
             try {
                 scanEntries(
                         section,
@@ -84,7 +84,7 @@ public class ManifestEntryExternalSort {
             ExternalSortConfig config,
             ManifestFile manifestFile,
             List<ManifestFileMeta> newFilesForAbort,
-            DeletedIdentifierSet deleteEntries,
+            CompactFileIdentifierSet deleteEntries,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         try (EntrySorter sorter = new EntrySorter(sortKey, config)) {
@@ -262,7 +262,7 @@ public class ManifestEntryExternalSort {
 
         private Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> writeMinorToManifest(
                 ManifestFile manifestFile,
-                DeletedIdentifierSet deleteEntries,
+                CompactFileIdentifierSet deleteEntries,
                 List<ManifestFileMeta> newFilesForAbort)
                 throws Exception {
             if (isEmpty()) {
@@ -273,8 +273,8 @@ public class ManifestEntryExternalSort {
                     manifestFile.createRollingWriter();
             RollingFileWriter<ManifestEntry, ManifestFileMeta> deleteWriter =
                     manifestFile.createRollingWriter();
-            DeletedIdentifierSet matchedEntries = new DeletedIdentifierSet();
-            DeletedIdentifierSet emittedDeletes = new DeletedIdentifierSet();
+            CompactFileIdentifierSet matchedEntries = new CompactFileIdentifierSet();
+            CompactFileIdentifierSet emittedDeletes = new CompactFileIdentifierSet();
             ReusableIdentifier identifier = new ReusableIdentifier();
             Exception exception = null;
             try {

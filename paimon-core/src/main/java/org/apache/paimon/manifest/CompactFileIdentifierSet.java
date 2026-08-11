@@ -18,7 +18,7 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
+import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
 
 import javax.annotation.Nullable;
 
@@ -28,12 +28,13 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
- * Compact, collision-safe set backed by primitive arrays and one identifier byte arena.
+ * Compact, collision-safe set for {@link FileEntry.Identifier} values, backed by primitive arrays
+ * and one identifier byte arena.
  *
  * <p>The reusable identifier is only used as lookup scratch. Added identifier bytes are copied into
  * the arena.
  */
-public final class DeletedIdentifierSet {
+public final class CompactFileIdentifierSet {
 
     private static final float LOAD_FACTOR = 0.75f;
 
@@ -145,8 +146,7 @@ public final class DeletedIdentifierSet {
     }
 
     private void growBuckets() {
-        checkState(
-                buckets.length < (1 << 30), "Too many deleted identifiers in one manifest group.");
+        checkState(buckets.length < (1 << 30), "Too many file identifiers in one manifest group.");
         int[] grown = filledWithMinusOne(buckets.length << 1);
         for (int entry = 0; entry < size; entry++) {
             int bucket = bucket(hashes[entry], grown.length);
@@ -174,7 +174,7 @@ public final class DeletedIdentifierSet {
             required = Math.addExact(arenaSize, additional);
         } catch (ArithmeticException e) {
             throw new IllegalStateException(
-                    "Deleted identifier arena exceeds the Java array limit.", e);
+                    "File identifier arena exceeds the Java array limit.", e);
         }
         if (required <= arena.length) {
             return;
