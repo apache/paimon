@@ -224,6 +224,8 @@ def _encode_scalar_to_value_bytes(typed_value, arrow_type: pa.DataType) -> bytes
 
 def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
     """Dispatch a typed Python scalar into the appropriate builder method."""
+    if pa.types.is_decimal(arrow_type) and arrow_type.scale < 0:
+        raise ValueError('VARIANT decimal scale must be non-negative')
     if value is None:
         builder.append_null()
         return
@@ -303,10 +305,6 @@ def _append_scalar(builder, value, arrow_type: pa.DataType) -> None:
         if precision > arrow_type.precision:
             raise ValueError(
                 f'{decimal} exceeds Arrow precision {arrow_type.precision}')
-        if scale < 0:
-            unscaled *= 10 ** -scale
-            scale = 0
-            precision = max(1, len(str(abs(unscaled))))
         builder.append_decimal_unscaled(unscaled, precision, scale)
     else:
         # Fallback: encode as string
