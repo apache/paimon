@@ -225,7 +225,9 @@ public class FlinkSinkBuilder {
                         table.rowType(),
                         readerFactoryForDescriptor,
                         table.coreOptions().blobWriteNullOnMissingFile(),
-                        table.coreOptions().blobWriteNullOnFetchFailure());
+                        table.coreOptions().blobWriteNullOnFetchFailure(),
+                        materializedBlobFieldIndexes(
+                                table.rowType(), table.coreOptions().blobInlineField()));
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
@@ -280,7 +282,8 @@ public class FlinkSinkBuilder {
                 rowType,
                 new UriReaderFactory(catalogContext),
                 checkBlobDescriptorExists,
-                writeNullOnFetchFailure);
+                writeNullOnFetchFailure,
+                Collections.emptySet());
     }
 
     private static DataStream<InternalRow> mapToInternalRowWithUriReaderFactory(
@@ -288,7 +291,8 @@ public class FlinkSinkBuilder {
             org.apache.paimon.types.RowType rowType,
             UriReaderFactory uriReaderFactory,
             boolean checkBlobDescriptorExists,
-            boolean writeNullOnFetchFailure) {
+            boolean writeNullOnFetchFailure,
+            Set<Integer> materializedBlobFields) {
         Set<Integer> blobFields =
                 checkBlobDescriptorExists
                         ? FlinkRowWrapper.blobFieldIndexes(rowType)
@@ -302,12 +306,21 @@ public class FlinkSinkBuilder {
                                                         uriReaderFactory,
                                                         checkBlobDescriptorExists,
                                                         writeNullOnFetchFailure,
-                                                        blobFields))
+                                                        blobFields,
+                                                        materializedBlobFields))
                         .returns(
                                 org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(
                                         rowType));
         forwardParallelism(result, input);
         return result;
+    }
+
+    private static Set<Integer> materializedBlobFieldIndexes(
+            org.apache.paimon.types.RowType rowType, Set<String> inlineBlobFields) {
+        Set<Integer> materializedBlobFields = FlinkRowWrapper.blobFieldIndexes(rowType);
+        materializedBlobFields.removeIf(
+                pos -> inlineBlobFields.contains(rowType.getFields().get(pos).name()));
+        return materializedBlobFields;
     }
 
     protected DataStreamSink<?> buildDynamicBucketSink(
