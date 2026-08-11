@@ -122,12 +122,7 @@ public class RenamingTwoPhaseOutputStream extends TwoPhaseOutputStream {
 
         @Override
         public void discard(FileIO fileIO) throws IOException {
-            if (fileIO.exists(targetPath)) {
-                fileIO.deleteQuietly(targetPath);
-            }
-            if (fileIO.exists(tempPath)) {
-                fileIO.deleteQuietly(tempPath);
-            }
+            fileIO.deleteQuietly(tempPath);
         }
 
         @Override

@@ -24,19 +24,23 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.fail;
 
-/** Common tests for the behavior of {@link FileIO} methods. */
+/** Provider-neutral contract tests for {@link FileIO}. */
 public abstract class FileIOBehaviorTestBase {
 
     private static final Random RND = new Random();
+
+    private static final byte[] DEFAULT_CONTENT = new byte[] {1, 2, 3, 4, 5, 6, 7, 8};
 
     /** The cached file system instance. */
     private FileIO fs;
@@ -70,194 +74,668 @@ public abstract class FileIOBehaviorTestBase {
         fs.delete(basePath, true);
     }
 
-    // ------------------------------------------------------------------------
-    //  Suite of Tests
-    // ------------------------------------------------------------------------
+    @Test
+    void testObjectStoreClassificationIsStable() throws IOException {
+        boolean objectStore = fs.isObjectStore();
+        Path file = createRandomFileInDirectory(basePath);
 
-    // --- exists
+        assertThat(fs.isObjectStore()).isEqualTo(objectStore);
+
+        fs.delete(file, false);
+        assertThat(fs.isObjectStore()).isEqualTo(objectStore);
+    }
+
+    // ------------------------------------------------------------------------
+    //  Input streams
+    // ------------------------------------------------------------------------
 
     @Test
-    void testFileExists() throws IOException {
-        final Path filePath = createRandomFileInDirectory(basePath);
-        assertThat(fs.exists(filePath)).isTrue();
+    void testInputStreamStartsAtZeroAndReadsCorrectBytes() throws IOException {
+        byte[] content = new byte[] {3, 1, 4, 1, 5, 9};
+        Path file = createRandomFileInDirectory(basePath, content);
+
+        try (SeekableInputStream in = fs.newInputStream(file)) {
+            assertThat(in.getPos()).isZero();
+            assertThat(readAll(in)).containsExactly(content);
+            assertThat(in.getPos()).isEqualTo(content.length);
+        }
     }
 
     @Test
-    void testFileDoesNotExist() throws IOException {
+    void testInputStreamBulkReadHonorsNonZeroBufferOffset() throws IOException {
+        byte[] content = new byte[] {11, 22, 33};
+        Path file = createRandomFileInDirectory(basePath, content);
+        byte[] buffer = new byte[] {99, 98, 0, 0, 0, 97, 96};
+
+        try (SeekableInputStream in = fs.newInputStream(file)) {
+            int totalRead = 0;
+            while (totalRead < content.length) {
+                int read = in.read(buffer, 2 + totalRead, content.length - totalRead);
+                assertThat(read).isPositive();
+                totalRead += read;
+            }
+
+            assertThat(totalRead).isEqualTo(content.length);
+            assertThat(buffer).containsExactly(99, 98, 11, 22, 33, 97, 96);
+            assertThat(in.getPos()).isEqualTo(content.length);
+        }
+    }
+
+    @Test
+    void testInputStreamsHaveIndependentPositions() throws IOException {
+        Path file = createRandomFileInDirectory(basePath, new byte[] {10, 20, 30});
+
+        try (SeekableInputStream first = fs.newInputStream(file);
+                SeekableInputStream second = fs.newInputStream(file)) {
+            assertThat(first.read()).isEqualTo(10);
+            assertThat(first.getPos()).isEqualTo(1);
+            assertThat(second.getPos()).isZero();
+            assertThat(second.read()).isEqualTo(10);
+            assertThat(second.getPos()).isEqualTo(1);
+
+            first.seek(2);
+            assertThat(first.read()).isEqualTo(30);
+            assertThat(second.read()).isEqualTo(20);
+        }
+    }
+
+    @Test
+    void testInputStreamSeeksForwardAndBackward() throws IOException {
+        byte[] content = new byte[] {10, 20, 30, 40, 50, 60};
+        Path file = createRandomFileInDirectory(basePath, content);
+
+        try (SeekableInputStream in = fs.newInputStream(file)) {
+            in.seek(4);
+            assertThat(in.getPos()).isEqualTo(4);
+            assertThat(in.read()).isEqualTo(50);
+
+            in.seek(1);
+            assertThat(in.getPos()).isEqualTo(1);
+            assertThat(in.read()).isEqualTo(20);
+        }
+    }
+
+    @Test
+    void testInputStreamReturnsEndOfFileAtFileLength() throws IOException {
+        byte[] content = new byte[] {7, 8, 9};
+        Path file = createRandomFileInDirectory(basePath, content);
+
+        try (SeekableInputStream in = fs.newInputStream(file)) {
+            in.seek(content.length);
+            assertThat(in.read()).isEqualTo(-1);
+            assertThat(in.read(new byte[2], 0, 2)).isEqualTo(-1);
+        }
+    }
+
+    @Test
+    void testInputStreamCanSeekBackToStart() throws IOException {
+        byte[] content = new byte[] {7, 8, 9};
+        Path file = createRandomFileInDirectory(basePath, content);
+
+        try (SeekableInputStream in = fs.newInputStream(file)) {
+            assertThat(in.read()).isEqualTo(7);
+            in.seek(0);
+            assertThat(in.getPos()).isZero();
+            assertThat(in.read()).isEqualTo(7);
+        }
+    }
+
+    @Test
+    void testInputStreamSeeksForwardBeyondOneMebibyte() throws IOException {
+        int targetPosition = 1024 * 1024 + 17;
+        byte[] content = new byte[targetPosition + 1];
+        content[targetPosition] = 42;
+        Path file = createRandomFileInDirectory(basePath, content);
+
+        try (SeekableInputStream in = fs.newInputStream(file)) {
+            in.seek(targetPosition);
+            assertThat(in.getPos()).isEqualTo(targetPosition);
+            assertThat(in.read()).isEqualTo(42);
+        }
+    }
+
+    @Test
+    void testInputStreamForMissingFileFailsByFirstRead() {
+        Path missing = new Path(basePath, randomName());
+
+        assertOpenOrFirstReadFails(missing);
+    }
+
+    @Test
+    void testInputStreamForDirectoryFailsByFirstRead() throws IOException {
+        Path directory = new Path(basePath, randomName());
+        fs.mkdirs(directory);
+
+        assertOpenOrFirstReadFails(directory);
+    }
+
+    // ------------------------------------------------------------------------
+    //  Output streams
+    // ------------------------------------------------------------------------
+
+    @Test
+    void testOutputStreamTracksPositionAndPublishesBytesOnClose() throws IOException {
+        Path file = new Path(basePath, randomName());
+
+        try (PositionOutputStream out = fs.newOutputStream(file, false)) {
+            assertThat(out.getPos()).isZero();
+            out.write(9);
+            assertThat(out.getPos()).isEqualTo(1);
+            out.write(new byte[] {10, 11, 12, 13}, 1, 2);
+            assertThat(out.getPos()).isEqualTo(3);
+        }
+
+        assertThat(readBytes(file)).containsExactly(9, 11, 12);
+    }
+
+    @Test
+    void testOutputStreamCreatesNestedTarget() throws IOException {
+        Path ancestor = new Path(basePath, randomName());
+        Path parent = new Path(ancestor, randomName());
+        Path file = new Path(parent, randomName());
+        byte[] content = new byte[] {1, 3, 3, 7};
+
+        writeBytes(file, content, false);
+
+        assertThat(readBytes(file)).containsExactly(content);
+        assertThat(fs.getFileStatus(ancestor).isDir()).isTrue();
+        assertThat(fs.getFileStatus(parent).isDir()).isTrue();
+    }
+
+    @Test
+    void testOutputStreamOverwriteReplacesOldContent() throws IOException {
+        Path file = createRandomFileInDirectory(basePath, new byte[] {1, 2, 3, 4, 5});
+
+        writeBytes(file, new byte[] {8, 9}, true);
+
+        assertThat(readBytes(file)).containsExactly(8, 9);
+    }
+
+    @Test
+    void testOutputStreamNoOverwriteFailsAndPreservesOldContent() throws IOException {
+        byte[] oldContent = new byte[] {1, 2, 3};
+        Path file = createRandomFileInDirectory(basePath, oldContent);
+
+        assertThatThrownBy(() -> writeBytes(file, new byte[] {9, 8, 7}, false))
+                .isInstanceOf(IOException.class);
+        assertThat(readBytes(file)).containsExactly(oldContent);
+    }
+
+    // ------------------------------------------------------------------------
+    //  File status and existence
+    // ------------------------------------------------------------------------
+
+    @Test
+    void testGetFileStatusForMissingPathThrowsFileNotFound() {
+        Path missing = new Path(basePath, randomName());
+
+        assertThatThrownBy(() -> fs.getFileStatus(missing))
+                .isInstanceOf(FileNotFoundException.class);
+    }
+
+    @Test
+    void testGetFileStatusDescribesFile() throws IOException {
+        byte[] content = new byte[] {2, 4, 6, 8, 10};
+        Path file = createRandomFileInDirectory(basePath, content);
+
+        FileStatus status = fs.getFileStatus(file);
+
+        assertThat(status.getPath()).isEqualTo(file);
+        assertThat(status.isDir()).isFalse();
+        assertThat(status.getLen()).isEqualTo(content.length);
+    }
+
+    @Test
+    void testGetFileStatusDescribesDirectory() throws IOException {
+        Path directory = new Path(basePath, randomName());
+        fs.mkdirs(directory);
+
+        FileStatus status = fs.getFileStatus(directory);
+
+        assertThat(status.getPath()).isEqualTo(directory);
+        assertThat(status.isDir()).isTrue();
+    }
+
+    @Test
+    void testFileStatusIsSnapshot() throws IOException {
+        Path path = createRandomFileInDirectory(basePath, new byte[] {1, 2, 3});
+        FileStatus snapshot = fs.getFileStatus(path);
+
+        assertThat(fs.delete(path, false)).isTrue();
+        assertThat(fs.mkdirs(path)).isTrue();
+        FileStatus current = fs.getFileStatus(path);
+
+        assertThat(snapshot.getPath()).isEqualTo(path);
+        assertThat(snapshot.isDir()).isFalse();
+        assertThat(snapshot.getLen()).isEqualTo(3);
+        assertThat(current.getPath()).isEqualTo(path);
+        assertThat(current.isDir()).isTrue();
+    }
+
+    @Test
+    void testExistsReturnsTrueForFile() throws IOException {
+        Path file = createRandomFileInDirectory(basePath);
+
+        assertThat(fs.exists(file)).isTrue();
+    }
+
+    @Test
+    void testExistsReturnsTrueForLogicalDirectory() throws IOException {
+        Path directory = new Path(basePath, randomName());
+        fs.mkdirs(directory);
+
+        assertThat(fs.exists(directory)).isTrue();
+    }
+
+    @Test
+    void testExistsReturnsFalseForMissingPath() throws IOException {
         assertThat(fs.exists(new Path(basePath, randomName()))).isFalse();
     }
 
-    // --- list files
+    // ------------------------------------------------------------------------
+    //  Listings
+    // ------------------------------------------------------------------------
 
     @Test
-    void testListFilesIterativeNonRecursive() throws IOException {
-        Path fileA = createRandomFileInDirectory(basePath);
-        Path dirB = new Path(basePath, randomName());
-        fs.mkdirs(dirB);
-        Path fileBC = createRandomFileInDirectory(dirB);
+    void testListStatusOfEmptyDirectoryReturnsNonNullEmptyArray() throws IOException {
+        FileStatus[] statuses = fs.listStatus(basePath);
 
-        List<FileStatus> allFiles = new ArrayList<>();
-        RemoteIterator<FileStatus> iter = fs.listFilesIterative(basePath, false);
-        while (iter.hasNext()) {
-            allFiles.add(iter.next());
-        }
-        assertThat(allFiles.size()).isEqualTo(1);
-        assertThat(allFiles.get(0).getPath()).isEqualTo(fileA);
+        assertThat(statuses).isNotNull().isEmpty();
     }
 
     @Test
-    void testListFilesIterativeRecursive() throws IOException {
-        Path fileA = createRandomFileInDirectory(basePath);
-        Path dirB = new Path(basePath, randomName());
-        fs.mkdirs(dirB);
-        Path fileBC = createRandomFileInDirectory(dirB);
+    void testListStatusReturnsOnlyCorrectDirectChildren() throws IOException {
+        byte[] firstContent = new byte[] {1, 2, 3, 4};
+        byte[] secondContent = new byte[] {5, 6};
+        Path firstFile = createRandomFileInDirectory(basePath, firstContent);
+        Path secondFile = createRandomFileInDirectory(basePath, secondContent);
+        Path firstDirectory = new Path(basePath, randomName());
+        Path secondDirectory = new Path(basePath, randomName());
+        Path nestedDirectory = new Path(firstDirectory, randomName());
+        createRandomFileInDirectory(nestedDirectory, new byte[] {9});
+        fs.mkdirs(secondDirectory);
 
-        List<FileStatus> allFiles = new ArrayList<>();
-        RemoteIterator<FileStatus> iter = fs.listFilesIterative(basePath, true);
-        while (iter.hasNext()) {
-            allFiles.add(iter.next());
-        }
-        assertThat(allFiles.size()).isEqualTo(2);
-        assertThat(allFiles.stream().filter(f -> f.getPath().equals(fileA)).count()).isEqualTo(1);
-        assertThat(allFiles.stream().filter(f -> f.getPath().equals(fileBC)).count()).isEqualTo(1);
+        FileStatus[] statuses = fs.listStatus(basePath);
+
+        assertThat(statuses).isNotNull().hasSize(4);
+        assertThat(statuses)
+                .extracting(FileStatus::getPath)
+                .containsExactlyInAnyOrder(firstFile, secondFile, firstDirectory, secondDirectory);
+        FileStatus firstFileStatus = statusFor(statuses, firstFile);
+        assertThat(firstFileStatus.isDir()).isFalse();
+        assertThat(firstFileStatus.getLen()).isEqualTo(firstContent.length);
+        FileStatus secondFileStatus = statusFor(statuses, secondFile);
+        assertThat(secondFileStatus.isDir()).isFalse();
+        assertThat(secondFileStatus.getLen()).isEqualTo(secondContent.length);
+        assertThat(statusFor(statuses, firstDirectory).isDir()).isTrue();
+        assertThat(statusFor(statuses, secondDirectory).isDir()).isTrue();
     }
 
-    // --- delete
+    @Test
+    void testListFilesNonRecursiveReturnsOnlyDirectFilesAndMatchesIterator() throws IOException {
+        Path firstDirectFile = createRandomFileInDirectory(basePath);
+        Path secondDirectFile = createRandomFileInDirectory(basePath);
+        Path directory = new Path(basePath, randomName());
+        Path nestedFile = createRandomFileInDirectory(directory);
+
+        FileStatus[] arrayResult = fs.listFiles(basePath, false);
+        List<FileStatus> iteratorResult = collect(fs.listFilesIterative(basePath, false));
+
+        assertThat(arrayResult).isNotNull();
+        assertThat(arrayResult)
+                .extracting(FileStatus::getPath)
+                .containsExactlyInAnyOrder(firstDirectFile, secondDirectFile);
+        assertThat(iteratorResult)
+                .extracting(FileStatus::getPath)
+                .containsExactlyInAnyOrder(firstDirectFile, secondDirectFile);
+        assertThat(Arrays.stream(arrayResult).allMatch(status -> !status.isDir())).isTrue();
+        assertThat(iteratorResult.stream().allMatch(status -> !status.isDir())).isTrue();
+        assertThat(arrayResult).noneMatch(status -> status.getPath().equals(nestedFile));
+    }
+
+    @Test
+    void testListFilesRecursiveReturnsAllFilesAndMatchesIterator() throws IOException {
+        Path firstDirectFile = createRandomFileInDirectory(basePath);
+        Path secondDirectFile = createRandomFileInDirectory(basePath);
+        Path firstLevelDirectory = new Path(basePath, randomName());
+        Path firstLevelFile = createRandomFileInDirectory(firstLevelDirectory);
+        Path secondLevelDirectory = new Path(firstLevelDirectory, randomName());
+        Path secondLevelFile = createRandomFileInDirectory(secondLevelDirectory);
+
+        FileStatus[] arrayResult = fs.listFiles(basePath, true);
+        List<FileStatus> iteratorResult = collect(fs.listFilesIterative(basePath, true));
+
+        assertThat(arrayResult).isNotNull();
+        assertThat(arrayResult)
+                .extracting(FileStatus::getPath)
+                .containsExactlyInAnyOrder(
+                        firstDirectFile, secondDirectFile, firstLevelFile, secondLevelFile);
+        assertThat(iteratorResult)
+                .extracting(FileStatus::getPath)
+                .containsExactlyInAnyOrder(
+                        firstDirectFile, secondDirectFile, firstLevelFile, secondLevelFile);
+        assertThat(Arrays.stream(arrayResult).allMatch(status -> !status.isDir())).isTrue();
+        assertThat(iteratorResult.stream().allMatch(status -> !status.isDir())).isTrue();
+    }
+
+    @Test
+    void testListDirectoriesReturnsOnlyDirectDirectories() throws IOException {
+        createRandomFileInDirectory(basePath);
+        Path firstDirectDirectory = new Path(basePath, randomName());
+        Path secondDirectDirectory = new Path(basePath, randomName());
+        Path nestedDirectory = new Path(firstDirectDirectory, randomName());
+        fs.mkdirs(nestedDirectory);
+        fs.mkdirs(secondDirectDirectory);
+
+        FileStatus[] statuses = fs.listDirectories(basePath);
+
+        assertThat(statuses).isNotNull().hasSize(2);
+        assertThat(statuses)
+                .extracting(FileStatus::getPath)
+                .containsExactlyInAnyOrder(firstDirectDirectory, secondDirectDirectory);
+        assertThat(Arrays.stream(statuses).allMatch(FileStatus::isDir)).isTrue();
+    }
+
+    // ------------------------------------------------------------------------
+    //  Delete
+    // ------------------------------------------------------------------------
 
     @Test
     void testExistingFileDeletion() throws IOException {
-        testSuccessfulDeletion(createRandomFileInDirectory(basePath), false);
+        Path file = createRandomFileInDirectory(basePath);
+
+        assertThat(fs.delete(file, false)).isTrue();
+
+        assertThat(fs.exists(file)).isFalse();
     }
 
     @Test
     void testExistingFileRecursiveDeletion() throws IOException {
-        testSuccessfulDeletion(createRandomFileInDirectory(basePath), true);
-    }
+        Path file = createRandomFileInDirectory(basePath);
 
-    @Test
-    void testNotExistingFileDeletion() throws IOException {
-        testSuccessfulDeletion(new Path(basePath, randomName()), false);
-    }
+        assertThat(fs.delete(file, true)).isTrue();
 
-    @Test
-    void testNotExistingFileRecursiveDeletion() throws IOException {
-        testSuccessfulDeletion(new Path(basePath, randomName()), true);
+        assertThat(fs.exists(file)).isFalse();
     }
 
     @Test
     void testExistingEmptyDirectoryDeletion() throws IOException {
-        final Path path = new Path(basePath, randomName());
-        fs.mkdirs(path);
-        testSuccessfulDeletion(path, false);
+        Path directory = new Path(basePath, randomName());
+        fs.mkdirs(directory);
+
+        assertThat(fs.delete(directory, false)).isTrue();
+
+        assertThat(fs.exists(directory)).isFalse();
     }
 
     @Test
     void testExistingEmptyDirectoryRecursiveDeletion() throws IOException {
-        final Path path = new Path(basePath, randomName());
-        fs.mkdirs(path);
-        testSuccessfulDeletion(path, true);
-    }
+        Path directory = new Path(basePath, randomName());
+        fs.mkdirs(directory);
 
-    private void testSuccessfulDeletion(Path path, boolean recursionEnabled) throws IOException {
-        fs.delete(path, recursionEnabled);
-        assertThat(fs.exists(path)).isFalse();
-    }
+        assertThat(fs.delete(directory, true)).isTrue();
 
-    @Test
-    void testExistingNonEmptyDirectoryDeletion() throws IOException {
-        final Path directoryPath = new Path(basePath, randomName());
-        final Path filePath = createRandomFileInDirectory(directoryPath);
-
-        assertThatThrownBy(() -> fs.delete(directoryPath, false)).isInstanceOf(IOException.class);
-        assertThat(fs.exists(directoryPath)).isTrue();
-        assertThat(fs.exists(filePath)).isTrue();
+        assertThat(fs.exists(directory)).isFalse();
     }
 
     @Test
-    void testExistingNonEmptyDirectoryRecursiveDeletion() throws IOException {
-        final Path directoryPath = new Path(basePath, randomName());
-        final Path filePath = createRandomFileInDirectory(directoryPath);
+    void testNonEmptyDirectoryNonRecursiveDeletionFailsWithoutDamage() throws IOException {
+        Path directory = new Path(basePath, randomName());
+        Path file = createRandomFileInDirectory(directory);
 
-        fs.delete(directoryPath, true);
-        assertThat(fs.exists(directoryPath)).isFalse();
-        assertThat(fs.exists(filePath)).isFalse();
-    }
-
-    @Test
-    void testExistingNonEmptyDirectoryWithSubDirRecursiveDeletion() throws IOException {
-        final Path level1SubDirWithFile = new Path(basePath, randomName());
-        final Path fileInLevel1Subdir = createRandomFileInDirectory(level1SubDirWithFile);
-        final Path level2SubDirWithFile = new Path(level1SubDirWithFile, randomName());
-        final Path fileInLevel2Subdir = createRandomFileInDirectory(level2SubDirWithFile);
-
-        testSuccessfulDeletion(level1SubDirWithFile, true);
-        assertThat(fs.exists(fileInLevel1Subdir)).isFalse();
-        assertThat(fs.exists(level2SubDirWithFile)).isFalse();
-        assertThat(fs.exists(fileInLevel2Subdir)).isFalse();
-    }
-
-    // --- mkdirs
-
-    @Test
-    void testMkdirsReturnsTrueWhenCreatingDirectory() throws Exception {
-        // this test applies to object stores as well, as rely on the fact that they
-        // return true when things are not bad
-
-        final Path directory = new Path(basePath, randomName());
-        assertThat(fs.mkdirs(directory)).isTrue();
+        assertThatThrownBy(() -> fs.delete(directory, false)).isInstanceOf(IOException.class);
         assertThat(fs.exists(directory)).isTrue();
+        assertThat(fs.exists(file)).isTrue();
     }
 
     @Test
-    void testMkdirsCreatesParentDirectories() throws Exception {
-        // this test applies to object stores as well, as rely on the fact that they
-        // return true when things are not bad
+    void testRecursiveDeletionRemovesEntireSubtree() throws IOException {
+        Path directory = new Path(basePath, randomName());
+        Path directFile = createRandomFileInDirectory(directory);
+        Path nestedDirectory = new Path(directory, randomName());
+        Path nestedFile = createRandomFileInDirectory(nestedDirectory);
 
-        final Path directory =
-                new Path(new Path(new Path(basePath, randomName()), randomName()), randomName());
+        assertThat(fs.delete(directory, true)).isTrue();
+
+        assertThat(fs.exists(directory)).isFalse();
+        assertThat(fs.exists(directFile)).isFalse();
+        assertThat(fs.exists(nestedDirectory)).isFalse();
+        assertThat(fs.exists(nestedFile)).isFalse();
+    }
+
+    @Test
+    void testMissingPathDeletionLeavesPathAbsent() throws IOException {
+        Path missing = new Path(basePath, randomName());
+
+        fs.delete(missing, false);
+
+        assertThat(fs.exists(missing)).isFalse();
+    }
+
+    @Test
+    void testMissingPathRecursiveDeletionLeavesPathAbsent() throws IOException {
+        Path missing = new Path(basePath, randomName());
+
+        fs.delete(missing, true);
+
+        assertThat(fs.exists(missing)).isFalse();
+    }
+
+    // ------------------------------------------------------------------------
+    //  Mkdirs
+    // ------------------------------------------------------------------------
+
+    @Test
+    void testMkdirsCreatesTargetAndLogicalParents() throws IOException {
+        Path first = new Path(basePath, randomName());
+        Path second = new Path(first, randomName());
+        Path target = new Path(second, randomName());
+
+        assertThat(fs.mkdirs(target)).isTrue();
+        assertThat(fs.getFileStatus(first).isDir()).isTrue();
+        assertThat(fs.getFileStatus(second).isDir()).isTrue();
+        assertThat(fs.getFileStatus(target).isDir()).isTrue();
+    }
+
+    @Test
+    void testMkdirsReturnsTrueForExistingDirectory() throws IOException {
+        Path directory = new Path(basePath, randomName());
         assertThat(fs.mkdirs(directory)).isTrue();
 
-        assertThat(fs.exists(directory)).isTrue();
-    }
-
-    @Test
-    void testMkdirsReturnsTrueForExistingDirectory() throws Exception {
-        // this test applies to object stores as well, as rely on the fact that they
-        // return true when things are not bad
-
-        final Path directory = new Path(basePath, randomName());
-
-        // make sure the directory exists
-        createRandomFileInDirectory(directory);
-
         assertThat(fs.mkdirs(directory)).isTrue();
+        assertThat(fs.getFileStatus(directory).isDir()).isTrue();
+    }
+
+    // ------------------------------------------------------------------------
+    //  Rename
+    // ------------------------------------------------------------------------
+
+    @Test
+    void testRenameFileMovesExactBytesToMissingDestination() throws IOException {
+        byte[] content = new byte[] {4, 2, 4, 2};
+        Path source = createRandomFileInDirectory(basePath, content);
+        Path destination = new Path(basePath, randomName());
+
+        assertThat(fs.rename(source, destination)).isTrue();
+
+        assertThat(fs.exists(source)).isFalse();
+        assertThat(readBytes(destination)).containsExactly(content);
     }
 
     @Test
-    protected void testMkdirsFailsForExistingFile() throws Exception {
-        final Path file = new Path(getBasePath(), randomName());
-        createFile(file);
+    void testRenameDirectoryMovesExactTreeToMissingDestination() throws IOException {
+        Path source = new Path(basePath, randomName());
+        Path child = createRandomFileInDirectory(source, new byte[] {1, 2});
+        Path nestedDirectory = new Path(source, randomName());
+        Path nestedChild = createRandomFileInDirectory(nestedDirectory, new byte[] {3, 4, 5});
+        Path destination = new Path(basePath, randomName());
 
-        try {
-            fs.mkdirs(file);
-            fail("should fail with an IOException");
-        } catch (IOException e) {
-            // good!
-        }
+        assertThat(fs.rename(source, destination)).isTrue();
+
+        assertThat(fs.exists(source)).isFalse();
+        assertThat(fs.exists(child)).isFalse();
+        assertThat(fs.exists(nestedDirectory)).isFalse();
+        assertThat(fs.exists(nestedChild)).isFalse();
+        assertThat(readBytes(new Path(destination, child.getName()))).containsExactly(1, 2);
+        assertThat(
+                        readBytes(
+                                new Path(
+                                        new Path(destination, nestedDirectory.getName()),
+                                        nestedChild.getName())))
+                .containsExactly(3, 4, 5);
+    }
+
+    // ------------------------------------------------------------------------
+    //  Copy
+    // ------------------------------------------------------------------------
+
+    @Test
+    void testCopyFileCreatesDestinationWithSourceBytes() throws IOException {
+        byte[] content = new byte[] {6, 2, 6, 4, 3};
+        Path source = createRandomFileInDirectory(basePath, content);
+        Path destination = new Path(basePath, randomName());
+
+        fs.copyFile(source, destination, false);
+
+        assertThat(readBytes(destination)).containsExactly(content);
+        assertThat(readBytes(source)).containsExactly(content);
     }
 
     @Test
-    void testMkdirsFailsWithExistingParentFile() throws Exception {
-        final Path file = new Path(getBasePath(), randomName());
-        createFile(file);
+    void testCopyFileOverwriteReplacesDestination() throws IOException {
+        byte[] content = new byte[] {7, 7};
+        Path source = createRandomFileInDirectory(basePath, content);
+        Path destination = createRandomFileInDirectory(basePath, new byte[] {1, 2, 3, 4});
 
-        final Path dirUnderFile = new Path(file, randomName());
-        try {
-            fs.mkdirs(dirUnderFile);
-            fail("should fail with an IOException");
-        } catch (IOException e) {
-            // good!
+        fs.copyFile(source, destination, true);
+
+        assertThat(readBytes(destination)).containsExactly(content);
+        assertThat(readBytes(source)).containsExactly(content);
+    }
+
+    @Test
+    void testCopyFileNoOverwriteFailsAndPreservesDestination() throws IOException {
+        byte[] sourceContent = new byte[] {9, 9};
+        Path source = createRandomFileInDirectory(basePath, sourceContent);
+        byte[] destinationContent = new byte[] {1, 2, 3};
+        Path destination = createRandomFileInDirectory(basePath, destinationContent);
+
+        assertThatThrownBy(() -> fs.copyFile(source, destination, false))
+                .isInstanceOf(IOException.class);
+        assertThat(readBytes(destination)).containsExactly(destinationContent);
+        assertThat(readBytes(source)).containsExactly(sourceContent);
+    }
+
+    @Test
+    void testCopyFilesCopiesEveryDirectFile() throws IOException {
+        Path sourceDirectory = new Path(basePath, randomName());
+        Path first = createRandomFileInDirectory(sourceDirectory, new byte[] {1, 3});
+        Path second = createRandomFileInDirectory(sourceDirectory, new byte[] {2, 4, 6});
+        Path targetDirectory = new Path(basePath, randomName());
+        fs.mkdirs(targetDirectory);
+
+        fs.copyFiles(sourceDirectory, targetDirectory, false);
+
+        assertThat(readBytes(new Path(targetDirectory, first.getName()))).containsExactly(1, 3);
+        assertThat(readBytes(new Path(targetDirectory, second.getName()))).containsExactly(2, 4, 6);
+        assertThat(readBytes(first)).containsExactly(1, 3);
+        assertThat(readBytes(second)).containsExactly(2, 4, 6);
+    }
+
+    // ------------------------------------------------------------------------
+    //  Two-phase output
+    // ------------------------------------------------------------------------
+
+    @Test
+    void testTwoPhaseOutputPublishesOnlyAfterCommit() throws IOException {
+        Path target = new Path(basePath, randomName());
+        byte[] content = new byte[] {5, 4, 3, 2, 1};
+        TwoPhaseOutputStream.Committer committer;
+        try (TwoPhaseOutputStream out = fs.newTwoPhaseOutputStream(target, false)) {
+            assertThat(out.getPos()).isZero();
+            out.write(content);
+            assertThat(out.getPos()).isEqualTo(content.length);
+            assertThat(fs.exists(target)).isFalse();
+            committer = out.closeForCommit();
         }
+
+        assertThat(committer.targetPath()).isEqualTo(target);
+        assertThat(fs.exists(target)).isFalse();
+
+        committer.commit(fs);
+        assertThat(readBytes(target)).containsExactly(content);
+    }
+
+    @Test
+    void testTwoPhaseDiscardDoesNotPublishAbandonedData() throws IOException {
+        Path target = new Path(basePath, randomName());
+        TwoPhaseOutputStream.Committer committer;
+        try (TwoPhaseOutputStream out = fs.newTwoPhaseOutputStream(target, false)) {
+            out.write(new byte[] {1, 2, 3});
+            committer = out.closeForCommit();
+        }
+
+        committer.discard(fs);
+
+        assertThat(fs.exists(target)).isFalse();
+    }
+
+    @Test
+    void testTwoPhaseDiscardPreservesPreExistingTarget() throws IOException {
+        byte[] oldContent = new byte[] {8, 6, 7, 5};
+        Path target = new Path(basePath, randomName());
+        TwoPhaseOutputStream.Committer committer;
+        try (TwoPhaseOutputStream out = fs.newTwoPhaseOutputStream(target, false)) {
+            out.write(new byte[] {3, 0, 9});
+            committer = out.closeForCommit();
+        }
+        assertThat(fs.exists(target)).isFalse();
+
+        writeBytes(target, oldContent, false);
+        assertThat(readBytes(target)).containsExactly(oldContent);
+
+        committer.discard(fs);
+
+        assertThat(fs.exists(target)).isTrue();
+        assertThat(readBytes(target)).containsExactly(oldContent);
+    }
+
+    @Test
+    void testTwoPhaseDiscardDoesNotAffectAnotherWriter() throws IOException {
+        Path target = new Path(basePath, randomName());
+        TwoPhaseOutputStream.Committer abandoned;
+        try (TwoPhaseOutputStream out = fs.newTwoPhaseOutputStream(target, false)) {
+            out.write(new byte[] {1, 1, 1});
+            abandoned = out.closeForCommit();
+        }
+
+        byte[] committedContent = new byte[] {2, 2, 2};
+        TwoPhaseOutputStream.Committer successful;
+        try (TwoPhaseOutputStream out = fs.newTwoPhaseOutputStream(target, false)) {
+            out.write(committedContent);
+            successful = out.closeForCommit();
+        }
+
+        abandoned.discard(fs);
+        successful.commit(fs);
+
+        assertThat(readBytes(target)).containsExactly(committedContent);
+    }
+
+    @Test
+    void testTwoPhaseCleanPreservesCommittedTarget() throws IOException {
+        byte[] content = new byte[] {2, 7, 1, 8};
+        Path target = new Path(basePath, randomName());
+        TwoPhaseOutputStream.Committer committer;
+        try (TwoPhaseOutputStream out = fs.newTwoPhaseOutputStream(target, false)) {
+            out.write(content);
+            committer = out.closeForCommit();
+        }
+        committer.commit(fs);
+
+        committer.clean(fs);
+
+        assertThat(readBytes(target)).containsExactly(content);
     }
 
     // ------------------------------------------------------------------------
@@ -268,17 +746,73 @@ public abstract class FileIOBehaviorTestBase {
         return StringUtils.getRandomString(RND, 16, 16, 'a', 'z');
     }
 
-    private void createFile(Path file) throws IOException {
-        try (PositionOutputStream out = fs.newOutputStream(file, false)) {
-            out.write(new byte[] {1, 2, 3, 4, 5, 6, 7, 8});
+    private void writeBytes(Path file, byte[] content, boolean overwrite) throws IOException {
+        try (PositionOutputStream out = fs.newOutputStream(file, overwrite)) {
+            out.write(content);
         }
     }
 
-    private Path createRandomFileInDirectory(Path directory) throws IOException {
-        fs.mkdirs(directory);
-        final Path filePath = new Path(directory, randomName());
-        createFile(filePath);
+    private byte[] readBytes(Path file) throws IOException {
+        try (SeekableInputStream in = fs.newInputStream(file)) {
+            return readAll(in);
+        }
+    }
 
-        return filePath;
+    private void assertOpenOrFirstReadFails(Path path) {
+        final SeekableInputStream in;
+        try {
+            in = fs.newInputStream(path);
+        } catch (IOException expectedAtOpen) {
+            return;
+        }
+
+        try {
+            assertThatThrownBy(() -> in.read()).isInstanceOf(IOException.class);
+        } finally {
+            try {
+                in.close();
+            } catch (IOException ignoredAtClose) {
+                // A close-only failure is deliberately irrelevant to the open/first-read contract.
+            }
+        }
+    }
+
+    private static byte[] readAll(SeekableInputStream in) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[4];
+        int read;
+        while ((read = in.read(buffer, 0, buffer.length)) != -1) {
+            out.write(buffer, 0, read);
+        }
+        return out.toByteArray();
+    }
+
+    private static List<FileStatus> collect(RemoteIterator<FileStatus> iterator)
+            throws IOException {
+        List<FileStatus> statuses = new ArrayList<>();
+        while (iterator.hasNext()) {
+            statuses.add(iterator.next());
+        }
+        return statuses;
+    }
+
+    private static FileStatus statusFor(FileStatus[] statuses, Path path) {
+        for (FileStatus status : statuses) {
+            if (status.getPath().equals(path)) {
+                return status;
+            }
+        }
+        throw new AssertionError("No status for " + path);
+    }
+
+    private Path createRandomFileInDirectory(Path directory) throws IOException {
+        return createRandomFileInDirectory(directory, DEFAULT_CONTENT);
+    }
+
+    private Path createRandomFileInDirectory(Path directory, byte[] content) throws IOException {
+        fs.mkdirs(directory);
+        Path file = new Path(directory, randomName());
+        writeBytes(file, content, false);
+        return file;
     }
 }

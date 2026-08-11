@@ -24,7 +24,7 @@ import java.io.IOException;
 import java.io.InputStream;
 
 /**
- * {@code SeekableInputStream} provides seek methods.
+ * An input stream with a queryable byte position and seek support.
  *
  * @since 0.4.0
  */
@@ -32,11 +32,12 @@ import java.io.InputStream;
 public abstract class SeekableInputStream extends InputStream {
 
     /**
-     * Seek to the given offset from the start of the file. The next read() will be from that
-     * location. Can't seek past the end of the stream.
+     * Seeks to an offset from the start of the file. After a successful return, {@link #getPos()}
+     * reports that offset and the next read begins there. Behavior for negative offsets or offsets
+     * past the end of the file is implementation-specific.
      *
      * @param desired the desired offset
-     * @throws IOException Thrown if an error occurred while seeking inside the input stream.
+     * @throws IOException if seeking fails
      */
     public abstract void seek(long desired) throws IOException;
 
@@ -50,9 +51,9 @@ public abstract class SeekableInputStream extends InputStream {
     public abstract long getPos() throws IOException;
 
     /**
-     * Reads up to <code>len</code> bytes of data from the input stream into an array of bytes. An
-     * attempt is made to read as many as <code>len</code> bytes, but a smaller number may be read.
-     * The number of bytes actually read is returned as an integer.
+     * Reads up to {@code len} bytes into the array.
+     *
+     * @return the number of bytes read, or {@code -1} at the end of the file
      */
     public abstract int read(byte[] b, int off, int len) throws IOException;
 

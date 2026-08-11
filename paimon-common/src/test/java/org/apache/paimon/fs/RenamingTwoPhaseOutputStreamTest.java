@@ -129,21 +129,26 @@ public class RenamingTwoPhaseOutputStreamTest {
     }
 
     @Test
-    void testDiscard() throws IOException {
+    void testDiscardRemovesOnlyItsStagedFile() throws IOException {
         RenamingTwoPhaseOutputStream stream =
                 new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
-
-        // Write some data
-        stream.write("Some data".getBytes());
-
-        // Close for commit
+        stream.write("abandoned".getBytes());
         TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
 
-        // Discard instead of commit
+        Path stagingDir = new Path(targetPath.getParent(), "_temporary");
+        FileStatus[] stagedFiles = fileIO.listStatus(stagingDir);
+        assertThat(stagedFiles).hasSize(1);
+        Path stagedPath = stagedFiles[0].getPath();
+
+        Path otherWriterPending = new Path(stagingDir, "attempt_0001_m_000010_15/part-00010");
+        fileIO.writeFile(otherWriterPending, "concurrent", false);
+        fileIO.writeFile(targetPath, "published", false);
+
         committer.discard(fileIO);
 
-        // Target file should not exist
-        assertThat(fileIO.exists(targetPath)).isFalse();
+        assertThat(fileIO.exists(stagedPath)).isFalse();
+        assertThat(fileIO.exists(otherWriterPending)).isTrue();
+        assertThat(fileIO.readFileUtf8(targetPath)).isEqualTo("published");
     }
 
     @Test

@@ -21,48 +21,58 @@ package org.apache.paimon.fs;
 import java.io.IOException;
 import java.io.Serializable;
 
-/** TwoPhaseOutputStream provides a way to write to a file and get a committer that can commit. */
+/**
+ * An output stream that stages data and produces a committer to publish it.
+ *
+ * <p>Staged data is not published at the target before commit is invoked. A successful commit makes
+ * the complete data visible but does not imply atomic replacement. If commit fails, the target
+ * state is unspecified.
+ */
 public abstract class TwoPhaseOutputStream extends PositionOutputStream {
+
     /**
-     * Closes the stream for writing and returns a committer that can be used to make the written
-     * data visible.
+     * Closes the stream for writing and returns a committer for the staged data.
      *
-     * <p>After calling this method, the stream should not be used for writing anymore. The returned
-     * committer can be used to commit the data or discard it.
+     * <p>After this call, the stream must not be used for writing. The staged data remains
+     * unpublished until {@link Committer#commit(FileIO)} is invoked.
      *
-     * @return A committer that can be used to commit the data
+     * @return a committer that can publish or discard the staged data
      * @throws IOException if an I/O error occurs during closing
      */
     public abstract Committer closeForCommit() throws IOException;
 
-    /** A committer interface that can commit or discard the written data. */
+    /** A serializable handle that can publish or discard one stream's staged data. */
     public interface Committer extends Serializable {
 
         /**
-         * Commits the written data, making it visible.
+         * Publishes the complete staged data at {@link #targetPath()}.
+         *
+         * <p>A successful return makes the complete data visible but does not guarantee atomic
+         * replacement. If this method throws, the target state is unspecified.
          *
          * @throws IOException if an I/O error occurs during commit
          */
         void commit(FileIO fileIO) throws IOException;
 
         /**
-         * Discards the written data, cleaning up any temporary files or resources. Called instead
-         * of {@link #commit} when the write is given up.
+         * Discards this write's staged data instead of publishing it.
+         *
+         * <p>Only resources created by this write may be removed. In particular, discard must not
+         * remove target content or resources created by another writer.
          *
          * @throws IOException if an I/O error occurs during discard
          */
         void discard(FileIO fileIO) throws IOException;
 
+        /** Returns the path where a successful commit publishes the staged data. */
         Path targetPath();
 
         /**
-         * Releases what this committer staged and no longer needs, after {@link #commit} has
-         * succeeded. May do nothing.
+         * Releases staging resources that this write no longer needs after {@link #commit}
+         * succeeds.
          *
-         * <p>Only resources this committer created itself. A staging directory is shared with every
-         * other writer of the same location, Paimon or not, and removing it is theirs to decide:
-         * finding it empty does not mean it is unused, because a writer that has just created it
-         * has not staged its file in it yet.
+         * <p>This method may do nothing. It may remove only resources created by this write and
+         * must not remove the committed target or resources owned by another writer.
          *
          * @throws IOException if an I/O error occurs during cleaning
          */

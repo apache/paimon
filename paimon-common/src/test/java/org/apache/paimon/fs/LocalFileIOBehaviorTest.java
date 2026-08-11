@@ -20,7 +20,14 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.attribute.FileTime;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link LocalFileIO}. */
 public class LocalFileIOBehaviorTest extends FileIOBehaviorTestBase {
@@ -35,5 +42,28 @@ public class LocalFileIOBehaviorTest extends FileIOBehaviorTestBase {
     @Override
     protected Path getBasePath() {
         return new Path(tmp.toUri());
+    }
+
+    @Test
+    void testIsObjectStoreReturnsFalse() {
+        assertThat(getFileSystem().isObjectStore()).isFalse();
+    }
+
+    @Test
+    void testFileStatusSnapshotsModificationTime() throws IOException {
+        java.nio.file.Path file = Files.createFile(tmp.resolve("snapshot"));
+        FileTime firstTimestamp = FileTime.fromMillis(1_000_000L);
+        FileTime secondTimestamp = FileTime.fromMillis(2_000_000L);
+        Files.setLastModifiedTime(file, firstTimestamp);
+
+        FileIO fileIO = getFileSystem();
+        Path path = new Path(file.toUri());
+        FileStatus snapshot = fileIO.getFileStatus(path);
+
+        Files.setLastModifiedTime(file, secondTimestamp);
+
+        assertThat(snapshot.getModificationTime()).isEqualTo(firstTimestamp.toMillis());
+        assertThat(fileIO.getFileStatus(path).getModificationTime())
+                .isEqualTo(secondTimestamp.toMillis());
     }
 }

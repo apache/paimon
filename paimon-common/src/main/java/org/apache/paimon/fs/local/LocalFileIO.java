@@ -243,11 +243,12 @@ public class LocalFileIO implements FileIO {
     @Override
     public void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
         LOG.debug("Invoking copyFile for {} to {}", sourcePath, targetPath);
-        if (!overwrite && exists(targetPath)) {
-            return;
-        }
         toPath(targetPath.getParent()).toFile().mkdirs();
-        Files.copy(toPath(sourcePath), toPath(targetPath), StandardCopyOption.REPLACE_EXISTING);
+        if (overwrite) {
+            Files.copy(toPath(sourcePath), toPath(targetPath), StandardCopyOption.REPLACE_EXISTING);
+        } else {
+            Files.copy(toPath(sourcePath), toPath(targetPath));
+        }
     }
 
     private java.nio.file.Path toPath(Path path) {
@@ -362,14 +363,16 @@ public class LocalFileIO implements FileIO {
 
     private static class LocalFileStatus implements FileStatus {
 
-        private final File file;
+        private final Path path;
+        private final boolean directory;
         private final long length;
-        private final String scheme;
+        private final long modificationTime;
 
         private LocalFileStatus(File file, String scheme) {
-            this.file = file;
+            this.path = new Path(scheme + ":" + file.toURI().getPath());
+            this.directory = file.isDirectory();
             this.length = file.length();
-            this.scheme = scheme;
+            this.modificationTime = file.lastModified();
         }
 
         @Override
@@ -379,22 +382,22 @@ public class LocalFileIO implements FileIO {
 
         @Override
         public boolean isDir() {
-            return file.isDirectory();
+            return directory;
         }
 
         @Override
         public Path getPath() {
-            return new Path(scheme + ":" + file.toURI().getPath());
+            return path;
         }
 
         @Override
         public long getModificationTime() {
-            return file.lastModified();
+            return modificationTime;
         }
 
         @Override
         public String toString() {
-            return "{" + "file=" + file + ", length=" + length + ", scheme='" + scheme + '\'' + '}';
+            return "{" + "path=" + path + ", directory=" + directory + ", length=" + length + '}';
         }
     }
 }
