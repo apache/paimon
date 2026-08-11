@@ -20,8 +20,9 @@ import unittest
 import requests
 from requests.exceptions import ConnectionError, ConnectTimeout, Timeout
 from urllib3.exceptions import NewConnectionError, MaxRetryError
+from urllib3.util.retry import RequestHistory
 
-from pypaimon.api.client import ExponentialRetry
+from pypaimon.api.client import ExponentialRetry, JavaStyleBackoffRetry
 
 
 class TestExponentialRetryStrategy(unittest.TestCase):
@@ -30,14 +31,47 @@ class TestExponentialRetryStrategy(unittest.TestCase):
         retry = ExponentialRetry._ExponentialRetry__create_retry_strategy(5)
 
         self.assertEqual(retry.total, 5)
-        self.assertEqual(retry.read, 5)
+        # Read errors / timeouts are not retried: the request has likely
+        # reached the server and its signature nonce is already consumed,
+        # so a retry with the same signed headers would be rejected with
+        # "Specified signature nonce was used already".
+        self.assertEqual(retry.read, 0)
         # Connect failures are intentionally non-retriable — see the
         # comment on ``ExponentialRetry.__create_retry_strategy``.
         self.assertEqual(retry.connect, 0)
+        self.assertEqual(retry.status, 5)
 
+        # Aligned with the Java client: only 429 / 503 are retried.
         self.assertIn(429, retry.status_forcelist)  # Too Many Requests
         self.assertIn(503, retry.status_forcelist)  # Service Unavailable
         self.assertNotIn(404, retry.status_forcelist)
+        self.assertNotIn(502, retry.status_forcelist)
+        self.assertNotIn(504, retry.status_forcelist)
+
+        self.assertIsInstance(retry, JavaStyleBackoffRetry)
+
+    def test_backoff_schedule_matches_java(self):
+        # Java ExponentialHttpRequestRetryStrategy sleeps
+        # 1000 * min(2^(execCount-1), 64) ms plus up to 10% jitter
+        # after each failed attempt.
+        base = ExponentialRetry._ExponentialRetry__create_retry_strategy(5)
+
+        def backoff_after(failures):
+            history = tuple(
+                RequestHistory("GET", "http://host", None, 503, None)
+                for _ in range(failures))
+            return base.new(history=history).get_backoff_time()
+
+        expected = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 64.0]
+        for failures, base_delay in enumerate(expected, start=1):
+            value = backoff_after(failures)
+            self.assertGreaterEqual(
+                value, base_delay,
+                "backoff after {} failure(s) must be >= {}s".format(failures, base_delay))
+            self.assertLessEqual(
+                value, base_delay * 1.1 + 1e-9,
+                "backoff after {} failure(s) must be <= {}s + 10% jitter".format(
+                    failures, base_delay))
 
     def test_retry_on_connect_error(self):
         # ``connect=0`` means connect errors are not retried — the
