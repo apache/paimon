@@ -1242,7 +1242,7 @@ All available procedures are listed below.
          CALL [catalog.]sys.copy_files(warehouse => 'sourceWarehouse', database => 'sourceDatabase', `table` => 'sourceTable', catalog_conf => 'key=value', target_warehouse => 'targetWarehouse', target_database => 'targetDatabase', target_table => 'targetTable', target_catalog_conf => 'key=value', parallelism => parallelism)
       </td>
       <td>
-         Copy files from a source table to a target table. Arguments:
+         Deprecated. This procedure is supported only by <code>FileSystemCatalog</code> and does not commit a standard catalog snapshot. Do not use it for normal table-copy workflows; use <code>clone</code> instead. It copies files from a source table to a target table. Arguments:
             <li>warehouse, database, table and catalog_conf: optional source catalog configuration.</li>
             <li>target_warehouse: the target warehouse. Cannot be empty.</li>
             <li>target_database, target_table and target_catalog_conf: optional target table and catalog configuration.</li>
