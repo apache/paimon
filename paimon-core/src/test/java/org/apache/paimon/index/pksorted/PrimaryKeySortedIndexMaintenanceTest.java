@@ -43,6 +43,7 @@ import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreCommit;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -324,7 +325,7 @@ class PrimaryKeySortedIndexMaintenanceTest {
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "itemId");
         options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "comment");
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         TableSchema schema =
                 schemaManager.createTable(
                         new Schema(
@@ -367,7 +368,7 @@ class PrimaryKeySortedIndexMaintenanceTest {
         fields.add(new DataField(7, "embedding", DataTypes.VECTOR(2, DataTypes.FLOAT())));
         RowType rowType = new RowType(fields);
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         TableSchema schema =
                 schemaManager.createTable(
                         new Schema(

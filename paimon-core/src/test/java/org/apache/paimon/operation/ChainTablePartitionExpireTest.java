@@ -30,6 +30,7 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.partition.PartitionUpdateTimeExpireStrategy;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -642,7 +643,7 @@ public class ChainTablePartitionExpireTest {
 
     private void createChainTable(Path tablePath, boolean withGroupPartition) throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
 
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "1");
@@ -700,8 +701,8 @@ public class ChainTablePartitionExpireTest {
             chainTableOptions.add(SchemaChange.setOption("chain-table.chain-partition-keys", "dt"));
         }
         schemaManager.commitChanges(chainTableOptions);
-        new SchemaManager(fileIO, tablePath, "snapshot").commitChanges(chainTableOptions);
-        new SchemaManager(fileIO, tablePath, "delta").commitChanges(chainTableOptions);
+        new FileSystemSchemaManager(fileIO, tablePath, "snapshot").commitChanges(chainTableOptions);
+        new FileSystemSchemaManager(fileIO, tablePath, "delta").commitChanges(chainTableOptions);
     }
 
     private FileStoreTable loadTable(Path tablePath) {
@@ -709,7 +710,8 @@ public class ChainTablePartitionExpireTest {
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
         String branchName = CoreOptions.branch(options.toMap());
-        TableSchema tableSchema = new SchemaManager(fileIO, tablePath, branchName).latest().get();
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath, branchName).latest().get();
         return FileStoreTableFactory.create(
                 fileIO, tablePath, tableSchema, CatalogEnvironment.empty());
     }

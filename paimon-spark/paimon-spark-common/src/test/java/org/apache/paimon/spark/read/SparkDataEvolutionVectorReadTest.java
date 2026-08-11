@@ -36,8 +36,8 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -191,7 +191,8 @@ public class SparkDataEvolutionVectorReadTest {
                         .options(options.toMap())
                         .build();
         TableSchema tableSchema =
-                SchemaUtils.forceCommit(new SchemaManager(LocalFileIO.create(), tablePath), schema);
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath), schema);
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 

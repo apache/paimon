@@ -61,8 +61,8 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
@@ -636,7 +636,7 @@ public class JavaPyE2ETest {
         options.set(GLOBAL_INDEX_ENABLED, true);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -697,7 +697,7 @@ public class JavaPyE2ETest {
         options.set(GLOBAL_INDEX_ENABLED, true);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -795,7 +795,7 @@ public class JavaPyE2ETest {
         options.set(GLOBAL_INDEX_ENABLED, true);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -864,7 +864,7 @@ public class JavaPyE2ETest {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -931,7 +931,7 @@ public class JavaPyE2ETest {
         options.set(BTREE_INDEX_COMPRESSION, "zstd");
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -997,7 +997,7 @@ public class JavaPyE2ETest {
         options.set(GLOBAL_INDEX_ENABLED, true);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -1239,7 +1239,7 @@ public class JavaPyE2ETest {
         configure.accept(options);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),

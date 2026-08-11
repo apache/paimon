@@ -40,9 +40,9 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.postpone.PostponeBucketWriter;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.SpecialFields;
@@ -505,7 +505,7 @@ class PrimaryKeyManagedBlobStoreTest {
         options.put(CoreOptions.BLOB_FIELD.key(), payloadName);
         options.put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
         TableSchema schema =
-                new SchemaManager(fileIO, tablePath)
+                new FileSystemSchemaManager(fileIO, tablePath)
                         .createTable(
                                 new Schema(
                                         valueFields,

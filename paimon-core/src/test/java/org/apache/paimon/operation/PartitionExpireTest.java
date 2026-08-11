@@ -31,6 +31,7 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.partition.actions.AddDonePartitionAction;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -107,7 +108,8 @@ public class PartitionExpireTest {
         options.set(PATH, path.toString());
         Path tablePath = CoreOptions.path(options);
         String branchName = CoreOptions.branch(options.toMap());
-        TableSchema tableSchema = new SchemaManager(fileIO, tablePath, branchName).latest().get();
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath, branchName).latest().get();
         createdPartitions = new HashSet<>();
         deletedPartitions = new ArrayList<>();
         PartitionModification partitionModification =
@@ -158,7 +160,7 @@ public class PartitionExpireTest {
 
     @Test
     public void testNonPartitionedTable() {
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         assertThatCode(
                         () ->
                                 schemaManager.createTable(
@@ -174,7 +176,7 @@ public class PartitionExpireTest {
 
     @Test
     public void testIllegalPartition() throws Exception {
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         schemaManager.createTable(
                 new Schema(
                         RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
@@ -197,7 +199,7 @@ public class PartitionExpireTest {
 
     @Test
     public void testBatchExpire() throws Exception {
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         schemaManager.createTable(
                 new Schema(
                         RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
@@ -228,7 +230,7 @@ public class PartitionExpireTest {
 
     @Test
     public void testExpireWithNullOrEmptyPartition() throws Exception {
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         schemaManager.createTable(
                 new Schema(
                         RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
@@ -256,7 +258,7 @@ public class PartitionExpireTest {
 
     @Test
     public void test() throws Exception {
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         schemaManager.createTable(
                 new Schema(
                         RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
@@ -299,7 +301,7 @@ public class PartitionExpireTest {
 
     @Test
     public void testDonePartitionExpire() throws Exception {
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         schemaManager.createTable(
                 new Schema(
                         RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
@@ -334,7 +336,7 @@ public class PartitionExpireTest {
 
     @Test
     public void testFilterCommittedAfterExpiring() throws Exception {
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         schemaManager.createTable(
                 new Schema(
                         RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
@@ -409,7 +411,7 @@ public class PartitionExpireTest {
 
     @Test
     public void testDeleteExpiredPartition() throws Exception {
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         schemaManager.createTable(
                 new Schema(
                         RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),

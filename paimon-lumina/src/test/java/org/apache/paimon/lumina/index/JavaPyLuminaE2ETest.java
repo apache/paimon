@@ -32,8 +32,8 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
@@ -132,7 +132,7 @@ public class JavaPyLuminaE2ETest {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -239,7 +239,7 @@ public class JavaPyLuminaE2ETest {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),

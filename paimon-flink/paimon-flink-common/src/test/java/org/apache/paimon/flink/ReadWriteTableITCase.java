@@ -23,6 +23,7 @@ import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -1468,7 +1469,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // validate schema options
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(warehouse, "default.db/T"));
+                new FileSystemSchemaManager(
+                        LocalFileIO.create(), new Path(warehouse, "default.db/T"));
         TableSchema schema = schemaManager.latest().get();
         Map<String, String> expected = new HashMap<>();
         // metadata column
@@ -1530,7 +1532,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         .build();
 
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(warehouse, "default.db/T"));
+                new FileSystemSchemaManager(
+                        LocalFileIO.create(), new Path(warehouse, "default.db/T"));
         schemaManager.createTable(schema);
 
         validateSchemaOptionResult();
@@ -1920,7 +1923,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         Path path = CoreOptions.path(context.getCatalogTable().getOptions());
         LocalFileIO.create().mkdirs(path);
         // update schema
-        new SchemaManager(LocalFileIO.create(), path)
+        new FileSystemSchemaManager(LocalFileIO.create(), path)
                 .createTable(FlinkCatalog.fromCatalogTable(context.getCatalogTable()));
 
         DynamicTableSink tableSink =

@@ -23,8 +23,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Or;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
@@ -53,7 +53,8 @@ public class FlinkTableSourceTest extends TableTestBase {
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
         Schema schema = Schema.newBuilder().column("col1", DataTypes.INT()).build();
-        TableSchema tableSchema = new SchemaManager(fileIO, tablePath).createTable(schema);
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
         Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
         DataTableSource tableSource =
                 new DataTableSource(
@@ -77,7 +78,8 @@ public class FlinkTableSourceTest extends TableTestBase {
                         .column("p2", DataTypes.STRING())
                         .partitionKeys("p1", "p2")
                         .build();
-        TableSchema tableSchema = new SchemaManager(fileIO, tablePath).createTable(schema);
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
         Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
         FlinkTableSource tableSource =
                 new DataTableSource(
@@ -231,7 +233,8 @@ public class FlinkTableSourceTest extends TableTestBase {
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
         Schema schema = Schema.newBuilder().column("contract_address", DataTypes.STRING()).build();
-        TableSchema tableSchema = new SchemaManager(fileIO, tablePath).createTable(schema);
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 

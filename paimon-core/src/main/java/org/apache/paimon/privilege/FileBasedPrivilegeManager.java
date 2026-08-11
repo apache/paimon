@@ -28,6 +28,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -386,7 +387,7 @@ public class FileBasedPrivilegeManager implements PrivilegeManager {
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.FILE_FORMAT, "avro");
         Path tableRoot = new Path(warehouse, USER_TABLE_DIR);
-        SchemaManager schemaManager = new SchemaManager(fileIO, tableRoot);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tableRoot);
         try {
             schemaManager.createTable(
                     new Schema(
@@ -404,7 +405,7 @@ public class FileBasedPrivilegeManager implements PrivilegeManager {
         Options options = new Options();
         options.set(CoreOptions.BUCKET, 1);
         Path tableRoot = new Path(warehouse, PRIVILEGE_TABLE_DIR);
-        SchemaManager schemaManager = new SchemaManager(fileIO, tableRoot);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tableRoot);
         try {
             schemaManager.createTable(
                     new Schema(

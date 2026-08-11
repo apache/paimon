@@ -38,6 +38,7 @@ import org.apache.paimon.jdbc.JdbcUtils.JdbcViewConflictKind;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -667,7 +668,7 @@ public class JdbcCatalog extends AbstractCatalog {
             }
 
             Path fromPath = getTableLocation(fromTable);
-            if (!new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
+            if (!new FileSystemSchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
                 // Rename the file system's table directory. Maintain consistency between tables in
                 // the file system and tables in the Hive Metastore.
                 Path toPath = getTableLocation(toTable);
@@ -974,7 +975,7 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     private SchemaManager getSchemaManager(Identifier identifier) {
-        return new SchemaManager(fileIO, getTableLocation(identifier));
+        return new FileSystemSchemaManager(fileIO, getTableLocation(identifier));
     }
 
     private Map<String, String> fetchProperties(String databaseName) {

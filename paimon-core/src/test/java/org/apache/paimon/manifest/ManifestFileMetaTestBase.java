@@ -28,7 +28,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -144,7 +144,7 @@ public abstract class ManifestFileMetaTestBase {
         Path path = new Path(pathStr);
         return new ManifestFile.Factory(
                         fileIO,
-                        new SchemaManager(fileIO, path),
+                        new FileSystemSchemaManager(fileIO, path),
                         getPartitionType(),
                         avro,
                         "zstd",

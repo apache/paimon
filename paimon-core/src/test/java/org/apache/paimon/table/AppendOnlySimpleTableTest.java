@@ -54,6 +54,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -1714,7 +1715,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         }
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
@@ -1732,7 +1733,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         configure.accept(conf);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.emptyList(),
@@ -1750,7 +1751,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         configure.accept(conf);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -1990,7 +1991,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         table.createBranch(BRANCH_NAME, "tag1");
 
         // Modify schema on main (add a column)
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("new_col", DataTypes.INT()));
 
         // Merge should fail due to schema mismatch
@@ -2015,7 +2016,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         table.createBranch(BRANCH_NAME, "tag1");
 
         SchemaManager branchSchemaManager =
-                new SchemaManager(table.fileIO(), table.location(), BRANCH_NAME);
+                new FileSystemSchemaManager(table.fileIO(), table.location(), BRANCH_NAME);
         branchSchemaManager.commitChanges(SchemaChange.addColumn("source_col", DataTypes.INT()));
         FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
         try (BatchTableWrite write =
@@ -2027,7 +2028,8 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         branchSchemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.dropColumn("source_col")));
 
-        SchemaManager mainSchemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager mainSchemaManager =
+                new FileSystemSchemaManager(table.fileIO(), table.location());
         mainSchemaManager.commitChanges(SchemaChange.addColumn("target_col", DataTypes.INT()));
         mainSchemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.dropColumn("target_col")));
@@ -2250,7 +2252,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
 
         // Directly write a new schema to the branch with row-tracking disabled
         SchemaManager branchSchemaManager =
-                new SchemaManager(table.fileIO(), table.location(), BRANCH_NAME);
+                new FileSystemSchemaManager(table.fileIO(), table.location(), BRANCH_NAME);
         TableSchema branchSchema = branchSchemaManager.latest().get();
         Map<String, String> newOptions = new HashMap<>(branchSchema.options());
         newOptions.remove("row-tracking.enabled");

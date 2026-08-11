@@ -40,6 +40,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.SimpleStats;
@@ -102,7 +103,8 @@ public class ExpireSnapshotsTest {
         store = createStore();
         snapshotManager = store.snapshotManager();
         changelogManager = store.changelogManager();
-        SchemaManager schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
+        SchemaManager schemaManager =
+                new FileSystemSchemaManager(fileIO, new Path(tempDir.toUri()));
         schemaManager.createTable(
                 new Schema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
