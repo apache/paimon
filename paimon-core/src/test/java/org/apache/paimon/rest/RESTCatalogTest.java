@@ -172,6 +172,7 @@ import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -2172,12 +2173,14 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testValidTokenWithIOCacheEnabled() throws Exception {
+    void testValidTokenWithIOCacheIgnoreVpcValidate() throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(IO_CACHE_ENABLED.key(), "true");
+        options.put(IO_CACHE_ENABLED.key(), "false");
+        options.put(IO_CACHE_IGNORE_VPC_VALIDATE.key(), "true");
         this.catalog = newRestCatalogWithDataToken(options);
         Identifier identifier =
-                Identifier.create("test_data_token", "table_for_testing_io_cache_enabled");
+                Identifier.create(
+                        "test_data_token", "table_for_testing_io_cache_ignore_vpc_validate");
         RESTToken expiredDataToken =
                 new RESTToken(
                         ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
@@ -2188,8 +2191,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
         RESTToken fileDataToken = fileIO.validToken();
 
-        // Verify IO_CACHE_ENABLED is merged into token
-        assertEquals("true", fileDataToken.token().get(IO_CACHE_ENABLED.key()));
+        assertEquals("true", fileDataToken.token().get(IO_CACHE_IGNORE_VPC_VALIDATE.key()));
+        assertThat(fileDataToken.token()).doesNotContainKey(IO_CACHE_ENABLED.key());
     }
 
     @Test

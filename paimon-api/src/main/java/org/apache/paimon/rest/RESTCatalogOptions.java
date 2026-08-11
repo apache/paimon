@@ -114,12 +114,40 @@ public class RESTCatalogOptions {
                                     + "'openapi' (the earlier ROA HMAC-SHA1 scheme). "
                                     + "If not set, will be automatically selected based on endpoint host.");
 
+    /** @deprecated Cache enablement is controlled by the policy vended by the REST server. */
+    @Deprecated
     public static final ConfigOption<Boolean> IO_CACHE_ENABLED =
             ConfigOptions.key("io-cache.enabled")
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "Enable cache for visiting files using file io (currently only JindoFileIO supports cache).");
+                            "Deprecated. Cache enablement is controlled by the policy vended by the REST server.");
+
+    public static final ConfigOption<Boolean> IO_CACHE_IGNORE_VPC_VALIDATE =
+            ConfigOptions.key("io-cache.ignore-vpc-validate")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to use the cache endpoint even when the REST server cannot validate VPC connectivity.");
+
+    public static final ConfigOption<Boolean> IO_CACHE_VPC_VALIDATED =
+            ConfigOptions.key("io-cache.vpc-validated")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether the REST server has validated connectivity from the source VPC to the cache endpoint.");
+
+    public static final ConfigOption<String> IO_CACHE_ENDPOINT =
+            ConfigOptions.key("io-cache.endpoint")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The cache endpoint vended by the REST server.");
+
+    public static final ConfigOption<String> IO_CACHE_ORIGIN_ENDPOINT =
+            ConfigOptions.key("io-cache.origin.endpoint")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The original OSS endpoint used when cache is bypassed.");
 
     public static final ConfigOption<String> IO_CACHE_WHITELIST_PATH =
             ConfigOptions.key("io-cache.whitelist-path")

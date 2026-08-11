@@ -21,6 +21,7 @@ package org.apache.paimon.jindo;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.SensitiveConfigUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import com.aliyun.jindodata.oss.auth.SimpleCredentialsProvider;
 import org.slf4j.Logger;
@@ -30,6 +31,9 @@ import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ORIGIN_ENDPOINT;
 
 /** Jindo {@link JindoHadoopOptions}. */
 public class JindoHadoopOptions implements Serializable {
@@ -51,6 +55,8 @@ public class JindoHadoopOptions implements Serializable {
     private static final String OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
+    private static final String OSS_ENDPOINT = "fs.oss.endpoint";
+    private static final String OSS_DIRECT_ENDPOINT = "fs.oss.direct.endpoint";
     private static final String OSS_SHOW_DIR_TIMESTAMP = "fs.oss.show-dir-timestamp";
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
@@ -137,13 +143,22 @@ public class JindoHadoopOptions implements Serializable {
 
     private void initDLFCacheBackend(CatalogContext context) {
         hadoopOptionsWithCache = new Options(hadoopOptions.toMap());
-        // DLF cache provide a fallback OSS endpoint for direct access to OSS without cache
-        if (context.options().get("fs.oss.direct.endpoint") != null) {
-            hadoopOptions.set("fs.oss.endpoint", context.options().get("fs.oss.direct.endpoint"));
+
+        String cacheEndpoint = context.options().get(IO_CACHE_ENDPOINT);
+        if (!StringUtils.isNullOrWhitespaceOnly(cacheEndpoint)) {
+            hadoopOptionsWithCache.set(OSS_ENDPOINT, cacheEndpoint);
+        }
+
+        String originEndpoint = context.options().get(IO_CACHE_ORIGIN_ENDPOINT);
+        if (StringUtils.isNullOrWhitespaceOnly(originEndpoint)) {
+            originEndpoint = context.options().get(OSS_DIRECT_ENDPOINT);
+        }
+        if (!StringUtils.isNullOrWhitespaceOnly(originEndpoint)) {
+            hadoopOptions.set(OSS_ENDPOINT, originEndpoint);
         }
         LOG.info(
                 "Using direct access to OSS endpoint: {}, cache endpoint: {}",
-                hadoopOptions.get("fs.oss.endpoint"),
-                hadoopOptionsWithCache.get("fs.oss.endpoint"));
+                hadoopOptions.get(OSS_ENDPOINT),
+                hadoopOptionsWithCache.get(OSS_ENDPOINT));
     }
 }

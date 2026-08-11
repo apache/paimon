@@ -28,7 +28,11 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Field;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ORIGIN_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -51,11 +55,31 @@ public class TestJindoCacheEnable {
             options.set(JINDO_CACHE_RPC_ADDRESS, "test-rpc-address:8080");
         } else {
             options.set("fs.oss.endpoint", "test-dlf-cache-endpoint");
-            options.set("fs.oss.direct.endpoint", "test-oss-endpoint");
+            options.set(IO_CACHE_ORIGIN_ENDPOINT, "test-oss-endpoint");
         }
         if (cacheWhitelist != null) {
             options.set(IO_CACHE_WHITELIST_PATH, cacheWhitelist);
         }
+        return CatalogContext.create(options);
+    }
+
+    private CatalogContext createDlfCacheContext(
+            String cachePolicy, Boolean vpcValidated, boolean ignoreVpcValidate) {
+        Options options = new Options();
+        if (cachePolicy != null) {
+            options.set(IO_CACHE_POLICY, cachePolicy);
+        }
+        options.set(
+                "fs.oss.endpoint",
+                Boolean.TRUE.equals(vpcValidated)
+                        ? "test-dlf-cache-endpoint"
+                        : "test-oss-endpoint");
+        options.set(IO_CACHE_ENDPOINT, "test-dlf-cache-endpoint");
+        options.set(IO_CACHE_ORIGIN_ENDPOINT, "test-oss-endpoint");
+        if (vpcValidated != null) {
+            options.set(IO_CACHE_VPC_VALIDATED, vpcValidated);
+        }
+        options.set(IO_CACHE_IGNORE_VPC_VALIDATE, ignoreVpcValidate);
         return CatalogContext.create(options);
     }
 
@@ -116,12 +140,12 @@ public class TestJindoCacheEnable {
     }
 
     @Test
-    public void testCacheDisabledWhenEnabledFalse() {
+    public void testDeprecatedCacheEnabledOptionIsIgnored() {
         CatalogContext context = createCatalogContext(false, "meta,read,write", true, null);
         JindoFileIO fileIO = new JindoFileIO();
         fileIO.configure(context);
 
-        verifyCacheFlags(fileIO, false, false, false);
+        verifyCacheFlags(fileIO, true, true, true);
     }
 
     @Test
@@ -134,12 +158,90 @@ public class TestJindoCacheEnable {
     }
 
     @Test
-    public void testDlfCacheEnabledWhenRpcAddressMissing() {
+    public void testOldBennettDlfCacheProtocolRemainsEnabled() {
         CatalogContext context = createCatalogContext(true, "meta,read,write", false, null);
         JindoFileIO fileIO = new JindoFileIO();
         fileIO.configure(context);
 
         verifyCacheFlags(fileIO, true, true, true);
+    }
+
+    @Test
+    public void testDlfCacheOriginEndpointCompatibility() {
+        Options options = new Options();
+        options.set(IO_CACHE_POLICY, "read");
+        options.set("fs.oss.endpoint", "test-dlf-cache-endpoint");
+        options.set("fs.oss.direct.endpoint", "test-legacy-oss-endpoint");
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(CatalogContext.create(options));
+
+        Path path = new Path("oss://test-bucket/database/table/bucket-0/file.orc");
+        assertThat(fileIO.hadoopOptions(path, "meta").get("fs.oss.endpoint"))
+                .isEqualTo("test-legacy-oss-endpoint");
+
+        options.set(IO_CACHE_ORIGIN_ENDPOINT, "test-oss-endpoint");
+        fileIO = new JindoFileIO();
+        fileIO.configure(CatalogContext.create(options));
+        assertThat(fileIO.hadoopOptions(path, "meta").get("fs.oss.endpoint"))
+                .isEqualTo("test-oss-endpoint");
+    }
+
+    @Test
+    public void testDlfCacheDisabledWhenVpcNotValidated() {
+        CatalogContext context = createDlfCacheContext("meta,read,write", false, false);
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(context);
+
+        verifyCacheFlags(fileIO, false, false, false);
+        Path path = new Path("oss://test-bucket/database/table/bucket-0/file.orc");
+        assertThat(fileIO.hadoopOptions(path, "read").get("fs.oss.endpoint"))
+                .isEqualTo("test-oss-endpoint");
+    }
+
+    @Test
+    public void testDlfCacheEnabledWhenIgnoringVpcValidation() {
+        CatalogContext context = createDlfCacheContext("read", false, true);
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(context);
+
+        verifyCacheFlags(fileIO, false, true, false);
+        Path path = new Path("oss://test-bucket/database/table/bucket-0/file.orc");
+        assertThat(fileIO.hadoopOptions(path, "read").get("fs.oss.endpoint"))
+                .isEqualTo("test-dlf-cache-endpoint");
+        assertThat(fileIO.hadoopOptions(path, "meta").get("fs.oss.endpoint"))
+                .isEqualTo("test-oss-endpoint");
+    }
+
+    @Test
+    public void testDlfCacheEnabledWhenVpcValidated() {
+        CatalogContext context = createDlfCacheContext("read", true, false);
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(context);
+
+        verifyCacheFlags(fileIO, false, true, false);
+        Path path = new Path("oss://test-bucket/database/table/bucket-0/file.orc");
+        assertThat(fileIO.hadoopOptions(path, "read").get("fs.oss.endpoint"))
+                .isEqualTo("test-dlf-cache-endpoint");
+        assertThat(fileIO.hadoopOptions(path, "meta").get("fs.oss.endpoint"))
+                .isEqualTo("test-oss-endpoint");
+    }
+
+    @Test
+    public void testDlfCacheNewProtocolDefaultsVpcValidationToFalse() {
+        CatalogContext context = createDlfCacheContext("meta,read,write", null, false);
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(context);
+
+        verifyCacheFlags(fileIO, false, false, false);
+    }
+
+    @Test
+    public void testIgnoreVpcValidationDoesNotOverrideDisabledPolicy() {
+        CatalogContext context = createDlfCacheContext("none", false, true);
+        JindoFileIO fileIO = new JindoFileIO();
+        fileIO.configure(context);
+
+        verifyCacheFlags(fileIO, false, false, false);
     }
 
     @Test

@@ -53,7 +53,7 @@ import java.util.concurrent.TimeUnit;
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link FileIO} to support getting token from REST Server. */
@@ -349,9 +349,10 @@ public class RESTTokenFileIO implements FileIO {
         if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
             newToken.put("fs.oss.endpoint", dlfOssEndpoint);
         }
-        if (catalogOptions.contains(IO_CACHE_ENABLED)) {
+        if (catalogOptions.contains(IO_CACHE_IGNORE_VPC_VALIDATE)) {
             newToken.put(
-                    IO_CACHE_ENABLED.key(), String.valueOf(catalogOptions.get(IO_CACHE_ENABLED)));
+                    IO_CACHE_IGNORE_VPC_VALIDATE.key(),
+                    String.valueOf(catalogOptions.get(IO_CACHE_IGNORE_VPC_VALIDATE)));
         }
         return ImmutableMap.copyOf(newToken);
     }

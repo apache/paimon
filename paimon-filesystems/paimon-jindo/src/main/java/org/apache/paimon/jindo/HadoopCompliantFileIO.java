@@ -26,6 +26,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -50,8 +51,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
 
 /**
@@ -95,22 +98,33 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
     @Override
     public void configure(CatalogContext context) {
+        metaCacheEnabled = false;
+        readCacheEnabled = false;
+        writeCacheEnabled = false;
+
         // Process file io cache configuration
-        if (!context.options().get(IO_CACHE_ENABLED)
-                || context.options().get(IO_CACHE_POLICY) == null
-                || context.options().get(IO_CACHE_POLICY).contains(DISABLE_CACHE_TAG)) {
+        Options options = context.options();
+        String cachePolicy = options.get(IO_CACHE_POLICY);
+        boolean useVpcValidationProtocol =
+                options.contains(IO_CACHE_ENDPOINT) || options.contains(IO_CACHE_VPC_VALIDATED);
+        boolean vpcValidated = !useVpcValidationProtocol || options.get(IO_CACHE_VPC_VALIDATED);
+        boolean ignoreVpcValidate = options.get(IO_CACHE_IGNORE_VPC_VALIDATE);
+        if (cachePolicy == null
+                || cachePolicy.contains(DISABLE_CACHE_TAG)
+                || (!vpcValidated && !ignoreVpcValidate)) {
             LOG.debug(
-                    "Cache is disabled with io-cache.enabled={}, io-cache.policy={}",
-                    context.options().get(IO_CACHE_ENABLED),
-                    context.options().get(IO_CACHE_POLICY));
+                    "Cache is disabled with io-cache.policy={}, io-cache.vpc-validated={}, io-cache.ignore-vpc-validate={}, use-vpc-validation-protocol={}",
+                    cachePolicy,
+                    vpcValidated,
+                    ignoreVpcValidate,
+                    useVpcValidationProtocol);
             return;
         }
         // Enable file io cache
-        metaCacheEnabled = context.options().get(IO_CACHE_POLICY).contains(META_CACHE_ENABLED_TAG);
-        readCacheEnabled = context.options().get(IO_CACHE_POLICY).contains(READ_CACHE_ENABLED_TAG);
-        writeCacheEnabled =
-                context.options().get(IO_CACHE_POLICY).contains(WRITE_CACHE_ENABLED_TAG);
-        String whitelist = context.options().get(IO_CACHE_WHITELIST_PATH);
+        metaCacheEnabled = cachePolicy.contains(META_CACHE_ENABLED_TAG);
+        readCacheEnabled = cachePolicy.contains(READ_CACHE_ENABLED_TAG);
+        writeCacheEnabled = cachePolicy.contains(WRITE_CACHE_ENABLED_TAG);
+        String whitelist = options.get(IO_CACHE_WHITELIST_PATH);
         if (!whitelist.equals("*")) {
             cacheWhitelistPaths = Lists.newArrayList(whitelist.split(","));
         }
