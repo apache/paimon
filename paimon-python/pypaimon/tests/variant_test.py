@@ -52,7 +52,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.data.generic_variant import GenericVariant, _GenericVariantBuilder
+from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.data.variant_shredding import (
     VARIANT_ARROW_TYPE,
     VariantSchema,
@@ -305,11 +305,6 @@ class TestVariantSchemaRoundTrip(unittest.TestCase):
 # ===========================================================================
 
 class TestGenericVariantContainer(unittest.TestCase):
-
-    def test_decimal_builder_distinguishes_value_overflow(self):
-        builder = _GenericVariantBuilder()
-        with self.assertRaisesRegex(ValueError, "exceeds 128 bits"):
-            builder.append_decimal_unscaled(1 << 127, 38, 0)
 
     def test_from_python_returns_instance(self):
         gv = GenericVariant.from_python({'a': 1, 'b': 'hello'})

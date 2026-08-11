@@ -1126,10 +1126,10 @@ Supported Paimon type strings for shredded sub-fields: `BOOLEAN`, `INT`, `BIGINT
 
 </Tabs>
 
-### VARIANT Path Updates
+### VARIANT FLOAT/DOUBLE Path Updates
 
-Read a path as an Arrow array, use Arrow compute, and replace its existing
-values without decoding unrelated fields:
+Read existing FLOAT or DOUBLE paths as Arrow arrays, use Arrow compute, and
+replace them without decoding unrelated fields:
 
 ```python
 import pyarrow as pa
@@ -1142,10 +1142,10 @@ updated_payload = variant_replace(
     payload, '$.velocity.y', pc.negate(current))
 ```
 
-`variant_get` returns NULL for a missing path. `variant_replace` accepts an
-Arrow Scalar, Array, or ChunkedArray. A missing path is unchanged unless
-`strict=True` is specified. Pass `{path: type}` to `variant_get` and
-`{path: values}` to `variant_replace` to process multiple paths in one pass.
+The Arrow type passed to `variant_get` and `variant_replace` must match the
+stored FLOAT or DOUBLE type; these APIs do not cast VARIANT values. Missing
+paths read as NULL and remain unchanged unless `strict=True` is specified.
+Pass mappings to process multiple paths in one pass.
 
 
 **`GenericVariant` API:**

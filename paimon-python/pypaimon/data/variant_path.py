@@ -16,12 +16,7 @@
 
 """Read and replace paths in Arrow VARIANT columns."""
 
-import base64
-import datetime
-import decimal
 import functools
-import json
-import math
 import re
 import struct
 from typing import Dict, Mapping, Optional, Sequence, Tuple
@@ -29,10 +24,6 @@ from typing import Dict, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pyarrow as pa
 
-from pypaimon.data._variant_float_format import (
-    format_float32,
-    format_float64,
-)
 from pypaimon.data._variant_binary import (
     _ARRAY,
     _OBJECT,
@@ -49,10 +40,10 @@ from pypaimon.data.generic_variant import (
     _DECIMAL4,
     _DECIMAL8,
     _DECIMAL16,
-    GenericVariant,
     _DOUBLE,
     _FLOAT,
     _LONG_STR,
+    _NULL,
     _MAX_DECIMAL4_PRECISION,
     _MAX_DECIMAL8_PRECISION,
     _MAX_DECIMAL16_PRECISION,
@@ -61,25 +52,11 @@ from pypaimon.data.generic_variant import (
 from pypaimon.data.variant_shredding import (
     _build_array_value,
     _build_object_value,
-    _encode_scalar_to_value_bytes,
 )
 
 
 _INDEX_PATTERN = re.compile(r"\[(\d+)]")
 _KEY_PATTERN = re.compile(r"\.([^\.\[]+)|\['([^']+)']|\[\"([^\"]+)\"]")
-_TIMESTAMP_PATTERN = re.compile(
-    r'^(\d{4})-(\d{1,2})-(\d{1,2})'
-    r'(?:(?: (\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,9}))?)'
-    r'|(?:T(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,9}))?)?))?$'
-)
-_JAVA_DECIMAL_FLOAT_PATTERN = re.compile(
-    r'^[+-]?(?:(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)'
-    r'(?:[eE][+-]?[0-9]+)?)[fFdD]?$'
-)
-_JAVA_HEX_FLOAT_PATTERN = re.compile(
-    r'^[+-]?0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?'
-    r'|\.[0-9a-fA-F]+)[pP][+-]?[0-9]+[fFdD]?$'
-)
 _Path = Tuple[Tuple[str, object], ...]
 _SLOW_PATH_ROWS = 64
 
@@ -765,10 +742,6 @@ def _partition_path_plans(values, metadata, valid_rows, parsed_paths):
 
 
 def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
-    if not all(pa.types.is_float32(target_type)
-               or pa.types.is_float64(target_type)
-               for target_type in target_types):
-        return None
     valid_rows = _valid_row_indices(chunk, values, chunk.field(1))
     if not len(valid_rows):
         return [pa.nulls(len(chunk), type=target_type)
@@ -786,11 +759,12 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
                 continue
             absolute = row_starts + pos
             headers = data[absolute]
-            if np.all(headers == _primitive_header(_DOUBLE)):
-                value_size, data_type = 8, np.dtype('<f8')
-            elif np.all(headers == _primitive_header(_FLOAT)):
-                value_size, data_type = 4, np.dtype('<f4')
-            else:
+            type_info = (
+                _FLOAT if pa.types.is_float32(target_type) else _DOUBLE)
+            value_size = 4 if type_info == _FLOAT else 8
+            data_type = (
+                np.dtype('<f4') if type_info == _FLOAT else np.dtype('<f8'))
+            if not np.all(headers == _primitive_header(type_info)):
                 uniform = False
                 break
             if np.any(absolute + 1 + value_size != row_starts + limit):
@@ -820,26 +794,26 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
                 continue
             absolute = row_starts + pos
             headers = data[absolute]
-            handled = np.zeros(len(rows), dtype=bool)
-            for header, value_size, data_type in (
-                    (_primitive_header(_DOUBLE), 8, np.dtype('<f8')),
-                    (_primitive_header(_FLOAT), 4, np.dtype('<f4'))):
-                selected = (
-                    (headers == header)
-                    & (absolute + 1 + value_size == row_starts + limit)
-                )
-                if not np.any(selected):
-                    continue
-                selected_rows = rows[selected]
-                selected_absolute = absolute[selected]
+            target_type = target_types[index]
+            type_info = (
+                _FLOAT if pa.types.is_float32(target_type) else _DOUBLE)
+            value_size = 4 if type_info == _FLOAT else 8
+            data_type = (
+                np.dtype('<f4') if type_info == _FLOAT else np.dtype('<f8'))
+            handled = (
+                (headers == _primitive_header(type_info))
+                & (absolute + 1 + value_size == row_starts + limit)
+            )
+            if np.any(handled):
+                selected_rows = rows[handled]
+                selected_absolute = absolute[handled]
                 indices = (
                     selected_absolute[:, None] + 1 + np.arange(value_size)
                 )
                 raw = np.ascontiguousarray(data[indices])
-                result = raw.view(data_type).reshape(-1)
-                outputs[index][selected_rows] = result
+                outputs[index][selected_rows] = raw.view(
+                    data_type).reshape(-1)
                 masks[index][selected_rows] = False
-                handled |= selected
             slow_by_path[index].update(
                 int(row) for row in rows[~handled])
 
@@ -852,8 +826,7 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
                 zip(positions, target_types)):
             if row not in slow_by_path[index] or pos is None:
                 continue
-            decoded = _decode_scalar(
-                value, row_metadata, pos, target_type)
+            decoded = _decode_floating(value, pos, target_type)
             if decoded is not None:
                 outputs[index][row] = decoded
                 masks[index][row] = False
@@ -863,408 +836,20 @@ def _vectorized_get_chunk(chunk, values, parsed_paths, target_types):
     ]
 
 
-def _decimal_text(value):
-    text = format(value, 'f')
-    return text[1:] if value == 0 and text.startswith('-') else text
-
-
-def _floating_text(value):
-    return format_float64(value)
-
-
-def _variant_floating_text(value, type_info):
-    if type_info == _FLOAT:
-        return format_float32(value)
-    if type_info == _DOUBLE:
-        return format_float64(value)
-    raise ValueError("not a floating-point VARIANT")
-
-
-def _timestamp_text(value):
-    text = (
-        f'{value.year:04d}-{value.month:02d}-{value.day:02d} '
-        f'{value.hour:02d}:{value.minute:02d}:{value.second:02d}'
-    )
-    if value.microsecond:
-        text += f'.{value.microsecond:06d}'.rstrip('0')
-    offset = value.utcoffset()
-    if offset is not None:
-        seconds = int(offset.total_seconds())
-        sign = '+' if seconds >= 0 else '-'
-        minutes = abs(seconds) // 60
-        text += f'{sign}{minutes // 60:02d}:{minutes % 60:02d}'
-    return text
-
-
-def _json_text(value):
-    if value is None:
-        return 'null'
-    if isinstance(value, bool):
-        return 'true' if value else 'false'
-    if isinstance(value, decimal.Decimal):
-        return _decimal_text(value)
-    if isinstance(value, float):
-        text = _floating_text(value)
-        return text if math.isfinite(value) else json.dumps(text)
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
-    if isinstance(value, bytes):
-        return json.dumps(base64.b64encode(value).decode('ascii'))
-    if isinstance(value, datetime.datetime):
-        return json.dumps(_timestamp_text(value))
-    if isinstance(value, datetime.date):
-        return json.dumps(value.isoformat())
-    if isinstance(value, dict):
-        return '{' + ','.join(
-            f'{json.dumps(key, ensure_ascii=False)}:{_json_text(child)}'
-            for key, child in value.items()
-        ) + '}'
-    if isinstance(value, (list, tuple)):
-        return '[' + ','.join(_json_text(child) for child in value) + ']'
-    return json.dumps(str(value), ensure_ascii=False)
-
-
-def _variant_json(value, metadata, pos, limit, keys=None):
-    size = _checked_value_size(value, pos, limit)
-    if pos + size != limit:
-        _malformed("child size does not match container offsets")
-    header = value[pos]
-    basic_type = header & 0x3
-    type_info = (header >> 2) & 0x3F
-    if basic_type == _OBJECT:
-        object_size, id_size, id_start, data_start, offsets, _ = (
-            _checked_object_layout(value, pos, limit))
-        if keys is None:
-            keys = {
-                key_id: key
-                for key, key_id in _metadata_key_ids(metadata).items()
-            }
-        fields = []
-        for slot in range(object_size):
-            key_id = _read_unsigned(
-                value, id_start + slot * id_size, id_size)
-            if key_id not in keys:
-                _malformed("object key is missing from metadata")
-            child_start, child_end = _checked_object_child_bounds(
-                value, data_start, offsets, slot)
-            fields.append(
-                json.dumps(keys[key_id], ensure_ascii=False)
-                + ':'
-                + _variant_json(
-                    value, metadata, child_start, child_end, keys)
-            )
-        return '{' + ','.join(fields) + '}'
-    if basic_type == _ARRAY:
-        array_size, data_start, offsets, _ = _checked_array_layout(
-            value, pos, limit)
-        return '[' + ','.join(
-            _variant_json(
-                value,
-                metadata,
-                data_start + offsets[slot],
-                data_start + offsets[slot + 1],
-                keys,
-            )
-            for slot in range(array_size)
-        ) + ']'
-
-    decoded = GenericVariant(bytes(value[pos:limit]), metadata).to_python()
-    if basic_type == _PRIMITIVE and type_info in (_FLOAT, _DOUBLE):
-        text = _variant_floating_text(decoded, type_info)
-        return text if math.isfinite(decoded) else json.dumps(text)
-    return _json_text(decoded)
-
-
-def _cast_decimal(value, target_type):
-    if isinstance(value, bool):
-        value = decimal.Decimal(1 if value else 0)
-    elif not isinstance(value, decimal.Decimal):
-        value = decimal.Decimal(str(value))
-    quantum = decimal.Decimal((0, (1,), -target_type.scale))
-    with decimal.localcontext() as context:
-        context.prec = max(50, target_type.precision + abs(target_type.scale))
-        result = value.quantize(quantum, rounding=decimal.ROUND_HALF_UP)
-    digits = len(result.as_tuple().digits)
-    if digits > target_type.precision:
-        raise ValueError("decimal precision overflow")
-    return result
-
-
-def _cast_integer(value, target_type):
-    bits = target_type.bit_width
-    if isinstance(value, float):
-        base_bits = 64 if bits == 64 else 32
-        minimum = -(1 << (base_bits - 1))
-        maximum = (1 << (base_bits - 1)) - 1
-        if math.isnan(value):
-            number = 0
-        elif value <= minimum:
-            number = minimum
-        elif value >= maximum:
-            number = maximum
-        else:
-            number = int(value)
-    else:
-        number = int(value)
-    return ((number + (1 << (bits - 1))) % (1 << bits)) - (1 << (bits - 1))
-
-
-def _cast_string_integer(value, target_type):
-    if not value:
-        raise ValueError
-    negative = value[0] == '-'
-    if value[0] in ('-', '+'):
-        value = value[1:]
-        if not value:
-            raise ValueError
-    parts = value.split('.')
-    if len(parts) > 2 or any(
-            character < '0' or character > '9'
-            for part in parts for character in part):
-        raise ValueError
-    integral = parts[0]
-    number = int(integral) if integral else 0
-    if negative:
-        number = -number
-    bits = target_type.bit_width
-    minimum = -(1 << (bits - 1))
-    maximum = (1 << (bits - 1)) - 1
-    if number < minimum or number > maximum:
-        raise ValueError
-    return number
-
-
-def _cast_string_floating(value):
-    text = value.strip()
-    if re.match(r'^[+-]?(?:NaN|Infinity)$', text):
-        if text.endswith('NaN'):
-            return math.copysign(float('nan'), -1.0 if text[0:1] == '-' else 1.0)
-        return float('-inf') if text.startswith('-') else float('inf')
-    if (_JAVA_DECIMAL_FLOAT_PATTERN.match(text)
-            or _JAVA_HEX_FLOAT_PATTERN.match(text)):
-        if text[-1:] in 'fFdD':
-            text = text[:-1]
-        if '0x' in text.lower():
-            return float.fromhex(text)
-        return float(text)
-    raise ValueError
-
-
-def _parse_date(value):
-    value = value.strip()
-    if value and (value.isdigit()
-                  or value[0] == '-' and value[1:].isdigit()):
-        return datetime.date(1970, 1, 1) + datetime.timedelta(days=int(value))
-    return datetime.datetime.strptime(value, '%Y-%m-%d').date()
-
-
-def _parse_timestamp(value, target_type):
-    value = value.strip()
-    if value and (value.isdigit()
-                  or value[0] == '-' and value[1:].isdigit()):
-        raw_value = int(value)
-        if target_type.unit == 'ns':
-            if raw_value < -(1 << 63) or raw_value > (1 << 63) - 1:
-                raise ValueError
-            return raw_value
-        micros = raw_value * {
-            's': 1_000_000, 'ms': 1000, 'us': 1,
-        }[target_type.unit]
-        return datetime.datetime(1970, 1, 1) + datetime.timedelta(
-            microseconds=int(micros))
-
-    match = _TIMESTAMP_PATTERN.match(value)
-    if match is None:
-        raise ValueError
-    groups = match.groups()
-    year, month, day = (int(part) for part in groups[:3])
-    if groups[3] is not None:
-        hour, minute, second, fraction = groups[3:7]
-    else:
-        hour, minute, second, fraction = groups[7:11]
-    hour = int(hour or 0)
-    minute = int(minute or 0)
-    second = int(second or 0)
-    nanos = int((fraction or '').ljust(9, '0') or 0)
-    base = datetime.datetime(year, month, day, hour, minute, second)
-
-    if target_type.unit == 'ns':
-        delta = base - datetime.datetime(1970, 1, 1)
-        epoch_nanos = (
-            (delta.days * 86400 + delta.seconds) * 1_000_000_000 + nanos
-        )
-        if epoch_nanos < -(1 << 63) or epoch_nanos > (1 << 63) - 1:
-            raise ValueError
-        return epoch_nanos
-
-    precision = {'s': 0, 'ms': 3, 'us': 6}[target_type.unit]
-    nanos = nanos // (10 ** (9 - precision)) * (10 ** (9 - precision))
-    return base + datetime.timedelta(microseconds=nanos // 1000)
-
-
-def _cast_python(value, target_type):
-    if value is None or pa.types.is_null(target_type):
-        return None
-    try:
-        if pa.types.is_string(target_type) or pa.types.is_large_string(
-                target_type):
-            if isinstance(value, (dict, list)):
-                return _json_text(value)
-            if isinstance(value, bool):
-                return str(value).lower()
-            if isinstance(value, decimal.Decimal):
-                return _decimal_text(value)
-            if isinstance(value, float):
-                return _floating_text(value)
-            if isinstance(value, (datetime.date, datetime.datetime)):
-                return value.isoformat()
-            if isinstance(value, bytes):
-                return value.decode('utf-8')
-            return str(value)
-        if pa.types.is_boolean(target_type):
-            if isinstance(value, str):
-                lowered = value.lower()
-                if lowered in ('t', 'true', 'y', 'yes', '1'):
-                    return True
-                if lowered in ('f', 'false', 'n', 'no', '0'):
-                    return False
-                else:
-                    raise ValueError
-            if isinstance(value, (bool, int)):
-                return value != 0
-            raise TypeError
-        if pa.types.is_signed_integer(target_type):
-            if not isinstance(value, (bool, int, float, decimal.Decimal, str)):
-                raise TypeError
-            if isinstance(value, str):
-                return _cast_string_integer(value, target_type)
-            return _cast_integer(value, target_type)
-        if pa.types.is_floating(target_type):
-            if not isinstance(value, (bool, int, float, decimal.Decimal, str)):
-                raise TypeError
-            if isinstance(value, str):
-                return _cast_string_floating(value)
-            return float(value)
-        if pa.types.is_decimal(target_type):
-            if not isinstance(value, (bool, int, float, decimal.Decimal, str)):
-                raise TypeError
-            return _cast_decimal(value, target_type)
-        if pa.types.is_binary(target_type) or pa.types.is_large_binary(
-                target_type):
-            if isinstance(value, bytes):
-                return value
-            if isinstance(value, str):
-                return value.encode('utf-8')
-            raise TypeError
-        if pa.types.is_date32(target_type):
-            if isinstance(value, datetime.datetime):
-                return value.date()
-            if isinstance(value, datetime.date):
-                return value
-            if isinstance(value, str):
-                return _parse_date(value)
-            raise TypeError
-        if pa.types.is_timestamp(target_type):
-            if isinstance(value, datetime.datetime):
-                return value
-            if isinstance(value, datetime.date):
-                return datetime.datetime.combine(value, datetime.time())
-            if isinstance(value, str):
-                return _parse_timestamp(value, target_type)
-            if isinstance(value, int) and not isinstance(value, bool):
-                result = datetime.datetime.fromtimestamp(
-                    value, tz=datetime.timezone.utc)
-                return result if target_type.tz else result.replace(tzinfo=None)
-            raise TypeError
-    except (ArithmeticError, TypeError, ValueError):
-        pass
-    raise ValueError(f"Invalid cast {value!r} to {target_type}")
-
-
-def _variant_object_children(value, metadata, pos, end):
-    size, id_size, id_start, data_start, offsets, _ = (
-        _checked_object_layout(value, pos, end))
-    keys = {
-        key_id: key for key, key_id in _metadata_key_ids(metadata).items()
-    }
-    children = {}
-    for slot in range(size):
-        key_id = _read_unsigned(value, id_start + slot * id_size, id_size)
-        if key_id not in keys:
-            _malformed("object key is missing from metadata")
-        children[keys[key_id]] = _checked_object_child_bounds(
-            value, data_start, offsets, slot)
-    return children
-
-
-def _variant_array_children(value, pos, end):
-    size, data_start, offsets, _ = _checked_array_layout(
-        value, pos, end)
-    children = []
-    for index in range(size):
-        child_start = data_start + offsets[index]
-        child_end = data_start + offsets[index + 1]
-        if _checked_value_size(value, child_start, child_end) != (
-                child_end - child_start):
-            _malformed("child size does not match container offsets")
-        children.append((child_start, child_end))
-    return children
-
-
-def _decode_scalar(value, metadata: bytes, pos: int, target_type):
+def _decode_floating(value, pos, target_type):
     size = _checked_value_size(value, pos)
-    end = pos + size
-    basic_type = value[pos] & 0x3
-    type_info = (value[pos] >> 2) & 0x3F
-    if pa.types.is_struct(target_type):
-        if basic_type != _OBJECT:
-            raise ValueError(f"Invalid cast VARIANT to {target_type}")
-        children = _variant_object_children(
-            value, metadata, pos, end)
-        return {
-            field.name: (
-                None if field.name not in children
-                else _decode_scalar(
-                    value, metadata, children[field.name][0], field.type)
-            )
-            for field in target_type
-        }
-    if (pa.types.is_list(target_type)
-            or pa.types.is_large_list(target_type)
-            or pa.types.is_fixed_size_list(target_type)):
-        if basic_type != _ARRAY:
-            raise ValueError(f"Invalid cast VARIANT to {target_type}")
-        return [
-            _decode_scalar(value, metadata, child_pos, target_type.value_type)
-            for child_pos, _ in _variant_array_children(
-                value, pos, end)
-        ]
-    if pa.types.is_map(target_type):
-        if (basic_type != _OBJECT
-                or not (pa.types.is_string(target_type.key_type)
-                        or pa.types.is_large_string(target_type.key_type))):
-            raise ValueError(f"Invalid cast VARIANT to {target_type}")
-        children = _variant_object_children(
-            value, metadata, pos, end)
-        return [
-            (key, _decode_scalar(
-                value, metadata, child_pos, target_type.item_type))
-            for key, (child_pos, _) in children.items()
-        ]
-    if (pa.types.is_string(target_type)
-            or pa.types.is_large_string(target_type)):
-        if basic_type in (_OBJECT, _ARRAY):
-            return _variant_json(value, metadata, pos, end)
-    selected = bytes(value[pos:end])
-    decoded = GenericVariant(selected, metadata).to_python()
-    if ((pa.types.is_string(target_type)
-         or pa.types.is_large_string(target_type))
-            and (value[pos] & 0x3) == _PRIMITIVE
-            and type_info in (_FLOAT, _DOUBLE)):
-        return _variant_floating_text(decoded, type_info)
-    return _cast_python(decoded, target_type)
+    header = value[pos]
+    if (header & 0x3) != _PRIMITIVE:
+        raise TypeError("VARIANT path is not FLOAT or DOUBLE")
+    type_info = (header >> 2) & 0x3F
+    if type_info == _FLOAT and pa.types.is_float32(target_type):
+        return struct.unpack_from('<f', value, pos + 1)[0]
+    if type_info == _DOUBLE and pa.types.is_float64(target_type):
+        return struct.unpack_from('<d', value, pos + 1)[0]
+    if type_info == _NULL and size == 1:
+        return None
+    raise TypeError(
+        f"VARIANT path type does not match {target_type}")
 
 
 def _patched_chunk(
@@ -1285,17 +870,6 @@ def _patched_chunk(
         )
     return pa.StructArray.from_arrays(
         [patched_values, metadata],
-        fields=list(chunk.type),
-        mask=chunk.is_null(),
-    )
-
-
-def _rebuilt_chunk(
-        chunk: pa.StructArray,
-        values: Sequence[bytes],
-) -> pa.StructArray:
-    return pa.StructArray.from_arrays(
-        [pa.array(values, type=chunk.type[0].type), chunk.field(1)],
         fields=list(chunk.type),
         mask=chunk.is_null(),
     )
@@ -1373,40 +947,19 @@ class _Replacement:
                 "VARIANT replacement must be an Arrow Scalar or Array")
         if not _supported_replacement_type(self.type):
             raise TypeError(
-                f"Unsupported VARIANT replacement type: {self.type}")
+                "VARIANT replacement type must be float32 or float64")
         if pa.types.is_float64(self.type):
             self._value_format = '<Bd'
             self._type_header = _primitive_header(_DOUBLE)
         elif pa.types.is_float32(self.type):
             self._value_format = '<Bf'
             self._type_header = _primitive_header(_FLOAT)
-        else:
-            self._value_format = None
-            self._type_header = None
-        self._fixed_size = (
-            struct.calcsize(self._value_format)
-            if self._value_format is not None else None
-        )
-
-    def values(self, offset: int, length: int):
-        if self._array is None:
-            return self._value.as_py()
-        return self._array.slice(offset, length).to_pylist()
-
-    def value_at(self, values, row: int):
-        return values if self._array is None else values[row]
+        self._fixed_size = struct.calcsize(self._value_format)
 
     def scalar_at(self, row: int):
         if self._array is None:
             return self._value.as_py()
         return self._array[row].as_py()
-
-    def fixed_size(self, value) -> Optional[int]:
-        return self._fixed_size if value is not None else None
-
-    def patch(self, data: bytearray, pos: int, value) -> None:
-        struct.pack_into(
-            self._value_format, data, pos, self._type_header, value)
 
     def numpy_values(self, offset: int, length: int, rows=None):
         if self._value_format is None:
@@ -1438,10 +991,17 @@ class _Replacement:
         )
 
     def encode(self, value) -> bytes:
-        if value is not None and self._value_format is not None:
+        if value is not None:
             return struct.pack(
                 self._value_format, self._type_header, value)
-        return _encode_scalar_to_value_bytes(value, self.type)
+        return bytes([_primitive_header(_NULL)])
+
+    def validate_source(self, value, pos) -> None:
+        header = value[pos]
+        if header not in (
+                self._type_header, _primitive_header(_NULL)):
+            raise TypeError(
+                f"VARIANT path type does not match {self.type}")
 
 
 def _vectorized_replace_chunk(
@@ -1452,9 +1012,6 @@ def _vectorized_replace_chunk(
         global_row,
         strict,
 ):
-    if not all(provider._fixed_size is not None
-               for _, _, provider in parsed):
-        return None
     valid_rows = _valid_row_indices(chunk, values, chunk.field(1))
     if not len(valid_rows):
         return chunk
@@ -1465,7 +1022,7 @@ def _vectorized_replace_chunk(
     data_start = 0
     output_data = None
     for planned in plans:
-        rows, row_starts, _, positions, limits = planned
+        rows, row_starts, source_data, positions, limits = planned
         replacements = []
         compatible = np.ones(len(rows), dtype=bool)
         has_replacement = False
@@ -1486,6 +1043,7 @@ def _vectorized_replace_chunk(
             absolute = row_starts + pos
             compatible &= (
                 replacement_valid
+                & (source_data[absolute] == provider._type_header)
                 & (absolute + provider._fixed_size == row_starts + limit)
             )
             replacements.append((pos, provider, replacement))
@@ -1515,15 +1073,25 @@ def _vectorized_replace_chunk(
     metadata = _BinaryValues(chunk.field(1))
     rebuilt_rows = {}
     for row in slow_rows:
-        original = bytes(values.view(row))
-        value = original
+        value = values.view(row)
         row_metadata = bytes(metadata.view(row))
         positions = _path_positions(value, row_metadata, parsed_paths)
+        if not any(pos is not None for pos in positions):
+            if strict:
+                missing = next(
+                    path for (path, _, _), pos in zip(parsed, positions)
+                    if pos is None)
+                raise ValueError(
+                    f"VARIANT path does not exist: {missing}")
+            continue
+        original = bytes(value)
+        value = original
         for (path, parsed_path, provider), pos in zip(parsed, positions):
             if pos is None:
                 if strict:
                     raise ValueError(f"VARIANT path does not exist: {path}")
                 continue
+            provider.validate_source(value, pos)
             replacement_value = provider.scalar_at(global_row + row)
             value = _replace_path(
                 value,
@@ -1546,67 +1114,31 @@ def _vectorized_replace_chunk(
 
 
 def _supported_replacement_type(data_type: pa.DataType) -> bool:
-    return (
-        pa.types.is_null(data_type)
-        or pa.types.is_boolean(data_type)
-        or pa.types.is_signed_integer(data_type)
-        or pa.types.is_float32(data_type)
-        or pa.types.is_float64(data_type)
-        or pa.types.is_string(data_type)
-        or pa.types.is_large_string(data_type)
-        or pa.types.is_binary(data_type)
-        or pa.types.is_large_binary(data_type)
-        or pa.types.is_date32(data_type)
-        or pa.types.is_timestamp(data_type)
-        or pa.types.is_decimal128(data_type)
-    )
+    return pa.types.is_float32(data_type) or pa.types.is_float64(data_type)
 
 
 def _variant_get(column, paths: Mapping[str, pa.DataType]):
     parsed = []
     for path, target_type in paths.items():
         if not isinstance(target_type, pa.DataType):
-            raise TypeError("VARIANT target_type must be a PyArrow data type")
+            raise TypeError("VARIANT data_type must be a PyArrow data type")
+        if not (pa.types.is_float32(target_type)
+                or pa.types.is_float64(target_type)):
+            raise TypeError("VARIANT data_type must be float32 or float64")
         parsed.append((path, _parse_path(path), target_type))
     parsed_paths = [parsed_path for _, parsed_path, _ in parsed]
     chunks, chunked, _ = _variant_chunks(column)
     result_chunks = {path: [] for path in paths}
     for chunk in chunks:
         values = _BinaryValues(chunk.field(0))
-        vectorized = _vectorized_get_chunk(
+        results = _vectorized_get_chunk(
             chunk,
             values,
             parsed_paths,
             [target_type for _, _, target_type in parsed],
         )
-        if vectorized is not None:
-            for (path, _, _), result in zip(parsed, vectorized):
-                result_chunks[path].append(result)
-            continue
-        metadata = _BinaryValues(chunk.field(1))
-        valid = chunk.is_valid().to_pylist()
-        results = {path: [] for path in paths}
-        for row in range(len(chunk)):
-            if not valid[row]:
-                for path in paths:
-                    results[path].append(None)
-                continue
-            value = values.view(row)
-            row_metadata = bytes(metadata.view(row))
-            positions = _path_positions(
-                value,
-                row_metadata,
-                parsed_paths,
-            )
-            for (path, _, target_type), pos in zip(parsed, positions):
-                results[path].append(
-                    None if pos is None
-                    else _decode_scalar(
-                        value, row_metadata, pos, target_type)
-                )
-        for path, _, target_type in parsed:
-            result_chunks[path].append(
-                pa.array(results[path], type=target_type))
+        for (path, _, _), result in zip(parsed, results):
+            result_chunks[path].append(result)
     if not chunked:
         return {path: chunks[0] for path, chunks in result_chunks.items()}
     return {
@@ -1615,16 +1147,16 @@ def _variant_get(column, paths: Mapping[str, pa.DataType]):
     }
 
 
-def variant_get(column, path, target_type=None):
-    """Read one or more VARIANT paths into Arrow arrays."""
+def variant_get(column, path, data_type=None):
+    """Read FLOAT or DOUBLE paths into matching Arrow arrays."""
     if isinstance(path, Mapping):
-        if target_type is not None:
+        if data_type is not None:
             raise TypeError(
-                "VARIANT target_type must be omitted for path mappings")
+                "VARIANT data_type must be omitted for path mappings")
         return _variant_get(column, path)
-    if target_type is None:
-        raise TypeError("VARIANT target_type must be a PyArrow data type")
-    return _variant_get(column, {path: target_type})[path]
+    if data_type is None:
+        raise TypeError("VARIANT data_type must be a PyArrow data type")
+    return _variant_get(column, {path: data_type})[path]
 
 
 def _paths_overlap(first: _Path, second: _Path) -> bool:
@@ -1646,7 +1178,7 @@ def variant_replace(
         replacement=None,
         strict: bool = False,
 ):
-    """Replace one or more existing VARIANT paths with Arrow values."""
+    """Replace existing FLOAT or DOUBLE paths with matching Arrow values."""
     if not isinstance(strict, bool):
         raise TypeError("VARIANT strict must be a boolean")
     if isinstance(path, Mapping):
@@ -1670,99 +1202,14 @@ def variant_replace(
     global_row = 0
     for chunk in chunks:
         values = _BinaryValues(chunk.field(0))
-        vectorized = _vectorized_replace_chunk(
+        result_chunks.append(_vectorized_replace_chunk(
             chunk,
             values,
             parsed,
             parsed_paths,
             global_row,
             strict,
-        )
-        if vectorized is not None:
-            result_chunks.append(vectorized)
-            global_row += len(chunk)
-            continue
-        metadata = _BinaryValues(chunk.field(1))
-        valid = chunk.is_valid().to_pylist()
-        chunk_replacements = {
-            path: provider.values(global_row, len(chunk))
-            for path, _, provider in parsed
-        }
-        patched_data = None
-        data_start = 0
-        rebuild = False
-        for row in range(len(chunk)):
-            if not valid[row]:
-                continue
-            row_start, value = values.row(row)
-            row_metadata = bytes(metadata.view(row))
-            positions = _path_positions(
-                value,
-                row_metadata,
-                parsed_paths,
-            )
-            for (path, parsed_path, provider), pos in zip(
-                    parsed, positions):
-                if pos is None:
-                    if strict:
-                        raise ValueError(
-                            f"VARIANT path does not exist: {path}")
-                    continue
-                replacement_value = provider.value_at(
-                    chunk_replacements[path], row)
-                new_size = provider.fixed_size(replacement_value)
-                encoded = (
-                    None if new_size is not None
-                    else provider.encode(replacement_value)
-                )
-                if new_size is None:
-                    new_size = len(encoded)
-                if new_size != _checked_value_size(value, pos):
-                    rebuild = True
-                    break
-                if patched_data is None:
-                    patched_data, data_start = values.copy_used_data()
-                patch_pos = row_start - data_start + pos
-                if encoded is None:
-                    provider.patch(
-                        patched_data, patch_pos, replacement_value)
-                else:
-                    patched_data[patch_pos:patch_pos + new_size] = encoded
-            if rebuild:
-                break
-
-        if rebuild:
-            rebuilt_values = []
-            for row in range(len(chunk)):
-                value = bytes(values.view(row))
-                if not valid[row]:
-                    rebuilt_values.append(value)
-                    continue
-                row_metadata = bytes(metadata.view(row))
-                positions = _path_positions(
-                    value,
-                    row_metadata,
-                    parsed_paths,
-                )
-                for (path, parsed_path, provider), pos in zip(
-                        parsed, positions):
-                    if pos is None:
-                        if strict:
-                            raise ValueError(
-                                f"VARIANT path does not exist: {path}")
-                        continue
-                    replacement_value = provider.value_at(
-                        chunk_replacements[path], row)
-                    encoded = provider.encode(replacement_value)
-                    value = _replace_path(
-                        value, row_metadata, 0, parsed_path, encoded)
-                rebuilt_values.append(value)
-            result_chunks.append(_rebuilt_chunk(chunk, rebuilt_values))
-        elif patched_data is not None:
-            result_chunks.append(_patched_chunk(
-                chunk, values, patched_data, data_start))
-        else:
-            result_chunks.append(chunk)
+        ))
         global_row += len(chunk)
 
     if not chunked:

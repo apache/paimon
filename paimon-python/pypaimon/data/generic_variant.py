@@ -148,12 +148,6 @@ def _write_le(buf, pos, value, n):
     buf[pos:pos + n] = value.to_bytes(n, 'little')
 
 
-def _decimal_from_unscaled(unscaled, scale):
-    sign = 1 if unscaled < 0 else 0
-    digits = tuple(int(digit) for digit in str(abs(unscaled))) or (0,)
-    return _decimal.Decimal((sign, digits, -scale))
-
-
 def _short_str_header(size):
     return (size << 2) | _SHORT_STR
 
@@ -312,26 +306,18 @@ class _GenericVariantBuilder:
         self._pos += 4
 
     def append_decimal(self, d):
+        d = d.normalize()
         sign, digits, exponent = d.as_tuple()
+        if exponent > 0:
+            raise ValueError(
+                f'append_decimal requires a non-positive exponent (got {d!r}); '
+                'use append_double() for Decimal values with positive exponents'
+            )
         unscaled = int(''.join(str(x) for x in digits))
         if sign:
             unscaled = -unscaled
-        if exponent > 0:
-            unscaled *= 10 ** exponent
-            scale = 0
-        else:
-            scale = -exponent
-        self.append_decimal_unscaled(
-            unscaled, max(1, len(str(abs(unscaled)))), scale)
-
-    def append_decimal_unscaled(self, unscaled, precision, scale):
-        if not 0 <= scale <= _MAX_DECIMAL16_PRECISION:
-            raise ValueError(f'Unsupported VARIANT decimal scale: {scale}')
-        if not 0 < precision <= _MAX_DECIMAL16_PRECISION:
-            raise ValueError(
-                f'Unsupported VARIANT decimal precision: {precision}')
-        if not -(1 << 127) <= unscaled < (1 << 127):
-            raise ValueError('VARIANT decimal value exceeds 128 bits')
+        scale = -exponent if exponent < 0 else 0
+        precision = len(digits)
 
         if scale <= _MAX_DECIMAL4_PRECISION and precision <= _MAX_DECIMAL4_PRECISION:
             self._write_byte(_primitive_header(_DECIMAL4))
@@ -682,7 +668,7 @@ class GenericVariant:
             else:
                 raw = bytes(value[pos + 2:pos + 18])
                 unscaled = int.from_bytes(raw, 'little', signed=True)
-            return _decimal_from_unscaled(unscaled, scale)
+            return _decimal.Decimal(unscaled) / (_decimal.Decimal(10) ** scale)
         if vtype == _Type.STRING:
             if basic_type == _SHORT_STR:
                 return value[pos + 1:pos + 1 + type_info].decode('utf-8')
