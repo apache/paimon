@@ -25,7 +25,10 @@ import org.apache.paimon.table.FormatTable
 
 import org.apache.spark.sql.Row
 
+import java.util.Locale
+
 import scala.collection.JavaConverters._
+import scala.util.control.NonFatal
 
 /**
  * The partition operations left over once ADD, DROP, SHOW and ANALYZE are covered: `TRUNCATE`,
@@ -231,19 +234,36 @@ class CatalogManagedPartitionEdgeParityTest extends PaimonSparkTestWithRestCatal
   private case object Accepted extends Outcome
   private case class Refused(message: String) extends Outcome
 
-  /** Runs a statement, reporting whether it was accepted rather than failing the test outright. */
+  /**
+   * Runs a statement, reporting whether it was accepted rather than failing the test outright. Only
+   * an intentional refusal counts as [[Refused]]; any other failure, such as a parse or resolution
+   * error, would also leave the state unchanged, so classifying it as a refusal would let a test
+   * pass without exercising the command it meant to. Such a failure propagates and fails the test.
+   */
   private def attempt(statement: String): Outcome =
     try {
       sql(statement).collect()
       Accepted
     } catch {
-      case error: Throwable =>
+      case NonFatal(error) if isExpectedRefusal(error) =>
         val message = causeMessages(error)
         // scalastyle:off println
         println(s"[edge-parity] refused: $statement -> $message")
         // scalastyle:on println
         Refused(message)
     }
+
+  /**
+   * An intentional refusal is Paimon's own [[UnsupportedOperationException]] somewhere in the cause
+   * chain, or Spark declining the command for a table that does not support it.
+   */
+  private def isExpectedRefusal(error: Throwable): Boolean = {
+    val causes = Iterator.iterate(error)(_.getCause).takeWhile(_ != null).toSeq
+    causes.exists(_.isInstanceOf[UnsupportedOperationException]) || {
+      val message = causeMessages(error).toLowerCase(Locale.ROOT)
+      message.contains("not supported") || message.contains("does not support")
+    }
+  }
 
   private def qualified(tableName: String): String = s"paimon.$dbName0.$tableName"
 
