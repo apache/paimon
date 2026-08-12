@@ -37,7 +37,6 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
     private final int assignId;
     private final long targetBucketRowNumber;
     private final int maxBucketsNum;
-    private int maxBucketId;
 
     private final Map<BinaryRow, SimplePartitionIndex> partitionIndex;
 
@@ -58,11 +57,7 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
             index = new SimplePartitionIndex();
             this.partitionIndex.put(partition, index);
         }
-        int assigned = index.assign(hash);
-        if (assigned > maxBucketId) {
-            maxBucketId = assigned;
-        }
-        return assigned;
+        return index.assign(hash);
     }
 
     @Override
@@ -82,6 +77,7 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
         private final Map<Integer, Long> bucketInformation;
         private final List<Integer> bucketList;
         private int currentBucket;
+        private boolean bucketUpperBoundReached;
 
         private SimplePartitionIndex() {
             bucketInformation = new LinkedHashMap<>();
@@ -104,11 +100,8 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
                             });
 
             if (num >= targetBucketRowNumber) {
-                if (-1 == maxBucketsNum
-                        || bucketInformation.isEmpty()
-                        || maxBucketId < maxBucketsNum - 1) {
-                    loadNewBucket();
-                } else {
+                if (bucketUpperBoundReached || !loadNewBucket()) {
+                    bucketUpperBoundReached = true;
                     currentBucket = ListUtils.pickRandomly(bucketList);
                 }
             }
@@ -131,16 +124,16 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
             return currentBucket;
         }
 
-        private void loadNewBucket() {
+        private boolean loadNewBucket() {
             for (int i = 0; i < Short.MAX_VALUE; i++) {
                 if (isMyBucket(i) && !bucketInformation.containsKey(i)) {
                     // The new bucketId may still be larger than the upper bound
                     if (-1 == maxBucketsNum || i <= maxBucketsNum - 1) {
                         currentBucket = i;
-                        return;
+                        return true;
                     }
                     // No need to enter the next iteration when upper bound exceeded
-                    return;
+                    return false;
                 }
             }
             throw new RuntimeException(
