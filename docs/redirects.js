@@ -257,10 +257,6 @@ module.exports = [
     "to": "/maintenance/manage-partitions"
   },
   {
-    "from": "/maintenance/manage-privileges.html",
-    "to": "/maintenance/manage-privileges"
-  },
-  {
     "from": "/maintenance/manage-snapshots.html",
     "to": "/maintenance/manage-snapshots"
   },

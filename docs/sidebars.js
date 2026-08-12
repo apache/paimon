@@ -251,7 +251,6 @@ const sidebars = {
       "maintenance/rescale-bucket",
       "maintenance/manage-tags",
       "maintenance/metrics",
-      "maintenance/manage-privileges",
       "maintenance/manage-branches",
       "maintenance/manage-partitions",
       "maintenance/configurations"
