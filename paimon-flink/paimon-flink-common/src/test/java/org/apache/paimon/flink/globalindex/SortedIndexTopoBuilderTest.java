@@ -24,6 +24,7 @@ import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 
@@ -168,5 +169,11 @@ public class SortedIndexTopoBuilderTest {
         tasks.add(new SortedBuildTask(0, new Range(0, 1499), new byte[0]));
 
         assertThat(SortedIndexTopoBuilder.calculateParallelism(tasks, 1000L, 16)).isEqualTo(1);
+    }
+
+    @Test
+    public void testSortColumnsUseRowIdAsTieBreaker() {
+        assertThat(SortedIndexTopoBuilder.createSortColumns("task-id", "index-key"))
+                .containsExactly("task-id", "index-key", SpecialFields.ROW_ID.name());
     }
 }
