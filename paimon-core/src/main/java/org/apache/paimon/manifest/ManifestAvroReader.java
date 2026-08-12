@@ -351,15 +351,14 @@ public final class ManifestAvroReader implements AutoCloseable {
                     decompressed.array(),
                     decompressed.arrayOffset() + decompressed.position(),
                     decompressed.remaining());
-            GenericRow row = recordDecoder.createRow();
+            GenericRow reuse = reuseRow ? recordDecoder.createRow() : null;
             return new RowIterator(
                     blockRecordCount,
                     decoderContext.decoder,
                     recordDecoder,
-                    row,
+                    reuse,
                     partitionFilter,
-                    bucketFilter,
-                    reuseRow);
+                    bucketFilter);
         }
 
         public long blockOrdinal() {
@@ -411,11 +410,11 @@ public final class ManifestAvroReader implements AutoCloseable {
 
         private final AvroRecordDecoder decoder;
         private final ManifestRecordDecoder recordDecoder;
+        private final @Nullable GenericRow reuseRow;
         private GenericRow row;
         private final @Nullable PartitionPredicate partitionFilter;
         private final @Nullable BucketFilter bucketFilter;
         private final boolean filtered;
-        private final boolean reuseRow;
 
         private long blockRemaining;
         private long blockRecordIndex = -1;
@@ -426,18 +425,17 @@ public final class ManifestAvroReader implements AutoCloseable {
                 long recordCount,
                 AvroRecordDecoder decoder,
                 ManifestRecordDecoder recordDecoder,
-                GenericRow row,
+                @Nullable GenericRow reuseRow,
                 @Nullable PartitionPredicate partitionFilter,
-                @Nullable BucketFilter bucketFilter,
-                boolean reuseRow) {
+                @Nullable BucketFilter bucketFilter) {
             blockRemaining = recordCount;
             this.decoder = decoder;
             this.recordDecoder = recordDecoder;
-            this.row = row;
+            this.reuseRow = reuseRow;
+            this.row = reuseRow;
             this.partitionFilter = partitionFilter;
             this.bucketFilter = bucketFilter;
             this.filtered = partitionFilter != null || bucketFilter != null;
-            this.reuseRow = reuseRow;
         }
 
         @Override
@@ -452,7 +450,7 @@ public final class ManifestAvroReader implements AutoCloseable {
                 }
                 while (blockRemaining > 0) {
                     blockRecordIndex++;
-                    if (!reuseRow && blockRecordIndex > 0) {
+                    if (reuseRow == null) {
                         row = recordDecoder.createRow();
                     }
                     int recordStart = decoder.absolutePosition();
@@ -488,7 +486,7 @@ public final class ManifestAvroReader implements AutoCloseable {
                     throw new NoSuchElementException();
                 }
                 blockRecordIndex++;
-                if (!reuseRow && blockRecordIndex > 0) {
+                if (reuseRow == null) {
                     row = recordDecoder.createRow();
                 }
                 int recordStart = decoder.absolutePosition();
