@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
@@ -43,12 +44,12 @@ import javax.annotation.Nullable;
 
 import java.util.HashMap;
 import java.util.List;
-import java.util.function.Supplier;
+import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
-/** Procedure which physically applies deletion vectors and assigns new row IDs. */
+/** Procedure which applies deletion vectors to the latest table state and assigns new row IDs. */
 public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
@@ -96,6 +97,7 @@ public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
                     FileStoreTable table = (FileStoreTable) sparkTable.getTable();
                     HashMap<String, String> dynamicOptions = new HashMap<>();
                     ProcedureUtils.putAllOptions(dynamicOptions, options);
+                    dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
                     table = table.copy(dynamicOptions);
 
                     checkArgument(
@@ -148,13 +150,19 @@ public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
         if (snapshot == null) {
             return;
         }
-        DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
-                deletionFilesPerBatch == null
-                        ? new DataEvolutionDeletionVectorMaterializeCoordinator(
-                                table, partitionPredicate, snapshot)
-                        : new DataEvolutionDeletionVectorMaterializeCoordinator(
-                                table, partitionPredicate, snapshot, deletionFilesPerBatch);
-        Supplier<List<DataEvolutionCompactTask>> taskPlanner = coordinator::plan;
+        Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner =
+                planningSnapshot -> {
+                    DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
+                            deletionFilesPerBatch == null
+                                    ? new DataEvolutionDeletionVectorMaterializeCoordinator(
+                                            table, partitionPredicate, planningSnapshot)
+                                    : new DataEvolutionDeletionVectorMaterializeCoordinator(
+                                            table,
+                                            partitionPredicate,
+                                            planningSnapshot,
+                                            deletionFilesPerBatch);
+                    return coordinator.plan();
+                };
         DataEvolutionRewriteExecutor.execute(
                 table,
                 snapshot,
@@ -170,7 +178,7 @@ public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
 
     @Override
     public String description() {
-        return "Physically apply deletion vectors and assign new row IDs.";
+        return "Apply deletion vectors to the latest table state and assign new row IDs.";
     }
 
     public static ProcedureBuilder builder() {

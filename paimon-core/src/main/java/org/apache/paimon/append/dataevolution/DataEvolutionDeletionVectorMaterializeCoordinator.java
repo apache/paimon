@@ -22,8 +22,12 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.BinaryIndexManifestEntry;
+import org.apache.paimon.manifest.FileEntry;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -34,6 +38,8 @@ import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.PrimitiveRowRanges;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
@@ -57,7 +63,7 @@ import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Plans tasks which physically apply deletion vectors and assign new row IDs. */
+/** Plans tasks which apply deletion vectors to the latest table state and assign new row IDs. */
 public class DataEvolutionDeletionVectorMaterializeCoordinator {
 
     // Soft target. One overlapping row-id component can exceed it.
@@ -103,55 +109,47 @@ public class DataEvolutionDeletionVectorMaterializeCoordinator {
 
     private static class MaterializeScanner {
 
-        @Nullable private final FileStoreScan anchorScan;
-        @Nullable private final FileStoreScan rangeScan;
+        private final FileStoreTable table;
+        @Nullable private final PartitionPredicate partitionPredicate;
+        private final IndexFileHandler indexFileHandler;
         private final Snapshot snapshot;
-        private final List<ManifestFileMeta> manifests;
-        private final LinkedHashMap<BinaryRow, LinkedHashMap<String, DeletionFile>>
-                remainingDeletionFiles;
         private final int deletionFilesPerBatch;
+        private boolean scanned;
 
         private MaterializeScanner(
                 FileStoreTable table,
                 @Nullable PartitionPredicate partitionPredicate,
                 Snapshot snapshot,
                 int deletionFilesPerBatch) {
+            this.table = table;
+            this.partitionPredicate = partitionPredicate;
+            this.indexFileHandler = table.store().newIndexFileHandler();
             this.snapshot = snapshot;
             checkArgument(deletionFilesPerBatch > 0, "Deletion files per batch must be positive.");
             this.deletionFilesPerBatch = deletionFilesPerBatch;
-            this.remainingDeletionFiles =
-                    scanDeletionFiles(
-                            table.store().newIndexFileHandler(), snapshot, partitionPredicate);
-
-            if (remainingDeletionFiles.isEmpty()) {
-                this.anchorScan = null;
-                this.rangeScan = null;
-                this.manifests = Collections.emptyList();
-            } else {
-                SnapshotReader snapshotReader =
-                        table.newSnapshotReader().withPartitionFilter(partitionPredicate);
-                this.manifests =
-                        snapshotReader
-                                .manifestsReader()
-                                .read(snapshot, ScanMode.ALL)
-                                .filteredManifests;
-                this.anchorScan =
-                        table.store().newScan().withPartitionFilter(partitionPredicate).dropStats();
-                this.rangeScan =
-                        table.store().newScan().withPartitionFilter(partitionPredicate).dropStats();
-            }
         }
 
         private MaterializeScanBatch scan() {
-            if (remainingDeletionFiles.isEmpty()) {
+            if (scanned) {
                 throw new EndOfScanException();
             }
+            scanned = true;
 
-            Map<BinaryRow, Map<String, DeletionFile>> candidates = takeCandidates();
+            Map<BinaryRow, Map<String, DeletionFile>> candidates = scanCandidates();
+            if (candidates.isEmpty()) {
+                throw new EndOfScanException();
+            }
             Set<String> candidateFileNames = new HashSet<>();
             candidates.values().forEach(files -> candidateFileNames.addAll(files.keySet()));
 
-            checkState(anchorScan != null && rangeScan != null);
+            SnapshotReader snapshotReader =
+                    table.newSnapshotReader().withPartitionFilter(partitionPredicate);
+            List<ManifestFileMeta> manifests =
+                    snapshotReader.manifestsReader().read(snapshot, ScanMode.ALL).filteredManifests;
+            FileStoreScan anchorScan =
+                    table.store().newScan().withPartitionFilter(partitionPredicate).dropStats();
+            FileStoreScan rangeScan =
+                    table.store().newScan().withPartitionFilter(partitionPredicate).dropStats();
             anchorScan.withDataFileNameFilter(candidateFileNames::contains);
             List<ManifestEntry> anchors = new ArrayList<>(candidateFileNames.size());
             anchorScan.readFileIterator(manifests).forEachRemaining(anchors::add);
@@ -183,89 +181,152 @@ public class DataEvolutionDeletionVectorMaterializeCoordinator {
                     missingFiles);
 
             ranges = Range.sortAndMergeOverlap(ranges);
-            rangeScan.withRowRanges(ranges);
-            List<ManifestEntry> entries = new ArrayList<>();
-            rangeScan.readFileIterator(manifestsForRanges(ranges)).forEachRemaining(entries::add);
+            List<ManifestEntry> entries = scanOverlappingRangeClosure(rangeScan, manifests, ranges);
 
-            Map<BinaryRow, Map<String, DeletionFile>> batchDeletionFiles =
-                    deletionFilesForEntries(entries);
+            Map<BinaryRow, Map<String, DeletionFile>> batchDeletionFiles = scanForEntries(entries);
             checkState(
                     containsAll(batchDeletionFiles, candidates),
                     "Deletion-vector row ranges do not contain all selected anchor files.");
-            removeDeletionFiles(batchDeletionFiles);
             return new MaterializeScanBatch(entries, batchDeletionFiles);
         }
 
-        private Map<BinaryRow, Map<String, DeletionFile>> takeCandidates() {
+        private List<ManifestEntry> scanOverlappingRangeClosure(
+                FileStoreScan rangeScan,
+                List<ManifestFileMeta> manifests,
+                List<Range> initialRanges) {
+            List<Range> coveredRanges = initialRanges;
+            List<Range> frontier = initialRanges;
+            Map<FileEntry.Identifier, ManifestEntry> result = new LinkedHashMap<>();
+            while (!frontier.isEmpty()) {
+                rangeScan.withRowRanges(frontier);
+                List<ManifestEntry> scannedEntries = new ArrayList<>();
+                rangeScan
+                        .readFileIterator(manifestsForRanges(manifests, frontier))
+                        .forEachRemaining(scannedEntries::add);
+
+                List<Range> expandedRanges = new ArrayList<>(coveredRanges);
+                for (ManifestEntry entry : scannedEntries) {
+                    result.putIfAbsent(entry.identifier(), entry);
+                    // A dedicated file can transitively bridge multiple normal-file ranges.
+                    expandedRanges.add(entry.file().nonNullRowIdRange());
+                }
+                expandedRanges = Range.sortAndMergeOverlap(expandedRanges);
+                frontier = subtractRanges(expandedRanges, coveredRanges);
+                coveredRanges = expandedRanges;
+            }
+            return new ArrayList<>(result.values());
+        }
+
+        private Map<BinaryRow, Map<String, DeletionFile>> scanCandidates() {
             Map<BinaryRow, Map<String, DeletionFile>> candidates = new LinkedHashMap<>();
             int count = 0;
-            for (Map.Entry<BinaryRow, LinkedHashMap<String, DeletionFile>> partition :
-                    remainingDeletionFiles.entrySet()) {
-                Map<String, DeletionFile> partitionCandidates = new LinkedHashMap<>();
-                for (Map.Entry<String, DeletionFile> deletionFile :
-                        partition.getValue().entrySet()) {
-                    partitionCandidates.put(deletionFile.getKey(), deletionFile.getValue());
-                    count++;
-                    if (count >= deletionFilesPerBatch) {
-                        break;
+            try (CloseableIterator<BinaryIndexManifestEntry> entries =
+                    indexFileHandler.scan(snapshot, BinaryIndexManifestEntry.FULL_PROJECTION)) {
+                while (entries.hasNext() && count < deletionFilesPerBatch) {
+                    IndexManifestEntry entry = entries.next().copy();
+                    if (!isDeletionVectorEntry(entry)) {
+                        continue;
+                    }
+                    LinkedHashMap<String, DeletionVectorMeta> deletionVectors =
+                            entry.indexFile().dvRanges();
+                    if (deletionVectors == null) {
+                        continue;
+                    }
+                    Map<String, DeletionFile> partitionCandidates =
+                            candidates.computeIfAbsent(
+                                    entry.partition(), ignored -> new LinkedHashMap<>());
+                    String path = indexFileHandler.filePath(entry).toString();
+                    for (DeletionVectorMeta deletionVector : deletionVectors.values()) {
+                        checkState(
+                                partitionCandidates.put(
+                                                deletionVector.dataFileName(),
+                                                toDeletionFile(path, deletionVector))
+                                        == null,
+                                "Duplicate deletion vector for data file '%s'.",
+                                deletionVector.dataFileName());
+                        count++;
+                        if (count >= deletionFilesPerBatch) {
+                            break;
+                        }
                     }
                 }
-                if (!partitionCandidates.isEmpty()) {
-                    candidates.put(partition.getKey(), partitionCandidates);
-                }
-                if (count >= deletionFilesPerBatch) {
-                    break;
-                }
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to scan deletion vectors.", e);
             }
             return candidates;
         }
 
-        private List<ManifestFileMeta> manifestsForRanges(List<Range> ranges) {
+        private List<ManifestFileMeta> manifestsForRanges(
+                List<ManifestFileMeta> manifests, List<Range> ranges) {
             if (!allContainsRowId(manifests)) {
                 return manifests;
             }
+            PrimitiveRowRanges rangeIndex = new PrimitiveRowRanges(ranges.size());
+            ranges.forEach(range -> rangeIndex.add(range.from, range.to));
             return manifests.stream()
                     .filter(
                             manifest ->
-                                    ranges.stream()
-                                            .anyMatch(
-                                                    range ->
-                                                            range.hasIntersection(
-                                                                    new Range(
-                                                                            manifest.minRowId(),
-                                                                            manifest.maxRowId()))))
+                                    rangeIndex.overlaps(manifest.minRowId(), manifest.maxRowId()))
                     .collect(Collectors.toList());
         }
 
-        private Map<BinaryRow, Map<String, DeletionFile>> deletionFilesForEntries(
-                List<ManifestEntry> entries) {
+        private Map<BinaryRow, Map<String, DeletionFile>> scanForEntries(
+                List<ManifestEntry> dataEntries) {
+            Map<BinaryRow, Set<String>> selectedFiles = new LinkedHashMap<>();
+            for (ManifestEntry entry : dataEntries) {
+                selectedFiles
+                        .computeIfAbsent(entry.partition(), ignored -> new HashSet<>())
+                        .add(entry.file().fileName());
+            }
             Map<BinaryRow, Map<String, DeletionFile>> result = new LinkedHashMap<>();
-            for (ManifestEntry entry : entries) {
-                Map<String, DeletionFile> partitionDeletionFiles =
-                        remainingDeletionFiles.get(entry.partition());
-                if (partitionDeletionFiles == null) {
-                    continue;
+            try (CloseableIterator<BinaryIndexManifestEntry> entries =
+                    indexFileHandler.scan(snapshot, BinaryIndexManifestEntry.FULL_PROJECTION)) {
+                while (entries.hasNext()) {
+                    IndexManifestEntry entry = entries.next().copy();
+                    if (!isDeletionVectorEntry(entry)) {
+                        continue;
+                    }
+                    Set<String> selectedPartitionFiles = selectedFiles.get(entry.partition());
+                    LinkedHashMap<String, DeletionVectorMeta> deletionVectors =
+                            entry.indexFile().dvRanges();
+                    if (selectedPartitionFiles == null || deletionVectors == null) {
+                        continue;
+                    }
+                    String path = indexFileHandler.filePath(entry).toString();
+                    for (DeletionVectorMeta deletionVector : deletionVectors.values()) {
+                        if (!selectedPartitionFiles.contains(deletionVector.dataFileName())) {
+                            continue;
+                        }
+                        Map<String, DeletionFile> partitionResult =
+                                result.computeIfAbsent(
+                                        entry.partition(), ignored -> new LinkedHashMap<>());
+                        checkState(
+                                partitionResult.put(
+                                                deletionVector.dataFileName(),
+                                                toDeletionFile(path, deletionVector))
+                                        == null,
+                                "Duplicate deletion vector for data file '%s'.",
+                                deletionVector.dataFileName());
+                    }
                 }
-                DeletionFile deletionFile = partitionDeletionFiles.get(entry.file().fileName());
-                if (deletionFile != null) {
-                    result.computeIfAbsent(entry.partition(), ignored -> new LinkedHashMap<>())
-                            .put(entry.file().fileName(), deletionFile);
-                }
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to scan deletion vectors for data files.", e);
             }
             return result;
         }
 
-        private void removeDeletionFiles(Map<BinaryRow, Map<String, DeletionFile>> deletionFiles) {
-            for (Map.Entry<BinaryRow, Map<String, DeletionFile>> partition :
-                    deletionFiles.entrySet()) {
-                Map<String, DeletionFile> remaining =
-                        remainingDeletionFiles.get(partition.getKey());
-                checkState(remaining != null);
-                partition.getValue().keySet().forEach(remaining::remove);
-                if (remaining.isEmpty()) {
-                    remainingDeletionFiles.remove(partition.getKey());
-                }
+        private boolean isDeletionVectorEntry(IndexManifestEntry entry) {
+            if (entry.kind() != FileKind.ADD
+                    || !DELETION_VECTORS_INDEX.equals(entry.indexFile().indexType())) {
+                return false;
             }
+            if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {
+                return false;
+            }
+            checkArgument(
+                    entry.bucket() == UNAWARE_BUCKET,
+                    "Materializing deletion vectors only supports unaware-bucket tables.");
+            return true;
         }
 
         private static boolean containsAll(
@@ -281,33 +342,47 @@ public class DataEvolutionDeletionVectorMaterializeCoordinator {
             return true;
         }
 
-        private static LinkedHashMap<BinaryRow, LinkedHashMap<String, DeletionFile>>
-                scanDeletionFiles(
-                        IndexFileHandler indexFileHandler,
-                        Snapshot snapshot,
-                        @Nullable PartitionPredicate partitionPredicate) {
-            LinkedHashMap<BinaryRow, LinkedHashMap<String, DeletionFile>> result =
-                    new LinkedHashMap<>();
-            for (IndexManifestEntry entry :
-                    indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX)) {
-                BinaryRow partition = entry.partition();
-                if (partitionPredicate != null && !partitionPredicate.test(partition)) {
-                    continue;
+        private static DeletionFile toDeletionFile(String path, DeletionVectorMeta deletionVector) {
+            return new DeletionFile(
+                    path,
+                    deletionVector.offset(),
+                    deletionVector.length(),
+                    deletionVector.cardinality());
+        }
+
+        private static List<Range> subtractRanges(
+                List<Range> expandedRanges, List<Range> coveredRanges) {
+            List<Range> result = new ArrayList<>();
+            int coveredIndex = 0;
+            for (Range expanded : expandedRanges) {
+                long cursor = expanded.from;
+                boolean exhausted = false;
+                while (coveredIndex < coveredRanges.size()
+                        && coveredRanges.get(coveredIndex).to < cursor) {
+                    coveredIndex++;
                 }
-                checkArgument(
-                        entry.bucket() == UNAWARE_BUCKET,
-                        "Materializing deletion vectors only supports unaware-bucket tables.");
-                Map<String, DeletionFile> files =
-                        indexFileHandler
-                                .dvIndex(partition, UNAWARE_BUCKET)
-                                .toDeletionFiles(Collections.singletonList(entry.indexFile()));
-                LinkedHashMap<String, DeletionFile> partitionFiles =
-                        result.computeIfAbsent(partition, ignored -> new LinkedHashMap<>());
-                for (Map.Entry<String, DeletionFile> file : files.entrySet()) {
-                    checkState(
-                            partitionFiles.put(file.getKey(), file.getValue()) == null,
-                            "Duplicate deletion vector for data file '%s'.",
-                            file.getKey());
+                int currentCoveredIndex = coveredIndex;
+                while (currentCoveredIndex < coveredRanges.size()) {
+                    Range covered = coveredRanges.get(currentCoveredIndex);
+                    if (covered.from > expanded.to) {
+                        break;
+                    }
+                    if (covered.from > cursor) {
+                        result.add(new Range(cursor, covered.from - 1));
+                    }
+                    if (covered.to >= expanded.to) {
+                        exhausted = true;
+                        break;
+                    }
+                    if (covered.to == Long.MAX_VALUE) {
+                        exhausted = true;
+                        break;
+                    }
+                    cursor = Math.max(cursor, covered.to + 1);
+                    currentCoveredIndex++;
+                }
+                if (!exhausted && cursor <= expanded.to) {
+                    result.add(new Range(cursor, expanded.to));
                 }
             }
             return result;

@@ -42,7 +42,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
-/** Source which plans tasks to physically apply data-evolution deletion vectors. */
+/** Source which plans tasks to apply data-evolution deletion vectors to the latest table state. */
 public class DataEvolutionDeletionVectorMaterializeSource
         extends AbstractNonCoordinatedSource<DataEvolutionCompactTask> {
 
@@ -76,7 +76,7 @@ public class DataEvolutionDeletionVectorMaterializeSource
         return new MaterializeSourceReader(table, partitionFilter, snapshot);
     }
 
-    /** Reader which plans materialization tasks in bounded batches. */
+    /** Reader which plans one bounded materialization batch per Flink job. */
     public static class MaterializeSourceReader
             extends AbstractNonCoordinatedSourceReader<DataEvolutionCompactTask> {
 
@@ -96,10 +96,9 @@ public class DataEvolutionDeletionVectorMaterializeSource
                 List<DataEvolutionCompactTask> tasks = coordinator.plan();
                 tasks.forEach(readerOutput::collect);
             } catch (EndOfScanException ignored) {
-                LOG.info("All deletion vectors have been planned for materialization.");
-                return InputStatus.END_OF_INPUT;
+                LOG.info("No deletion vectors found for materialization.");
             }
-            return InputStatus.MORE_AVAILABLE;
+            return InputStatus.END_OF_INPUT;
         }
     }
 

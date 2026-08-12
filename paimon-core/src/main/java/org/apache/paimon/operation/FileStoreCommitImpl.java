@@ -31,6 +31,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.BinaryIndexManifestEntry;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -76,6 +77,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
@@ -83,6 +85,7 @@ import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RetryWaiter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -97,6 +100,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -120,6 +124,7 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
  * Default implementation of {@link FileStoreCommit}.
@@ -814,16 +819,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // latest snapshot here guarantees that an index committed concurrently is either
             // deleted by this attempt or makes this attempt retry and is deleted by the next one.
             if (latestSnapshot != null && latestSnapshot.indexManifest() != null) {
-                for (IndexManifestEntry entry :
-                        indexManifestFile.read(latestSnapshot.indexManifest())) {
-                    if (entry.indexFile().globalIndexMeta() != null
-                            && materializedBuckets.contains(
-                                    Pair.of(entry.partition(), entry.bucket()))) {
-                        indexFiles.add(entry.toDeleteEntry());
+                try (CloseableIterator<BinaryIndexManifestEntry> entries =
+                        indexManifestFile.scan(
+                                latestSnapshot.indexManifest(),
+                                BinaryIndexManifestEntry.FULL_PROJECTION)) {
+                    while (entries.hasNext()) {
+                        BinaryIndexManifestEntry binaryEntry = entries.next();
+                        if (binaryEntry.hasGlobalIndexMeta()
+                                && materializedBuckets.contains(
+                                        Pair.of(
+                                                deserializeBinaryRow(binaryEntry.partitionBytes()),
+                                                binaryEntry.bucket()))) {
+                            indexFiles.add(binaryEntry.copy().toDeleteEntry());
+                        }
                     }
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to scan the latest index manifest.", e);
                 }
             }
-
             return new CommitChanges(
                     changes.compactTableFiles, changes.compactChangelog, indexFiles);
         };
@@ -1057,9 +1070,46 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     retryResult instanceof CommitFailRetryResult
                             ? (CommitFailRetryResult) retryResult
                             : null;
+            List<Range> changedRowRanges =
+                    options.dataEvolutionEnabled() && commitKind == CommitKind.COMPACT
+                            ? deltaFiles.stream()
+                                    .map(ManifestEntry::file)
+                                    .filter(file -> file.firstRowId() != null)
+                                    .map(DataFileMeta::nonNullRowIdRange)
+                                    .collect(Collectors.toList())
+                            : Collections.emptyList();
             // An overwrite may replace the base manifest list without recording the replacements
             // in its delta manifest, so the cached base cannot always be refreshed incrementally.
-            if (commitFailRetry != null
+            if (!changedRowRanges.isEmpty()) {
+                baseDataFiles =
+                        scanner.readAllEntriesFromChangedRowRanges(
+                                latestSnapshot, changedPartitions, changedRowRanges);
+                Set<String> dataFilesToDelete =
+                        deltaFiles.stream()
+                                .filter(entry -> entry.kind() == FileKind.DELETE)
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toSet());
+                for (IndexManifestEntry indexFile : indexFiles) {
+                    if (indexFile.indexFile().dvRanges() != null) {
+                        dataFilesToDelete.addAll(indexFile.indexFile().dvRanges().keySet());
+                    }
+                }
+                if (!dataFilesToDelete.isEmpty()) {
+                    baseDataFiles.addAll(
+                            scanner.readAllEntriesFromDataFiles(
+                                    latestSnapshot, changedPartitions, dataFilesToDelete));
+                    baseDataFiles =
+                            new ArrayList<>(
+                                    baseDataFiles.stream()
+                                            .collect(
+                                                    Collectors.toMap(
+                                                            FileEntry::identifier,
+                                                            entry -> entry,
+                                                            (left, right) -> left,
+                                                            LinkedHashMap::new))
+                                            .values());
+                }
+            } else if (commitFailRetry != null
                     && commitFailRetry.latestSnapshot != null
                     && commitFailRetry.baseDataFiles != null
                     && !hasOverwriteSinceLastAttempt) {

@@ -33,7 +33,7 @@ import static org.apache.paimon.utils.ParameterUtils.getPartitions;
 import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
-/** Procedure which physically applies deletion vectors and assigns new row IDs. */
+/** Procedure which applies deletion vectors to the latest table state and assigns new row IDs. */
 public class MaterializeDeletionVectorsProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "materialize_deletion_vectors";

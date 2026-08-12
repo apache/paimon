@@ -94,6 +94,7 @@ public class TableCommitImpl implements InnerTableCommit {
     @Nullable private List<BinaryRow> overwriteStaticPartitions = null;
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
+    private boolean maintainAfterCommit = true;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -166,6 +167,12 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl expireForEmptyCommit(boolean expireForEmptyCommit) {
         this.expireForEmptyCommit = expireForEmptyCommit;
+        return this;
+    }
+
+    /** Controls whether automatic maintenance runs after a commit. */
+    public TableCommitImpl maintainAfterCommit(boolean maintainAfterCommit) {
+        this.maintainAfterCommit = maintainAfterCommit;
         return this;
     }
 
@@ -287,7 +294,7 @@ public class TableCommitImpl implements InnerTableCommit {
             for (ManifestCommittable committable : committables) {
                 newSnapshots += commit.commit(committable, checkAppendFiles);
             }
-            if (!committables.isEmpty()) {
+            if (maintainAfterCommit && !committables.isEmpty()) {
                 maintain(
                         committables.get(committables.size() - 1).identifier(),
                         maintainExecutor,
@@ -312,10 +319,12 @@ public class TableCommitImpl implements InnerTableCommit {
                             ? commit.overwritePartition(overwritePartitionSpec, committable)
                             : commit.overwriteStaticPartitions(
                                     overwriteStaticPartitions, committable);
-            maintain(
-                    committable.identifier(),
-                    maintainExecutor,
-                    newSnapshots > 0 || expireForEmptyCommit);
+            if (maintainAfterCommit) {
+                maintain(
+                        committable.identifier(),
+                        maintainExecutor,
+                        newSnapshots > 0 || expireForEmptyCommit);
+            }
         }
     }
 
@@ -452,6 +461,11 @@ public class TableCommitImpl implements InnerTableCommit {
         if (doExpire && expireSnapshots != null) {
             expireSnapshots.run();
         }
+    }
+
+    /** Runs all table maintenance synchronously. */
+    public void runMaintenance() {
+        maintain(COMMIT_IDENTIFIER, true);
     }
 
     public void expireSnapshots() {

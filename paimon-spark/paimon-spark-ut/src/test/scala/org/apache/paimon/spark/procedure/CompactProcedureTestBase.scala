@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
 import org.apache.paimon.fs.Path
@@ -1722,7 +1723,10 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             |CREATE TABLE T (id INT, value STRING, pt STRING)
             |TBLPROPERTIES (
             |  'bucket' = '-1',
-            |  'write-only' = 'true',
+            |  'write-only' = 'false',
+            |  'snapshot.num-retained.min' = '1',
+            |  'snapshot.num-retained.max' = '1',
+            |  'snapshot.time-retained' = '0 ms',
             |  'row-tracking.enabled' = 'true',
             |  'data-evolution.enabled' = 'true',
             |  'deletion-vectors.enabled' = 'true')
@@ -1745,23 +1749,80 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 2)
       Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(0)
       checkAnswer(
-        sql("SELECT id, pt, _ROW_ID FROM T ORDER BY id"),
+        sql("SELECT id, pt FROM T ORDER BY id"),
         Seq(
-          Row(0, "p0", 15L),
-          Row(2, "p0", 16L),
-          Row(3, "p0", 17L),
-          Row(4, "p0", 18L),
-          Row(5, "p1", 5L),
-          Row(6, "p1", 6L),
-          Row(7, "p1", 7L),
-          Row(8, "p1", 8L),
-          Row(9, "p1", 9L),
-          Row(10, "p0", 19L),
-          Row(12, "p0", 20L),
-          Row(13, "p0", 21L),
-          Row(14, "p0", 22L)
+          Row(0, "p0"),
+          Row(2, "p0"),
+          Row(3, "p0"),
+          Row(4, "p0"),
+          Row(5, "p1"),
+          Row(6, "p1"),
+          Row(7, "p1"),
+          Row(8, "p1"),
+          Row(9, "p1"),
+          Row(10, "p0"),
+          Row(12, "p0"),
+          Row(13, "p0"),
+          Row(14, "p0")
         )
       )
+      assert(
+        sql("SELECT _ROW_ID FROM T WHERE pt = 'p0'")
+          .collect()
+          .map(_.getLong(0))
+          .sorted
+          .sameElements(15L to 22L))
+    }
+  }
+
+  test("Paimon Procedure: reject legacy row id rewrite for empty data evolution table") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+
+      val exception = intercept[IllegalArgumentException] {
+        sql(
+          "CALL sys.compact(table => 'T', options => " +
+            "'data-evolution.compaction.rewrite-row-ids=true')").collect()
+      }
+      Assertions
+        .assertThat(exception.getMessage)
+        .contains("data-evolution.compaction.rewrite-row-ids=true")
+        .contains("materialize_deletion_vectors")
+    }
+  }
+
+  test("Paimon Procedure: materialize deletion vectors enables snapshot expiration") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'true',
+            |  'snapshot.num-retained.min' = '1',
+            |  'snapshot.num-retained.max' = '1',
+            |  'snapshot.time-retained' = '0 ms',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 'one'), (2, 'two')")
+      sql("DELETE FROM T WHERE id = 1")
+
+      checkAnswer(sql("CALL sys.materialize_deletion_vectors(table => 'T')"), Row(true) :: Nil)
+
+      val table = loadTable("T")
+      Assertions
+        .assertThat(table.snapshotManager().earliestSnapshotId())
+        .isEqualTo(table.snapshotManager().latestSnapshotId())
+      Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(0)
+      checkAnswer(sql("SELECT id, value FROM T"), Row(2, "two") :: Nil)
     }
   }
 
@@ -1771,7 +1832,10 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             |CREATE TABLE T (id INT, value STRING, pt STRING)
             |TBLPROPERTIES (
             |  'bucket' = '-1',
-            |  'write-only' = 'true',
+            |  'write-only' = 'false',
+            |  'snapshot.num-retained.min' = '1',
+            |  'snapshot.num-retained.max' = '1',
+            |  'snapshot.time-retained' = '0 ms',
             |  'row-tracking.enabled' = 'true',
             |  'data-evolution.enabled' = 'true',
             |  'deletion-vectors.enabled' = 'true',
@@ -1792,11 +1856,86 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       executeDataEvolutionCompaction(table, candidateFilesPerBatch = 2)
 
       Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 2)
+      Assertions
+        .assertThat(table.snapshotManager().earliestSnapshotId())
+        .isEqualTo(table.snapshotManager().latestSnapshotId())
       Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(2)
       checkAnswer(
         sql("SELECT id, pt, _ROW_ID FROM T ORDER BY id"),
         Seq(Row(1, "p0", 1L), Row(2, "p1", 2L), Row(4, "p0", 4L))
       )
+    }
+  }
+
+  test("Paimon Procedure: delay partition expiration until all compact batches finish") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING, pt STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'true',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'compaction.min.file-num' = '2',
+            |  'partition.expiration-time' = '0 ms',
+            |  'partition.expiration-check-interval' = '0 ms',
+            |  'partition.expiration-strategy' = 'update-time')
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (0, 'value-0', 'p0')")
+      sql("INSERT INTO T VALUES (1, 'value-1', 'p0')")
+      sql("INSERT INTO T VALUES (2, 'value-2', 'p1')")
+      sql("INSERT INTO T VALUES (3, 'value-3', 'p1')")
+
+      val writeTable = loadTable("T")
+      val snapshotBefore = lastSnapshotId(writeTable)
+      val compactTable =
+        writeTable.copy(util.Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"))
+
+      CompactProcedure.executeDataEvolutionCompaction(
+        compactTable,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        Int.box(2)
+      )
+
+      Assertions.assertThat(lastSnapshotId(compactTable)).isGreaterThanOrEqualTo(snapshotBefore + 3)
+      checkAnswer(sql("SELECT id FROM T"), Seq.empty)
+    }
+  }
+
+  test("Paimon Procedure: run deferred maintenance without a compact batch") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, pt STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'true',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'partition.expiration-time' = '0 ms',
+            |  'partition.expiration-check-interval' = '0 ms',
+            |  'partition.expiration-strategy' = 'update-time')
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (0, 'p0')")
+
+      val table =
+        loadTable("T").copy(util.Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"))
+      CompactProcedure.executeDataEvolutionCompaction(
+        table,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        Int.box(2)
+      )
+
+      checkAnswer(sql("SELECT id FROM T"), Seq.empty)
     }
   }
 

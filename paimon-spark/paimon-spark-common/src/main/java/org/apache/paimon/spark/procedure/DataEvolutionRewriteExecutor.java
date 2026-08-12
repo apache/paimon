@@ -39,7 +39,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.function.Supplier;
+import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.spark.utils.SparkProcedureUtils.readParallelism;
@@ -55,20 +55,34 @@ final class DataEvolutionRewriteExecutor {
     static void execute(
             FileStoreTable table,
             Snapshot initialSnapshot,
-            Supplier<List<DataEvolutionCompactTask>> taskPlanner,
+            Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner,
             JavaSparkContext javaSparkContext,
             SparkSession sparkSession,
             CommitConfigurer commitConfigurer) {
         CommitMessageSerializer messageSerializer = new CommitMessageSerializer();
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         Snapshot preparationSnapshot = initialSnapshot;
+        int round = 0;
         try {
             while (true) {
-                List<DataEvolutionCompactTask> compactionTasks = taskPlanner.get();
+                List<DataEvolutionCompactTask> compactionTasks =
+                        taskPlanner.apply(preparationSnapshot);
+                round++;
                 if (compactionTasks.isEmpty()) {
-                    LOG.info("Task plan is empty, no data evolution rewrite job to execute.");
+                    LOG.info(
+                            "No data evolution rewrite task planned in round {} for table {}, "
+                                    + "continue to scan the next batch.",
+                            round,
+                            table.fullName());
                     continue;
                 }
+                boolean containsMaterializeDeletion =
+                        compactionTasks.stream()
+                                .anyMatch(
+                                        task ->
+                                                task.type()
+                                                        == DataEvolutionCompactTask.TaskType
+                                                                .MATERIALIZE_DELETION);
 
                 DataEvolutionCompactTaskSerializer serializer =
                         new DataEvolutionCompactTaskSerializer();
@@ -82,6 +96,14 @@ final class DataEvolutionRewriteExecutor {
                 }
 
                 int readParallelism = readParallelism(serializedTasks, sparkSession);
+                LOG.info(
+                        "Starting to execute {} data evolution rewrite tasks of table {} in round {} "
+                                + "with read parallelism {}, contains materialize deletion {}.",
+                        serializedTasks.size(),
+                        table.fullName(),
+                        round,
+                        readParallelism,
+                        containsMaterializeDeletion);
                 JavaRDD<byte[]> commitMessageJavaRDD =
                         javaSparkContext
                                 .parallelize(serializedTasks, readParallelism)
@@ -110,6 +132,10 @@ final class DataEvolutionRewriteExecutor {
                 List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
                 try (TableCommitImpl commit = table.newCommit(commitUser)) {
                     commitConfigurer.configure(commit);
+                    // Planners can retain files and partitions from the initial snapshot across
+                    // batches. Run maintenance once after all batches have committed so that an
+                    // intermediate expiration cannot invalidate a later task.
+                    commit.maintainAfterCommit(false);
                     List<CommitMessage> messages =
                             deserializeCommitMessagesAndReleaseSerializedBytes(
                                     messageSerializer, serializedMessages);
@@ -135,7 +161,23 @@ final class DataEvolutionRewriteExecutor {
                 }
             }
         } catch (EndOfScanException e) {
-            LOG.info("Catching EndOfScanException, the data evolution rewrite job is finishing.");
+            LOG.info(
+                    "Catching EndOfScanException, the data evolution rewrite job of table {} is "
+                            + "finishing after {} plan rounds.",
+                    table.fullName(),
+                    round);
+        }
+        // Run this even when this invocation committed no batch. A previous invocation may have
+        // committed all rewrites and failed only while running the deferred maintenance.
+        runMaintenance(table);
+    }
+
+    private static void runMaintenance(FileStoreTable table) {
+        try (TableCommitImpl commit =
+                table.newCommit(createCommitUser(table.coreOptions().toConfiguration()))) {
+            commit.runMaintenance();
+        } catch (Exception e) {
+            throw new RuntimeException("Maintain table after data evolution rewrite failed.", e);
         }
     }
 

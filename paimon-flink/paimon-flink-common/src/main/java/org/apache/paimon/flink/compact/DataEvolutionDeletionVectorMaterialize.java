@@ -30,12 +30,13 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 
 import javax.annotation.Nullable;
 
-/** Builds a Flink job which physically applies data-evolution deletion vectors. */
+/** Builds a Flink job which applies deletion vectors to the latest table state. */
 public class DataEvolutionDeletionVectorMaterialize {
 
     private final transient StreamExecutionEnvironment env;
@@ -58,6 +59,9 @@ public class DataEvolutionDeletionVectorMaterialize {
     public void build() {
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         if (snapshot == null) {
+            env.fromSequence(0, 0)
+                    .name("Nothing to Materialize Source")
+                    .sinkTo(new DiscardingSink<>());
             return;
         }
         DataEvolutionDeletionVectorMaterializeSource source =

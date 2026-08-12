@@ -32,7 +32,7 @@ import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Flink action which physically applies deletion vectors for a data evolution table. */
+/** Flink action which applies deletion vectors to the latest data evolution table state. */
 public class MaterializeDeletionVectorsAction extends TableActionBase {
 
     private List<Map<String, String>> partitions;

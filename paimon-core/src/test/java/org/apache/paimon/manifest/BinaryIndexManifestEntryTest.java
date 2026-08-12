@@ -129,6 +129,34 @@ class BinaryIndexManifestEntryTest extends TableTestBase {
                 .hasMessageContaining(IndexManifestEntry.GLOBAL_INDEX);
     }
 
+    @Test
+    void testFullProjectionCopyIsIndependentFromReusableView() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        IndexManifestFile indexManifestFile = table.store().indexManifestFileFactory().create();
+
+        IndexManifestEntry first =
+                entry(
+                        FileKind.ADD,
+                        partition(1),
+                        3,
+                        "btree",
+                        new GlobalIndexMeta(10, 19, 1, new int[] {2}, null));
+        IndexManifestEntry second =
+                entry(FileKind.DELETE, partition(2), 4, "deletion-vector", null);
+        String fileName = indexManifestFile.writeWithoutRolling(Arrays.asList(first, second));
+
+        try (CloseableIterator<BinaryIndexManifestEntry> entries =
+                indexManifestFile.scan(fileName, BinaryIndexManifestEntry.FULL_PROJECTION)) {
+            BinaryIndexManifestEntry reusable = entries.next();
+            IndexManifestEntry copied = reusable.copy();
+
+            assertThat(copied).isEqualTo(first);
+            assertThat(entries.next()).isSameAs(reusable);
+            assertThat(copied).isEqualTo(first);
+        }
+    }
+
     private static IndexManifestEntry entry(
             FileKind kind,
             BinaryRow partition,

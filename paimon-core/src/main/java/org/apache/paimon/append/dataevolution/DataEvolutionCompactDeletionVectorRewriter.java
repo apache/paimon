@@ -25,25 +25,32 @@ import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
+import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.BinaryIndexManifestEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -99,8 +106,11 @@ public class DataEvolutionCompactDeletionVectorRewriter {
 
     private Map<BinaryRow, AppendDeleteFileMaintainer> collectMaintainers(
             Snapshot snapshot, List<CommitMessage> messages) {
-        Map<BinaryRow, AppendDeleteFileMaintainer> result = new LinkedHashMap<>();
         RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        Map<BinaryRow, Set<String>> anchorsByPartition =
+                collectAnchorFileNames(messages, rangeHelper);
+        Map<BinaryRow, AppendDeleteFileMaintainer> result =
+                createMaintainers(snapshot, anchorsByPartition);
 
         for (CommitMessage message : messages) {
             CommitMessageImpl commitMessage = (CommitMessageImpl) message;
@@ -123,16 +133,11 @@ public class DataEvolutionCompactDeletionVectorRewriter {
                 continue;
             }
 
-            AppendDeleteFileMaintainer maintainer =
-                    result.computeIfAbsent(
-                            commitMessage.partition(),
-                            ignored ->
-                                    BaseAppendDeleteFileMaintainer.forUnawareAppend(
-                                            table.store().newIndexFileHandler(),
-                                            snapshot,
-                                            commitMessage.partition()));
+            AppendDeleteFileMaintainer maintainer = result.get(commitMessage.partition());
             if (isMaterialized(compactIncrement)) {
-                removeMaterializedDeletionVectors(maintainer, rangeHelper, before);
+                if (maintainer != null) {
+                    removeMaterializedDeletionVectors(maintainer, rangeHelper, before);
+                }
                 continue;
             }
 
@@ -147,6 +152,9 @@ public class DataEvolutionCompactDeletionVectorRewriter {
                             + "range, but compact before range is %s and compact after range is %s.",
                     beforeRange,
                     afterRange);
+            if (maintainer == null) {
+                continue;
+            }
             DeletionVector merged = newDeletionVector();
 
             // Merge all old DeletionVectors, should consider row range offset of each sub dv
@@ -164,6 +172,77 @@ public class DataEvolutionCompactDeletionVectorRewriter {
             }
         }
         return result;
+    }
+
+    private Map<BinaryRow, Set<String>> collectAnchorFileNames(
+            List<CommitMessage> messages, RangeHelper<DataFileMeta> rangeHelper) {
+        Map<BinaryRow, Set<String>> result = new LinkedHashMap<>();
+        for (CommitMessage message : messages) {
+            CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+            List<DataFileMeta> before =
+                    normalFiles(commitMessage.compactIncrement().compactBefore());
+            for (List<DataFileMeta> rowGroup : rangeHelper.mergeOverlappingRanges(before)) {
+                result.computeIfAbsent(commitMessage.partition(), ignored -> new HashSet<>())
+                        .add(retrieveAnchorFile(rowGroup, file -> file).fileName());
+            }
+        }
+        return result;
+    }
+
+    private Map<BinaryRow, AppendDeleteFileMaintainer> createMaintainers(
+            Snapshot snapshot, Map<BinaryRow, Set<String>> anchorsByPartition) {
+        if (anchorsByPartition.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
+        Map<BinaryRow, List<IndexManifestEntry>> entriesByPartition = new LinkedHashMap<>();
+        try (CloseableIterator<BinaryIndexManifestEntry> entries =
+                indexFileHandler.scan(snapshot, BinaryIndexManifestEntry.FULL_PROJECTION)) {
+            while (entries.hasNext()) {
+                BinaryIndexManifestEntry binaryEntry = entries.next();
+                if (!binaryEntry.isAdd()
+                        || !DELETION_VECTORS_INDEX.equals(binaryEntry.indexType().toString())) {
+                    continue;
+                }
+                IndexManifestEntry entry = binaryEntry.copy();
+                Set<String> anchors = anchorsByPartition.get(entry.partition());
+                if (anchors == null || !containsDeletionVectorFor(entry, anchors)) {
+                    continue;
+                }
+                entriesByPartition
+                        .computeIfAbsent(entry.partition(), ignored -> new ArrayList<>())
+                        .add(entry);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to scan deletion vectors for compacted files.", e);
+        }
+
+        Map<BinaryRow, AppendDeleteFileMaintainer> result = new LinkedHashMap<>();
+        entriesByPartition.forEach(
+                (partition, entries) ->
+                        result.put(
+                                partition,
+                                BaseAppendDeleteFileMaintainer.forUnawareAppend(
+                                        indexFileHandler, partition, entries)));
+        return result;
+    }
+
+    private boolean containsDeletionVectorFor(IndexManifestEntry entry, Set<String> anchors) {
+        if (entry.kind() != FileKind.ADD
+                || !DELETION_VECTORS_INDEX.equals(entry.indexFile().indexType())) {
+            return false;
+        }
+        LinkedHashMap<String, DeletionVectorMeta> deletionVectors = entry.indexFile().dvRanges();
+        if (deletionVectors == null) {
+            return false;
+        }
+        for (String dataFileName : deletionVectors.keySet()) {
+            if (anchors.contains(dataFileName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void removeMaterializedDeletionVectors(

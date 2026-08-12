@@ -237,8 +237,10 @@ Deleting rows with deletion vectors does not physically remove the original
 data immediately. Data Evolution compaction preserves row IDs and logical
 deletions, so it does not materialize deleted rows. The legacy
 `data-evolution.compaction.rewrite-row-ids` option is no longer supported. Use
-the `materialize_deletion_vectors` procedure when the deleted rows must be
-physically removed.
+the `materialize_deletion_vectors` procedure to apply deletion vectors to the
+latest table state and replace the affected files. Historical snapshots and
+tags may still reference the replaced files; reclaiming their storage requires
+those references to expire and snapshot expiration to remove the files.
 
 :::
 
@@ -267,6 +269,12 @@ Consumers which persist `_ROW_ID` values must therefore coordinate with this
 operation. Concurrent changes to affected row-ID ranges cause the procedure to
 fail instead of committing stale results. Materialization of vector-store files
 is not currently supported.
+
+Spark processes bounded batches until all matching deletion vectors have been
+materialized. To keep a Flink job bounded, one Flink procedure invocation
+processes one batch with a soft target of 100,000 deletion vectors. An
+overlapping row-ID component is never split and can exceed the target. Invoke
+the Flink procedure repeatedly until an invocation makes no changes.
 
 ```sql
 CREATE TABLE target_table (id INT, b INT, c INT) TBLPROPERTIES (

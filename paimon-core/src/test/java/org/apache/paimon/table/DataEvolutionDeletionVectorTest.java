@@ -311,9 +311,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                         failure)
                 .containsExactlyElementsOf(reassignedRows);
         assertThat(table.latestSnapshot().get().id()).isEqualTo(reassignSnapshotId);
-        assertThat(failure)
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Row ID existence conflict");
+        assertThat(failure).isInstanceOf(RuntimeException.class).hasMessageContaining("conflict");
     }
 
     @Test
@@ -615,6 +613,34 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testMaterializeKeepsSiblingDeletionVectorsInTouchedIndexFile() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        commitDeletionVectors(table, DEFAULT_DV_SPECS);
+        Map<Range, String> anchorsBefore = anchorFilesByRange(table);
+        assertThat(liveDeletionVectorIndexFileNames(table)).hasSize(1);
+
+        materializeDeletionVectors(table, 1);
+
+        table = getTableDefault();
+        List<Range> rangesAfter = normalFileRowRanges(table);
+        List<Range> unchangedRanges =
+                anchorsBefore.keySet().stream()
+                        .filter(rangesAfter::contains)
+                        .collect(Collectors.toList());
+        assertThat(unchangedRanges).hasSize(2);
+        assertThat(rangesAfter).hasSize(3).anyMatch(range -> range.from >= 15);
+        assertThat(liveDeletionVectorDataFileNames(table))
+                .containsExactlyInAnyOrderElementsOf(
+                        unchangedRanges.stream()
+                                .map(anchorsBefore::get)
+                                .collect(Collectors.toList()));
+        assertThat(readRows(table.newReadBuilder()))
+                .containsExactlyElementsOf(expectedRows("base", FULL_RANGE));
+    }
+
+    @Test
     public void testMaterializeOnlyDeletionVectorRanges() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -634,6 +660,41 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 .isEqualTo(fileNames(filesBefore.get(new Range(10, 14))));
         assertThat(readRows(table.newReadBuilder()))
                 .containsExactlyElementsOf(expectedRowsExcluding("base", FULL_RANGE, 6));
+        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
+    }
+
+    @Test
+    public void testMaterializeRangeCoveredBySpanningBlobFile() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        writeBlobRange(table, 5L, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114);
+        commitDeletionVectors(table, Collections.singletonList(new DvSpec(new Range(5, 9), 6)));
+
+        Map<Range, List<DataFileMeta>> filesBefore = normalFilesByRange(table);
+        materializeDeletionVectors(table);
+
+        table = getTableDefault();
+        Map<Range, List<DataFileMeta>> filesAfter = normalFilesByRange(table);
+        assertThat(filesAfter.keySet())
+                .containsExactlyInAnyOrder(new Range(0, 4), new Range(15, 23));
+        assertThat(fileNames(filesAfter.get(new Range(0, 4))))
+                .isEqualTo(fileNames(filesBefore.get(new Range(0, 4))));
+
+        List<String> expectedRows = new ArrayList<>();
+        for (int rowId = 0; rowId < 15; rowId++) {
+            if (rowId != 6) {
+                expectedRows.add(
+                        rowId
+                                + "|name-"
+                                + rowId
+                                + "|base-"
+                                + rowId
+                                + "|"
+                                + (rowId < 5 ? rowId : rowId + 100));
+            }
+        }
+        assertThat(readRows(table.newReadBuilder())).containsExactlyElementsOf(expectedRows);
         assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
     }
 
@@ -846,6 +907,32 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         }
     }
 
+    private void writeBlobRange(FileStoreTable table, long firstRowId, int... values)
+            throws Exception {
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "128 MB");
+        table = table.copy(dynamicOptions);
+        RowType writeType = table.rowType().project(Collections.singletonList("f3"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType);
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int value : values) {
+                write.write(GenericRow.of(new BlobData(new byte[] {(byte) value})));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            assertThat(
+                            messages.stream()
+                                    .flatMap(
+                                            message ->
+                                                    ((CommitMessageImpl) message)
+                                                            .newFilesIncrement().newFiles()
+                                                                    .stream()))
+                    .hasSize(1);
+            setFirstRowId(messages, firstRowId);
+            commit.commit(messages);
+        }
+    }
+
     private void writeRowsWithLargeFirstRange(FileStoreTable table) throws Exception {
         for (int batch = 0; batch < 3; batch++) {
             BatchWriteBuilder builder = table.newBatchWriteBuilder();
@@ -920,9 +1007,18 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     private void materializeDeletionVectors(FileStoreTable table) throws Exception {
+        materializeDeletionVectors(table, null);
+    }
+
+    private void materializeDeletionVectors(FileStoreTable table, Integer deletionFilesPerBatch)
+            throws Exception {
         Snapshot snapshot = table.latestSnapshot().get();
         DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
-                new DataEvolutionDeletionVectorMaterializeCoordinator(table, null, snapshot);
+                deletionFilesPerBatch == null
+                        ? new DataEvolutionDeletionVectorMaterializeCoordinator(
+                                table, null, snapshot)
+                        : new DataEvolutionDeletionVectorMaterializeCoordinator(
+                                table, null, snapshot, deletionFilesPerBatch);
         List<CommitMessage> commitMessages = new ArrayList<>();
         try {
             while (true) {

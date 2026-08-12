@@ -88,6 +88,32 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testMaterializeDeletionVectorsForEmptyTable() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        createTable();
+
+        assertThat(sql("CALL sys.materialize_deletion_vectors(`table` => 'default.T')"))
+                .containsExactly(Row.of("Success"));
+        assertThat(paimonTable("T").latestSnapshot()).isEmpty();
+    }
+
+    @Test
+    public void testCompactRejectsLegacyRowIdRewriteForEmptyTable() {
+        createTable();
+
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CALL sys.compact(`table` => 'default.T', "
+                                                + "options => 'data-evolution.compaction.rewrite-row-ids=true')"))
+                .hasRootCauseMessage(
+                        "Option 'data-evolution.compaction.rewrite-row-ids=true' is no longer supported. "
+                                + "Data evolution compaction preserves row IDs and logical deletions. "
+                                + "Use the 'materialize_deletion_vectors' procedure to apply deletion "
+                                + "vectors to the latest table state and assign new row IDs.");
+    }
+
+    @Test
     public void testDeleteFromEmptyTable() throws Exception {
         createTable();
 
