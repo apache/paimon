@@ -20,12 +20,9 @@ package org.apache.paimon.operation.commit;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
-import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -57,22 +54,6 @@ public class AppendConflictDetection extends ConflictDetection {
                 deletionVectorsEnabled,
                 indexFileHandler,
                 commitScanner);
-    }
-
-    @Override
-    public List<SimpleFileEntry> scanBaseDataFiles(
-            Snapshot latestSnapshot,
-            List<BinaryRow> changedPartitions,
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            CommitKind commitKind,
-            @Nullable CommitFailRetryResult previousAttempt,
-            boolean hasOverwriteSincePreviousAttempt) {
-        return scanChangedPartitions(
-                latestSnapshot,
-                changedPartitions,
-                previousAttempt,
-                hasOverwriteSincePreviousAttempt);
     }
 
     @Override

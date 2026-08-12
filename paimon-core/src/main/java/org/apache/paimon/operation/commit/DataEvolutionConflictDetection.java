@@ -48,7 +48,6 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -144,21 +143,92 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             CommitKind commitKind,
             @Nullable CommitFailRetryResult previousAttempt,
             boolean hasOverwriteSincePreviousAttempt) {
-        List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles, commitKind);
-        Set<String> referencedDataFiles = referencedDataFiles(deltaFiles, indexFiles);
-        if (changedRowRanges.isEmpty()) {
-            if (commitKind == CommitKind.OVERWRITE && !referencedDataFiles.isEmpty()) {
-                return commitScanner()
-                        .readAllEntriesFromDataFiles(
-                                latestSnapshot, changedPartitions, referencedDataFiles);
-            }
-            return scanChangedPartitions(
+        if (commitKind == CommitKind.COMPACT) {
+            return scanCompactBaseDataFiles(
                     latestSnapshot,
                     changedPartitions,
+                    deltaFiles,
+                    indexFiles,
                     previousAttempt,
                     hasOverwriteSincePreviousAttempt);
         }
+        if (commitKind == CommitKind.OVERWRITE) {
+            return scanOverwriteBaseDataFiles(
+                    latestSnapshot,
+                    changedPartitions,
+                    deltaFiles,
+                    indexFiles,
+                    previousAttempt,
+                    hasOverwriteSincePreviousAttempt);
+        }
+        return super.scanBaseDataFiles(
+                latestSnapshot,
+                changedPartitions,
+                deltaFiles,
+                indexFiles,
+                commitKind,
+                previousAttempt,
+                hasOverwriteSincePreviousAttempt);
+    }
 
+    private List<SimpleFileEntry> scanCompactBaseDataFiles(
+            Snapshot latestSnapshot,
+            List<BinaryRow> changedPartitions,
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            @Nullable CommitFailRetryResult previousAttempt,
+            boolean hasOverwriteSincePreviousAttempt) {
+        List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles);
+        if (changedRowRanges.isEmpty()) {
+            return super.scanBaseDataFiles(
+                    latestSnapshot,
+                    changedPartitions,
+                    deltaFiles,
+                    indexFiles,
+                    CommitKind.COMPACT,
+                    previousAttempt,
+                    hasOverwriteSincePreviousAttempt);
+        }
+        return scanChangedRowRanges(
+                latestSnapshot,
+                changedPartitions,
+                changedRowRanges,
+                referencedDataFiles(deltaFiles, indexFiles));
+    }
+
+    private List<SimpleFileEntry> scanOverwriteBaseDataFiles(
+            Snapshot latestSnapshot,
+            List<BinaryRow> changedPartitions,
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            @Nullable CommitFailRetryResult previousAttempt,
+            boolean hasOverwriteSincePreviousAttempt) {
+        List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles);
+        Set<String> referencedDataFiles = referencedDataFiles(deltaFiles, indexFiles);
+        if (!changedRowRanges.isEmpty()) {
+            return scanChangedRowRanges(
+                    latestSnapshot, changedPartitions, changedRowRanges, referencedDataFiles);
+        }
+        if (!referencedDataFiles.isEmpty()) {
+            return commitScanner()
+                    .readAllEntriesFromDataFiles(
+                            latestSnapshot, changedPartitions, referencedDataFiles);
+        }
+        return super.scanBaseDataFiles(
+                latestSnapshot,
+                changedPartitions,
+                deltaFiles,
+                indexFiles,
+                CommitKind.OVERWRITE,
+                previousAttempt,
+                hasOverwriteSincePreviousAttempt);
+    }
+
+    private List<SimpleFileEntry> scanChangedRowRanges(
+            Snapshot latestSnapshot,
+            List<BinaryRow> changedPartitions,
+            List<Range> changedRowRanges,
+            Set<String> referencedDataFiles) {
         List<SimpleFileEntry> baseDataFiles =
                 new ArrayList<>(
                         commitScanner()
@@ -201,13 +271,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     }
 
     private List<Range> changedRowRanges(
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            CommitKind commitKind) {
-        if (commitKind != CommitKind.COMPACT && commitKind != CommitKind.OVERWRITE) {
-            return Collections.emptyList();
-        }
-
+            List<ManifestEntry> deltaFiles, List<IndexManifestEntry> indexFiles) {
         List<Range> ranges =
                 deltaFiles.stream()
                         .map(ManifestEntry::file)

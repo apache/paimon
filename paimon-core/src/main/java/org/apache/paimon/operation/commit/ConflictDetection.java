@@ -284,14 +284,20 @@ public abstract class ConflictDetection {
             CommitKind commitKind,
             String baseCommitUser);
 
-    public abstract List<SimpleFileEntry> scanBaseDataFiles(
+    public List<SimpleFileEntry> scanBaseDataFiles(
             Snapshot latestSnapshot,
             List<BinaryRow> changedPartitions,
             List<ManifestEntry> deltaFiles,
             List<IndexManifestEntry> indexFiles,
             CommitKind commitKind,
             @Nullable CommitFailRetryResult previousAttempt,
-            boolean hasOverwriteSincePreviousAttempt);
+            boolean hasOverwriteSincePreviousAttempt) {
+        return scanChangedPartitions(
+                latestSnapshot,
+                changedPartitions,
+                previousAttempt,
+                hasOverwriteSincePreviousAttempt);
+    }
 
     protected List<SimpleFileEntry> scanChangedPartitions(
             Snapshot latestSnapshot,
