@@ -19,6 +19,7 @@
 package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 
 import org.apache.avro.file.DataFileWriter;
@@ -27,7 +28,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 /** Avro writer which accepts normal rows, encoded records and compressed blocks. */
-public final class AvroBlockWriter implements AutoCloseable {
+public final class AvroBlockWriter implements FormatWriter {
 
     private final DataFileWriter<InternalRow> writer;
     private final PositionOutputStream out;
@@ -37,6 +38,7 @@ public final class AvroBlockWriter implements AutoCloseable {
         this.out = out;
     }
 
+    @Override
     public void addElement(InternalRow element) throws IOException {
         writer.append(element);
     }
@@ -49,6 +51,7 @@ public final class AvroBlockWriter implements AutoCloseable {
         writer.appendAllFrom(block.asStream(), false);
     }
 
+    @Override
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
         return suggestedCheck && out.getPos() >= targetSize;
     }
