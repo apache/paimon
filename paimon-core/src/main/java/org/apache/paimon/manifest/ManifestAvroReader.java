@@ -103,7 +103,50 @@ public final class ManifestAvroReader implements AutoCloseable {
             RowType projectedType,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable BucketFilter bucketFilter) {
-        return new RowsIterator(projectedType, partitionFilter, bucketFilter);
+        return new CloseableIterator<InternalRow>() {
+
+            private @Nullable RowIterator rows;
+            private boolean closed;
+
+            @Override
+            public boolean hasNext() {
+                if (closed) {
+                    return false;
+                }
+                try {
+                    while (rows == null || !rows.hasNext()) {
+                        if (!ManifestAvroReader.this.hasNext()) {
+                            return false;
+                        }
+                        rows =
+                                ManifestAvroReader.this
+                                        .next()
+                                        .toRows(
+                                                projectedType,
+                                                partitionFilter,
+                                                bucketFilter,
+                                                readStatistics);
+                    }
+                    return true;
+                } catch (IOException e) {
+                    throw new UncheckedIOException("Failed to decode Manifest Avro block.", e);
+                }
+            }
+
+            @Override
+            public InternalRow next() {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                return rows.next();
+            }
+
+            @Override
+            public void close() throws IOException {
+                closed = true;
+                ManifestAvroReader.this.close();
+            }
+        };
     }
 
     long decodedDataFiles() {
@@ -180,64 +223,6 @@ public final class ManifestAvroReader implements AutoCloseable {
 
         public AvroRawBlock encodedBlock() {
             return block;
-        }
-    }
-
-    private final class RowsIterator implements CloseableIterator<InternalRow> {
-
-        private final RowType projectedType;
-        private final @Nullable PartitionPredicate partitionFilter;
-        private final @Nullable BucketFilter bucketFilter;
-
-        private @Nullable RowIterator rows;
-        private boolean closed;
-
-        private RowsIterator(
-                RowType projectedType,
-                @Nullable PartitionPredicate partitionFilter,
-                @Nullable BucketFilter bucketFilter) {
-            this.projectedType = projectedType;
-            this.partitionFilter = partitionFilter;
-            this.bucketFilter = bucketFilter;
-        }
-
-        @Override
-        public boolean hasNext() {
-            if (closed) {
-                return false;
-            }
-            try {
-                while (rows == null || !rows.hasNext()) {
-                    if (!ManifestAvroReader.this.hasNext()) {
-                        return false;
-                    }
-                    rows =
-                            ManifestAvroReader.this
-                                    .next()
-                                    .toRows(
-                                            projectedType,
-                                            partitionFilter,
-                                            bucketFilter,
-                                            readStatistics);
-                }
-                return true;
-            } catch (IOException e) {
-                throw new UncheckedIOException("Failed to decode Manifest Avro block.", e);
-            }
-        }
-
-        @Override
-        public InternalRow next() {
-            if (!hasNext()) {
-                throw new NoSuchElementException();
-            }
-            return rows.next();
-        }
-
-        @Override
-        public void close() throws IOException {
-            closed = true;
-            ManifestAvroReader.this.close();
         }
     }
 
