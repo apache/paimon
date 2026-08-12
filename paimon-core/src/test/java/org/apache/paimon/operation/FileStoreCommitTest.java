@@ -1998,7 +1998,7 @@ public class FileStoreCommitTest {
                 Collections.emptyList(),
                 Collections.emptyList(),
                 scanner ->
-                        new ConflictDetection(
+                        ConflictDetection.create(
                                 tableName,
                                 commitUser,
                                 store.partitionType(),

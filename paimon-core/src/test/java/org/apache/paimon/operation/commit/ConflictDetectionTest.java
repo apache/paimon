@@ -23,13 +23,16 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
@@ -50,8 +53,99 @@ import static org.apache.paimon.manifest.FileKind.DELETE;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildBaseEntriesWithDV;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEntriesWithDV;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class ConflictDetectionTest {
+
+    @Test
+    void testCreateConflictDetectionByTableType() {
+        assertThat(createConflictDetection(null, false, false))
+                .isInstanceOf(AppendConflictDetection.class);
+        assertThat(createConflictDetection(null, false, true))
+                .isInstanceOf(PrimaryKeyConflictDetection.class);
+        assertThat(createConflictDetection(null, true, false))
+                .isInstanceOf(DataEvolutionConflictDetection.class);
+        // Data Evolution takes precedence even if a key comparator is supplied.
+        assertThat(createConflictDetection(null, true, true))
+                .isInstanceOf(DataEvolutionConflictDetection.class);
+    }
+
+    @Test
+    void testDataEvolutionCompactScansChangedRowRanges() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        DataEvolutionConflictDetection detection =
+                (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
+        Snapshot snapshot = snapshot(1);
+        BinaryRow partition = BinaryRow.singleColumn(1);
+        List<BinaryRow> changedPartitions = Collections.singletonList(partition);
+        Range changedRange = new Range(10, 19);
+
+        ManifestEntry delta = mock(ManifestEntry.class);
+        DataFileMeta dataFile = mock(DataFileMeta.class);
+        when(delta.kind()).thenReturn(ADD);
+        when(delta.file()).thenReturn(dataFile);
+        when(dataFile.firstRowId()).thenReturn(10L);
+        when(dataFile.nonNullRowIdRange()).thenReturn(changedRange);
+        when(scanner.readAllEntriesFromChangedRowRanges(
+                        snapshot, changedPartitions, Collections.singletonList(changedRange)))
+                .thenReturn(Collections.emptyList());
+
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                snapshot,
+                                changedPartitions,
+                                Collections.singletonList(delta),
+                                Collections.emptyList(),
+                                Snapshot.CommitKind.COMPACT,
+                                null,
+                                false))
+                .isEmpty();
+        verify(scanner)
+                .readAllEntriesFromChangedRowRanges(
+                        snapshot, changedPartitions, Collections.singletonList(changedRange));
+    }
+
+    @Test
+    void testAppendScansChangedPartitions() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        ConflictDetection detection = createConflictDetection(scanner, false, false);
+        Snapshot snapshot = snapshot(1);
+        List<BinaryRow> changedPartitions = Collections.singletonList(BinaryRow.singleColumn(1));
+        List<SimpleFileEntry> expected = Collections.singletonList(createFileEntry("base", ADD));
+        when(scanner.readAllEntriesFromChangedPartitions(snapshot, changedPartitions))
+                .thenReturn(expected);
+
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                snapshot,
+                                changedPartitions,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Snapshot.CommitKind.APPEND,
+                                null,
+                                false))
+                .isSameAs(expected);
+        verify(scanner).readAllEntriesFromChangedPartitions(snapshot, changedPartitions);
+    }
+
+    @Test
+    void testAppendSkipsDataEvolutionConflictChecks() {
+        ConflictDetection detection = createConflictDetection(null, false, false);
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createGlobalIndexEntry("idx", ADD, BinaryRow.EMPTY_ROW, 0, 149)),
+                        null,
+                        Snapshot.CommitKind.APPEND);
+
+        assertThat(exception).isEmpty();
+    }
 
     @Test
     public void testBuildBaseEntriesWithDV() {
@@ -369,7 +463,7 @@ class ConflictDetectionTest {
 
     @Test
     void testShouldBeOverwriteCommit() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> addOnlyEntries = new ArrayList<>();
         addOnlyEntries.add(createFileEntry("f1", ADD));
@@ -400,7 +494,7 @@ class ConflictDetectionTest {
 
     @Test
     void testMaterializeDvRowIdCheckOnlyAppliesToCompactCommit() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         detection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(1L);
         assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.APPEND)).isFalse();
@@ -434,7 +528,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceNoConflict() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries = new ArrayList<>();
         baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 100L));
@@ -450,7 +544,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceBaseFileRemoved() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries = new ArrayList<>();
 
@@ -468,7 +562,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceBaseFileRewritten() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries = new ArrayList<>();
         baseEntries.add(createFileEntryWithRowId("f2", ADD, 0L, 200L));
@@ -487,7 +581,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceNormalFileRejectsAdjacentDataFiles() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries = new ArrayList<>();
         baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 2L));
@@ -505,7 +599,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceDedicatedFileCoveredByDataFiles() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries = new ArrayList<>();
         baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 4L));
@@ -521,7 +615,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceDedicatedFileRejectsAdjacentDataFiles() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries = new ArrayList<>();
         baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 2L));
@@ -539,7 +633,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceDedicatedFileRejectsRangeNotCoveredByOneDataFile() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries = new ArrayList<>();
         baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 2L));
@@ -556,7 +650,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceDedicatedFileIgnoresBaseDedicatedFiles() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries = new ArrayList<>();
         baseEntries.add(createFileEntryWithRowId("old.blob", ADD, 0L, 2L));
@@ -573,7 +667,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceSkipsNewlyAppendedFiles() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         // nextRowId=100: files with firstRowId >= 100 are newly appended, not references
         List<SimpleFileEntry> baseEntries = new ArrayList<>();
@@ -593,7 +687,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceSkipsNonPreAssigned() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries = new ArrayList<>();
 
@@ -608,7 +702,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceSkipsDeleteEntries() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries = new ArrayList<>();
 
@@ -623,7 +717,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceSkipsWhenNextRowIdNull() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries = new ArrayList<>();
         List<SimpleFileEntry> deltaEntries = new ArrayList<>();
@@ -637,7 +731,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceCompactAllowsAdjacentNormalRanges() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries =
                 Arrays.asList(
@@ -654,7 +748,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceCompactAllowsBlobAcrossAdjacentNormalRanges() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries =
                 Arrays.asList(
@@ -671,7 +765,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceCompactRejectsStaleRangeAfterReassign() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         List<SimpleFileEntry> baseEntries =
                 Arrays.asList(
@@ -689,7 +783,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdExistenceCompactDoesNotMergeAcrossPartitions() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
         BinaryRow partition0 = BinaryRow.singleColumn(0);
         BinaryRow partition1 = BinaryRow.singleColumn(1);
 
@@ -710,7 +804,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdRangeConflictsReportsDedicatedFileSpanningDataFiles() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -734,7 +828,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdRangeConflictsAllowsAdjacentDataFiles() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -752,7 +846,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckRowIdRangeConflictsAllowsDedicatedFileCoveredByOneDataFile() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -796,7 +890,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckGlobalIndexRowIdExistenceNoConflict() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -815,7 +909,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckGlobalIndexRowIdExistenceBaseFileRemoved() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -836,7 +930,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckGlobalIndexRowIdExistenceByPartitionAndBucket() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
         BinaryRow partition0 = BinaryRow.singleColumn(0);
         BinaryRow partition1 = BinaryRow.singleColumn(1);
 
@@ -869,7 +963,7 @@ class ConflictDetectionTest {
 
     @Test
     void testCheckGlobalIndexRowIdExistenceSkipsDeleteIndexEntry() {
-        ConflictDetection detection = createConflictDetection();
+        DataEvolutionConflictDetection detection = createConflictDetection();
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -884,20 +978,27 @@ class ConflictDetectionTest {
         assertThat(exception).isNotPresent();
     }
 
-    private ConflictDetection createConflictDetection() {
-        return new ConflictDetection(
+    private DataEvolutionConflictDetection createConflictDetection() {
+        return (DataEvolutionConflictDetection) createConflictDetection(null, true, false);
+    }
+
+    private ConflictDetection createConflictDetection(
+            @Nullable CommitScanner scanner,
+            boolean dataEvolutionEnabled,
+            boolean primaryKeyTable) {
+        return ConflictDetection.create(
                 "test-table",
                 "test-user",
                 RowType.of(),
                 null,
-                null,
+                primaryKeyTable ? (left, right) -> 0 : null,
                 BucketMode.HASH_FIXED,
                 false,
-                true,
+                dataEvolutionEnabled,
                 false,
                 null,
                 null,
-                null);
+                scanner);
     }
 
     private Snapshot snapshot(long id) {
