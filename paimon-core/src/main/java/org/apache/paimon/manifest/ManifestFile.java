@@ -200,8 +200,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             @Nullable BucketFilter bucketFilter)
             throws IOException {
         try {
-            return new ManifestAvroReader(
-                    fileIO.newInputStream(path), projectedType, partitionFilter, bucketFilter);
+            ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+            return reader.read(projectedType, partitionFilter, bucketFilter);
         } catch (IOException e) {
             FileUtils.checkExists(fileIO, path);
             throw e;

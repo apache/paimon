@@ -112,7 +112,8 @@ public final class ProjectedManifestEntry implements ManifestEntry {
                                                         DataFileMeta.LEVEL,
                                                         DataFileMeta.EXTRA_FILES,
                                                         DataFileMeta.EMBEDDED_FILE_INDEX,
-                                                        DataFileMeta.EXTERNAL_PATH)))));
+                                                        DataFileMeta.EXTERNAL_PATH,
+                                                        DataFileMeta.FIRST_ROW_ID)))));
     }
 
     private static Projection createRowRangeProjection() {

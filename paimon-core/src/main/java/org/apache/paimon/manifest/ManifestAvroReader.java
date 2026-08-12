@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.avro.AvroBlockReader;
-import org.apache.paimon.format.avro.AvroBlockReader.BorrowedBlock;
+import org.apache.paimon.format.avro.AvroRawBlock;
 import org.apache.paimon.format.avro.AvroRecordDecoder;
 import org.apache.paimon.format.avro.AvroRecordDecoder.FieldDecoder;
 import org.apache.paimon.format.avro.AvroRecordDecoder.FieldType;
@@ -36,106 +36,113 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
  * Schema-aware Avro reader which projects fields and filters before decoding data file metadata.
+ *
+ * <p>This reader also exposes reusable raw Avro blocks.
  */
-final class ManifestAvroReader implements CloseableIterator<InternalRow> {
+public final class ManifestAvroReader implements AutoCloseable {
 
     private final AvroBlockReader blockReader;
-    private final AvroRecordDecoder decoder;
-    private final ManifestRecordDecoder recordDecoder;
+    private final DecoderContext decoderContext;
+    private final boolean rawBlockCopySupported;
 
-    private long recordsRemaining;
-    private @Nullable InternalRow next;
-    private boolean nextReady;
-    private boolean finished;
+    private long blockOrdinal = -1;
 
-    ManifestAvroReader(
-            InputStream input,
-            RowType projectedType,
-            @Nullable PartitionPredicate partitionFilter,
-            @Nullable BucketFilter bucketFilter)
-            throws IOException {
-        AvroBlockReader blockReader = new AvroBlockReader(input);
+    ManifestAvroReader(InputStream input) throws IOException {
+        AvroBlockReader blockReader = null;
         try {
-            AvroRecordDecoder decoder = blockReader.createRecordDecoder();
-            this.recordDecoder =
-                    new ManifestRecordDecoder(
-                            decoder, projectedType, partitionFilter, bucketFilter);
-            this.decoder = decoder;
+            blockReader = new AvroBlockReader(input);
             this.blockReader = blockReader;
-        } catch (RuntimeException | Error e) {
-            IOUtils.closeQuietly(blockReader);
-            throw e;
+            this.decoderContext = new DecoderContext(blockReader.createRecordDecoder());
+            this.rawBlockCopySupported =
+                    blockReader.supportsRawBlockCopy(ManifestEntry.MANIFEST_ROW_TYPE);
+        } catch (IOException | RuntimeException | Error failure) {
+            IOUtils.closeQuietly(blockReader == null ? input : blockReader);
+            throw failure;
         }
     }
 
-    @Override
-    public boolean hasNext() {
-        if (nextReady) {
-            return true;
-        }
-        if (finished) {
-            return false;
-        }
-
-        try {
-            while (true) {
-                if (recordsRemaining == 0) {
-                    if (decoder.isInitialized() && !decoder.isEnd()) {
-                        throw new IOException(
-                                "Manifest Avro block contains trailing undecoded bytes.");
-                    }
-                    if (!blockReader.hasNextBlock()) {
-                        finished = true;
-                        return false;
-                    }
-                    BorrowedBlock block = blockReader.nextBorrowedBlock();
-                    decoder.reset(block.bytes(), block.offset(), block.length());
-                    recordsRemaining = block.recordCount();
-                }
-
-                InternalRow candidate = recordDecoder.read(decoder);
-                recordsRemaining--;
-                if (candidate != null) {
-                    next = candidate;
-                    nextReady = true;
-                    return true;
-                }
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to decode Manifest Avro block.", e);
-        }
+    /** Returns whether another raw Avro block is available. */
+    public boolean hasNext() throws IOException {
+        return blockReader.hasNextBlock();
     }
 
-    @Override
-    public InternalRow next() {
+    /** Returns the next raw block without decompressing it. */
+    public RawBlock next() throws IOException {
         if (!hasNext()) {
             throw new NoSuchElementException();
         }
-        InternalRow result = next;
-        next = null;
-        nextReady = false;
-        return result;
+        return new RawBlock(
+                decoderContext,
+                rawBlockCopySupported,
+                blockReader.nextBorrowedRawBlock(),
+                ++blockOrdinal);
     }
 
-    long decodedDataFiles() {
-        return recordDecoder.decodedDataFiles;
-    }
+    /**
+     * Returns an iterator over projected rows from all remaining blocks.
+     *
+     * <p>Every returned row has independent backing data. Closing the iterator closes this reader.
+     */
+    public CloseableIterator<InternalRow> read(
+            RowType projectedType,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter) {
+        return new CloseableIterator<InternalRow>() {
 
-    long skippedDataFiles() {
-        return recordDecoder.skippedDataFiles;
+            private @Nullable RowIterator rows;
+            private boolean closed;
+
+            @Override
+            public boolean hasNext() {
+                if (closed) {
+                    return false;
+                }
+                try {
+                    while (rows == null || !rows.hasNext()) {
+                        if (!ManifestAvroReader.this.hasNext()) {
+                            return false;
+                        }
+                        rows =
+                                ManifestAvroReader.this
+                                        .next()
+                                        .toRows(
+                                                projectedType,
+                                                partitionFilter,
+                                                bucketFilter,
+                                                false);
+                    }
+                    return true;
+                } catch (IOException e) {
+                    throw new UncheckedIOException("Failed to decode Manifest Avro block.", e);
+                }
+            }
+
+            @Override
+            public InternalRow next() {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                return rows.next();
+            }
+
+            @Override
+            public void close() throws IOException {
+                closed = true;
+                ManifestAvroReader.this.close();
+            }
+        };
     }
 
     @Override
     public void close() throws IOException {
-        next = null;
-        nextReady = false;
-        finished = true;
         blockReader.close();
     }
 
@@ -157,22 +164,9 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
         private final int bucketPosition;
         private final int totalBucketsPosition;
         private final int filePosition;
-
         private final FieldDecoder fileReader;
 
-        private final @Nullable PartitionPredicate partitionFilter;
-        private final @Nullable BucketFilter bucketFilter;
-        private final boolean partitionNeededForFilter;
-        private final boolean bucketNeededForFilter;
-
-        private long decodedDataFiles;
-        private long skippedDataFiles;
-
-        private ManifestRecordDecoder(
-                AvroRecordDecoder decoder,
-                RowType projectedType,
-                @Nullable PartitionPredicate partitionFilter,
-                @Nullable BucketFilter bucketFilter) {
+        private ManifestRecordDecoder(AvroRecordDecoder decoder, RowType projectedType) {
             this.projectedFieldCount = projectedType.getFieldCount();
             this.versionPosition =
                     projectedType.getFieldIndex(ManifestSchemaUtils.FORMAT_IDENTIFIER_FIELD);
@@ -181,10 +175,6 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
             this.bucketPosition = projectedType.getFieldIndex(ManifestEntry.BUCKET);
             this.totalBucketsPosition = projectedType.getFieldIndex(ManifestEntry.TOTAL_BUCKETS);
             this.filePosition = projectedType.getFieldIndex(ManifestEntry.FILE);
-            this.partitionFilter = partitionFilter;
-            this.bucketFilter = bucketFilter;
-            this.partitionNeededForFilter = partitionFilter != null || bucketFilter != null;
-            this.bucketNeededForFilter = bucketFilter != null;
 
             validateTopLevelFields(decoder);
             // Manifest v2 has a fixed top-level layout, but DataFileMeta has gained nullable
@@ -195,7 +185,12 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
                             5, filePosition >= 0 ? projectedType.getTypeAt(filePosition) : null);
         }
 
-        private @Nullable InternalRow read(AvroRecordDecoder decoder) throws IOException {
+        private boolean read(
+                AvroRecordDecoder decoder,
+                GenericRow row,
+                @Nullable PartitionPredicate partitionFilter,
+                @Nullable BucketFilter bucketFilter)
+                throws IOException {
             if (!decoder.readRecordStart()) {
                 throw new IOException("Unexpected null or non-record Manifest Avro value.");
             }
@@ -203,6 +198,7 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
             int version = decoder.readInt();
             ManifestEntrySerializer.checkFormatIdentifier(version);
             int kind = decoder.readInt();
+            boolean partitionNeededForFilter = partitionFilter != null || bucketFilter != null;
             byte[] partitionBytes;
             if (partitionPosition >= 0 || partitionNeededForFilter) {
                 partitionBytes = decoder.readBytes();
@@ -215,9 +211,10 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
                     partitionNeededForFilter ? deserializeBinaryRow(partitionBytes) : null;
             if (partitionFilter != null && !partitionFilter.test(partition)) {
                 skipBucketAndFile(decoder);
-                return null;
+                return false;
             }
 
+            boolean bucketNeededForFilter = bucketFilter != null;
             int bucket;
             if (bucketPosition >= 0 || bucketNeededForFilter) {
                 bucket = decoder.readInt();
@@ -236,27 +233,24 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
 
             if (bucketFilter != null && !bucketFilter.test(partition, bucket, totalBuckets)) {
                 skipFile(decoder);
-                return null;
+                return false;
             }
 
             Object file;
             if (filePosition >= 0) {
-                file = fileReader.read(decoder, null);
-                decodedDataFiles++;
+                file = fileReader.read(decoder, row.getField(filePosition));
             } else {
                 fileReader.skip(decoder);
-                skippedDataFiles++;
                 file = null;
             }
 
-            GenericRow row = new GenericRow(projectedFieldCount);
             setProjected(row, versionPosition, version);
             setProjected(row, kindPosition, (byte) kind);
             setProjected(row, partitionPosition, partitionBytes);
             setProjected(row, bucketPosition, bucket);
             setProjected(row, totalBucketsPosition, totalBuckets);
             setProjected(row, filePosition, file);
-            return row;
+            return true;
         }
 
         private void skipBucketAndFile(AvroRecordDecoder decoder) throws IOException {
@@ -267,7 +261,6 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
 
         private void skipFile(AvroRecordDecoder decoder) throws IOException {
             fileReader.skip(decoder);
-            skippedDataFiles++;
         }
 
         private static void setProjected(
@@ -311,6 +304,222 @@ final class ManifestAvroReader implements CloseableIterator<InternalRow> {
                         String.format(
                                 "Unexpected Manifest Avro type for field %s: expected %s but found %s.",
                                 decoder.fieldName(position), expectedType, actualType));
+            }
+        }
+    }
+
+    /** Borrowed raw block which must be consumed before the enclosing reader advances. */
+    public static final class RawBlock {
+
+        private final DecoderContext decoderContext;
+        private final boolean rawBlockCopySupported;
+        private final AvroRawBlock block;
+        private final long blockOrdinal;
+        private final long blockRecordCount;
+
+        private RawBlock(
+                DecoderContext decoderContext,
+                boolean rawBlockCopySupported,
+                AvroRawBlock block,
+                long blockOrdinal) {
+            this.decoderContext = decoderContext;
+            this.rawBlockCopySupported = rawBlockCopySupported;
+            this.block = block;
+            this.blockOrdinal = blockOrdinal;
+            this.blockRecordCount = block.recordCount();
+        }
+
+        /** Lazily decompresses this block and returns an iterator over one reusable row. */
+        public RowIterator toRows(RowType projectedType) throws IOException {
+            return toRows(projectedType, null, null, true);
+        }
+
+        private RowIterator toRows(
+                RowType projectedType,
+                @Nullable PartitionPredicate partitionFilter,
+                @Nullable BucketFilter bucketFilter,
+                boolean reuseRow)
+                throws IOException {
+            ManifestRecordDecoder recordDecoder = decoderContext.recordDecoder(projectedType);
+
+            ByteBuffer decompressed = decoderContext.decompress(block);
+            decoderContext.decoder.reset(
+                    decompressed.array(),
+                    decompressed.arrayOffset() + decompressed.position(),
+                    decompressed.remaining());
+            GenericRow reuse = reuseRow ? new GenericRow(recordDecoder.projectedFieldCount) : null;
+            return new RowIterator(
+                    blockRecordCount,
+                    decoderContext.decoder,
+                    recordDecoder,
+                    reuse,
+                    partitionFilter,
+                    bucketFilter);
+        }
+
+        public long blockOrdinal() {
+            return blockOrdinal;
+        }
+
+        public long recordCount() {
+            return blockRecordCount;
+        }
+
+        public boolean rawBlockCopySupported() {
+            return rawBlockCopySupported;
+        }
+
+        public AvroRawBlock encodedBlock() {
+            return block;
+        }
+    }
+
+    /** Decoder state shared by the borrowed blocks produced by one reader. */
+    private static final class DecoderContext {
+
+        private final AvroRecordDecoder decoder;
+
+        private @Nullable ByteBuffer decompressionBuffer;
+        private RowType projectedRowType;
+        private ManifestRecordDecoder recordDecoder;
+
+        private DecoderContext(AvroRecordDecoder decoder) {
+            this.decoder = decoder;
+        }
+
+        private ByteBuffer decompress(AvroRawBlock block) throws IOException {
+            decompressionBuffer = block.decompress(decompressionBuffer);
+            return decompressionBuffer;
+        }
+
+        private ManifestRecordDecoder recordDecoder(RowType rowType) {
+            if (!rowType.equals(projectedRowType)) {
+                recordDecoder = new ManifestRecordDecoder(decoder, rowType);
+                projectedRowType = rowType;
+            }
+            return recordDecoder;
+        }
+    }
+
+    /** Iterator over the reusable row decoded from one borrowed block. */
+    public static final class RowIterator implements Iterator<GenericRow> {
+
+        private final AvroRecordDecoder decoder;
+        private final ManifestRecordDecoder recordDecoder;
+        private final @Nullable GenericRow reuseRow;
+        private final @Nullable PartitionPredicate partitionFilter;
+        private final @Nullable BucketFilter bucketFilter;
+        private final boolean filtered;
+
+        private long blockRemaining;
+        private long blockRecordIndex = -1;
+        private @Nullable GenericRow next;
+        private @Nullable ByteBuffer encodedRecord;
+
+        private RowIterator(
+                long recordCount,
+                AvroRecordDecoder decoder,
+                ManifestRecordDecoder recordDecoder,
+                @Nullable GenericRow reuseRow,
+                @Nullable PartitionPredicate partitionFilter,
+                @Nullable BucketFilter bucketFilter) {
+            blockRemaining = recordCount;
+            this.decoder = decoder;
+            this.recordDecoder = recordDecoder;
+            this.reuseRow = reuseRow;
+            this.partitionFilter = partitionFilter;
+            this.bucketFilter = bucketFilter;
+            this.filtered = partitionFilter != null || bucketFilter != null;
+        }
+
+        @Override
+        public boolean hasNext() {
+            try {
+                if (!filtered) {
+                    ensureBlockFullyConsumed();
+                    return blockRemaining > 0;
+                }
+                if (next != null) {
+                    return true;
+                }
+                while (blockRemaining > 0) {
+                    blockRecordIndex++;
+                    GenericRow row =
+                            reuseRow == null
+                                    ? new GenericRow(recordDecoder.projectedFieldCount)
+                                    : reuseRow;
+                    int recordStart = decoder.absolutePosition();
+                    boolean selected =
+                            recordDecoder.read(decoder, row, partitionFilter, bucketFilter);
+                    blockRemaining--;
+                    if (selected) {
+                        encodedRecord =
+                                decoder.borrowedView(recordStart, decoder.absolutePosition());
+                        next = row;
+                        return true;
+                    }
+                }
+                ensureBlockFullyConsumed();
+                return false;
+            } catch (IOException e) {
+                throw new UncheckedIOException(
+                        "Failed to decode projected Manifest Avro record.", e);
+            }
+        }
+
+        @Override
+        public GenericRow next() {
+            if (filtered) {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                GenericRow result = next;
+                next = null;
+                return result;
+            }
+            try {
+                if (blockRemaining == 0) {
+                    throw new NoSuchElementException();
+                }
+                blockRecordIndex++;
+                GenericRow row =
+                        reuseRow == null
+                                ? new GenericRow(recordDecoder.projectedFieldCount)
+                                : reuseRow;
+                int recordStart = decoder.absolutePosition();
+                recordDecoder.read(decoder, row, null, null);
+                encodedRecord = decoder.borrowedView(recordStart, decoder.absolutePosition());
+                blockRemaining--;
+                return row;
+            } catch (IOException e) {
+                throw new UncheckedIOException(
+                        "Failed to decode projected Manifest Avro record.", e);
+            }
+        }
+
+        public long recordIndex() {
+            checkCurrentRecord();
+            return blockRecordIndex;
+        }
+
+        /** Returns a borrowed encoded view of the current complete Avro record. */
+        public ByteBuffer encodedRecord() {
+            checkCurrentRecord();
+            if (encodedRecord == null) {
+                throw new IllegalStateException("No current Manifest Avro record.");
+            }
+            return encodedRecord;
+        }
+
+        private void ensureBlockFullyConsumed() throws IOException {
+            if (blockRemaining == 0 && !decoder.isEnd()) {
+                throw new IOException("Manifest Avro block contains trailing undecoded bytes.");
+            }
+        }
+
+        private void checkCurrentRecord() {
+            if (blockRecordIndex < 0) {
+                throw new IllegalStateException("No current Manifest Avro record.");
             }
         }
     }
