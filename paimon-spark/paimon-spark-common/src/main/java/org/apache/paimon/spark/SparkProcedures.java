@@ -46,6 +46,7 @@ import org.apache.paimon.spark.procedure.MigrateTableProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
 import org.apache.paimon.spark.procedure.PurgeFilesProcedure;
+import org.apache.paimon.spark.procedure.ReassignRowIdProcedure;
 import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
 import org.apache.paimon.spark.procedure.RemoveUnexistingFilesProcedure;
 import org.apache.paimon.spark.procedure.RenameBranchProcedure;
@@ -129,6 +130,7 @@ public class SparkProcedures {
                 "trigger_tag_automatic_creation", TriggerTagAutomaticCreationProcedure::builder);
         procedureBuilders.put("rewrite_file_index", RewriteFileIndexProcedure::builder);
         procedureBuilders.put("copy", CopyFilesProcedure::builder);
+        procedureBuilders.put("reassign_row_id", ReassignRowIdProcedure::builder);
         return procedureBuilders.build();
     }
 }
