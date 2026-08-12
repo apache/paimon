@@ -1835,13 +1835,13 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
       checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 20)))
       val ranges = table
-          .newSnapshotReader()
-          .read()
-          .dataSplits()
-          .asScala
-          .flatMap(_.dataFiles().asScala)
-          .map(file => (file.nonNullFirstRowId(), file.rowCount()))
-          .distinct
+        .newSnapshotReader()
+        .read()
+        .dataSplits()
+        .asScala
+        .flatMap(_.dataFiles().asScala)
+        .map(file => (file.nonNullFirstRowId(), file.rowCount()))
+        .distinct
       assert(ranges == Seq((0L, 2L)), ranges)
     }
   }
