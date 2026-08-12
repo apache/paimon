@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.execution
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.format.{FormatTablePartitionRepair, PaimonFormatTable}
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -63,7 +64,11 @@ object PaimonFormatTablePartitionDdlExec {
       table: PaimonFormatTable): UnsupportedOperationException =
     new UnsupportedOperationException(
       s"$operation PARTITION is supported only for a Format Table with catalog-managed " +
-        s"partitions, but partitions of ${table.name()} are discovered from the filesystem.")
+        s"partitions, but partitions of ${table.name()} are discovered from the filesystem. " +
+        s"A partition of this table is a plain directory under the table location: create or " +
+        s"remove the directory directly, or enable catalog-managed partitions with ALTER TABLE " +
+        s"... SET TBLPROPERTIES ('${CoreOptions.METASTORE_PARTITIONED_TABLE.key()}' = 'true') " +
+        s"followed by MSCK REPAIR TABLE to register the existing partitions.")
 }
 
 /**
