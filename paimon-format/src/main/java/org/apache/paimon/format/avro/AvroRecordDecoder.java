@@ -27,6 +27,7 @@ import org.apache.avro.io.DecoderFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 /**
  * Decoder for sequentially reading records from Avro blocks without exposing Avro classes to
@@ -38,6 +39,9 @@ public final class AvroRecordDecoder {
     private final int recordBranch;
 
     private @Nullable BinaryDecoder decoder;
+    private @Nullable ByteBuffer borrowedView;
+    private int blockOffset;
+    private int blockLength;
 
     AvroRecordDecoder(Schema writerSchema) {
         if (writerSchema.getType() == Schema.Type.UNION) {
@@ -93,6 +97,11 @@ public final class AvroRecordDecoder {
     /** Reuses this decoder for another block. */
     public void reset(byte[] bytes, int offset, int length) {
         decoder = DecoderFactory.get().binaryDecoder(bytes, offset, length, decoder);
+        blockOffset = offset;
+        blockLength = length;
+        if (borrowedView == null || borrowedView.array() != bytes) {
+            borrowedView = ByteBuffer.wrap(bytes);
+        }
     }
 
     /** Returns whether a block has been supplied through {@link #reset(byte[], int, int)}. */
@@ -112,6 +121,34 @@ public final class AvroRecordDecoder {
 
     public int readInt() throws IOException {
         return decoder().readInt();
+    }
+
+    /** Returns the byte position relative to the beginning of the current block. */
+    private int position() throws IOException {
+        return blockLength - decoder().inputStream().available();
+    }
+
+    /** Returns the absolute byte position in the current block's backing array. */
+    public int absolutePosition() throws IOException {
+        return blockOffset + position();
+    }
+
+    /** Returns a borrowed view of an absolute range in the current block's backing array. */
+    public ByteBuffer borrowedView(int start, int end) {
+        if (borrowedView == null) {
+            throw new IllegalStateException("No Avro block has been supplied.");
+        }
+        int blockEnd = blockOffset + blockLength;
+        if (start < blockOffset || end < start || end > blockEnd) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Borrowed Avro byte range [%s, %s) is outside block range [%s, %s).",
+                            start, end, blockOffset, blockEnd));
+        }
+        borrowedView.clear();
+        borrowedView.position(start);
+        borrowedView.limit(end);
+        return borrowedView;
     }
 
     public byte[] readBytes() throws IOException {

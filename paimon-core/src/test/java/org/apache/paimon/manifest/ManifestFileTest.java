@@ -45,6 +45,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -122,18 +124,14 @@ public class ManifestFileTest {
         ManifestEntrySerializer serializer = new ManifestEntrySerializer();
         List<ManifestEntry> actual = new ArrayList<>();
 
-        try (ManifestAvroReader reader =
-                new ManifestAvroReader(
-                        fileIO.newInputStream(path),
-                        ManifestEntry.MANIFEST_ROW_TYPE,
-                        partitionFilter,
-                        bucketFilter)) {
-            while (reader.hasNext()) {
-                InternalRow row = reader.next();
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                CloseableIterator<InternalRow> rows =
+                        reader.read(
+                                ManifestEntry.MANIFEST_ROW_TYPE, partitionFilter, bucketFilter)) {
+            while (rows.hasNext()) {
+                InternalRow row = rows.next();
                 actual.add(serializer.fromRow(row));
             }
-            assertThat(reader.decodedDataFiles()).isEqualTo(expected.size());
-            assertThat(reader.skippedDataFiles()).isEqualTo(entries.size() - expected.size());
         }
 
         assertThat(actual).containsExactlyElementsOf(expected);
@@ -169,11 +167,11 @@ public class ManifestFileTest {
         ProjectedManifestEntry projectedEntry =
                 ProjectedManifestEntry.Projection.create(projectedType).createEntry();
 
-        try (ManifestAvroReader reader =
-                new ManifestAvroReader(fileIO.newInputStream(path), projectedType, null, null)) {
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                CloseableIterator<InternalRow> rows = reader.read(projectedType, null, null)) {
             for (ManifestEntry expected : entries) {
-                assertThat(reader.hasNext()).isTrue();
-                InternalRow row = reader.next();
+                assertThat(rows.hasNext()).isTrue();
+                InternalRow row = rows.next();
                 assertThat(row.getFieldCount()).isEqualTo(3);
                 assertThat(row.getRow(0, projectedFileType.getFieldCount()).getFieldCount())
                         .isEqualTo(2);
@@ -184,9 +182,7 @@ public class ManifestFileTest {
                 assertThat(projectedEntry.partition()).isEqualTo(expected.partition());
                 assertThat(projectedEntry.kind()).isEqualTo(expected.kind());
             }
-            assertThat(reader.hasNext()).isFalse();
-            assertThat(reader.decodedDataFiles()).isEqualTo(entries.size());
-            assertThat(reader.skippedDataFiles()).isZero();
+            assertThat(rows.hasNext()).isFalse();
         }
     }
 
@@ -200,11 +196,11 @@ public class ManifestFileTest {
 
         List<DataField> fields = ManifestEntry.MANIFEST_ROW_TYPE.getFields();
         RowType projectedType = new RowType(false, Arrays.asList(fields.get(2), fields.get(1)));
-        try (ManifestAvroReader reader =
-                new ManifestAvroReader(fileIO.newInputStream(path), projectedType, null, null)) {
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                CloseableIterator<InternalRow> rows = reader.read(projectedType, null, null)) {
             for (ManifestEntry expected : entries) {
-                assertThat(reader.hasNext()).isTrue();
-                InternalRow row = reader.next();
+                assertThat(rows.hasNext()).isTrue();
+                InternalRow row = rows.next();
                 assertThat(row.getFieldCount()).isEqualTo(2);
                 assertThat(row.getBinary(0))
                         .containsExactly(
@@ -212,9 +208,28 @@ public class ManifestFileTest {
                                         expected.partition()));
                 assertThat(FileKind.fromByteValue(row.getByte(1))).isEqualTo(expected.kind());
             }
-            assertThat(reader.hasNext()).isFalse();
-            assertThat(reader.decodedDataFiles()).isZero();
-            assertThat(reader.skippedDataFiles()).isEqualTo(entries.size());
+            assertThat(rows.hasNext()).isFalse();
+        }
+    }
+
+    @Test
+    void testAvroReaderRejectsTrailingUndecodedRecords() throws Exception {
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest =
+                writeSingleManifest(manifestFile, Arrays.asList(gen.next(), gen.next()));
+        Path path = new Path(new Path(tempDir.toUri()), "manifest/" + manifest.fileName());
+        lowerFirstBlockRecordCount(path);
+
+        try (ManifestAvroReader reader =
+                        new ManifestAvroReader(LocalFileIO.create().newInputStream(path));
+                CloseableIterator<InternalRow> rows =
+                        reader.read(ManifestEntry.MANIFEST_ROW_TYPE, null, null)) {
+            assertThat(rows.hasNext()).isTrue();
+            rows.next();
+            assertThatThrownBy(rows::hasNext)
+                    .isInstanceOf(UncheckedIOException.class)
+                    .hasRootCauseInstanceOf(IOException.class)
+                    .hasStackTraceContaining("trailing undecoded bytes");
         }
     }
 
@@ -246,7 +261,8 @@ public class ManifestFileTest {
         try (CloseableIterator<ProjectedManifestEntry> entries =
                 manifestFile.scan(
                         manifest.fileName(), ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
-            assertThatThrownBy(entries::hasNext)
+            assertThat(entries.hasNext()).isTrue();
+            assertThatThrownBy(entries::next)
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("not compatible");
         }
@@ -286,17 +302,32 @@ public class ManifestFileTest {
         }
 
         ManifestEntry actual;
-        try (ManifestAvroReader reader =
-                new ManifestAvroReader(
-                        fileIO.newInputStream(path), ManifestEntry.MANIFEST_ROW_TYPE, null, null)) {
-            assertThat(reader.hasNext()).isTrue();
-            actual = serializer.fromRow(reader.next());
-            assertThat(reader.hasNext()).isFalse();
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                CloseableIterator<InternalRow> rows =
+                        reader.read(ManifestEntry.MANIFEST_ROW_TYPE, null, null)) {
+            assertThat(rows.hasNext()).isTrue();
+            actual = serializer.fromRow(rows.next());
+            assertThat(rows.hasNext()).isFalse();
         }
 
         assertThat(actual.fileName()).isEqualTo(source.fileName());
         assertThat(actual.file().firstRowId()).isNull();
         assertThat(actual.file().writeCols()).isNull();
+
+        ProjectedManifestEntry.Projection projection = ProjectedManifestEntry.ROW_RANGE_PROJECTION;
+        ProjectedManifestEntry binaryEntry = projection.createEntry();
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path))) {
+            assertThat(reader.hasNext()).isTrue();
+            ManifestAvroReader.RawBlock block = reader.next();
+            assertThat(block.rawBlockCopySupported()).isFalse();
+            ManifestAvroReader.RowIterator rows = block.toRows(projection.projectedType());
+            assertThat(rows.hasNext()).isTrue();
+            binaryEntry.replace(rows.next());
+            assertThat(binaryEntry.rowCount()).isEqualTo(source.rowCount());
+            assertThat(binaryEntry.firstRowId()).isNull();
+            assertThat(rows.hasNext()).isFalse();
+            assertThat(reader.hasNext()).isFalse();
+        }
     }
 
     @Test
@@ -331,12 +362,15 @@ public class ManifestFileTest {
         }
 
         assertThatThrownBy(
-                        () ->
-                                new ManifestAvroReader(
-                                        fileIO.newInputStream(path),
-                                        ManifestEntry.MANIFEST_ROW_TYPE,
-                                        null,
-                                        null))
+                        () -> {
+                            try (ManifestAvroReader reader =
+                                            new ManifestAvroReader(fileIO.newInputStream(path));
+                                    CloseableIterator<InternalRow> rows =
+                                            reader.read(
+                                                    ManifestEntry.MANIFEST_ROW_TYPE, null, null)) {
+                                rows.hasNext();
+                            }
+                        })
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("expected _KIND but found _FILE");
     }
@@ -392,7 +426,7 @@ public class ManifestFileTest {
     }
 
     @Test
-    void testReadDeletedEntriesWithProjectedScan() {
+    void testReadDeletedEntriesWithProjectedScan() throws Exception {
         ManifestEntry first = gen.next();
         ManifestEntry second = gen.next();
         DataFileMeta firstFile =
@@ -441,6 +475,14 @@ public class ManifestFileTest {
         ManifestFileMeta secondManifest =
                 writeSingleManifest(manifestFile, Arrays.asList(secondAdd, secondDelete));
 
+        try (CloseableIterator<ProjectedManifestEntry> entries =
+                manifestFile.scan(
+                        firstManifest.fileName(), ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
+            assertThat(entries.next().file().nonNullFirstRowId()).isEqualTo(10L);
+            assertThat(entries.next().file().nonNullFirstRowId()).isEqualTo(10L);
+            assertThat(entries.hasNext()).isFalse();
+        }
+
         Set<FileEntry.Identifier> deleted =
                 FileEntry.readDeletedEntries(
                         manifestFile, Arrays.asList(firstManifest, secondManifest), 2);
@@ -488,31 +530,170 @@ public class ManifestFileTest {
     }
 
     @Test
-    void testScanProjectedManifestEntriesCanBeRetained() throws Exception {
+    void testScanProjectedManifestCreatesDistinctEntryWrappers() throws Exception {
         List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
         ProjectedManifestEntry.Projection projection =
                 projection(DataFileMeta.FILE_NAME, DataFileMeta.ROW_COUNT);
-        List<ProjectedManifestEntry> actual = new ArrayList<>();
+        List<String> fileNames = new ArrayList<>();
+        List<Long> rowCounts = new ArrayList<>();
+        ProjectedManifestEntry previous = null;
 
         try (CloseableIterator<ProjectedManifestEntry> iterator =
                 manifestFile.scan(manifest.fileName(), projection)) {
             while (iterator.hasNext()) {
-                actual.add(iterator.next());
+                ProjectedManifestEntry current = iterator.next();
+                assertThat(current).isNotSameAs(previous);
+                fileNames.add(current.fileName());
+                rowCounts.add(current.rowCount());
+                previous = current;
             }
         }
 
-        assertThat(actual).hasSize(entries.size());
-        for (int i = 1; i < actual.size(); i++) {
-            assertThat(actual.get(i)).isNotSameAs(actual.get(i - 1));
-        }
-        assertThat(actual.stream().map(ManifestEntry::fileName).collect(Collectors.toList()))
+        assertThat(fileNames)
                 .containsExactlyElementsOf(
                         entries.stream().map(ManifestEntry::fileName).collect(Collectors.toList()));
-        assertThat(actual.stream().map(ManifestEntry::rowCount).collect(Collectors.toList()))
+        assertThat(rowCounts)
                 .containsExactlyElementsOf(
                         entries.stream().map(ManifestEntry::rowCount).collect(Collectors.toList()));
+    }
+
+    @Test
+    void testBlockReaderConvertsRawBlocksToProjectedRows() throws Exception {
+        List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+        ProjectedManifestEntry.Projection projection =
+                projection(DataFileMeta.FILE_NAME, DataFileMeta.ROW_COUNT);
+        ProjectedManifestEntry actual = projection.createEntry();
+        InternalRow reusedRow = null;
+        InternalRow reusedFileRow = null;
+        int position = 0;
+
+        try (ManifestAvroReader reader = openManifestReader(manifest)) {
+            while (reader.hasNext()) {
+                ManifestAvroReader.RawBlock block = reader.next();
+                assertThat(block.rawBlockCopySupported()).isTrue();
+                ManifestAvroReader.RowIterator rows = block.toRows(projection.projectedType());
+                ByteBuffer reusedEncodedRecord = null;
+                while (rows.hasNext()) {
+                    GenericRow row = rows.next();
+                    ByteBuffer encodedRecord = rows.encodedRecord();
+                    assertThat(encodedRecord.remaining()).isPositive();
+                    if (reusedEncodedRecord != null) {
+                        assertThat(encodedRecord).isSameAs(reusedEncodedRecord);
+                    }
+                    reusedEncodedRecord = encodedRecord;
+                    InternalRow fileRow = row.getRow(2, 2);
+                    if (reusedRow != null) {
+                        assertThat(row).isSameAs(reusedRow);
+                        assertThat(fileRow).isSameAs(reusedFileRow);
+                    }
+                    reusedRow = row;
+                    reusedFileRow = fileRow;
+                    actual.replace(row);
+                    ManifestEntry expected = entries.get(position++);
+                    assertThat(actual.kind()).isEqualTo(expected.kind());
+                    assertThat(actual.partition()).isEqualTo(expected.partition());
+                    assertThat(actual.fileName()).isEqualTo(expected.fileName());
+                    assertThat(actual.rowCount()).isEqualTo(expected.rowCount());
+                }
+            }
+        }
+
+        assertThat(position).isEqualTo(entries.size());
+    }
+
+    @Test
+    void testBlockReaderReadsAcrossMultipleBlocks() throws Exception {
+        List<ManifestEntry> entries = Collections.nCopies(1_000, gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+        ProjectedManifestEntry.Projection projection = projection(DataFileMeta.FILE_NAME);
+        int blockCount = 0;
+        int rowCount = 0;
+
+        try (ManifestAvroReader reader = openManifestReader(manifest)) {
+            while (reader.hasNext()) {
+                ManifestAvroReader.RowIterator rows =
+                        reader.next().toRows(projection.projectedType());
+                assertThat(rows.hasNext()).isTrue();
+                while (rows.hasNext()) {
+                    rows.next();
+                    rowCount++;
+                }
+                blockCount++;
+            }
+        }
+
+        assertThat(blockCount).isGreaterThan(1);
+        assertThat(rowCount).isEqualTo(entries.size());
+    }
+
+    @Test
+    void testBlockReaderSupportsReorderedProjection() throws Exception {
+        List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
+        RowType fileType =
+                DataFileMeta.SCHEMA.project(DataFileMeta.ROW_COUNT, DataFileMeta.FILE_NAME);
+        RowType projectedType =
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                manifestType.getField(ManifestEntry.FILE).newType(fileType),
+                                manifestType.getField(ManifestEntry.PARTITION),
+                                manifestType.getField(ManifestEntry.KIND)));
+        ProjectedManifestEntry.Projection projection =
+                ProjectedManifestEntry.Projection.create(projectedType);
+        ProjectedManifestEntry actual = projection.createEntry();
+        int position = 0;
+
+        try (ManifestAvroReader reader = openManifestReader(manifest)) {
+            while (reader.hasNext()) {
+                ManifestAvroReader.RowIterator rows =
+                        reader.next().toRows(projection.projectedType());
+                while (rows.hasNext()) {
+                    InternalRow row = rows.next();
+                    assertThat(row.getRow(0, 2).getLong(0))
+                            .isEqualTo(entries.get(position).rowCount());
+                    actual.replace(row);
+                    assertThat(actual.fileName()).isEqualTo(entries.get(position).fileName());
+                    assertThat(actual.partition()).isEqualTo(entries.get(position).partition());
+                    assertThat(actual.kind()).isEqualTo(entries.get(position).kind());
+                    position++;
+                }
+            }
+        }
+
+        assertThat(position).isEqualTo(entries.size());
+    }
+
+    @Test
+    void testBlockReaderSupportsFullManifestProjection() throws Exception {
+        List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+        ProjectedManifestEntry.Projection projection = ProjectedManifestEntry.fullProjection();
+        ProjectedManifestEntry binaryEntry = projection.createEntry();
+        ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+        int position = 0;
+
+        try (ManifestAvroReader reader = openManifestReader(manifest)) {
+            while (reader.hasNext()) {
+                ManifestAvroReader.RowIterator rows =
+                        reader.next().toRows(projection.projectedType());
+                while (rows.hasNext()) {
+                    binaryEntry.replace(rows.next());
+                    assertThat(serializer.fromRow(binaryEntry.fullRow()))
+                            .isEqualTo(entries.get(position++));
+                }
+            }
+        }
+
+        assertThat(position).isEqualTo(entries.size());
     }
 
     @Test
@@ -540,19 +721,18 @@ public class ManifestFileTest {
         List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
-        List<ProjectedManifestEntry> retained = new ArrayList<>();
+        List<String> processedFileNames = new ArrayList<>();
 
         try (CloseableIterator<ProjectedManifestEntry> iterator =
                 manifestFile.scan(manifest.fileName(), projection(DataFileMeta.FILE_NAME))) {
             while (iterator.hasNext()) {
                 ProjectedManifestEntry entry = iterator.next();
-                retained.add(entry);
+                processedFileNames.add(entry.fileName());
                 break;
             }
         }
 
-        assertThat(retained).hasSize(1);
-        assertThat(retained.get(0).fileName()).isEqualTo(entries.get(0).fileName());
+        assertThat(processedFileNames).containsExactly(entries.get(0).fileName());
     }
 
     @Test
@@ -561,7 +741,7 @@ public class ManifestFileTest {
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
         RuntimeException failure = new RuntimeException("Expected processing failure.");
-        List<ProjectedManifestEntry> retained = new ArrayList<>();
+        List<String> processedFileNames = new ArrayList<>();
 
         assertThatThrownBy(
                         () -> {
@@ -571,13 +751,12 @@ public class ManifestFileTest {
                                             projection(DataFileMeta.FILE_NAME))) {
                                 assertThat(iterator.hasNext()).isTrue();
                                 ProjectedManifestEntry entry = iterator.next();
-                                retained.add(entry);
+                                processedFileNames.add(entry.fileName());
                                 throw failure;
                             }
                         })
                 .isSameAs(failure);
-        assertThat(retained).hasSize(1);
-        assertThat(retained.get(0).fileName()).isEqualTo(entries.get(0).fileName());
+        assertThat(processedFileNames).containsExactly(entries.get(0).fileName());
     }
 
     private List<ManifestEntry> generateData() {
@@ -586,6 +765,38 @@ public class ManifestFileTest {
             entries.add(gen.next());
         }
         return entries;
+    }
+
+    private ManifestAvroReader openManifestReader(ManifestFileMeta manifest) throws IOException {
+        FileIO fileIO = LocalFileIO.create();
+        Path path = new Path(new Path(tempDir.toUri()), "manifest/" + manifest.fileName());
+        return new ManifestAvroReader(fileIO.newInputStream(path));
+    }
+
+    private void lowerFirstBlockRecordCount(Path path) throws IOException {
+        java.nio.file.Path localPath = java.nio.file.Paths.get(path.toUri());
+        byte[] bytes = java.nio.file.Files.readAllBytes(localPath);
+        byte[] syncMarker = Arrays.copyOfRange(bytes, bytes.length - 16, bytes.length);
+        int headerSyncPosition = indexOf(bytes, syncMarker, 4, bytes.length - syncMarker.length);
+        assertThat(headerSyncPosition).isGreaterThanOrEqualTo(0);
+
+        int blockCountPosition = headerSyncPosition + syncMarker.length;
+        assertThat(bytes[blockCountPosition]).isEqualTo((byte) 4);
+        bytes[blockCountPosition] = 2;
+        java.nio.file.Files.write(localPath, bytes);
+    }
+
+    private static int indexOf(byte[] bytes, byte[] target, int from, int limit) {
+        for (int position = from; position + target.length <= limit; position++) {
+            int index = 0;
+            while (index < target.length && bytes[position + index] == target[index]) {
+                index++;
+            }
+            if (index == target.length) {
+                return position;
+            }
+        }
+        return -1;
     }
 
     private ManifestFile createManifestFile(String pathStr) {
