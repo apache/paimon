@@ -829,8 +829,7 @@ public class ManifestFileTest {
             assertThat(reader.hasNext()).isTrue();
             ManifestAvroReader.RawBlock block = reader.next();
             assertThat(block.recordCount()).isEqualTo(entries.size());
-            writer.writeEncodedBlock(
-                    block.encodedBlock(), encodedBlock(sourceMeta, entries), block.recordCount());
+            writer.writeEncodedBlock(block.encodedBlock(), encodedBlock(sourceMeta, entries));
             assertThat(reader.hasNext()).isFalse();
         }
         writer.close();
@@ -849,6 +848,7 @@ public class ManifestFileTest {
         boolean nullPartition = entries.get(0).partition().isNullAt(0);
         return new ManifestAvroWriter.EncodedBlock(
                 meta.numAddedFiles(),
+                meta.numDeletedFiles(),
                 meta.schemaId(),
                 meta.minBucket(),
                 meta.maxBucket(),

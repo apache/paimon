@@ -115,23 +115,23 @@ public final class ManifestAvroWriter implements AutoCloseable {
         }
     }
 
-    public void writeEncodedBlock(AvroRawBlock block, EncodedBlock metadata, long blockRecordCount)
-            throws IOException {
-        if (blockRecordCount != block.recordCount()) {
+    public void writeEncodedBlock(AvroRawBlock block, EncodedBlock metadata) throws IOException {
+        if (metadata.addedFiles < 0 || metadata.deletedFiles < 0) {
             throw new IllegalArgumentException(
                     String.format(
-                            "Manifest block record count mismatch: expected %s, actual %s.",
-                            blockRecordCount, block.recordCount()));
+                            "Manifest block file counts must be non-negative: added %s, deleted %s.",
+                            metadata.addedFiles, metadata.deletedFiles));
         }
-        if (metadata.addedFiles < 0 || metadata.addedFiles > blockRecordCount) {
+        long metadataRecordCount = Math.addExact(metadata.addedFiles, metadata.deletedFiles);
+        if (metadataRecordCount != block.recordCount()) {
             throw new IllegalArgumentException(
                     String.format(
-                            "Manifest block added file count %s is outside [0, %s].",
-                            metadata.addedFiles, blockRecordCount));
+                            "Manifest block record count mismatch: metadata %s, block %s.",
+                            metadataRecordCount, block.recordCount()));
         }
         try {
-            currentWriter().writeEncodedBlock(block, metadata, blockRecordCount);
-            afterWrite(blockRecordCount, true);
+            currentWriter().writeEncodedBlock(block, metadata);
+            afterWrite(metadataRecordCount, true);
         } catch (IOException | RuntimeException | Error failure) {
             abort();
             throw failure;
@@ -244,6 +244,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
     public static final class EncodedBlock {
 
         private final long addedFiles;
+        private final long deletedFiles;
         private final long schemaId;
         private final int minBucket;
         private final int maxBucket;
@@ -258,6 +259,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
 
         public EncodedBlock(
                 long addedFiles,
+                long deletedFiles,
                 long schemaId,
                 int minBucket,
                 int maxBucket,
@@ -270,6 +272,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 @Nullable BinaryRow minNonNullPartition,
                 @Nullable BinaryRow maxNonNullPartition) {
             this.addedFiles = addedFiles;
+            this.deletedFiles = deletedFiles;
             this.schemaId = schemaId;
             this.minBucket = minBucket;
             this.maxBucket = maxBucket;
@@ -350,12 +353,11 @@ public final class ManifestAvroWriter implements AutoCloseable {
             addEncodedPartition(metadata.partition, 1);
         }
 
-        private void writeEncodedBlock(
-                AvroRawBlock block, EncodedBlock metadata, long blockRecordCount)
+        private void writeEncodedBlock(AvroRawBlock block, EncodedBlock metadata)
                 throws IOException {
             ensureOpen();
             writer.addEncodedBlock(block);
-            collectStats(metadata, blockRecordCount);
+            collectStats(metadata);
             if (metadata.nullPartitionCount > 0) {
                 addEncodedPartition(metadata.nullPartition, metadata.nullPartitionCount);
             }
@@ -415,9 +417,9 @@ public final class ManifestAvroWriter implements AutoCloseable {
             }
         }
 
-        private void collectStats(EncodedBlock block, long blockRecordCount) {
+        private void collectStats(EncodedBlock block) {
             numAddedFiles = Math.addExact(numAddedFiles, block.addedFiles);
-            numDeletedFiles = Math.addExact(numDeletedFiles, blockRecordCount - block.addedFiles);
+            numDeletedFiles = Math.addExact(numDeletedFiles, block.deletedFiles);
             schemaId = Math.max(schemaId, block.schemaId);
             minBucket = Math.min(minBucket, block.minBucket);
             maxBucket = Math.max(maxBucket, block.maxBucket);
