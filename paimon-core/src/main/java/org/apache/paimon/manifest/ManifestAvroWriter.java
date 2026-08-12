@@ -68,6 +68,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
     private @Nullable FileWriter currentWriter;
     private long recordCount;
     private boolean closed;
+    private boolean successfullyClosed;
 
     ManifestAvroWriter(
             FileIO fileIO,
@@ -122,8 +123,14 @@ public final class ManifestAvroWriter implements AutoCloseable {
                             "Manifest block record count mismatch: expected %s, actual %s.",
                             blockRecordCount, block.recordCount()));
         }
+        if (metadata.addedFiles < 0 || metadata.addedFiles > blockRecordCount) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Manifest block added file count %s is outside [0, %s].",
+                            metadata.addedFiles, blockRecordCount));
+        }
         try {
-            currentWriter().writeEncodedBlock(block, metadata);
+            currentWriter().writeEncodedBlock(block, metadata, blockRecordCount);
             afterWrite(blockRecordCount, true);
         } catch (IOException | RuntimeException | Error failure) {
             abort();
@@ -166,9 +173,9 @@ public final class ManifestAvroWriter implements AutoCloseable {
     }
 
     public List<ManifestFileMeta> result() {
-        if (!closed) {
+        if (!successfullyClosed) {
             throw new IllegalStateException(
-                    "Cannot access manifest results before closing the writer.");
+                    "Cannot access manifest results before successfully closing the writer.");
         }
         return results;
     }
@@ -184,6 +191,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         completedPaths.clear();
         results.clear();
         closed = true;
+        successfullyClosed = false;
     }
 
     @Override
@@ -193,6 +201,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         }
         try {
             closeCurrentWriter();
+            successfullyClosed = true;
         } catch (IOException | RuntimeException | Error failure) {
             abort();
             throw failure;
@@ -341,11 +350,12 @@ public final class ManifestAvroWriter implements AutoCloseable {
             addEncodedPartition(metadata.partition, 1);
         }
 
-        private void writeEncodedBlock(AvroRawBlock block, EncodedBlock metadata)
+        private void writeEncodedBlock(
+                AvroRawBlock block, EncodedBlock metadata, long blockRecordCount)
                 throws IOException {
             ensureOpen();
             writer.addEncodedBlock(block);
-            collectStats(metadata);
+            collectStats(metadata, blockRecordCount);
             if (metadata.nullPartitionCount > 0) {
                 addEncodedPartition(metadata.nullPartition, metadata.nullPartitionCount);
             }
@@ -405,8 +415,9 @@ public final class ManifestAvroWriter implements AutoCloseable {
             }
         }
 
-        private void collectStats(EncodedBlock block) {
+        private void collectStats(EncodedBlock block, long blockRecordCount) {
             numAddedFiles = Math.addExact(numAddedFiles, block.addedFiles);
+            numDeletedFiles = Math.addExact(numDeletedFiles, blockRecordCount - block.addedFiles);
             schemaId = Math.max(schemaId, block.schemaId);
             minBucket = Math.min(minBucket, block.minBucket);
             maxBucket = Math.max(maxBucket, block.maxBucket);
