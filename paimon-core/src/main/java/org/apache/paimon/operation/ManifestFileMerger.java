@@ -21,8 +21,8 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
+import org.apache.paimon.manifest.ManifestAvroWriter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -264,8 +264,7 @@ public class ManifestFileMerger {
             return Optional.empty();
         }
 
-        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
-                manifestFile.createRollingWriter();
+        ManifestAvroWriter writer = manifestFile.createAvroWriter();
         Function<ManifestFileMeta, List<FullCompactionReadResult>> reader =
                 file ->
                         singletonList(
