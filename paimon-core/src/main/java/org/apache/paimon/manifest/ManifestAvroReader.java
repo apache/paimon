@@ -185,10 +185,6 @@ public final class ManifestAvroReader implements AutoCloseable {
                             5, filePosition >= 0 ? projectedType.getTypeAt(filePosition) : null);
         }
 
-        private GenericRow createRow() {
-            return new GenericRow(projectedFieldCount);
-        }
-
         private boolean read(
                 AvroRecordDecoder decoder,
                 GenericRow row,
@@ -351,7 +347,7 @@ public final class ManifestAvroReader implements AutoCloseable {
                     decompressed.array(),
                     decompressed.arrayOffset() + decompressed.position(),
                     decompressed.remaining());
-            GenericRow reuse = reuseRow ? recordDecoder.createRow() : null;
+            GenericRow reuse = reuseRow ? new GenericRow(recordDecoder.projectedFieldCount) : null;
             return new RowIterator(
                     blockRecordCount,
                     decoderContext.decoder,
@@ -451,7 +447,7 @@ public final class ManifestAvroReader implements AutoCloseable {
                 while (blockRemaining > 0) {
                     blockRecordIndex++;
                     if (reuseRow == null) {
-                        row = recordDecoder.createRow();
+                        row = new GenericRow(recordDecoder.projectedFieldCount);
                     }
                     int recordStart = decoder.absolutePosition();
                     boolean selected =
@@ -487,7 +483,7 @@ public final class ManifestAvroReader implements AutoCloseable {
                 }
                 blockRecordIndex++;
                 if (reuseRow == null) {
-                    row = recordDecoder.createRow();
+                    row = new GenericRow(recordDecoder.projectedFieldCount);
                 }
                 int recordStart = decoder.absolutePosition();
                 recordDecoder.read(decoder, row, null, null);
