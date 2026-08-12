@@ -213,6 +213,19 @@ public interface FileEntry {
             return appendEntryFields(entry);
         }
 
+        /** Replaces this encoding with an already serialized identifier. */
+        public ReusableIdentifier replace(byte[] value, int offset, int valueLength) {
+            checkArgument(value != null, "Serialized identifier cannot be null.");
+            checkArgument(
+                    offset >= 0 && valueLength >= 0 && offset <= value.length - valueLength,
+                    "Identifier byte range is invalid.");
+            length = 0;
+            ensureCapacity(valueLength);
+            System.arraycopy(value, offset, bytes, 0, valueLength);
+            length = valueLength;
+            return this;
+        }
+
         private ReusableIdentifier appendEntryFields(ProjectedManifestEntry entry) {
             putInt(entry.bucket());
             ProjectedDataFileMeta file = entry.file();

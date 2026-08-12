@@ -212,6 +212,11 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         }
     }
 
+    /** Opens a low-allocation reader for the encoded manifest fields needed by run merge. */
+    public ManifestAvroReader scanForRunMerge(String fileName, @Nullable Long fileSize) {
+        return scanAvroBlocks(fileName, fileSize);
+    }
+
     @VisibleForTesting
     public long suggestedFileSize() {
         return suggestedFileSize;

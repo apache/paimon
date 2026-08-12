@@ -1024,6 +1024,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Partition field name to sort manifest entries by. Validated by schema validation, if not configured, defaults to the first partition field.</td>
         </tr>
         <tr>
+            <td><h5>manifest-sort.run-merge-optimize.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to use streaming run merge for RowID-based manifest sorting. When disabled, the external sorter is used without changing the RowID sort semantics.</td>
+        </tr>
+        <tr>
             <td><h5>manifest.compression</h5></td>
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
