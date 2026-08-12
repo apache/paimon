@@ -58,6 +58,7 @@ import org.apache.paimon.spark.procedure.ReplaceTagProcedure;
 import org.apache.paimon.spark.procedure.RescaleProcedure;
 import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
 import org.apache.paimon.spark.procedure.RewriteFileIndexProcedure;
+import org.apache.paimon.spark.procedure.RewriteManifestProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
 import org.apache.paimon.spark.procedure.RollbackToTimestampProcedure;
 import org.apache.paimon.spark.procedure.RollbackToWatermarkProcedure;
@@ -124,6 +125,7 @@ public class SparkProcedures {
         procedureBuilders.put("reset_consumer", ResetConsumerProcedure::builder);
         procedureBuilders.put("mark_partition_done", MarkPartitionDoneProcedure::builder);
         procedureBuilders.put("compact_manifest", CompactManifestProcedure::builder);
+        procedureBuilders.put("rewrite_manifest", RewriteManifestProcedure::builder);
         procedureBuilders.put("clear_consumers", ClearConsumersProcedure::builder);
         procedureBuilders.put("alter_view_dialect", AlterViewDialectProcedure::builder);
         procedureBuilders.put("create_function", CreateFunctionProcedure::builder);
