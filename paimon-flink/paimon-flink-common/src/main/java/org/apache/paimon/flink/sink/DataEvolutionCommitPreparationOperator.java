@@ -33,15 +33,15 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Operator to rewrite deletion vectors for data-evolution compaction before committing. */
-public class DataEvolutionCompactDeletionVectorOperator
+/** Prepares deletion-vector and index changes for a data-evolution rewrite commit. */
+public class DataEvolutionCommitPreparationOperator
         extends PrepareCommitOperator<Committable, Committable> {
 
     private final FileStoreTable table;
     private final Snapshot snapshot;
     private final List<Committable> committables;
 
-    private DataEvolutionCompactDeletionVectorOperator(
+    private DataEvolutionCommitPreparationOperator(
             StreamOperatorParameters<Committable> parameters,
             FileStoreTable table,
             Snapshot snapshot) {
@@ -76,7 +76,7 @@ public class DataEvolutionCompactDeletionVectorOperator
         return toCommit;
     }
 
-    /** {@link StreamOperatorFactory} of {@link DataEvolutionCompactDeletionVectorOperator}. */
+    /** {@link StreamOperatorFactory} of {@link DataEvolutionCommitPreparationOperator}. */
     public static class Factory extends PrepareCommitOperator.Factory<Committable, Committable> {
 
         private final FileStoreTable table;
@@ -92,13 +92,13 @@ public class DataEvolutionCompactDeletionVectorOperator
         @SuppressWarnings("unchecked")
         public <T extends StreamOperator<Committable>> T createStreamOperator(
                 StreamOperatorParameters<Committable> parameters) {
-            return (T) new DataEvolutionCompactDeletionVectorOperator(parameters, table, snapshot);
+            return (T) new DataEvolutionCommitPreparationOperator(parameters, table, snapshot);
         }
 
         @Override
         @SuppressWarnings("rawtypes")
         public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
-            return DataEvolutionCompactDeletionVectorOperator.class;
+            return DataEvolutionCommitPreparationOperator.class;
         }
     }
 }

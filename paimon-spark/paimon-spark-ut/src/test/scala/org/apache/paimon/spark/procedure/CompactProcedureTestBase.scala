@@ -1740,7 +1740,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       Assertions.assertThat(deletionVectorIndexFileCount(table)).isEqualTo(1)
       val snapshotBefore = lastSnapshotId(table)
 
-      executeDataEvolutionCompaction(table, materializeDeletionVectors = true, filesPerBatch = 1)
+      executeDeletionVectorMaterialization(table, deletionFilesPerBatch = 1)
 
       Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 2)
       Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(0)
@@ -1789,7 +1789,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       Assertions.assertThat(deletionVectorIndexFileCount(table)).isEqualTo(1)
       val snapshotBefore = lastSnapshotId(table)
 
-      executeDataEvolutionCompaction(table, materializeDeletionVectors = false, filesPerBatch = 2)
+      executeDataEvolutionCompaction(table, candidateFilesPerBatch = 2)
 
       Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 2)
       Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(2)
@@ -1802,22 +1802,36 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
   private def executeDataEvolutionCompaction(
       table: FileStoreTable,
-      materializeDeletionVectors: Boolean,
-      filesPerBatch: Int): Unit = {
+      candidateFilesPerBatch: Int): Unit = {
+    CompactProcedure.executeDataEvolutionCompaction(
+      table,
+      p0PartitionPredicate(table),
+      null,
+      new JavaSparkContext(spark.sparkContext),
+      spark,
+      Int.box(candidateFilesPerBatch)
+    )
+  }
+
+  private def executeDeletionVectorMaterialization(
+      table: FileStoreTable,
+      deletionFilesPerBatch: Int): Unit = {
+    MaterializeDeletionVectorsProcedure.executeDeletionVectorMaterialization(
+      table,
+      p0PartitionPredicate(table),
+      new JavaSparkContext(spark.sparkContext),
+      spark,
+      Int.box(deletionFilesPerBatch)
+    )
+  }
+
+  private def p0PartitionPredicate(table: FileStoreTable): PartitionPredicate = {
     val partitionPredicate = PartitionPredicate.fromMap(
       table.schema().logicalPartitionType(),
       util.Collections.singletonMap("pt", "p0"),
       table.coreOptions().partitionDefaultName()
     )
-    CompactProcedure.executeDataEvolutionCompaction(
-      table,
-      partitionPredicate,
-      null,
-      new JavaSparkContext(spark.sparkContext),
-      spark,
-      materializeDeletionVectors,
-      Int.box(filesPerBatch)
-    )
+    partitionPredicate
   }
 
   private def deletionVectorIndexFileCount(table: FileStoreTable): Int = {

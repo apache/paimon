@@ -615,6 +615,29 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testMaterializeOnlyDeletionVectorRanges() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        commitDeletionVectors(table, Collections.singletonList(new DvSpec(new Range(5, 9), 6)));
+
+        Map<Range, List<DataFileMeta>> filesBefore = normalFilesByRange(table);
+        materializeDeletionVectors(table);
+
+        table = getTableDefault();
+        Map<Range, List<DataFileMeta>> filesAfter = normalFilesByRange(table);
+        assertThat(filesAfter.keySet())
+                .containsExactlyInAnyOrder(new Range(0, 4), new Range(10, 14), new Range(15, 18));
+        assertThat(fileNames(filesAfter.get(new Range(0, 4))))
+                .isEqualTo(fileNames(filesBefore.get(new Range(0, 4))));
+        assertThat(fileNames(filesAfter.get(new Range(10, 14))))
+                .isEqualTo(fileNames(filesBefore.get(new Range(10, 14))));
+        assertThat(readRows(table.newReadBuilder()))
+                .containsExactlyElementsOf(expectedRowsExcluding("base", FULL_RANGE, 6));
+        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
+    }
+
+    @Test
     public void testBlobCompactKeepsDeletionVectors() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -1324,6 +1347,10 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
 
     private static long fileWeight(List<DataFileMeta> files) {
         return estimatedFileWeight(files, 1D);
+    }
+
+    private static List<String> fileNames(List<DataFileMeta> files) {
+        return files.stream().map(DataFileMeta::fileName).sorted().collect(Collectors.toList());
     }
 
     private static long estimatedFileWeight(List<DataFileMeta> files, double remainingRatio) {

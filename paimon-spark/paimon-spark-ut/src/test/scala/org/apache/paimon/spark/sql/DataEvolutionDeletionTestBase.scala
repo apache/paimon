@@ -619,7 +619,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |WHEN MATCHED THEN UPDATE SET t.b = s.b
             |""".stripMargin)
 
-      compactDataEvolutionTable(materializeDeletionVectors = false)
+      compactDataEvolutionTable()
 
       checkAnswer(
         sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
@@ -659,7 +659,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |WHEN MATCHED THEN UPDATE SET t.b = s.b
             |""".stripMargin)
 
-      compactDataEvolutionTable(materializeDeletionVectors = true)
+      materializeDeletionVectors()
 
       checkAnswer(
         sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
@@ -706,7 +706,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
       assert(btreeIndexEntryCount("t") > 0)
 
       sql("DELETE FROM t WHERE id IN (2, 4)")
-      compactDataEvolutionTable(materializeDeletionVectors = true)
+      materializeDeletionVectors()
 
       checkAnswer(
         sql("SELECT id, name, b FROM t WHERE name IN ('name-1', 'name-2') ORDER BY id"),
@@ -715,14 +715,14 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
     }
   }
 
-  private def compactDataEvolutionTable(materializeDeletionVectors: Boolean): Unit = {
-    if (materializeDeletionVectors) {
-      sql(
-        "CALL sys.materialize_deletion_vectors(" +
-          "table => 't', options => 'compaction.min.file-num=2')")
-    } else {
-      sql("CALL sys.compact(table => 't', options => 'compaction.min.file-num=2')")
-    }
+  private def compactDataEvolutionTable(): Unit = {
+    sql("CALL sys.compact(table => 't', options => 'compaction.min.file-num=2')")
+  }
+
+  private def materializeDeletionVectors(): Unit = {
+    sql(
+      "CALL sys.materialize_deletion_vectors(" +
+        "table => 't', options => 'compaction.min.file-num=2')")
   }
 
   private def btreeIndexEntryCount(tableName: String): Int = {

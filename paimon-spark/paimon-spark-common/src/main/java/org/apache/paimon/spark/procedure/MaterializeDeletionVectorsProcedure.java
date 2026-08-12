@@ -18,6 +18,9 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.BucketMode;
@@ -26,6 +29,7 @@ import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -35,7 +39,11 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
+import javax.annotation.Nullable;
+
 import java.util.HashMap;
+import java.util.List;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -112,15 +120,48 @@ public class MaterializeDeletionVectorsProcedure extends BaseProcedure {
                                         spark(),
                                         relation);
                     }
-                    CompactProcedure.executeDataEvolutionCompaction(
+                    executeDeletionVectorMaterialization(
                             table,
                             partitionPredicate,
-                            null,
                             new JavaSparkContext(spark().sparkContext()),
-                            spark(),
-                            true);
+                            spark());
                     return new InternalRow[] {newInternalRow(true)};
                 });
+    }
+
+    static void executeDeletionVectorMaterialization(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            JavaSparkContext javaSparkContext,
+            SparkSession sparkSession) {
+        executeDeletionVectorMaterialization(
+                table, partitionPredicate, javaSparkContext, sparkSession, null);
+    }
+
+    static void executeDeletionVectorMaterialization(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            JavaSparkContext javaSparkContext,
+            SparkSession sparkSession,
+            @Nullable Integer deletionFilesPerBatch) {
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        if (snapshot == null) {
+            return;
+        }
+        DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
+                deletionFilesPerBatch == null
+                        ? new DataEvolutionDeletionVectorMaterializeCoordinator(
+                                table, partitionPredicate, snapshot)
+                        : new DataEvolutionDeletionVectorMaterializeCoordinator(
+                                table, partitionPredicate, snapshot, deletionFilesPerBatch);
+        Supplier<List<DataEvolutionCompactTask>> taskPlanner = coordinator::plan;
+        DataEvolutionRewriteExecutor.execute(
+                table,
+                snapshot,
+                taskPlanner,
+                javaSparkContext,
+                sparkSession,
+                commit -> commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id()));
     }
 
     private boolean blank(InternalRow args, int index) {

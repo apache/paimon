@@ -18,42 +18,53 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.flink.compact.DataEvolutionTableCompact;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.compact.DataEvolutionDeletionVectorMaterialize;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.configuration.ExecutionOptions;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Flink action which physically applies deletion vectors for a data evolution table. */
-public class MaterializeDeletionVectorsAction extends CompactAction {
+public class MaterializeDeletionVectorsAction extends TableActionBase {
+
+    private List<Map<String, String>> partitions;
+    private String whereSql;
 
     public MaterializeDeletionVectorsAction(
             String database,
             String tableName,
             Map<String, String> catalogConfig,
             Map<String, String> tableConf) {
-        super(database, tableName, catalogConfig, tableConf);
+        super(database, tableName, catalogConfig);
+        this.forceStartFlinkJob = true;
+        checkArgument(
+                table instanceof FileStoreTable,
+                "Materializing deletion vectors only supports FileStoreTable.");
+        HashMap<String, String> dynamicOptions = new HashMap<>(tableConf);
+        dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
+        table = table.copy(dynamicOptions);
     }
 
-    @Override
     public MaterializeDeletionVectorsAction withPartitions(List<Map<String, String>> partitions) {
-        super.withPartitions(partitions);
+        this.partitions = partitions;
         return this;
     }
 
-    @Override
     public MaterializeDeletionVectorsAction withWhereSql(String whereSql) {
-        super.withWhereSql(whereSql);
+        this.whereSql = whereSql;
         return this;
     }
 
     @Override
-    protected boolean buildImpl() throws Exception {
+    public void build() throws Exception {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         checkArgument(
                 fileStoreTable.bucketMode() == BucketMode.BUCKET_UNAWARE
@@ -62,17 +73,16 @@ public class MaterializeDeletionVectorsAction extends CompactAction {
         checkArgument(
                 fileStoreTable.coreOptions().deletionVectorsEnabled(),
                 "Materializing deletion vectors requires deletion vectors to be enabled.");
-        return super.buildImpl();
-    }
-
-    @Override
-    protected void buildForDataEvolutionTableCompact(
-            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
-            throws Exception {
-        checkArgument(!isStreaming, "Materializing deletion vectors only supports batch mode yet.");
-        DataEvolutionTableCompact builder =
-                new DataEvolutionTableCompact(env, identifier.getFullName(), table, true);
-        builder.withPartitionPredicate(getPartitionPredicate());
+        checkArgument(
+                env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
+                        != RuntimeExecutionMode.STREAMING,
+                "Materializing deletion vectors only supports batch mode yet.");
+        DataEvolutionDeletionVectorMaterialize builder =
+                new DataEvolutionDeletionVectorMaterialize(
+                        env, identifier.getFullName(), fileStoreTable);
+        builder.withPartitionPredicate(
+                ActionPartitionPredicate.create(
+                        fileStoreTable, partitions, whereSql, "deletion vector materialization"));
         builder.build();
     }
 }
