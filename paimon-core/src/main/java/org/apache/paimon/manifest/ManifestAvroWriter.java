@@ -68,7 +68,6 @@ public final class ManifestAvroWriter implements AutoCloseable {
     private @Nullable FileWriter currentWriter;
     private long recordCount;
     private boolean closed;
-    private boolean successfullyClosed;
 
     ManifestAvroWriter(
             FileIO fileIO,
@@ -173,9 +172,9 @@ public final class ManifestAvroWriter implements AutoCloseable {
     }
 
     public List<ManifestFileMeta> result() {
-        if (!successfullyClosed) {
+        if (!closed) {
             throw new IllegalStateException(
-                    "Cannot access manifest results before successfully closing the writer.");
+                    "Cannot access manifest results before closing the writer.");
         }
         return results;
     }
@@ -183,15 +182,12 @@ public final class ManifestAvroWriter implements AutoCloseable {
     public void abort() {
         if (currentWriter != null) {
             currentWriter.abort();
-            currentWriter = null;
         }
         for (Path path : completedPaths) {
             fileIO.deleteQuietly(path);
         }
         completedPaths.clear();
         results.clear();
-        closed = true;
-        successfullyClosed = false;
     }
 
     @Override
@@ -201,7 +197,6 @@ public final class ManifestAvroWriter implements AutoCloseable {
         }
         try {
             closeCurrentWriter();
-            successfullyClosed = true;
         } catch (IOException | RuntimeException | Error failure) {
             abort();
             throw failure;

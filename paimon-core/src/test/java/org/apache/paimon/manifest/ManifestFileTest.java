@@ -111,7 +111,7 @@ public class ManifestFileTest {
 
         assertThatThrownBy(writer::result)
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("successfully closing");
+                .hasMessageContaining("before closing");
     }
 
     @Test
