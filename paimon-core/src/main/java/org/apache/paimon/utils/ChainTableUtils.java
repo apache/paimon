@@ -39,7 +39,9 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAmount;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -59,6 +61,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Utils for chain table. */
 public class ChainTableUtils {
+    public static final int MAX_DELTA_PARTITIONS = 10_000_000;
 
     public static boolean isChainTable(Map<String, String> tblOptions) {
         return CoreOptions.fromMap(tblOptions).isChainTable();
@@ -105,6 +108,23 @@ public class ChainTableUtils {
         LocalDateTime startPartitionTime = timeResolver.parsePartitionValues(startPartitionValues);
         LocalDateTime endPartitionTime = timeResolver.parsePartitionValues(endPartitionValues);
         TemporalAmount step = timeResolver.extractMinStep();
+        // Period-based steps (year/month) are coarse-grained and cannot explode, so only
+        // fine-grained Duration steps need the partition-count guard.
+        if (step instanceof Duration) {
+            long totalSeconds = ChronoUnit.SECONDS.between(startPartitionTime, endPartitionTime);
+            long stepSeconds = ((Duration) step).getSeconds();
+            long estimatedCount = stepSeconds == 0 ? 0 : totalSeconds / stepSeconds;
+            checkArgument(
+                    estimatedCount < MAX_DELTA_PARTITIONS,
+                    "Too many delta partitions generated between '%s' and '%s' "
+                            + "(exceeds %s). Please widen the partition granularity or reduce "
+                            + "the query range. Pattern: '%s', formatter: '%s'.",
+                    startPartitionValues,
+                    endPartitionValues,
+                    MAX_DELTA_PARTITIONS,
+                    options.partitionTimestampPattern(),
+                    options.partitionTimestampFormatter());
+        }
         LocalDateTime candidateTime = startPartitionTime.plus(step);
         while (!candidateTime.isAfter(endPartitionTime)) {
             BinaryRow candidatePartition =

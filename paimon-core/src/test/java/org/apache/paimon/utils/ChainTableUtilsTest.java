@@ -51,6 +51,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test class for {@link org.apache.paimon.utils.ChainTableUtils}. */
 public class ChainTableUtilsTest {
@@ -961,5 +962,37 @@ public class ChainTableUtilsTest {
         assertThat(getString(deltas.get(2), 3)).isEqualTo("13");
         assertThat(getString(deltas.get(3), 3)).isEqualTo("14");
         assertThat(getString(deltas.get(4), 3)).isEqualTo("15");
+    }
+
+    @Test
+    public void testGetDeltaPartitionsExceedsMaxLimit() {
+        RowType partType = RowType.builder().field("dt", DataTypes.STRING().notNull()).build();
+
+        Options opts = new Options();
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dt");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMddHHmmss");
+        CoreOptions options = new CoreOptions(opts);
+
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        options.partitionDefaultName(),
+                        partType,
+                        new String[] {"dt"},
+                        options.legacyPartitionName());
+
+        BinaryRow begin = row(Lists.newArrayList("20250101000000"));
+        BinaryRow end = row(Lists.newArrayList("20260101000000"));
+
+        assertThatThrownBy(
+                        () ->
+                                ChainTableUtils.getDeltaPartitions(
+                                        begin,
+                                        end,
+                                        Collections.singletonList("dt"),
+                                        partType,
+                                        options,
+                                        partitionComputer))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Too many delta partitions generated");
     }
 }

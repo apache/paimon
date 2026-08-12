@@ -26,7 +26,6 @@ import java.time.Period;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoField;
 import java.time.temporal.ChronoUnit;
-import java.time.temporal.IsoFields;
 import java.time.temporal.TemporalAccessor;
 import java.time.temporal.TemporalAmount;
 import java.time.temporal.TemporalField;
@@ -34,10 +33,12 @@ import java.time.temporal.TemporalUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -68,33 +69,17 @@ public class PartitionTimeResolver {
     }
 
     static {
-        FIELD_MAP.put('G', ChronoField.ERA);
+        // Only round-trippable date/time fields are supported for chain table delta computation.
         FIELD_MAP.put('y', ChronoField.YEAR);
-        FIELD_MAP.put('Y', IsoFields.WEEK_BASED_YEAR);
         FIELD_MAP.put('u', ChronoField.YEAR);
-        FIELD_MAP.put('D', ChronoField.DAY_OF_YEAR);
         FIELD_MAP.put('M', ChronoField.MONTH_OF_YEAR);
         FIELD_MAP.put('L', ChronoField.MONTH_OF_YEAR);
         FIELD_MAP.put('d', ChronoField.DAY_OF_MONTH);
-        FIELD_MAP.put('w', ChronoField.ALIGNED_WEEK_OF_YEAR);
-        FIELD_MAP.put('W', ChronoField.ALIGNED_WEEK_OF_MONTH);
-        FIELD_MAP.put('E', ChronoField.DAY_OF_WEEK);
-        FIELD_MAP.put('e', ChronoField.DAY_OF_WEEK);
-        FIELD_MAP.put('c', ChronoField.DAY_OF_WEEK);
-        FIELD_MAP.put('Q', IsoFields.QUARTER_OF_YEAR);
-        FIELD_MAP.put('q', IsoFields.QUARTER_OF_YEAR);
-        FIELD_MAP.put('F', ChronoField.ALIGNED_DAY_OF_WEEK_IN_MONTH);
-        FIELD_MAP.put('a', ChronoField.AMPM_OF_DAY);
-        FIELD_MAP.put('h', ChronoField.CLOCK_HOUR_OF_AMPM);
-        FIELD_MAP.put('K', ChronoField.HOUR_OF_AMPM);
-        FIELD_MAP.put('k', ChronoField.CLOCK_HOUR_OF_DAY);
+        FIELD_MAP.put('D', ChronoField.DAY_OF_YEAR);
         FIELD_MAP.put('H', ChronoField.HOUR_OF_DAY);
+        FIELD_MAP.put('k', ChronoField.CLOCK_HOUR_OF_DAY);
         FIELD_MAP.put('m', ChronoField.MINUTE_OF_HOUR);
         FIELD_MAP.put('s', ChronoField.SECOND_OF_MINUTE);
-        FIELD_MAP.put('S', ChronoField.NANO_OF_SECOND);
-        FIELD_MAP.put('A', ChronoField.MILLI_OF_DAY);
-        FIELD_MAP.put('n', ChronoField.NANO_OF_SECOND);
-        FIELD_MAP.put('N', ChronoField.NANO_OF_DAY);
     }
 
     private void init() {
@@ -104,6 +89,32 @@ public class PartitionTimeResolver {
         boolean matched = matchRecursive(0, 0);
         checkArgument(
                 matched, "Failed to match pattern '%s' to formatter '%s'", pattern, formatter);
+        validateFormatterFields();
+    }
+
+    /**
+     * Validates that the formatter specifies a complete date. Unsupported field letters have
+     * already been rejected by {@link #parseFormatter()}.
+     */
+    private void validateFormatterFields() {
+        Set<TemporalField> dateFields = new HashSet<>();
+        for (FormatToken token : formatTokens) {
+            if (token instanceof TemporalFieldToken) {
+                dateFields.add(((TemporalFieldToken) token).field);
+            }
+        }
+
+        boolean hasCompleteDate =
+                (dateFields.contains(ChronoField.YEAR)
+                                && dateFields.contains(ChronoField.MONTH_OF_YEAR)
+                                && dateFields.contains(ChronoField.DAY_OF_MONTH))
+                        || (dateFields.contains(ChronoField.YEAR)
+                                && dateFields.contains(ChronoField.DAY_OF_YEAR));
+        checkArgument(
+                hasCompleteDate,
+                "Formatter '%s' does not specify a complete date. "
+                        + "Chain table delta computation requires year-month-day or year-day-of-year.",
+                formatter);
     }
 
     /**
@@ -355,20 +366,11 @@ public class PartitionTimeResolver {
 
     private static TemporalAmount stepOf(TemporalFieldToken fieldToken) {
         TemporalUnit unit = fieldToken.field.getBaseUnit();
-        if (unit == ChronoUnit.YEARS || unit == IsoFields.WEEK_BASED_YEARS) {
+        if (unit == ChronoUnit.YEARS) {
             return Period.ofYears(1);
         }
         if (unit == ChronoUnit.MONTHS) {
             return Period.ofMonths(1);
-        }
-        if (unit == IsoFields.QUARTER_YEARS) {
-            return Period.ofMonths(3);
-        }
-        if (unit == ChronoUnit.NANOS) {
-            if (fieldToken.letter == 'S') {
-                return Duration.ofNanos((long) Math.pow(10, 9 - fieldToken.getLength()));
-            }
-            return Duration.ofNanos(1);
         }
         return unit.getDuration();
     }
