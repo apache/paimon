@@ -53,7 +53,6 @@ public final class ManifestAvroReader implements AutoCloseable {
     private final AvroBlockReader blockReader;
     private final DecoderContext decoderContext;
     private final boolean rawBlockCopySupported;
-    private final ReadStatistics readStatistics = new ReadStatistics();
 
     private long blockOrdinal = -1;
 
@@ -117,11 +116,7 @@ public final class ManifestAvroReader implements AutoCloseable {
                         rows =
                                 ManifestAvroReader.this
                                         .next()
-                                        .toRows(
-                                                projectedType,
-                                                partitionFilter,
-                                                bucketFilter,
-                                                readStatistics);
+                                        .toRows(projectedType, partitionFilter, bucketFilter);
                     }
                     return true;
                 } catch (IOException e) {
@@ -143,14 +138,6 @@ public final class ManifestAvroReader implements AutoCloseable {
                 ManifestAvroReader.this.close();
             }
         };
-    }
-
-    long decodedDataFiles() {
-        return readStatistics.decodedDataFiles;
-    }
-
-    long skippedDataFiles() {
-        return readStatistics.skippedDataFiles;
     }
 
     @Override
@@ -347,14 +334,13 @@ public final class ManifestAvroReader implements AutoCloseable {
 
         /** Lazily decompresses this block and returns an iterator over one reusable row. */
         public RowIterator toRows(RowType projectedType) throws IOException {
-            return toRows(projectedType, null, null, null);
+            return toRows(projectedType, null, null);
         }
 
         private RowIterator toRows(
                 RowType projectedType,
                 @Nullable PartitionPredicate partitionFilter,
-                @Nullable BucketFilter bucketFilter,
-                @Nullable ReadStatistics readStatistics)
+                @Nullable BucketFilter bucketFilter)
                 throws IOException {
             ManifestRecordDecoder recordDecoder = decoderContext.recordDecoder(projectedType);
 
@@ -370,8 +356,7 @@ public final class ManifestAvroReader implements AutoCloseable {
                     recordDecoder,
                     row,
                     partitionFilter,
-                    bucketFilter,
-                    readStatistics);
+                    bucketFilter);
         }
 
         public long blockOrdinal() {
@@ -426,7 +411,6 @@ public final class ManifestAvroReader implements AutoCloseable {
         private final GenericRow row;
         private final @Nullable PartitionPredicate partitionFilter;
         private final @Nullable BucketFilter bucketFilter;
-        private final @Nullable ReadStatistics readStatistics;
         private final boolean filtered;
 
         private long blockRemaining;
@@ -440,15 +424,13 @@ public final class ManifestAvroReader implements AutoCloseable {
                 ManifestRecordDecoder recordDecoder,
                 GenericRow row,
                 @Nullable PartitionPredicate partitionFilter,
-                @Nullable BucketFilter bucketFilter,
-                @Nullable ReadStatistics readStatistics) {
+                @Nullable BucketFilter bucketFilter) {
             blockRemaining = recordCount;
             this.decoder = decoder;
             this.recordDecoder = recordDecoder;
             this.row = row;
             this.partitionFilter = partitionFilter;
             this.bucketFilter = bucketFilter;
-            this.readStatistics = readStatistics;
             this.filtered = partitionFilter != null || bucketFilter != null;
         }
 
@@ -467,7 +449,6 @@ public final class ManifestAvroReader implements AutoCloseable {
                     int recordStart = decoder.absolutePosition();
                     boolean selected =
                             recordDecoder.read(decoder, row, partitionFilter, bucketFilter);
-                    recordRead(selected);
                     blockRemaining--;
                     if (selected) {
                         encodedRecord =
@@ -501,7 +482,6 @@ public final class ManifestAvroReader implements AutoCloseable {
                 int recordStart = decoder.absolutePosition();
                 recordDecoder.read(decoder, row, null, null);
                 encodedRecord = decoder.borrowedView(recordStart, decoder.absolutePosition());
-                recordRead(true);
                 blockRemaining--;
                 return row;
             } catch (IOException e) {
@@ -524,16 +504,6 @@ public final class ManifestAvroReader implements AutoCloseable {
             return encodedRecord;
         }
 
-        private void recordRead(boolean selected) {
-            if (readStatistics != null) {
-                if (selected && recordDecoder.filePosition >= 0) {
-                    readStatistics.decodedDataFiles++;
-                } else {
-                    readStatistics.skippedDataFiles++;
-                }
-            }
-        }
-
         private void ensureBlockFullyConsumed() throws IOException {
             if (blockRemaining == 0 && !decoder.isEnd()) {
                 throw new IOException("Manifest Avro block contains trailing undecoded bytes.");
@@ -545,11 +515,5 @@ public final class ManifestAvroReader implements AutoCloseable {
                 throw new IllegalStateException("No current Manifest Avro record.");
             }
         }
-    }
-
-    private static final class ReadStatistics {
-
-        private long decodedDataFiles;
-        private long skippedDataFiles;
     }
 }

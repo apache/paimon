@@ -134,8 +134,6 @@ public class ManifestFileTest {
                 InternalRow row = rows.next();
                 actual.add(serializer.fromRow(row));
             }
-            assertThat(reader.decodedDataFiles()).isEqualTo(expected.size());
-            assertThat(reader.skippedDataFiles()).isEqualTo(entries.size() - expected.size());
         }
 
         assertThat(actual).containsExactlyElementsOf(expected);
@@ -187,8 +185,6 @@ public class ManifestFileTest {
                 assertThat(projectedEntry.kind()).isEqualTo(expected.kind());
             }
             assertThat(rows.hasNext()).isFalse();
-            assertThat(reader.decodedDataFiles()).isEqualTo(entries.size());
-            assertThat(reader.skippedDataFiles()).isZero();
         }
     }
 
@@ -215,8 +211,6 @@ public class ManifestFileTest {
                 assertThat(FileKind.fromByteValue(row.getByte(1))).isEqualTo(expected.kind());
             }
             assertThat(rows.hasNext()).isFalse();
-            assertThat(reader.decodedDataFiles()).isZero();
-            assertThat(reader.skippedDataFiles()).isEqualTo(entries.size());
         }
     }
 
