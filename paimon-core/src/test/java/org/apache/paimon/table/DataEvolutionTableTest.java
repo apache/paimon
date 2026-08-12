@@ -1146,11 +1146,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(filesBefore.get(candidateRange).size()).isEqualTo(2);
         assertThat(filesBefore.get(lastRange).size()).isEqualTo(1);
 
-        Map<String, String> compactOptions = new HashMap<>();
-        compactOptions.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 B");
-        compactOptions.put(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "1 B");
-        compactOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        FileStoreTable compactTable = table.copy(compactOptions);
+        FileStoreTable compactTable = withCompactOptions(table, "1 B");
         DataEvolutionCompactCoordinator coordinator =
                 new DataEvolutionCompactCoordinator(
                         compactTable, false, false, compactTable.latestSnapshot().get());
@@ -1177,6 +1173,76 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(readF0AndF2(getTableDefault()))
                 .isEqualTo(
                         Arrays.asList("0|base-0", "10|updated-10", "11|updated-11", "20|base-20"));
+    }
+
+    @Test
+    public void testCompactPreservesConcurrentPartialUpdateWithinCandidateRange() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        long candidateStart = writeFullRows(table, 10, 11);
+        updateF2(table, candidateStart, 10, 11);
+
+        FileStoreTable compactTable = withCompactOptions(table, "1 MB");
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        compactTable, false, false, compactTable.latestSnapshot().get());
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isEqualTo(1);
+        CommitMessage message =
+                tasks.get(0).doCompact(compactTable, "test-concurrent-partial-update");
+
+        // Add an update after the compact task has read its input. It has the same logical range
+        // but a newer sequence, so the stale compact may commit without losing the update.
+        updateF2(table, candidateStart, 100, 101);
+        long concurrentSnapshotId = table.latestSnapshot().get().id();
+
+        try (BatchTableCommit commit = compactTable.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(concurrentSnapshotId + 1L);
+        assertThat(currentFileNamesByRange(table).get(new Range(0L, 1L)).size()).isEqualTo(2);
+        assertThat(readF0AndF2(table)).isEqualTo(Arrays.asList("10|updated-100", "11|updated-101"));
+    }
+
+    @Test
+    public void testCompactKeepsConcurrentAppendForNextSmallFileMerge() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeFullRows(table, 0);
+        writeFullRows(table, 1);
+
+        FileStoreTable compactTable = withCompactOptions(table, "1 MB");
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        compactTable, false, false, compactTable.latestSnapshot().get());
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isEqualTo(1);
+        CommitMessage message = tasks.get(0).doCompact(compactTable, "test-concurrent-append");
+
+        // This append is outside the task's row-id range. It must not conflict with or be consumed
+        // by the stale compact task.
+        assertThat(writeFullRows(table, 2)).isEqualTo(2L);
+        try (BatchTableCommit commit = compactTable.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+
+        Map<Range, List<String>> filesAfter = currentFileNamesByRange(table);
+        assertThat(filesAfter.get(new Range(0L, 1L)).size()).isEqualTo(1);
+        assertThat(filesAfter.get(new Range(2L, 2L)).size()).isEqualTo(1);
+        assertThat(readF0AndF2(table)).isEqualTo(Arrays.asList("0|base-0", "1|base-1", "2|base-2"));
+
+        DataEvolutionCompactCoordinator nextCoordinator =
+                new DataEvolutionCompactCoordinator(
+                        compactTable, false, false, compactTable.latestSnapshot().get());
+        List<DataEvolutionCompactTask> nextTasks = nextCoordinator.plan();
+        assertThat(nextTasks.size()).isEqualTo(1);
+        assertThat(
+                        nextTasks.get(0).compactBefore().stream()
+                                .map(DataFileMeta::fileName)
+                                .sorted()
+                                .collect(Collectors.toList()))
+                .isEqualTo(currentFileNames(table));
     }
 
     @Test
@@ -1283,6 +1349,14 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
             setFirstRowId(messages, firstRowId);
             commit.commit(messages);
         }
+    }
+
+    private FileStoreTable withCompactOptions(FileStoreTable table, String targetFileSize) {
+        Map<String, String> compactOptions = new HashMap<>();
+        compactOptions.put(CoreOptions.TARGET_FILE_SIZE.key(), targetFileSize);
+        compactOptions.put(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "1 B");
+        compactOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        return table.copy(compactOptions);
     }
 
     private long writePartitionRows(FileStoreTable table, String partition, int... values)
