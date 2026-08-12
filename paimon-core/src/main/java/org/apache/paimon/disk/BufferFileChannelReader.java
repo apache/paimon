@@ -20,7 +20,6 @@ package org.apache.paimon.disk;
 
 import org.apache.paimon.memory.Buffer;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -69,7 +68,7 @@ public class BufferFileChannelReader {
     private void readFully(ByteBuffer target) throws IOException {
         while (target.hasRemaining()) {
             if (fileChannel.read(target) < 0) {
-                throw new EOFException("Premature end of file while reading buffer");
+                throw new IOException("Premature end of file while reading buffer");
             }
         }
     }
