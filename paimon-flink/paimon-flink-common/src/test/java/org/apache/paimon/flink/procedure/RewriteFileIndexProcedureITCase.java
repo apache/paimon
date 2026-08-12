@@ -227,7 +227,8 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
     }
 
     private void assertFileIndexTypes(
-            String tableName, String expectedIndexType, boolean expectedEmbeddedIndex) throws Exception {
+            String tableName, String expectedIndexType, boolean expectedEmbeddedIndex)
+            throws Exception {
         flinkCatalog()
                 .catalog()
                 .invalidateTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
