@@ -596,9 +596,10 @@ case class VectorSearchQuery(override val args: Seq[Expression])
   }
 
   def hasOuterReference(argsWithoutTable: Seq[Expression]): Boolean = {
-    val queryVector = argsWithoutTable(1)
-    (argsWithoutTable.size == 3 || argsWithoutTable.size == 4) &&
-    (queryVector.references.nonEmpty || containsOuterReference(queryVector))
+    (argsWithoutTable.size == 3 || argsWithoutTable.size == 4) && {
+      val queryVector = argsWithoutTable(1)
+      queryVector.references.nonEmpty || containsOuterReference(queryVector)
+    }
   }
 
   private def containsOuterReference(expr: Expression): Boolean = {
