@@ -116,18 +116,9 @@ public class UniversalCompaction implements CompactStrategy {
             candidateCount++;
         }
 
-        if (candidateCount == 0) {
-            return Optional.empty();
-        }
-
-        // Level 1 must be compacted with level 0 to avoid producing level 0. Include it in the
-        // initial candidates so that the size-ratio check also considers level 2 based on the
-        // combined size of level 0 and level 1.
-        if (candidateCount < runs.size() && runs.get(candidateCount).level() == 1) {
-            candidateCount++;
-        }
-
-        return Optional.of(pickForSizeRatio(numLevels - 1, runs, candidateCount, true));
+        return candidateCount == 0
+                ? Optional.empty()
+                : Optional.of(pickForSizeRatio(numLevels - 1, runs, candidateCount, true));
     }
 
     @VisibleForTesting
@@ -172,22 +163,22 @@ public class UniversalCompaction implements CompactStrategy {
     public CompactUnit pickForSizeRatio(
             int maxLevel, List<LevelSortedRun> runs, int candidateCount, boolean forcePick) {
         long candidateSize = candidateSize(runs, candidateCount);
+        boolean compactionTriggered = forcePick || candidateCount > 1;
         for (int i = candidateCount; i < runs.size(); i++) {
             LevelSortedRun next = runs.get(i);
             if (candidateSize * (100.0 + sizeRatio + ratioForOffPeak()) / 100.0
                     < next.run().totalSize()) {
-                break;
+                if (!compactionTriggered || next.level() > 1) {
+                    break;
+                }
             }
 
             candidateSize += next.run().totalSize();
             candidateCount++;
+            compactionTriggered = true;
         }
 
-        if (forcePick || candidateCount > 1) {
-            return createUnit(runs, maxLevel, candidateCount);
-        }
-
-        return null;
+        return compactionTriggered ? createUnit(runs, maxLevel, candidateCount) : null;
     }
 
     private int ratioForOffPeak() {
