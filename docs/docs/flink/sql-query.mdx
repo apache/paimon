@@ -110,21 +110,6 @@ If you want see `DELETE` records, you can use audit_log table:
 SELECT * FROM t$audit_log /*+ OPTIONS('incremental-between' = '12,20') */;
 ```
 
-### Batch Latest Delta
-
-For a one-shot batch query, you can read newly changed files from only the latest snapshot without
-first looking up its snapshot ID:
-
-```sql
-SELECT * FROM t /*+ OPTIONS('scan.mode' = 'latest-delta') */;
-```
-
-The latest snapshot is selected when the query is planned. This mode does not keep consumer
-progress and does not search backwards for an `APPEND` snapshot. It uses the same semantics as
-`incremental-between-scan-mode = 'delta'`, so a latest `COMPACT` or `OVERWRITE` snapshot produces
-no records. If multiple snapshots must be consumed reliably, use `incremental-between` with
-explicit boundaries instead.
-
 ### Batch Incremental between Auto-created Tags
 
 You can use `incremental-between` to query incremental changes between two tags. But for auto-created tag, the tag may
