@@ -24,11 +24,71 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link SimpleHashBucketAssigner}. */
 public class SimpleHashBucketAssignerTest {
+
+    @Test
+    public void testOverflowIsSpreadAcrossAllBuckets() {
+        // A single assigner owns every bucket id, so a cap of 4 means buckets 0..3.
+        SimpleHashBucketAssigner assigner = new SimpleHashBucketAssigner(1, 0, 100, 4);
+        BinaryRow partition = BinaryRow.EMPTY_ROW;
+
+        Map<Integer, Integer> rowsPerBucket = new HashMap<>();
+        for (int hash = 0; hash < 1000; hash++) {
+            rowsPerBucket.merge(assigner.assign(partition, hash), 1, Integer::sum);
+        }
+
+        assertThat(rowsPerBucket.keySet()).containsExactlyInAnyOrder(0, 1, 2, 3);
+
+        // The first 400 rows fill each bucket to its target of 100. The remaining 600 go through
+        // ListUtils.pickRandomly, so they must land across the four buckets rather than piling
+        // into one. More than one bucket ending up past its target is what "spread" means here.
+        // Every bucket must take a share of the overflow, the constructor's included. Asserting
+        // merely "more than one" would still pass with the first bucket frozen at its target.
+        assertThat(rowsPerBucket.values()).allMatch(rows -> rows > 100);
+    }
+
+    @Test
+    public void testSecondPartitionAfterTheCapIsExhausted() {
+        // maxBucketId is shared across partitions, so by the time a later partition starts, the
+        // create-a-new-bucket branch is already closed for it and it goes straight to
+        // pickRandomly. Its own first bucket must be in the pool or that call has nothing to
+        // choose from.
+        SimpleHashBucketAssigner assigner = new SimpleHashBucketAssigner(1, 0, 100, 4);
+
+        for (int hash = 0; hash < 500; hash++) {
+            assigner.assign(row(1), hash);
+        }
+
+        Map<Integer, Integer> rowsPerBucket = new HashMap<>();
+        for (int hash = 0; hash < 300; hash++) {
+            rowsPerBucket.merge(assigner.assign(row(2), hash), 1, Integer::sum);
+        }
+
+        assertThat(rowsPerBucket.keySet()).allMatch(bucket -> bucket >= 0 && bucket < 4);
+        assertThat(rowsPerBucket.values().stream().mapToInt(Integer::intValue).sum())
+                .isEqualTo(300);
+    }
+
+    @Test
+    public void testUnboundedAssignmentIsUnchanged() {
+        // Negative control: without an upper bound the random-pick branch is unreachable, so the
+        // assignment sequence must stay exactly as it was.
+        SimpleHashBucketAssigner assigner = new SimpleHashBucketAssigner(1, 0, 100, -1);
+        BinaryRow partition = BinaryRow.EMPTY_ROW;
+
+        for (int bucket = 0; bucket < 10; bucket++) {
+            for (int i = 0; i < 100; i++) {
+                assertThat(assigner.assign(partition, bucket * 100 + i)).isEqualTo(bucket);
+            }
+        }
+    }
 
     @Test
     public void testAssign() {

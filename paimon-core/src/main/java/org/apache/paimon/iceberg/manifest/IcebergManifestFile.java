@@ -266,12 +266,15 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     default:
                         // contains_nan is only meaningful for FLOAT/DOUBLE per the Iceberg spec
                 }
+                // an unknown bound must be omitted, not published as a value
+                Object min = fieldStats.min();
+                Object max = fieldStats.max();
                 partitionSummaries.add(
                         new IcebergPartitionSummary(
                                 Objects.requireNonNull(fieldStats.nullCount()) > 0,
                                 containsNan,
-                                toByteBuffer(type, fieldStats.min()).array(),
-                                toByteBuffer(type, fieldStats.max()).array()));
+                                min == null ? null : toByteBuffer(type, min).array(),
+                                max == null ? null : toByteBuffer(type, max).array()));
             }
             return new IcebergManifestFileMeta(
                     path.toString(),

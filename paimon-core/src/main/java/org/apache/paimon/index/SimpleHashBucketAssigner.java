@@ -112,7 +112,21 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
                     currentBucket = ListUtils.pickRandomly(bucketList);
                 }
             }
-            bucketInformation.compute(currentBucket, (i, l) -> l == null ? 1L : l + 1);
+            // A bucket is created by exactly one of these two calls, so both have to register
+            // it and neither can double-register. The first bucket of a partition is created by
+            // the computeIfAbsent above. Every later one is created here instead: loadNewBucket()
+            // switches currentBucket to an id that is absent from bucketInformation, and this
+            // compute() is what puts it there, so the next assign() finds it present and that
+            // computeIfAbsent's mapping function never runs for it.
+            bucketInformation.compute(
+                    currentBucket,
+                    (i, l) -> {
+                        if (l == null) {
+                            bucketList.add(i);
+                            return 1L;
+                        }
+                        return l + 1;
+                    });
             hash2Bucket.put(hash, (short) currentBucket);
             return currentBucket;
         }

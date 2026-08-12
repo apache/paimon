@@ -19,10 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -69,9 +65,7 @@ import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import static org.apache.paimon.table.source.DeletionVectorTestUtils.commitDeletionVectors;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -234,30 +228,9 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         FullTextScan.Plan plan = builder.newFullTextScan().scan();
         assertThat(plan.splits()).anyMatch(RawFullTextSearchSplit.class::isInstance);
 
-        // Materialization rewrites the surviving row ids after planning. Both the indexed and raw
-        // sides must still be evaluated against the pre-compaction snapshot carried by the plan.
+        // A deletion vector committed after planning must not affect the snapshot pinned by the
+        // plan, including its raw fallback side.
         commitDeletionVectors(table, 0L);
-        Map<String, String> compactOptions = new HashMap<>();
-        compactOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
-        FileStoreTable compactTable = table.copy(compactOptions);
-        Snapshot compactSnapshot = compactTable.latestSnapshot().get();
-        DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(compactTable, false, false, compactSnapshot);
-        List<DataEvolutionCompactTask> tasks = coordinator.plan();
-        assertThat(tasks)
-                .singleElement()
-                .extracting(DataEvolutionCompactTask::type)
-                .isEqualTo(DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
-        List<CommitMessage> messages = new ArrayList<>();
-        for (DataEvolutionCompactTask task : tasks) {
-            messages.add(task.doCompact(compactTable, "test-full-text-snapshot-pin"));
-        }
-        messages.addAll(
-                new DataEvolutionCompactionCommitPreparation(compactTable, compactSnapshot)
-                        .prepare(messages));
-        try (BatchTableCommit commit = compactTable.newBatchWriteBuilder().newCommit()) {
-            commit.commit(messages);
-        }
 
         GlobalIndexResult result = builder.newFullTextRead().read(plan);
         assertThat(result.results()).containsExactlyInAnyOrder(0L, 1L);

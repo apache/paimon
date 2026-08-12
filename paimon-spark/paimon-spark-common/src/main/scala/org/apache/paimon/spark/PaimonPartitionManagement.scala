@@ -20,7 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionStatistics
-import org.apache.paimon.table.{FileStoreTable, Table}
+import org.apache.paimon.table.{FileStoreTable, FormatTable, Table}
 import org.apache.paimon.table.source.ScanMode
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.{InternalRowPartitionComputer, TypeUtils}
@@ -57,8 +57,19 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
             )
             toPaimonPartition(r, partitionKeys.take(r.numFields))
         }
+      case _: FormatTable =>
+        // Reached by the partition operations this trait still serves directly, such as TRUNCATE
+        // PARTITION. Saying that only a FileStoreTable has partitions would be wrong for a Format
+        // Table with catalog-managed partitions, which has them and lists them here; a Format
+        // Table is still a Paimon table, just not a native one.
+        throw new UnsupportedOperationException(
+          s"This partition operation is supported only for a native Paimon table; " +
+            s"${table.name()} is a Format Table, which manages its partitions through " +
+            s"ADD PARTITION, DROP PARTITION and MSCK REPAIR TABLE.")
       case _ =>
-        throw new UnsupportedOperationException("Only FileStoreTable supports partitions.")
+        throw new UnsupportedOperationException(
+          s"This partition operation is supported only for a native Paimon table, " +
+            s"which ${table.name()} is not.")
     }
   }
 

@@ -23,6 +23,7 @@ import org.apache.paimon.compression.BlockDecompressor;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileBasedBloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
 import org.apache.paimon.utils.Preconditions;
@@ -169,10 +170,37 @@ public class SstFileReader implements Closeable {
 
     @Override
     public void close() throws IOException {
+        // A failing bloom filter must not take the block cache down with it: both hold pages in
+        // the shared cache manager, and the caller above closes the file handle after this.
+        Throwable collected = null;
         if (bloomFilter != null) {
-            bloomFilter.close();
+            try {
+                bloomFilter.close();
+            } catch (Throwable t) {
+                collected = ExceptionUtils.firstOrSuppressed(t, collected);
+            }
         }
-        blockCache.close();
+        try {
+            blockCache.close();
+        } catch (Throwable t) {
+            collected = ExceptionUtils.firstOrSuppressed(t, collected);
+        }
+        if (collected != null) {
+            rethrowAsIOException(collected);
+        }
+    }
+
+    private static void rethrowAsIOException(Throwable failure) throws IOException {
+        if (failure instanceof IOException) {
+            throw (IOException) failure;
+        }
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure instanceof RuntimeException) {
+            throw (RuntimeException) failure;
+        }
+        throw new IOException(failure);
     }
 
     /** An Iterator for range queries. */

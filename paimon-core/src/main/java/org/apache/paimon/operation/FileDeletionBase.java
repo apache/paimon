@@ -245,8 +245,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                 ManifestReadThreadPool.sequentialBatchedExecute(
                         manifest -> {
                             try {
-                                return manifestFile.readExpireFileEntries(
-                                        manifest.fileName(), manifest.fileSize());
+                                return manifestFile.readExpireFileEntries(manifest.fileName());
                             } catch (Exception e) {
                                 // We want to delete the data file, so just ignore the unavailable
                                 // files
@@ -275,9 +274,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
     private Iterable<ExpireFileEntry> readExpireFileEntries(List<ManifestFileMeta> manifests) {
         return ManifestReadThreadPool.sequentialBatchedExecute(
-                manifest ->
-                        manifestFile.readExpireFileEntries(
-                                manifest.fileName(), manifest.fileSize()),
+                manifest -> manifestFile.readExpireFileEntries(manifest.fileName()),
                 manifests,
                 fileOperationParallelism);
     }

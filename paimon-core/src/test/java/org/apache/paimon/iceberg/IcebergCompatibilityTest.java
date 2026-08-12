@@ -1372,6 +1372,73 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
+    public void testNullPartitionValue() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.VARCHAR(10), DataTypes.INT()},
+                        new String[] {"pt", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.singletonList("pt"), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(BinaryString.fromString("a"), 1), 1);
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // every entry of this manifest has a null partition value, so its partition
+        // statistics are unknown and the summary must omit both bounds
+        write.write(GenericRow.of(null, 2), 1);
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        FileIO fileIO = table.fileIO();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        fileIO, new Path(table.location(), "metadata/v2.metadata.json"));
+        List<String> partitionSummaries = new ArrayList<>();
+        try (DataFileReader<GenericRecord> dataFileReader =
+                new DataFileReader<>(
+                        new SeekableFileInput(new File(metadata.currentSnapshot().manifestList())),
+                        new GenericDatumReader<>())) {
+            while (dataFileReader.hasNext()) {
+                partitionSummaries.add(dataFileReader.next().get("partitions").toString());
+            }
+        }
+        assertThat(partitionSummaries)
+                .anySatisfy(
+                        summary ->
+                                assertThat(summary)
+                                        .contains("\"contains_null\": true")
+                                        .contains("\"lower_bound\": null")
+                                        .contains("\"upper_bound\": null"));
+        // known bounds are still recorded for non-null partition values
+        assertThat(partitionSummaries)
+                .anySatisfy(
+                        summary ->
+                                assertThat(summary)
+                                        .contains("\"lower_bound\": \"a\"")
+                                        .contains("\"upper_bound\": \"a\""));
+
+        write.write(GenericRow.of(BinaryString.fromString("b"), 3), 1);
+        commit.commit(3, write.prepareCommit(false, 3));
+
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(a, 1)", "Record(null, 2)", "Record(b, 3)");
+
+        // a non add-only commit reads the omitted bounds back from the base manifests
+        Map<String, String> partition = new HashMap<>();
+        partition.put("pt", "a");
+        commit.truncatePartitions(Collections.singletonList(partition));
+
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(null, 2)", "Record(b, 3)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testStringPartitionNullPadding() throws Exception {
         RowType rowType =
                 RowType.of(

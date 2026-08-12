@@ -129,6 +129,7 @@ public class JdbcCatalog extends AbstractCatalog {
         } catch (SQLException e) {
             throw new RuntimeException("Cannot initialize JDBC catalog", e);
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted in call to initialize", e);
         }
     }

@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.factories.Factory;
 import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileStatus;
@@ -165,9 +166,23 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     FactoryUtil.discoverFactory(
                             IcebergCommitCallback.class.getClassLoader(),
                             IcebergMetadataCommitterFactory.class,
-                            storageType.toString());
-        } catch (FactoryException ignore) {
+                            storageType.committerFactoryIdentifier());
+        } catch (FactoryException e) {
             metadataCommitterFactory = null;
+            // storage types without a committer have no factory by design, so a miss is expected
+            if (storageType.requiresMetadataCommitter()) {
+                LOG.warn(
+                        "No IcebergMetadataCommitterFactory for '{}={}' found on the classpath, so "
+                                + "table {} will not be synced to the external catalog (commits and "
+                                + "metadata files are unaffected). Check that the module providing it "
+                                + "is deployed and that its META-INF/services/{} entry survived "
+                                + "shading. Cause: {}",
+                        IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                        storageType,
+                        table.fullName(),
+                        Factory.class.getName(),
+                        e.getMessage());
+            }
         }
         this.metadataCommitter =
                 metadataCommitterFactory == null ? null : metadataCommitterFactory.create(table);
@@ -1323,10 +1338,15 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             for (int i = 0; i < numFields; i++) {
                 IcebergPartitionSummary summary = fileMeta.partitions().get(i);
                 DataType fieldType = partitionType.getTypeAt(i);
-                minValues.setField(
-                        i, IcebergConversions.toPaimonObject(fieldType, summary.lowerBound()));
-                maxValues.setField(
-                        i, IcebergConversions.toPaimonObject(fieldType, summary.upperBound()));
+                // an omitted bound means the value is unknown; keep the slot null
+                byte[] lowerBound = summary.lowerBound();
+                byte[] upperBound = summary.upperBound();
+                if (lowerBound != null) {
+                    minValues.setField(i, IcebergConversions.toPaimonObject(fieldType, lowerBound));
+                }
+                if (upperBound != null) {
+                    maxValues.setField(i, IcebergConversions.toPaimonObject(fieldType, upperBound));
+                }
                 // IcebergPartitionSummary only has `containsNull` field and does not have the
                 // exact number of nulls.
                 nullCounts[i] = summary.containsNull() ? 1 : 0;
