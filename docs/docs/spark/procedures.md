@@ -58,6 +58,20 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>materialize_deletion_vectors</td>
+      <td>
+         Applies deletion vectors to the latest state of an unaware-bucket Data Evolution table and assigns new row IDs to surviving rows. Affected global indexes are dropped. Spark processes bounded batches until all matching deletion vectors are materialized. Historical snapshots and tags can retain the replaced files until snapshot expiration. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>partitions: partition filter. Cannot be used together with where.</li>
+            <li>options: additional dynamic table options.</li>
+            <li>where: partition predicate. Cannot be used together with partitions.</li>
+      </td>
+      <td>
+         CALL sys.materialize_deletion_vectors(table => 'T') <br/><br/>
+         CALL sys.materialize_deletion_vectors(table => 'T', partitions => 'dt=2026-08-12')
+      </td>
+    </tr>
+    <tr>
       <td>compact_database</td>
       <td>
          To compact all tables across one or more databases. Arguments:

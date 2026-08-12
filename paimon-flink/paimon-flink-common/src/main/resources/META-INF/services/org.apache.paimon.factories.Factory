@@ -103,6 +103,7 @@ org.apache.paimon.flink.procedure.TriggerTagAutomaticCreationProcedure
 org.apache.paimon.flink.procedure.RemoveUnexistingManifestsProcedure
 org.apache.paimon.flink.procedure.DataEvolutionMergeIntoProcedure
 org.apache.paimon.flink.procedure.ReassignRowIdProcedure
+org.apache.paimon.flink.procedure.MaterializeDeletionVectorsProcedure
 org.apache.paimon.flink.procedure.CreateGlobalIndexProcedure
 org.apache.paimon.flink.procedure.VectorSearchProcedure
 org.apache.paimon.flink.procedure.FullTextSearchProcedure

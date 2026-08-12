@@ -19,11 +19,10 @@
 package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.sink.DataEvolutionTableCompactSink;
-import org.apache.paimon.flink.source.DataEvolutionTableCompactSource;
+import org.apache.paimon.flink.sink.DataEvolutionDeletionVectorMaterializeSink;
+import org.apache.paimon.flink.source.DataEvolutionDeletionVectorMaterializeSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -37,8 +36,8 @@ import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 
 import javax.annotation.Nullable;
 
-/** Build for data-evolution table flink compaction job. */
-public class DataEvolutionTableCompact {
+/** Builds a Flink job which applies deletion vectors to the latest table state. */
+public class DataEvolutionDeletionVectorMaterialize {
 
     private final transient StreamExecutionEnvironment env;
     private final String tableIdentifier;
@@ -46,7 +45,7 @@ public class DataEvolutionTableCompact {
 
     @Nullable private PartitionPredicate partitionPredicate;
 
-    public DataEvolutionTableCompact(
+    public DataEvolutionDeletionVectorMaterialize(
             StreamExecutionEnvironment env, String tableIdentifier, FileStoreTable table) {
         this.env = env;
         this.tableIdentifier = tableIdentifier;
@@ -58,35 +57,34 @@ public class DataEvolutionTableCompact {
     }
 
     public void build() {
-        DataEvolutionCompactCoordinator.validateOptions(table.coreOptions());
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         if (snapshot == null) {
-            env.fromSequence(0, 0).name("Nothing to Compact Source").sinkTo(new DiscardingSink<>());
+            env.fromSequence(0, 0)
+                    .name("Nothing to Materialize Source")
+                    .sinkTo(new DiscardingSink<>());
             return;
         }
-        DataEvolutionTableCompactSource source =
-                new DataEvolutionTableCompactSource(table, partitionPredicate, snapshot);
+        DataEvolutionDeletionVectorMaterializeSource source =
+                new DataEvolutionDeletionVectorMaterializeSource(
+                        table, partitionPredicate, snapshot);
         DataStreamSource<DataEvolutionCompactTask> sourceStream =
-                DataEvolutionTableCompactSource.buildSource(env, source, tableIdentifier);
-
+                DataEvolutionDeletionVectorMaterializeSource.buildSource(
+                        env, source, tableIdentifier);
         sinkFromSource(sourceStream, snapshot);
     }
 
     private void sinkFromSource(
             DataStreamSource<DataEvolutionCompactTask> input, Snapshot snapshot) {
         Options conf = Options.fromMap(table.options());
-        Integer compactionWorkerParallelism =
+        Integer workerParallelism =
                 conf.get(FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM);
         PartitionTransformation<DataEvolutionCompactTask> transformation =
                 new PartitionTransformation<>(
                         input.getTransformation(), new RebalancePartitioner<>());
-        if (compactionWorkerParallelism != null) {
-            transformation.setParallelism(compactionWorkerParallelism);
-        } else {
-            transformation.setParallelism(env.getParallelism());
-        }
+        transformation.setParallelism(
+                workerParallelism == null ? env.getParallelism() : workerParallelism);
 
         DataStream<DataEvolutionCompactTask> rebalanced = new DataStream<>(env, transformation);
-        DataEvolutionTableCompactSink.sink(table, rebalanced, snapshot);
+        DataEvolutionDeletionVectorMaterializeSink.sink(table, rebalanced, snapshot);
     }
 }

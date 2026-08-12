@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.TableCommitImpl;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -29,37 +30,36 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Compaction Sink for data-evolution table. */
-public class DataEvolutionTableCompactSink extends FlinkSink<DataEvolutionCompactTask> {
+/** Sink which commits physically materialized data-evolution deletion vectors. */
+public class DataEvolutionDeletionVectorMaterializeSink
+        extends FlinkSink<DataEvolutionCompactTask> {
 
     private final Snapshot snapshot;
 
-    public DataEvolutionTableCompactSink(FileStoreTable table, Snapshot snapshot) {
+    public DataEvolutionDeletionVectorMaterializeSink(FileStoreTable table, Snapshot snapshot) {
         super(table, true);
         this.snapshot = snapshot;
     }
 
     public static DataStreamSink<?> sink(
             FileStoreTable table, DataStream<DataEvolutionCompactTask> input, Snapshot snapshot) {
-        boolean isStreaming = isStreaming(input);
-        checkArgument(!isStreaming, "Data evolution compaction sink only supports batch mode yet.");
-        return new DataEvolutionTableCompactSink(table, snapshot).sinkFrom(input);
+        checkArgument(
+                !isStreaming(input),
+                "Deletion vector materialize sink only supports batch mode yet.");
+        return new DataEvolutionDeletionVectorMaterializeSink(table, snapshot).sinkFrom(input);
     }
 
     @Override
     public DataStreamSink<?> sinkFrom(
             DataStream<DataEvolutionCompactTask> input, String initialCommitUser) {
         DataStream<Committable> written = doWrite(input, initialCommitUser, null);
-        if (table.coreOptions().deletionVectorsEnabled()) {
-            written =
-                    written.transform(
-                                    "Data Evolution Compact Deletion Vector Rewriter : "
-                                            + table.name(),
-                                    new CommittableTypeInfo(),
-                                    new DataEvolutionCommitPreparationOperator.Factory(
-                                            table, snapshot))
-                            .forceNonParallel();
-        }
+        written =
+                written.transform(
+                                "Data Evolution Deletion Vector Materialize Commit Preparation : "
+                                        + table.name(),
+                                new CommittableTypeInfo(),
+                                new DataEvolutionCommitPreparationOperator.Factory(table, snapshot))
+                        .forceNonParallel();
         return doCommit(written, initialCommitUser);
     }
 
@@ -71,7 +71,11 @@ public class DataEvolutionTableCompactSink extends FlinkSink<DataEvolutionCompac
 
     @Override
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory() {
-        return context -> new StoreCommitter(table, table.newCommit(context.commitUser()), context);
+        return context -> {
+            TableCommitImpl commit = table.newCommit(context.commitUser());
+            commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id());
+            return new StoreCommitter(table, commit, context);
+        };
     }
 
     @Override
