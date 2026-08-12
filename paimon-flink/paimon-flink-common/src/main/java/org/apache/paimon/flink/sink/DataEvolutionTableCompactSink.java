@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.TableCommitImpl;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -33,17 +34,33 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class DataEvolutionTableCompactSink extends FlinkSink<DataEvolutionCompactTask> {
 
     private final Snapshot snapshot;
+    private final boolean materializeDeletionVectors;
 
     public DataEvolutionTableCompactSink(FileStoreTable table, Snapshot snapshot) {
+        this(table, snapshot, false);
+    }
+
+    public DataEvolutionTableCompactSink(
+            FileStoreTable table, Snapshot snapshot, boolean materializeDeletionVectors) {
         super(table, true);
         this.snapshot = snapshot;
+        this.materializeDeletionVectors = materializeDeletionVectors;
     }
 
     public static DataStreamSink<?> sink(
             FileStoreTable table, DataStream<DataEvolutionCompactTask> input, Snapshot snapshot) {
+        return sink(table, input, snapshot, false);
+    }
+
+    public static DataStreamSink<?> sink(
+            FileStoreTable table,
+            DataStream<DataEvolutionCompactTask> input,
+            Snapshot snapshot,
+            boolean materializeDeletionVectors) {
         boolean isStreaming = isStreaming(input);
         checkArgument(!isStreaming, "Data evolution compaction sink only supports batch mode yet.");
-        return new DataEvolutionTableCompactSink(table, snapshot).sinkFrom(input);
+        return new DataEvolutionTableCompactSink(table, snapshot, materializeDeletionVectors)
+                .sinkFrom(input);
     }
 
     @Override
@@ -71,7 +88,13 @@ public class DataEvolutionTableCompactSink extends FlinkSink<DataEvolutionCompac
 
     @Override
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory() {
-        return context -> new StoreCommitter(table, table.newCommit(context.commitUser()), context);
+        return context -> {
+            TableCommitImpl commit = table.newCommit(context.commitUser());
+            if (materializeDeletionVectors) {
+                commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id());
+            }
+            return new StoreCommitter(table, commit, context);
+        };
     }
 
     @Override

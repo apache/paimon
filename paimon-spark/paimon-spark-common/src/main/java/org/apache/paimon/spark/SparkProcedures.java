@@ -40,6 +40,7 @@ import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
 import org.apache.paimon.spark.procedure.FastForwardProcedure;
 import org.apache.paimon.spark.procedure.MarkPartitionDoneProcedure;
+import org.apache.paimon.spark.procedure.MaterializeDeletionVectorsProcedure;
 import org.apache.paimon.spark.procedure.MergeBranchProcedure;
 import org.apache.paimon.spark.procedure.MigrateDatabaseProcedure;
 import org.apache.paimon.spark.procedure.MigrateTableProcedure;
@@ -104,6 +105,8 @@ public class SparkProcedures {
         procedureBuilders.put("delete_branch", DeleteBranchProcedure::builder);
         procedureBuilders.put("rename_branch", RenameBranchProcedure::builder);
         procedureBuilders.put("compact", CompactProcedure::builder);
+        procedureBuilders.put(
+                "materialize_deletion_vectors", MaterializeDeletionVectorsProcedure::builder);
         procedureBuilders.put("compact_database", CompactDatabaseProcedure::builder);
         procedureBuilders.put("compact_chain_table", CompactChainTableProcedure::builder);
         procedureBuilders.put("rescale", RescaleProcedure::builder);

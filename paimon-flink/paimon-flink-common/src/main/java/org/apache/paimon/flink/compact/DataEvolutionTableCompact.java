@@ -41,14 +41,24 @@ public class DataEvolutionTableCompact {
     private final transient StreamExecutionEnvironment env;
     private final String tableIdentifier;
     private final FileStoreTable table;
+    private final boolean materializeDeletionVectors;
 
     @Nullable private PartitionPredicate partitionPredicate;
 
     public DataEvolutionTableCompact(
             StreamExecutionEnvironment env, String tableIdentifier, FileStoreTable table) {
+        this(env, tableIdentifier, table, false);
+    }
+
+    public DataEvolutionTableCompact(
+            StreamExecutionEnvironment env,
+            String tableIdentifier,
+            FileStoreTable table,
+            boolean materializeDeletionVectors) {
         this.env = env;
         this.tableIdentifier = tableIdentifier;
         this.table = table;
+        this.materializeDeletionVectors = materializeDeletionVectors;
     }
 
     public void withPartitionPredicate(PartitionPredicate partitionPredicate) {
@@ -61,7 +71,8 @@ public class DataEvolutionTableCompact {
             return;
         }
         DataEvolutionTableCompactSource source =
-                new DataEvolutionTableCompactSource(table, partitionPredicate, snapshot);
+                new DataEvolutionTableCompactSource(
+                        table, partitionPredicate, snapshot, materializeDeletionVectors);
         DataStreamSource<DataEvolutionCompactTask> sourceStream =
                 DataEvolutionTableCompactSource.buildSource(env, source, tableIdentifier);
 
@@ -83,6 +94,6 @@ public class DataEvolutionTableCompact {
         }
 
         DataStream<DataEvolutionCompactTask> rebalanced = new DataStream<>(env, transformation);
-        DataEvolutionTableCompactSink.sink(table, rebalanced, snapshot);
+        DataEvolutionTableCompactSink.sink(table, rebalanced, snapshot, materializeDeletionVectors);
     }
 }

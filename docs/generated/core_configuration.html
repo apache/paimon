@@ -492,7 +492,7 @@ under the License.
             <td><h5>data-evolution.compaction.rewrite-row-ids</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Legacy compatibility option. Setting this option to true fails. Data-evolution compaction preserves row IDs and logical deletions; it does not materialize deleted rows.</td>
+            <td>Legacy compatibility option. Setting this option to true fails. Data-evolution compaction preserves row IDs and logical deletions. Use the 'materialize_deletion_vectors' procedure to physically apply deletion vectors and assign new row IDs.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.enabled</h5></td>

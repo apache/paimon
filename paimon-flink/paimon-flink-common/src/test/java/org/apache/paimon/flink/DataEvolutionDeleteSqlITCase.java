@@ -23,6 +23,7 @@ import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
@@ -61,6 +62,29 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
                 .containsExactly(
                         Row.of(1, "one", "A"), Row.of(5, "five", "B"), Row.of(6, "six", "B"));
         assertDeleteSnapshot(table, originalFiles, 3L);
+    }
+
+    @Test
+    public void testMaterializeDeletionVectorsProcedure() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        createTable();
+        sql("INSERT INTO T VALUES (1, 'one', 'A'), (2, 'two', 'A'), (3, 'three', 'A')");
+        sql("INSERT INTO T VALUES (4, 'four', 'B'), (5, 'five', 'B'), (6, 'six', 'B')");
+        sql("DELETE FROM T WHERE id IN (2, 4)");
+
+        FileStoreTable table = paimonTable("T");
+        assertThat(deletionVectorCardinality(table)).isEqualTo(2L);
+
+        sql("CALL sys.materialize_deletion_vectors(`table` => 'default.T')");
+
+        table = paimonTable("T");
+        assertThat(deletionVectorCardinality(table)).isZero();
+        assertThat(sql("SELECT id, name, dt FROM T ORDER BY id"))
+                .containsExactly(
+                        Row.of(1, "one", "A"),
+                        Row.of(3, "three", "A"),
+                        Row.of(5, "five", "B"),
+                        Row.of(6, "six", "B"));
     }
 
     @Test

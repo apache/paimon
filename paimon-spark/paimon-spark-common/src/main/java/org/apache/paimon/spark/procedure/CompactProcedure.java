@@ -28,6 +28,7 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
+import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
@@ -70,6 +71,7 @@ import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -96,6 +98,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import scala.collection.JavaConverters;
@@ -551,25 +554,45 @@ public class CompactProcedure extends BaseProcedure {
             @Nullable PartitionPredicate partitionPredicate,
             @Nullable Duration partitionIdleTime,
             JavaSparkContext javaSparkContext) {
+        executeDataEvolutionCompaction(
+                table, partitionPredicate, partitionIdleTime, javaSparkContext, spark(), false);
+    }
+
+    static void executeDataEvolutionCompaction(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            @Nullable Duration partitionIdleTime,
+            JavaSparkContext javaSparkContext,
+            SparkSession sparkSession,
+            boolean materializeDeletionVectors) {
         List<DataEvolutionCompactTask> compactionTasks;
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         if (snapshot == null) {
             LOG.info("Table {} has no snapshot yet, skip this compact job.", table.fullName());
             return;
         }
-        DataEvolutionCompactCoordinator compactCoordinator =
-                new DataEvolutionCompactCoordinator(
-                        table,
-                        partitionPredicate,
-                        table.coreOptions().blobCompactionEnabled(),
-                        false,
-                        snapshot);
+        Supplier<List<DataEvolutionCompactTask>> taskPlanner;
+        if (materializeDeletionVectors) {
+            DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
+                    new DataEvolutionDeletionVectorMaterializeCoordinator(
+                            table, partitionPredicate, snapshot);
+            taskPlanner = coordinator::plan;
+        } else {
+            DataEvolutionCompactCoordinator coordinator =
+                    new DataEvolutionCompactCoordinator(
+                            table,
+                            partitionPredicate,
+                            table.coreOptions().blobCompactionEnabled(),
+                            false,
+                            snapshot);
+            taskPlanner = coordinator::plan;
+        }
         CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         int round = 0;
         try {
             while (true) {
-                compactionTasks = compactCoordinator.plan();
+                compactionTasks = taskPlanner.get();
                 round++;
                 if (partitionIdleTime != null) {
                     SnapshotReader snapshotReader = table.newSnapshotReader();
@@ -604,6 +627,7 @@ public class CompactProcedure extends BaseProcedure {
                             table.fullName());
                     continue;
                 }
+                boolean containsMaterializeDeletion = containsMaterializeDeletion(compactionTasks);
                 DataEvolutionCompactTaskSerializer serializer =
                         new DataEvolutionCompactTaskSerializer();
                 List<byte[]> serializedTasks = new ArrayList<>();
@@ -615,7 +639,7 @@ public class CompactProcedure extends BaseProcedure {
                     throw new RuntimeException("serialize compaction task failed");
                 }
 
-                int readParallelism = readParallelism(serializedTasks, spark());
+                int readParallelism = readParallelism(serializedTasks, sparkSession);
                 LOG.info(
                         "Starting to execute {} data evolution compact tasks of table {} in round {} "
                                 + "with read parallelism {}, contains materialize deletion {}.",
@@ -651,6 +675,9 @@ public class CompactProcedure extends BaseProcedure {
 
                 List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
                 try (TableCommitImpl commit = table.newCommit(commitUser)) {
+                    if (materializeDeletionVectors) {
+                        commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id());
+                    }
                     List<CommitMessage> messages =
                             deserializeCommitMessagesAndReleaseSerializedBytes(
                                     messageSerializerser, serializedMessages);

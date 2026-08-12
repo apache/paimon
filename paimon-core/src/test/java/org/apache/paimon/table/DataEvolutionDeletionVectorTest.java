@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
+import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -53,6 +54,7 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -577,9 +579,39 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                                         compactTable.latestSnapshot().get()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key())
-                .hasMessageContaining("does not materialize deleted rows");
+                .hasMessageContaining("materialize_deletion_vectors");
 
         assertThat(liveDeletionVectorDataFileNames(table)).isNotEmpty();
+    }
+
+    @Test
+    public void testMaterializeDeletionVectors() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        updateStructuredColumn(table);
+        commitDeletionVectors(table, DEFAULT_DV_SPECS);
+        List<String> oldAnchorFiles = new ArrayList<>(anchorFilesByRange(table).values());
+
+        materializeDeletionVectors(table);
+
+        table = getTableDefault();
+        List<String> expectedRows = expectedRows("updated", FULL_RANGE);
+        assertThat(readRows(table.newReadBuilder())).containsExactlyElementsOf(expectedRows);
+        assertThat(readProjectedStrings(table.newReadBuilder().withProjection(new int[] {2})))
+                .containsExactlyElementsOf(expectedProjectedStrings("updated", FULL_RANGE));
+        assertThat(readProjectedBlobValues(table.newReadBuilder().withProjection(new int[] {3})))
+                .containsExactlyElementsOf(expectedBlobValues(FULL_RANGE));
+
+        List<Range> materializedRanges = normalFileRowRanges(table);
+        assertThat(materializedRanges).containsExactly(new Range(15, 24));
+        assertBlobFileRowRanges(table, Collections.singletonList(new Range(15, 24)));
+        DataSplit materializedSplit = planDataSplit(table, materializedRanges.get(0));
+        assertDeletionFileRanges(materializedSplit);
+        assertThat(materializedSplit.mergedRowCount()).hasValue(10L);
+        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
+        assertThat(liveDeletionVectorDataFileNames(table))
+                .doesNotContainAnyElementsOf(oldAnchorFiles);
     }
 
     @Test
@@ -862,6 +894,31 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 new DataEvolutionCompactionCommitPreparation(table, snapshot)
                         .prepare(commitMessages));
         return commitMessages;
+    }
+
+    private void materializeDeletionVectors(FileStoreTable table) throws Exception {
+        Snapshot snapshot = table.latestSnapshot().get();
+        DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
+                new DataEvolutionDeletionVectorMaterializeCoordinator(table, null, snapshot);
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        try {
+            while (true) {
+                for (DataEvolutionCompactTask task : coordinator.plan()) {
+                    assertThat(task.type())
+                            .isEqualTo(DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
+                    commitMessages.add(task.doCompact(table, "test-materialize-dv"));
+                }
+            }
+        } catch (EndOfScanException ignored) {
+        }
+        assertThat(commitMessages).isNotEmpty();
+        commitMessages.addAll(
+                new DataEvolutionCompactionCommitPreparation(table, snapshot)
+                        .prepare(commitMessages));
+        try (TableCommitImpl commit = table.newCommit("test-materialize-dv")) {
+            commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id())
+                    .commit(commitMessages);
+        }
     }
 
     private void commitGlobalIndex(FileStoreTable table, String fileName, Range rowRange)

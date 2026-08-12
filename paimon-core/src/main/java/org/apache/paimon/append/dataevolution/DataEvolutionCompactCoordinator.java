@@ -82,7 +82,8 @@ public class DataEvolutionCompactCoordinator {
         checkArgument(
                 !options.dataEvolutionCompactionRewriteRowIds(),
                 "Option '%s=true' is no longer supported. Data evolution compaction preserves "
-                        + "row IDs and logical deletions; it does not materialize deleted rows.",
+                        + "row IDs and logical deletions. Use the 'materialize_deletion_vectors' "
+                        + "procedure to physically apply deletion vectors and assign new row IDs.",
                 CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key());
 
         long targetFileSize = options.targetFileSize(false);

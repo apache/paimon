@@ -619,7 +619,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |WHEN MATCHED THEN UPDATE SET t.b = s.b
             |""".stripMargin)
 
-      compactDataEvolutionTable(rewriteRowIds = false)
+      compactDataEvolutionTable(materializeDeletionVectors = false)
 
       checkAnswer(
         sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
@@ -637,7 +637,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Data Evolution deletion: materialized compact after delete and merge") {
+  test("Data Evolution deletion: materialize deletion vectors after delete and merge") {
     withTable("t", "s") {
       sql("""
             |CREATE TABLE t (id INT, b INT, c INT)
@@ -659,19 +659,19 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |WHEN MATCHED THEN UPDATE SET t.b = s.b
             |""".stripMargin)
 
-      compactDataEvolutionTable(rewriteRowIds = true)
+      compactDataEvolutionTable(materializeDeletionVectors = true)
 
       checkAnswer(
-        sql("SELECT id, b, c FROM t ORDER BY id"),
+        sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
         Seq(
-          Row(0, 0, 0),
-          Row(2, 200, 2),
-          Row(3, 3, 3),
-          Row(4, 4, 4),
-          Row(5, 5, 5),
-          Row(7, 700, 7),
-          Row(8, 8, 8),
-          Row(9, 9, 9))
+          Row(0, 0, 0, 10L),
+          Row(2, 200, 2, 11L),
+          Row(3, 3, 3, 12L),
+          Row(4, 4, 4, 13L),
+          Row(5, 5, 5, 14L),
+          Row(7, 700, 7, 15L),
+          Row(8, 8, 8, 16L),
+          Row(9, 9, 9, 17L))
       )
     }
   }
@@ -706,7 +706,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
       assert(btreeIndexEntryCount("t") > 0)
 
       sql("DELETE FROM t WHERE id IN (2, 4)")
-      compactDataEvolutionTable(rewriteRowIds = true)
+      compactDataEvolutionTable(materializeDeletionVectors = true)
 
       checkAnswer(
         sql("SELECT id, name, b FROM t WHERE name IN ('name-1', 'name-2') ORDER BY id"),
@@ -715,15 +715,14 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
     }
   }
 
-  private def compactDataEvolutionTable(rewriteRowIds: Boolean): Unit = {
-    val rewriteRowIdsOption =
-      if (rewriteRowIds) {
-        ",data-evolution.compaction.rewrite-row-ids=true"
-      } else {
-        ""
-      }
-    sql(
-      s"CALL sys.compact(table => 't', options => 'compaction.min.file-num=2$rewriteRowIdsOption')")
+  private def compactDataEvolutionTable(materializeDeletionVectors: Boolean): Unit = {
+    if (materializeDeletionVectors) {
+      sql(
+        "CALL sys.materialize_deletion_vectors(" +
+          "table => 't', options => 'compaction.min.file-num=2')")
+    } else {
+      sql("CALL sys.compact(table => 't', options => 'compaction.min.file-num=2')")
+    }
   }
 
   private def btreeIndexEntryCount(tableName: String): Int = {

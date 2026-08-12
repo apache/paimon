@@ -2567,7 +2567,8 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Legacy compatibility option. Setting this option to true fails. "
                                     + "Data-evolution compaction preserves row IDs and logical "
-                                    + "deletions; it does not materialize deleted rows.");
+                                    + "deletions. Use the 'materialize_deletion_vectors' procedure "
+                                    + "to physically apply deletion vectors and assign new row IDs.");
 
     public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
             key("blob-compaction.enabled")

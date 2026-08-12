@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
 import org.apache.paimon.flink.sink.DataEvolutionCompactionTaskTypeInfo;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -41,6 +42,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.function.Supplier;
 
 /** Source for data-evolution table Compaction. */
 public class DataEvolutionTableCompactSource
@@ -54,12 +56,22 @@ public class DataEvolutionTableCompactSource
     private final FileStoreTable table;
     @Nullable private final PartitionPredicate partitionFilter;
     private final Snapshot snapshot;
+    private final boolean materializeDeletionVectors;
 
     public DataEvolutionTableCompactSource(
             FileStoreTable table, @Nullable PartitionPredicate partitionFilter, Snapshot snapshot) {
+        this(table, partitionFilter, snapshot, false);
+    }
+
+    public DataEvolutionTableCompactSource(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            Snapshot snapshot,
+            boolean materializeDeletionVectors) {
         this.table = table;
         this.partitionFilter = partitionFilter;
         this.snapshot = snapshot;
+        this.materializeDeletionVectors = materializeDeletionVectors;
     }
 
     @Override
@@ -73,23 +85,35 @@ public class DataEvolutionTableCompactSource
         Preconditions.checkArgument(
                 readerContext.currentParallelism() == 1,
                 "Compaction Operator parallelism in paimon MUST be one.");
-        return new CompactSourceReader(table, partitionFilter, snapshot);
+        return new CompactSourceReader(
+                table, partitionFilter, snapshot, materializeDeletionVectors);
     }
 
     /** BucketUnawareCompactSourceReader. */
     public static class CompactSourceReader
             extends AbstractNonCoordinatedSourceReader<DataEvolutionCompactTask> {
-        private final DataEvolutionCompactCoordinator compactionCoordinator;
+        private final Supplier<List<DataEvolutionCompactTask>> taskPlanner;
 
         public CompactSourceReader(
-                FileStoreTable table, @Nullable PartitionPredicate partitions, Snapshot snapshot) {
-            compactionCoordinator =
-                    new DataEvolutionCompactCoordinator(
-                            table,
-                            partitions,
-                            table.coreOptions().blobCompactionEnabled(),
-                            false,
-                            snapshot);
+                FileStoreTable table,
+                @Nullable PartitionPredicate partitions,
+                Snapshot snapshot,
+                boolean materializeDeletionVectors) {
+            if (materializeDeletionVectors) {
+                DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
+                        new DataEvolutionDeletionVectorMaterializeCoordinator(
+                                table, partitions, snapshot);
+                taskPlanner = coordinator::plan;
+            } else {
+                DataEvolutionCompactCoordinator coordinator =
+                        new DataEvolutionCompactCoordinator(
+                                table,
+                                partitions,
+                                table.coreOptions().blobCompactionEnabled(),
+                                false,
+                                snapshot);
+                taskPlanner = coordinator::plan;
+            }
         }
 
         @Override
@@ -97,7 +121,7 @@ public class DataEvolutionTableCompactSource
                 throws Exception {
             try {
                 // do scan and plan action, emit data-evolution compaction tasks.
-                List<DataEvolutionCompactTask> tasks = compactionCoordinator.plan();
+                List<DataEvolutionCompactTask> tasks = taskPlanner.get();
                 tasks.forEach(readerOutput::collect);
             } catch (EndOfScanException esf) {
                 LOG.info("Catching EndOfScanException, the job is finished.");

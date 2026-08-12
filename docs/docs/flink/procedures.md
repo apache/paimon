@@ -96,6 +96,31 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>materialize_deletion_vectors</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.materialize_deletion_vectors(
+            `table` => 'table',
+            partitions => 'partitions',
+            options => 'options',
+            `where` => 'where') <br/><br/>
+         -- Use indexed argument<br/>
+         CALL [catalog.]sys.materialize_deletion_vectors('table') <br/>
+         CALL [catalog.]sys.materialize_deletion_vectors('table', 'partitions', 'options', 'where')
+      </td>
+      <td>
+         Physically applies deletion vectors for an unaware-bucket Data Evolution table and assigns new row IDs to surviving rows. Affected global indexes are dropped. Arguments:
+            <li>table(required): the target table identifier.</li>
+            <li>partitions(optional): partition filter.</li>
+            <li>options(optional): additional dynamic table options.</li>
+            <li>where(optional): partition predicate (cannot be used together with partitions).</li>
+      </td>
+      <td>
+         CALL sys.materialize_deletion_vectors(`table` => 'default.T') <br/><br/>
+         CALL sys.materialize_deletion_vectors(`table` => 'default.T', partitions => 'dt=2026-08-12')
+      </td>
+   </tr>
+   <tr>
       <td>compact_database</td>
       <td>
          -- Use named argument<br/>

@@ -353,8 +353,8 @@ one delete snapshot.
 - This action performs a logical delete. Data Evolution compaction preserves
   those logical deletions instead of materializing them, and the legacy
   `data-evolution.compaction.rewrite-row-ids` option is no longer supported.
-  There is currently no standalone action for physically applying these
-  deletion vectors.
+  Run `CALL sys.materialize_deletion_vectors(...)` separately to physically
+  apply the resulting deletion vectors and assign new row IDs.
 - Do not run multiple delete actions, or concurrent `APPEND`, `COMPACT`, or
   `OVERWRITE` operations, against the same table. A conflicting
   commit causes the action to fail instead of silently overwriting deletion
