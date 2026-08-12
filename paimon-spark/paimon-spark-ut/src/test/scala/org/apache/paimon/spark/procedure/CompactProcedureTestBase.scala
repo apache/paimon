@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
 import org.apache.paimon.fs.Path
@@ -1724,9 +1723,6 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             |TBLPROPERTIES (
             |  'bucket' = '-1',
             |  'write-only' = 'false',
-            |  'snapshot.num-retained.min' = '1',
-            |  'snapshot.num-retained.max' = '1',
-            |  'snapshot.time-retained' = '0 ms',
             |  'row-tracking.enabled' = 'true',
             |  'data-evolution.enabled' = 'true',
             |  'deletion-vectors.enabled' = 'true')
@@ -1864,78 +1860,6 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         sql("SELECT id, pt, _ROW_ID FROM T ORDER BY id"),
         Seq(Row(1, "p0", 1L), Row(2, "p1", 2L), Row(4, "p0", 4L))
       )
-    }
-  }
-
-  test("Paimon Procedure: delay partition expiration until all compact batches finish") {
-    withTable("T") {
-      sql("""
-            |CREATE TABLE T (id INT, value STRING, pt STRING)
-            |TBLPROPERTIES (
-            |  'bucket' = '-1',
-            |  'write-only' = 'true',
-            |  'row-tracking.enabled' = 'true',
-            |  'data-evolution.enabled' = 'true',
-            |  'deletion-vectors.enabled' = 'true',
-            |  'compaction.min.file-num' = '2',
-            |  'partition.expiration-time' = '0 ms',
-            |  'partition.expiration-check-interval' = '0 ms',
-            |  'partition.expiration-strategy' = 'update-time')
-            |PARTITIONED BY (pt)
-            |""".stripMargin)
-      sql("INSERT INTO T VALUES (0, 'value-0', 'p0')")
-      sql("INSERT INTO T VALUES (1, 'value-1', 'p0')")
-      sql("INSERT INTO T VALUES (2, 'value-2', 'p1')")
-      sql("INSERT INTO T VALUES (3, 'value-3', 'p1')")
-
-      val writeTable = loadTable("T")
-      val snapshotBefore = lastSnapshotId(writeTable)
-      val compactTable =
-        writeTable.copy(util.Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"))
-
-      CompactProcedure.executeDataEvolutionCompaction(
-        compactTable,
-        null,
-        null,
-        new JavaSparkContext(spark.sparkContext),
-        spark,
-        Int.box(2)
-      )
-
-      Assertions.assertThat(lastSnapshotId(compactTable)).isGreaterThanOrEqualTo(snapshotBefore + 3)
-      checkAnswer(sql("SELECT id FROM T"), Seq.empty)
-    }
-  }
-
-  test("Paimon Procedure: run deferred maintenance without a compact batch") {
-    withTable("T") {
-      sql("""
-            |CREATE TABLE T (id INT, pt STRING)
-            |TBLPROPERTIES (
-            |  'bucket' = '-1',
-            |  'write-only' = 'true',
-            |  'row-tracking.enabled' = 'true',
-            |  'data-evolution.enabled' = 'true',
-            |  'deletion-vectors.enabled' = 'true',
-            |  'partition.expiration-time' = '0 ms',
-            |  'partition.expiration-check-interval' = '0 ms',
-            |  'partition.expiration-strategy' = 'update-time')
-            |PARTITIONED BY (pt)
-            |""".stripMargin)
-      sql("INSERT INTO T VALUES (0, 'p0')")
-
-      val table =
-        loadTable("T").copy(util.Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"))
-      CompactProcedure.executeDataEvolutionCompaction(
-        table,
-        null,
-        null,
-        new JavaSparkContext(spark.sparkContext),
-        spark,
-        Int.box(2)
-      )
-
-      checkAnswer(sql("SELECT id FROM T"), Seq.empty)
     }
   }
 

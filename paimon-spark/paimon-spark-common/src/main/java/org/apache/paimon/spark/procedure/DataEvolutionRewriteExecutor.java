@@ -132,10 +132,6 @@ final class DataEvolutionRewriteExecutor {
                 List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
                 try (TableCommitImpl commit = table.newCommit(commitUser)) {
                     commitConfigurer.configure(commit);
-                    // Planners can retain files and partitions from the initial snapshot across
-                    // batches. Run maintenance once after all batches have committed so that an
-                    // intermediate expiration cannot invalidate a later task.
-                    commit.maintainAfterCommit(false);
                     List<CommitMessage> messages =
                             deserializeCommitMessagesAndReleaseSerializedBytes(
                                     messageSerializer, serializedMessages);
@@ -166,18 +162,6 @@ final class DataEvolutionRewriteExecutor {
                             + "finishing after {} plan rounds.",
                     table.fullName(),
                     round);
-        }
-        // Run this even when this invocation committed no batch. A previous invocation may have
-        // committed all rewrites and failed only while running the deferred maintenance.
-        runMaintenance(table);
-    }
-
-    private static void runMaintenance(FileStoreTable table) {
-        try (TableCommitImpl commit =
-                table.newCommit(createCommitUser(table.coreOptions().toConfiguration()))) {
-            commit.runMaintenance();
-        } catch (Exception e) {
-            throw new RuntimeException("Maintain table after data evolution rewrite failed.", e);
         }
     }
 
