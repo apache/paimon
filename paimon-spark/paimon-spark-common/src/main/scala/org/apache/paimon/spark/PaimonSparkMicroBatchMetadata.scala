@@ -20,14 +20,14 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.annotation.Experimental
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
-import org.apache.paimon.table.source.WrittenColumns
 
+import org.apache.spark.Partition
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Dataset
+import org.apache.spark.sql.connector.read.InputPartition
 import org.apache.spark.sql.execution.datasources.v2.DataSourceRDD
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
-import java.util.{IdentityHashMap, Map => JMap, Optional, UUID}
+import java.util.{IdentityHashMap, List => JList, Map => JMap, Optional, UUID}
 
 import scala.util.control.NonFatal
 
@@ -45,16 +45,16 @@ object PaimonSparkMicroBatchMetadata {
    * job. The result is empty when the Dataset is not backed by a Paimon source, the lineage is
    * incomplete, or multiple Paimon sources make the result ambiguous.
    */
-  def writtenColumns(batch: Dataset[_]): Optional[WrittenColumns] = {
+  def writtenColumnIds(batch: Dataset[_]): Optional[JList[Integer]] = {
     try {
-      extractWrittenColumns(batch)
+      extractWrittenColumnIds(batch)
     } catch {
       case NonFatal(_) => Optional.empty()
       case _: LinkageError => Optional.empty()
     }
   }
 
-  private def extractWrittenColumns(batch: Dataset[_]): Optional[WrittenColumns] = {
+  private def extractWrittenColumnIds(batch: Dataset[_]): Optional[JList[Integer]] = {
     if (!hasExactlyOnePaimonSource(batch)) {
       return Optional.empty()
     }
@@ -70,8 +70,7 @@ object PaimonSparkMicroBatchMetadata {
       var partitionIndex = 0
 
       while (valid && partitionIndex < partitions.length) {
-        val inputs =
-          SparkShimLoader.shim.dataSourceInputPartitions(partitions(partitionIndex)).iterator
+        val inputs = dataSourceInputPartitions(partitions(partitionIndex)).iterator
         while (valid && inputs.hasNext) {
           inputs.next() match {
             case input: PaimonMicroBatchInputPartition =>
@@ -131,9 +130,47 @@ object PaimonSparkMicroBatchMetadata {
     if (!visit(batch.queryExecution.toRdd) || (only eq null)) {
       Optional.empty()
     } else {
-      Optional.of(only.writtenColumns)
+      only.writtenColumnIds
     }
   }
+
+  private def dataSourceInputPartitions(partition: Partition): Seq[InputPartition] = {
+    if (partition == null) {
+      throw new IllegalArgumentException("Data source RDD partition must not be null.")
+    }
+
+    val pluralMethod =
+      try {
+        Some(partition.getClass.getMethod("inputPartitions"))
+      } catch {
+        case _: NoSuchMethodException => None
+      }
+
+    pluralMethod match {
+      case Some(method) => requireInputPartitions(method.invoke(partition))
+      case None =>
+        Seq(requireInputPartition(partition.getClass.getMethod("inputPartition").invoke(partition)))
+    }
+  }
+
+  private def requireInputPartitions(value: Any): Seq[InputPartition] =
+    value match {
+      case null => throw new IllegalArgumentException("Input partitions must not be null.")
+      case values: scala.collection.Seq[_] =>
+        values.iterator.map(requireInputPartition).toVector
+      case other =>
+        throw new IllegalArgumentException(
+          s"Unexpected input partitions type ${other.getClass.getName}.")
+    }
+
+  private def requireInputPartition(value: Any): InputPartition =
+    value match {
+      case input: InputPartition => input
+      case null => throw new IllegalArgumentException("Input partition must not be null.")
+      case other =>
+        throw new IllegalArgumentException(
+          s"Unexpected input partition type ${other.getClass.getName}.")
+    }
 
   private def hasExactlyOnePaimonSource(batch: Dataset[_]): Boolean = {
     val queryId = batch.sparkSession.sparkContext.getLocalProperty(StreamingQueryIdKey)
@@ -159,13 +196,7 @@ object PaimonSparkMicroBatchMetadata {
     // access isolated here and fail closed if a Spark version changes it.
     val sources =
       execution.getClass.getMethod("sources").invoke(execution).asInstanceOf[Seq[AnyRef]]
-    val distinctSources = new IdentityHashMap[AnyRef, java.lang.Boolean]()
-    sources.foreach(source => distinctSources.put(source, java.lang.Boolean.TRUE))
-
-    if (distinctSources.size() != 1) {
-      false
-    } else {
-      distinctSources.keySet().iterator().next().isInstanceOf[PaimonMicroBatchStream]
-    }
+    sources.headOption.exists(
+      first => first.isInstanceOf[PaimonMicroBatchStream] && sources.forall(_ eq first))
   }
 }

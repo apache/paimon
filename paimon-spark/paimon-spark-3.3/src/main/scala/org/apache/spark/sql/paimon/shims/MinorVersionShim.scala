@@ -18,17 +18,13 @@
 
 package org.apache.spark.sql.paimon.shims
 
-import org.apache.spark.Partition
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable}
 import org.apache.spark.sql.catalyst.plans.physical.{ClusteredDistribution, Distribution}
-import org.apache.spark.sql.connector.read.{InputPartition, Scan}
-import org.apache.spark.sql.execution.datasources.v2.{DataSourceRDDPartition, DataSourceV2ScanRelation}
+import org.apache.spark.sql.connector.read.Scan
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 
 object MinorVersionShim {
-
-  def dataSourceInputPartitions(partition: Partition): Seq[InputPartition] =
-    partition.asInstanceOf[DataSourceRDDPartition].inputPartitions
 
   def createCTERelationRef(
       cteId: Long,

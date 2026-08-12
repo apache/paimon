@@ -200,11 +200,10 @@ val query = spark.readStream
 
 ### Written Columns of a Micro-Batch
 
-`foreachBatch` consumers can inspect which Paimon field IDs were written by the data files admitted to the current micro-batch. Paimon plans this experimental metadata automatically. Call `PaimonSparkMicroBatchMetadata.writtenColumns` with the raw `Dataset` passed to `foreachBatch`.
+`foreachBatch` consumers can inspect which Paimon field IDs were written by the data files admitted to the current micro-batch. Call `PaimonSparkMicroBatchMetadata.writtenColumnIds` with the raw `Dataset` passed to `foreachBatch`. Paimon resolves the file metadata lazily when this method is called.
 
 ```scala
 import org.apache.paimon.spark.PaimonSparkMicroBatchMetadata
-import org.apache.paimon.table.source.{AllColumns, KnownWrittenColumns}
 import org.apache.spark.sql.{Dataset, Row}
 
 val query = spark.readStream
@@ -213,22 +212,20 @@ val query = spark.readStream
   .writeStream
   .option("checkpointLocation", "/path/to/checkpoint")
   .foreachBatch { (batch: Dataset[Row], _: Long) =>
-    val writtenColumns = PaimonSparkMicroBatchMetadata.writtenColumns(batch)
-    if (!writtenColumns.isPresent) {
+    val writtenColumnIds = PaimonSparkMicroBatchMetadata.writtenColumnIds(batch)
+    if (!writtenColumnIds.isPresent) {
       // Metadata is unavailable; conservatively process all columns.
-    } else if (writtenColumns.get() == AllColumns.INSTANCE) {
-      // Exact field IDs are unavailable; conservatively process all columns.
     } else {
-      val fieldIds = writtenColumns.get().asInstanceOf[KnownWrittenColumns].fieldIds()
+      val fieldIds = writtenColumnIds.get()
       // Process the exact set of written Paimon field IDs.
     }
   }
   .start()
 ```
 
-A present `KnownWrittenColumns` contains the complete, immutable set of written field IDs in ascending order. The set may be empty; that is a known empty set, not unknown metadata. A present `AllColumns.INSTANCE` means that exact file or schema metadata could not be resolved, so every column must be treated as written.
+A present `Optional` contains the complete, immutable list of written field IDs in ascending order. The list may be empty; that is a known empty set, not unknown metadata.
 
-An empty `Optional` means that metadata is unavailable, for example because the micro-batch is empty, the `Dataset` is not the raw batch from a query with exactly one distinct Paimon streaming source, or its lineage is incomplete or ambiguous. An empty `Optional` does not mean that no columns were written; callers must fall back to processing all columns.
+An empty `Optional` means that metadata is unavailable, for example because a file or schema cannot be resolved, the micro-batch is empty, the `Dataset` is not the raw batch from a query with exactly one distinct Paimon streaming source, or its lineage is incomplete or ambiguous. An empty `Optional` does not mean that no columns were written; callers must fall back to processing all columns.
 
 Paimon Structured Streaming supports read row in the form of changelog (add rowkind column in row to represent its
 change type) in two ways:

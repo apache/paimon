@@ -21,18 +21,18 @@ package org.apache.paimon.utils;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
-import org.apache.paimon.table.source.AllColumns;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.KnownWrittenColumns;
-import org.apache.paimon.table.source.WrittenColumns;
 import org.apache.paimon.types.DataField;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
@@ -46,70 +46,41 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 /** Util class for data evolution. */
 public class DataEvolutionUtils {
 
-    /** Collect written field ids from data files in the selected splits. */
-    public static WrittenColumns collectWrittenColumns(
+    /**
+     * Collect exact written field ids; an empty list is exact and an empty optional is unresolved.
+     */
+    public static Optional<List<Integer>> collectWrittenColumnIds(
             Collection<DataSplit> splits, Function<Long, TableSchema> schemaLoader) {
         Set<Integer> fieldIds = new TreeSet<>();
-        Map<Long, Map<String, Integer>> fieldIdByNameCache = new HashMap<>();
+        Map<Long, List<DataField>> schemaFieldsCache = new HashMap<>();
         Map<Pair<Long, List<String>>, Set<Integer>> fieldIdsCache = new HashMap<>();
-        for (DataSplit split : splits) {
-            for (DataFileMeta file : split.dataFiles()) {
-                try {
+        try {
+            for (DataSplit split : splits) {
+                for (DataFileMeta file : split.dataFiles()) {
                     Pair<Long, List<String>> cacheKey = Pair.of(file.schemaId(), file.writeCols());
                     Set<Integer> fileFieldIds = fieldIdsCache.get(cacheKey);
                     if (fileFieldIds == null) {
-                        fileFieldIds = computeFileFieldIds(schemaLoader, fieldIdByNameCache, file);
+                        List<DataField> schemaFields =
+                                schemaFieldsCache.computeIfAbsent(
+                                        file.schemaId(),
+                                        schemaId -> {
+                                            TableSchema schema = schemaLoader.apply(schemaId);
+                                            checkArgument(
+                                                    schema != null,
+                                                    "Cannot find schema %s.",
+                                                    schemaId);
+                                            return schema.fields();
+                                        });
+                        fileFieldIds = resolveFileFieldIds(schemaFields, file, true);
                         fieldIdsCache.put(cacheKey, fileFieldIds);
-                        fieldIds.addAll(fileFieldIds);
                     }
-                } catch (RuntimeException e) {
-                    return AllColumns.INSTANCE;
+                    fieldIds.addAll(fileFieldIds);
                 }
             }
+        } catch (RuntimeException e) {
+            return Optional.empty();
         }
-        return new KnownWrittenColumns(fieldIds);
-    }
-
-    private static Set<Integer> computeFileFieldIds(
-            Function<Long, TableSchema> schemaLoader,
-            Map<Long, Map<String, Integer>> fieldIdByNameCache,
-            DataFileMeta file) {
-        Map<String, Integer> fieldIdByName =
-                fieldIdByNameCache.computeIfAbsent(
-                        file.schemaId(),
-                        schemaId -> {
-                            TableSchema fileSchema = schemaLoader.apply(schemaId);
-                            if (fileSchema == null) {
-                                throw new IllegalArgumentException(
-                                        "Cannot find schema " + schemaId);
-                            }
-
-                            Map<String, Integer> fieldIds = new HashMap<>();
-                            for (DataField field : fileSchema.fields()) {
-                                fieldIds.put(field.name(), field.id());
-                            }
-                            return fieldIds;
-                        });
-
-        List<String> writeCols = file.writeCols();
-        if (writeCols == null) {
-            return new TreeSet<>(fieldIdByName.values());
-        }
-
-        Set<Integer> fieldIds = new TreeSet<>();
-        for (String writeCol : writeCols) {
-            Integer fieldId = fieldIdByName.get(writeCol);
-            if (fieldId == null) {
-                checkArgument(
-                        SpecialFields.isSystemField(writeCol),
-                        "Cannot find write column '%s' in schema %s.",
-                        writeCol,
-                        file.schemaId());
-            } else {
-                fieldIds.add(fieldId);
-            }
-        }
-        return fieldIds;
+        return Optional.of(Collections.unmodifiableList(new ArrayList<>(fieldIds)));
     }
 
     /**
@@ -117,15 +88,33 @@ public class DataEvolutionUtils {
      */
     public static Set<Integer> fileFieldIds(
             Function<Long, TableSchema> scanTableSchema, DataFileMeta file) {
-        TableSchema schema = scanTableSchema.apply(file.schemaId());
+        return resolveFileFieldIds(scanTableSchema.apply(file.schemaId()).fields(), file, false);
+    }
+
+    private static Set<Integer> resolveFileFieldIds(
+            List<DataField> schemaFields, DataFileMeta file, boolean strict) {
         List<String> writeCols = file.writeCols();
         Set<String> writeColNames = writeCols == null ? null : new HashSet<>(writeCols);
+        Set<String> unresolved =
+                strict && writeColNames != null ? new HashSet<>(writeColNames) : null;
         Set<Integer> ids = new HashSet<>();
-        for (DataField field : schema.fields()) {
+        for (DataField field : schemaFields) {
             // writeCols may also contain physical row-tracking fields outside the table schema.
             if (writeColNames == null || writeColNames.contains(field.name())) {
                 ids.add(field.id());
+                if (unresolved != null) {
+                    unresolved.remove(field.name());
+                }
             }
+        }
+
+        if (unresolved != null) {
+            unresolved.removeIf(SpecialFields::isSystemField);
+            checkArgument(
+                    unresolved.isEmpty(),
+                    "Cannot find write columns %s in schema %s.",
+                    unresolved,
+                    file.schemaId());
         }
         return ids;
     }

@@ -24,10 +24,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.SpecialFields;
-import org.apache.paimon.table.source.AllColumns;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.KnownWrittenColumns;
-import org.apache.paimon.table.source.WrittenColumns;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
@@ -39,6 +36,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -120,10 +118,18 @@ public class DataEvolutionUtilsTest {
                                         1,
                                         Collections.singletonList("other"))))
                 .containsExactly(2);
+        assertThat(
+                        DataEvolutionUtils.fileFieldIds(
+                                ignored -> schema,
+                                dataFile(
+                                        "unknown.parquet",
+                                        1,
+                                        Collections.singletonList("unknown"))))
+                .isEmpty();
     }
 
     @Test
-    public void testCollectWrittenColumnsByFieldIdAcrossSchemas() {
+    public void testCollectWrittenColumnIdsAcrossSchemas() {
         Map<Long, TableSchema> schemas = new HashMap<>();
         schemas.put(
                 0L,
@@ -141,54 +147,36 @@ public class DataEvolutionUtilsTest {
         DataFileMeta oldSchemaFile = dataFile(0L, Arrays.asList("a", "old_name"));
         DataFileMeta newSchemaFile = dataFile(1L, Arrays.asList("new_name", "c"));
 
-        WrittenColumns result =
-                DataEvolutionUtils.collectWrittenColumns(
-                        Collections.singletonList(dataSplit(oldSchemaFile, newSchemaFile)),
-                        schemas::get);
-
-        assertThat(result).isInstanceOf(KnownWrittenColumns.class);
-        assertThat(((KnownWrittenColumns) result).fieldIds()).containsExactly(1, 2, 3);
+        assertThat(collectWrittenColumnIds(schemas::get, oldSchemaFile, newSchemaFile))
+                .hasValue(Arrays.asList(1, 2, 3));
     }
 
     @Test
-    public void testCollectWrittenColumnsFallsBackWhenSchemaIsUnknown() {
+    public void testCollectWrittenColumnIdsFallsBackWhenResolutionFails() {
         DataFileMeta unknownSchemaFile = dataFile(99L, Collections.singletonList("a"));
+        assertThat(collectWrittenColumnIds(ignored -> null, unknownSchemaFile))
+                .as("unknown schema")
+                .isEmpty();
 
-        WrittenColumns result =
-                DataEvolutionUtils.collectWrittenColumns(
-                        Collections.singletonList(dataSplit(unknownSchemaFile)), ignored -> null);
+        DataFileMeta unresolvedSchemaFile = dataFile(1L, Collections.singletonList("missing"));
+        assertThat(
+                        collectWrittenColumnIds(
+                                ignored -> {
+                                    throw new IllegalArgumentException("schema cannot be resolved");
+                                },
+                                unresolvedSchemaFile))
+                .as("schema loader failure")
+                .isEmpty();
 
-        assertThat(result).isSameAs(AllColumns.INSTANCE);
-    }
-
-    @Test
-    public void testCollectWrittenColumnsFallsBackWhenSchemaResolutionFails() {
-        DataFileMeta file = dataFile(1L, Collections.singletonList("missing"));
-
-        WrittenColumns result =
-                DataEvolutionUtils.collectWrittenColumns(
-                        Collections.singletonList(dataSplit(file)),
-                        ignored -> {
-                            throw new IllegalArgumentException("schema cannot be resolved");
-                        });
-
-        assertThat(result).isSameAs(AllColumns.INSTANCE);
-    }
-
-    @Test
-    public void testCollectWrittenColumnsFallsBackWhenWriteColumnIsMissing() {
         TableSchema schema = tableSchema(1L, new DataField(1, "a", DataTypes.INT()));
-        DataFileMeta file = dataFile(1L, Collections.singletonList("missing"));
-
-        WrittenColumns result =
-                DataEvolutionUtils.collectWrittenColumns(
-                        Collections.singletonList(dataSplit(file)), ignored -> schema);
-
-        assertThat(result).isSameAs(AllColumns.INSTANCE);
+        DataFileMeta unknownColumnFile = dataFile(1L, Collections.singletonList("missing"));
+        assertThat(collectWrittenColumnIds(ignored -> schema, unknownColumnFile))
+                .as("unknown non-system write column")
+                .isEmpty();
     }
 
     @Test
-    public void testCollectWrittenColumnsIgnoresSystemFields() {
+    public void testCollectWrittenColumnIdsIgnoresSystemFields() {
         TableSchema schema = tableSchema(1L, new DataField(1, "a", DataTypes.INT()));
         DataFileMeta file =
                 dataFile(
@@ -198,39 +186,22 @@ public class DataEvolutionUtilsTest {
                                 "a",
                                 SpecialFields.SEQUENCE_NUMBER.name()));
 
-        WrittenColumns result =
-                DataEvolutionUtils.collectWrittenColumns(
-                        Collections.singletonList(dataSplit(file)), ignored -> schema);
+        assertThat(collectWrittenColumnIds(ignored -> schema, file))
+                .hasValue(Collections.singletonList(1));
 
-        assertThat(result).isInstanceOf(KnownWrittenColumns.class);
-        assertThat(((KnownWrittenColumns) result).fieldIds()).containsExactly(1);
+        assertThat(
+                        collectWrittenColumnIds(
+                                ignored -> schema,
+                                dataFile(
+                                        1L,
+                                        Arrays.asList(
+                                                SpecialFields.ROW_ID.name(),
+                                                SpecialFields.SEQUENCE_NUMBER.name()))))
+                .hasValue(Collections.emptyList());
     }
 
     @Test
-    public void testCollectWrittenColumnsCachesFileSchemaProjection() {
-        TableSchema schema =
-                tableSchema(
-                        1L,
-                        new DataField(1, "a", DataTypes.INT()),
-                        new DataField(2, "b", DataTypes.STRING()));
-        DataFileMeta first = dataFile(1L, Collections.singletonList("b"));
-        DataFileMeta second = dataFile(1L, Collections.singletonList("b"));
-        AtomicInteger schemaLoads = new AtomicInteger();
-
-        WrittenColumns result =
-                DataEvolutionUtils.collectWrittenColumns(
-                        Collections.singletonList(dataSplit(first, second)),
-                        ignored -> {
-                            schemaLoads.incrementAndGet();
-                            return schema;
-                        });
-
-        assertThat(((KnownWrittenColumns) result).fieldIds()).containsExactly(2);
-        assertThat(schemaLoads).hasValue(1);
-    }
-
-    @Test
-    public void testCollectWrittenColumnsCachesSchemaAcrossProjections() {
+    public void testCollectWrittenColumnIdsCachesSchemaAcrossProjections() {
         TableSchema schema =
                 spy(
                         tableSchema(
@@ -239,23 +210,27 @@ public class DataEvolutionUtilsTest {
                                 new DataField(2, "b", DataTypes.STRING())));
         DataFileMeta first = dataFile(1L, Collections.singletonList("a"));
         DataFileMeta second = dataFile(1L, Collections.singletonList("b"));
+        DataFileMeta repeated = dataFile(1L, Collections.singletonList("a"));
         AtomicInteger schemaLoads = new AtomicInteger();
 
-        WrittenColumns result =
-                DataEvolutionUtils.collectWrittenColumns(
-                        Collections.singletonList(dataSplit(first, second)),
+        Optional<List<Integer>> result =
+                collectWrittenColumnIds(
                         ignored -> {
                             schemaLoads.incrementAndGet();
                             return schema;
-                        });
+                        },
+                        first,
+                        second,
+                        repeated);
 
-        assertThat(((KnownWrittenColumns) result).fieldIds()).containsExactly(1, 2);
+        assertThat(result.get()).containsExactly(1, 2);
         assertThat(schemaLoads).hasValue(1);
         verify(schema).fields();
+        verify(repeated).writeCols();
     }
 
     @Test
-    public void testCollectWrittenColumnsExpandsLegacyFileSchema() {
+    public void testCollectWrittenColumnIdsExpandsLegacyFileSchema() {
         TableSchema schema =
                 tableSchema(
                         1L,
@@ -263,12 +238,8 @@ public class DataEvolutionUtilsTest {
                         new DataField(2, "b", DataTypes.STRING()));
         DataFileMeta legacyFile = dataFile(1L, null);
 
-        WrittenColumns result =
-                DataEvolutionUtils.collectWrittenColumns(
-                        Collections.singletonList(dataSplit(legacyFile)), ignored -> schema);
-
-        assertThat(result).isInstanceOf(KnownWrittenColumns.class);
-        assertThat(((KnownWrittenColumns) result).fieldIds()).containsExactly(1, 2);
+        assertThat(collectWrittenColumnIds(ignored -> schema, legacyFile))
+                .hasValue(Arrays.asList(1, 2));
     }
 
     @Test
@@ -349,6 +320,12 @@ public class DataEvolutionUtilsTest {
                 .withBucketPath("bucket-0")
                 .withDataFiles(Arrays.asList(files))
                 .build();
+    }
+
+    private static Optional<List<Integer>> collectWrittenColumnIds(
+            Function<Long, TableSchema> schemaLoader, DataFileMeta... files) {
+        return DataEvolutionUtils.collectWrittenColumnIds(
+                Collections.singletonList(dataSplit(files)), schemaLoader);
     }
 
     private static TableSchema tableSchema(long id, DataField... fields) {
