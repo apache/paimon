@@ -54,6 +54,7 @@ import static org.apache.paimon.operation.commit.ConflictDetection.buildBaseEntr
 import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEntriesWithDV;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -105,6 +106,123 @@ class ConflictDetectionTest {
         verify(scanner)
                 .readAllEntriesFromChangedRowRanges(
                         snapshot, changedPartitions, Collections.singletonList(changedRange));
+    }
+
+    @Test
+    void testDataEvolutionOverwriteScansDeletedFileRowRange() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        DataEvolutionConflictDetection detection =
+                (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
+        Snapshot snapshot = snapshot(1);
+        BinaryRow partition = BinaryRow.singleColumn(1);
+        List<BinaryRow> changedPartitions = Collections.singletonList(partition);
+        Range changedRange = new Range(10, 19);
+
+        ManifestEntry deleted = manifestEntry(DELETE, "deleted", 10L, changedRange);
+        SimpleFileEntry base = createFileEntryWithRowId("deleted", ADD, partition, 0, 10L, 10L);
+        when(scanner.readAllEntriesFromChangedRowRanges(
+                        snapshot, changedPartitions, Collections.singletonList(changedRange)))
+                .thenReturn(Collections.singletonList(base));
+
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                snapshot,
+                                changedPartitions,
+                                Collections.singletonList(deleted),
+                                Collections.emptyList(),
+                                Snapshot.CommitKind.OVERWRITE,
+                                null,
+                                false))
+                .containsExactly(base);
+        verify(scanner, never())
+                .readAllEntriesFromDataFiles(
+                        snapshot, changedPartitions, Collections.singleton("deleted"));
+        verify(scanner, never()).readAllEntriesFromChangedPartitions(snapshot, changedPartitions);
+    }
+
+    @Test
+    void testDataEvolutionOverwriteScansDeletionVectorDataFile() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        DataEvolutionConflictDetection detection =
+                (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
+        Snapshot snapshot = snapshot(1);
+        List<BinaryRow> changedPartitions = Collections.singletonList(BinaryRow.singleColumn(1));
+        SimpleFileEntry base = createFileEntry("base", ADD);
+        when(scanner.readAllEntriesFromDataFiles(
+                        snapshot, changedPartitions, Collections.singleton("base")))
+                .thenReturn(Collections.singletonList(base));
+
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                snapshot,
+                                changedPartitions,
+                                Collections.emptyList(),
+                                Collections.singletonList(
+                                        createDvIndexEntry(
+                                                "dv", ADD, Collections.singletonList("base"))),
+                                Snapshot.CommitKind.OVERWRITE,
+                                null,
+                                false))
+                .containsExactly(base);
+        verify(scanner, never()).readAllEntriesFromChangedPartitions(snapshot, changedPartitions);
+    }
+
+    @Test
+    void testDataEvolutionOverwriteSupplementsLegacyDeletedFile() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        DataEvolutionConflictDetection detection =
+                (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
+        Snapshot snapshot = snapshot(1);
+        BinaryRow partition = BinaryRow.singleColumn(1);
+        List<BinaryRow> changedPartitions = Collections.singletonList(partition);
+        Range changedRange = new Range(10, 19);
+
+        ManifestEntry added = manifestEntry(ADD, "added", 10L, changedRange);
+        ManifestEntry deleted = manifestEntry(DELETE, "legacy", null, null);
+        SimpleFileEntry rangeBase =
+                createFileEntryWithRowId("range-base", ADD, partition, 0, 10L, 10L);
+        SimpleFileEntry legacyBase = createFileEntry("legacy", ADD);
+        when(scanner.readAllEntriesFromChangedRowRanges(
+                        snapshot, changedPartitions, Collections.singletonList(changedRange)))
+                .thenReturn(Collections.singletonList(rangeBase));
+        when(scanner.readAllEntriesFromDataFiles(
+                        snapshot, changedPartitions, Collections.singleton("legacy")))
+                .thenReturn(Collections.singletonList(legacyBase));
+
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                snapshot,
+                                changedPartitions,
+                                Arrays.asList(added, deleted),
+                                Collections.emptyList(),
+                                Snapshot.CommitKind.OVERWRITE,
+                                null,
+                                false))
+                .containsExactly(rangeBase, legacyBase);
+        verify(scanner, never()).readAllEntriesFromChangedPartitions(snapshot, changedPartitions);
+    }
+
+    @Test
+    void testDataEvolutionOverwriteFallsBackWithoutSelectors() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        DataEvolutionConflictDetection detection =
+                (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
+        Snapshot snapshot = snapshot(1);
+        List<BinaryRow> changedPartitions = Collections.singletonList(BinaryRow.singleColumn(1));
+        List<SimpleFileEntry> expected = Collections.singletonList(createFileEntry("base", ADD));
+        when(scanner.readAllEntriesFromChangedPartitions(snapshot, changedPartitions))
+                .thenReturn(expected);
+
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                snapshot,
+                                changedPartitions,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Snapshot.CommitKind.OVERWRITE,
+                                null,
+                                false))
+                .isSameAs(expected);
     }
 
     @Test
@@ -999,6 +1117,20 @@ class ConflictDetectionTest {
                 null,
                 null,
                 scanner);
+    }
+
+    private ManifestEntry manifestEntry(
+            FileKind kind, String fileName, @Nullable Long firstRowId, @Nullable Range rowIdRange) {
+        ManifestEntry entry = mock(ManifestEntry.class);
+        DataFileMeta file = mock(DataFileMeta.class);
+        when(entry.kind()).thenReturn(kind);
+        when(entry.file()).thenReturn(file);
+        when(file.fileName()).thenReturn(fileName);
+        when(file.firstRowId()).thenReturn(firstRowId);
+        if (rowIdRange != null) {
+            when(file.nonNullRowIdRange()).thenReturn(rowIdRange);
+        }
+        return entry;
     }
 
     private Snapshot snapshot(long id) {

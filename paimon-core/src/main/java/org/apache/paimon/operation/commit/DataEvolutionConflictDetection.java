@@ -145,7 +145,13 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             @Nullable CommitFailRetryResult previousAttempt,
             boolean hasOverwriteSincePreviousAttempt) {
         List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles, commitKind);
+        Set<String> referencedDataFiles = referencedDataFiles(deltaFiles, indexFiles);
         if (changedRowRanges.isEmpty()) {
+            if (commitKind == CommitKind.OVERWRITE && !referencedDataFiles.isEmpty()) {
+                return commitScanner()
+                        .readAllEntriesFromDataFiles(
+                                latestSnapshot, changedPartitions, referencedDataFiles);
+            }
             return scanChangedPartitions(
                     latestSnapshot,
                     changedPartitions,
@@ -154,27 +160,20 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         }
 
         List<SimpleFileEntry> baseDataFiles =
-                commitScanner()
-                        .readAllEntriesFromChangedRowRanges(
-                                latestSnapshot, changedPartitions, changedRowRanges);
-        Set<String> dataFilesToDelete =
-                deltaFiles.stream()
-                        .filter(entry -> entry.kind() == FileKind.DELETE)
-                        .map(entry -> entry.file().fileName())
-                        .collect(Collectors.toSet());
-        for (IndexManifestEntry indexFile : indexFiles) {
-            if (indexFile.indexFile().dvRanges() != null) {
-                dataFilesToDelete.addAll(indexFile.indexFile().dvRanges().keySet());
-            }
-        }
-        if (dataFilesToDelete.isEmpty()) {
+                new ArrayList<>(
+                        commitScanner()
+                                .readAllEntriesFromChangedRowRanges(
+                                        latestSnapshot, changedPartitions, changedRowRanges));
+        referencedDataFiles.removeAll(
+                baseDataFiles.stream().map(SimpleFileEntry::fileName).collect(Collectors.toSet()));
+        if (referencedDataFiles.isEmpty()) {
             return baseDataFiles;
         }
 
         baseDataFiles.addAll(
                 commitScanner()
                         .readAllEntriesFromDataFiles(
-                                latestSnapshot, changedPartitions, dataFilesToDelete));
+                                latestSnapshot, changedPartitions, referencedDataFiles));
         return new ArrayList<>(
                 baseDataFiles.stream()
                         .collect(
@@ -186,11 +185,26 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                         .values());
     }
 
+    private Set<String> referencedDataFiles(
+            List<ManifestEntry> deltaFiles, List<IndexManifestEntry> indexFiles) {
+        Set<String> referencedDataFiles =
+                deltaFiles.stream()
+                        .filter(entry -> entry.kind() == FileKind.DELETE)
+                        .map(entry -> entry.file().fileName())
+                        .collect(Collectors.toSet());
+        for (IndexManifestEntry indexFile : indexFiles) {
+            if (indexFile.indexFile().dvRanges() != null) {
+                referencedDataFiles.addAll(indexFile.indexFile().dvRanges().keySet());
+            }
+        }
+        return referencedDataFiles;
+    }
+
     private List<Range> changedRowRanges(
             List<ManifestEntry> deltaFiles,
             List<IndexManifestEntry> indexFiles,
             CommitKind commitKind) {
-        if (commitKind != CommitKind.COMPACT) {
+        if (commitKind != CommitKind.COMPACT && commitKind != CommitKind.OVERWRITE) {
             return Collections.emptyList();
         }
 
