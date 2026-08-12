@@ -23,6 +23,8 @@ import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTO
 import org.apache.paimon.fs.Path
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
+import org.apache.paimon.spark.commands.{DataEvolutionPaimonWriter, PaimonSparkWriter}
 import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.DataSplit
@@ -31,6 +33,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.spark.api.java.JavaSparkContext
 import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted}
 import org.apache.spark.sql.{Dataset, Row}
+import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions
@@ -1768,6 +1771,78 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
           .map(_.getLong(0))
           .sorted
           .sameElements(15L to 22L))
+    }
+  }
+
+  test("Paimon Procedure: rebase data evolution compact after operation-less partial update") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value INT)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'file.format' = 'avro',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'compaction.min.file-num' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 10)")
+      sql("INSERT INTO T VALUES (2, 20)")
+
+      val table = loadTable("T")
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      val updated = new AtomicBoolean(false)
+
+      CompactProcedure.executeDataEvolutionCompaction(
+        table,
+        relation,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        null,
+        _ => {
+          if (updated.compareAndSet(false, true)) {
+            // Python MERGE commits the same regular partial-column files without an operation.
+            val updateSnapshot = table.latestSnapshot().get()
+            val dataSplits = table
+              .newSnapshotReader()
+              .withSnapshot(updateSnapshot)
+              .read()
+              .splits()
+              .asScala
+              .collect { case split: DataSplit => split }
+              .toSeq
+            val firstRowIds = dataSplits
+              .flatMap(_.dataFiles().asScala)
+              .map(_.nonNullFirstRowId())
+              .sorted
+            val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+            val updateRows = sql("SELECT value + 1 AS value, _ROW_ID FROM T WHERE id = 1")
+              .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+              .select("value", "_FIRST_ROW_ID", "_ROW_ID")
+            val updateMessages =
+              DataEvolutionPaimonWriter(table, dataSplits)
+                .writePartialFields(updateRows, Seq("value"))
+
+            val writer = PaimonSparkWriter(table)
+            writer.rowIdCheckConflict(updateSnapshot.id())
+            writer.commit(updateMessages)
+            assert(table.latestSnapshot().get().operation() == null)
+          }
+        }
+      )
+
+      checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 20)))
+      val ranges = table
+          .newSnapshotReader()
+          .read()
+          .dataSplits()
+          .asScala
+          .flatMap(_.dataFiles().asScala)
+          .map(file => (file.nonNullFirstRowId(), file.rowCount()))
+          .distinct
+      assert(ranges == Seq((0L, 2L)), ranges)
     }
   }
 
