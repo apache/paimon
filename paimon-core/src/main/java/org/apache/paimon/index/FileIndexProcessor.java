@@ -176,9 +176,9 @@ public class FileIndexProcessor {
                 outputStream.write(baos.toByteArray());
             }
             extras.add(newIndexPath.getName());
-            return dataFileMeta.copy(extras);
+            return dataFileMeta.copy(extras).copy((byte[]) null);
         } else if (baos.size() == 0) {
-            return dataFileMeta.copy(extras);
+            return dataFileMeta.copy(extras).copy((byte[]) null);
         } else {
             return dataFileMeta.copy(extras).copy(baos.toByteArray());
         }

@@ -170,6 +170,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
                         + ") PARTITIONED BY (dt) WITH ("
                         + " 'write-only' = 'true',"
                         + " 'file-index.bloom-filter.columns' = 'k',"
+                        + " 'file-index.in-manifest-threshold' = '1 MB',"
                         + " 'bucket' = '-1'"
                         + ")");
         sql("INSERT INTO T VALUES (1, '100', '20221208')");
@@ -180,8 +181,9 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
         } else {
             sql("CALL sys.rewrite_file_index('default.T')");
         }
-        assertFileIndexTypes("T", "bloom-filter");
+        assertFileIndexTypes("T", "bloom-filter", true);
 
+        sql("ALTER TABLE T SET ('file-index.in-manifest-threshold' = '1 B')");
         sql("ALTER TABLE T RESET ('file-index.bloom-filter.columns')");
         sql("ALTER TABLE T SET ('file-index.bitmap.columns' = 'k')");
         if (isNamedArgument) {
@@ -189,10 +191,43 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
         } else {
             sql("CALL sys.rewrite_file_index('default.T')");
         }
-        assertFileIndexTypes("T", "bitmap");
+        assertFileIndexTypes("T", "bitmap", false);
     }
 
-    private void assertFileIndexTypes(String tableName, String expectedIndexType) throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFileIndexProcedureDropEmbeddedIndex(boolean isNamedArgument) throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k INT,"
+                        + " dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'file-index.bloom-filter.columns' = 'k',"
+                        + " 'file-index.in-manifest-threshold' = '1 MB',"
+                        + " 'bucket' = '-1'"
+                        + ")");
+        sql("INSERT INTO T VALUES (1, '20221208')");
+
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        if (isNamedArgument) {
+            sql("CALL sys.rewrite_file_index(`table` => 'default.T')");
+        } else {
+            sql("CALL sys.rewrite_file_index('default.T')");
+        }
+        assertFileIndexTypes("T", "bloom-filter", true);
+
+        sql("ALTER TABLE T RESET ('file-index.bloom-filter.columns')");
+        if (isNamedArgument) {
+            sql("CALL sys.rewrite_file_index(`table` => 'default.T')");
+        } else {
+            sql("CALL sys.rewrite_file_index('default.T')");
+        }
+        assertNoFileIndexes("T");
+    }
+
+    private void assertFileIndexTypes(
+            String tableName, String expectedIndexType, boolean expectedEmbeddedIndex) throws Exception {
         flinkCatalog()
                 .catalog()
                 .invalidateTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
@@ -200,11 +235,15 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
         for (ManifestEntry entry : table.store().newScan().plan().files()) {
             byte[] embeddedIndex = entry.file().embeddedIndex();
             FileIndexFormat.Reader reader;
-            if (embeddedIndex != null) {
+            if (expectedEmbeddedIndex) {
+                Assertions.assertThat(embeddedIndex).isNotNull();
+                Assertions.assertThat(entry.file().extraFiles())
+                        .noneMatch(s -> s.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX));
                 reader =
                         FileIndexFormat.createReader(
                                 new ByteArraySeekableStream(embeddedIndex), table.rowType());
             } else {
+                Assertions.assertThat(embeddedIndex).isNull();
                 String indexFile =
                         entry.file().extraFiles().stream()
                                 .filter(s -> s.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
@@ -228,6 +267,18 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
                 Assertions.assertThat(indexes).containsKey("k");
                 Assertions.assertThat(indexes.get("k").keySet()).containsExactly(expectedIndexType);
             }
+        }
+    }
+
+    private void assertNoFileIndexes(String tableName) throws Exception {
+        flinkCatalog()
+                .catalog()
+                .invalidateTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
+        FileStoreTable table = paimonTable(tableName);
+        for (ManifestEntry entry : table.store().newScan().plan().files()) {
+            Assertions.assertThat(entry.file().embeddedIndex()).isNull();
+            Assertions.assertThat(entry.file().extraFiles())
+                    .noneMatch(s -> s.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX));
         }
     }
 
