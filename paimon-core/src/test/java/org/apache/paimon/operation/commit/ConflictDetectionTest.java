@@ -30,6 +30,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
@@ -643,6 +644,28 @@ class ConflictDetectionTest {
         assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.COMPACT)).isTrue();
         assertThat(detection.shouldCheckHistoricalRowIdEntry(FileKind.ADD)).isTrue();
         assertThat(detection.shouldCheckHistoricalRowIdEntry(FileKind.DELETE)).isFalse();
+
+        RowIdConflictChecker checker =
+                detection.createRowIdConflictChecker(
+                        mock(SchemaManager.class),
+                        Arrays.asList(
+                                manifestEntry(DELETE, "deleted", 10L, new Range(10, 19)),
+                                manifestEntry(ADD, "added", 30L, new Range(30, 39)),
+                                manifestEntry(DELETE, "dedicated.blob", 50L, new Range(50, 59))),
+                        Snapshot.CommitKind.COMPACT);
+        assertThat(checker).isNotNull();
+        assertThat(
+                        checker.conflictsWith(
+                                manifestEntry(ADD, "historical", 15L, new Range(15, 24)).file()))
+                .isTrue();
+        assertThat(
+                        checker.conflictsWith(
+                                manifestEntry(ADD, "historical", 35L, new Range(35, 44)).file()))
+                .isFalse();
+        assertThat(
+                        checker.conflictsWith(
+                                manifestEntry(ADD, "historical", 55L, new Range(55, 64)).file()))
+                .isFalse();
 
         detection.setRowIdCheckFromSnapshot(1L);
         assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.APPEND)).isTrue();

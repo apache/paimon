@@ -33,6 +33,7 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -170,9 +171,10 @@ public abstract class ConflictDetection {
         return false;
     }
 
-    public RowIdConflictChecker.TriggerSource rowIdConflictCheckTriggerSource() {
-        throw new UnsupportedOperationException(
-                "Row ID conflict detection is only supported for Data Evolution tables.");
+    @Nullable
+    public RowIdConflictChecker createRowIdConflictChecker(
+            SchemaManager schemaManager, List<ManifestEntry> deltaFiles, CommitKind commitKind) {
+        return null;
     }
 
     @Nullable

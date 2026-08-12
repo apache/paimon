@@ -26,10 +26,4 @@ public interface RowIdConflictChecker {
     boolean isEmpty();
 
     boolean conflictsWith(DataFileMeta file);
-
-    /** Defines the source operation which triggers this conflict check. */
-    enum TriggerSource {
-        DATA_EVOLUTION_DML,
-        MATERIALIZE_DV_COMPACTION
-    }
 }

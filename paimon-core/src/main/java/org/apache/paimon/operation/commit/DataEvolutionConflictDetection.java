@@ -32,6 +32,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -59,7 +60,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
-import static org.apache.paimon.operation.commit.RowIdConflictChecker.TriggerSource.MATERIALIZE_DV_COMPACTION;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -73,7 +73,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     private final SnapshotManager snapshotManager;
 
     private @Nullable Long rowIdCheckFromSnapshot;
-    private @Nullable RowIdConflictChecker.TriggerSource rowIdConflictCheckTriggerSource;
+    private @Nullable RowIdConflictCheckStrategy rowIdConflictCheckStrategy;
 
     public DataEvolutionConflictDetection(
             String tableName,
@@ -102,36 +102,42 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     @Override
     public void setRowIdCheckFromSnapshot(@Nullable Long rowIdCheckFromSnapshot) {
         setRowIdCheckFromSnapshot(
-                rowIdCheckFromSnapshot, RowIdConflictChecker.TriggerSource.DATA_EVOLUTION_DML);
+                rowIdCheckFromSnapshot, DataEvolutionDmlRowIdConflictCheck.INSTANCE);
     }
 
     @Override
     public void setRowIdCheckFromSnapshotForMaterializeDvCompaction(
             @Nullable Long rowIdCheckFromSnapshot) {
-        setRowIdCheckFromSnapshot(rowIdCheckFromSnapshot, MATERIALIZE_DV_COMPACTION);
+        setRowIdCheckFromSnapshot(rowIdCheckFromSnapshot, MaterializeDvRowIdConflictCheck.INSTANCE);
     }
 
     private void setRowIdCheckFromSnapshot(
             @Nullable Long rowIdCheckFromSnapshot,
-            RowIdConflictChecker.TriggerSource triggerSource) {
+            RowIdConflictCheckStrategy conflictCheckStrategy) {
         this.rowIdCheckFromSnapshot = rowIdCheckFromSnapshot;
-        this.rowIdConflictCheckTriggerSource =
-                rowIdCheckFromSnapshot == null ? null : triggerSource;
+        this.rowIdConflictCheckStrategy =
+                rowIdCheckFromSnapshot == null ? null : conflictCheckStrategy;
     }
 
     @Override
     public boolean shouldCheckRowIdFromSnapshot(CommitKind commitKind) {
-        return rowIdCheckFromSnapshot != null
-                && (rowIdConflictCheckTriggerSource != MATERIALIZE_DV_COMPACTION
-                        || commitKind == CommitKind.COMPACT);
+        return rowIdCheckFromSnapshot != null && rowIdConflictCheckStrategy().appliesTo(commitKind);
     }
 
     @Override
-    public RowIdConflictChecker.TriggerSource rowIdConflictCheckTriggerSource() {
+    @Nullable
+    public RowIdConflictChecker createRowIdConflictChecker(
+            SchemaManager schemaManager, List<ManifestEntry> deltaFiles, CommitKind commitKind) {
+        if (!shouldCheckRowIdFromSnapshot(commitKind)) {
+            return null;
+        }
+        return rowIdConflictCheckStrategy().createChecker(schemaManager, deltaFiles);
+    }
+
+    private RowIdConflictCheckStrategy rowIdConflictCheckStrategy() {
         checkState(
-                rowIdConflictCheckTriggerSource != null,
-                "Row ID conflict check trigger source is not set.");
-        return rowIdConflictCheckTriggerSource;
+                rowIdConflictCheckStrategy != null, "Row ID conflict check strategy is not set.");
+        return rowIdConflictCheckStrategy;
     }
 
     @Override
@@ -454,7 +460,75 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     }
 
     boolean shouldCheckHistoricalRowIdEntry(FileKind kind) {
-        return rowIdConflictCheckTriggerSource != MATERIALIZE_DV_COMPACTION || kind == FileKind.ADD;
+        return rowIdConflictCheckStrategy().shouldCheckHistoricalEntry(kind);
+    }
+
+    private interface RowIdConflictCheckStrategy {
+
+        boolean appliesTo(CommitKind commitKind);
+
+        RowIdConflictChecker createChecker(
+                SchemaManager schemaManager, List<ManifestEntry> deltaFiles);
+
+        boolean shouldCheckHistoricalEntry(FileKind kind);
+    }
+
+    private static class DataEvolutionDmlRowIdConflictCheck implements RowIdConflictCheckStrategy {
+
+        private static final DataEvolutionDmlRowIdConflictCheck INSTANCE =
+                new DataEvolutionDmlRowIdConflictCheck();
+
+        @Override
+        public boolean appliesTo(CommitKind commitKind) {
+            return true;
+        }
+
+        @Override
+        public RowIdConflictChecker createChecker(
+                SchemaManager schemaManager, List<ManifestEntry> deltaFiles) {
+            return RowIdColumnConflictChecker.fromDataFiles(
+                    schemaManager,
+                    deltaFiles.stream().map(ManifestEntry::file).collect(Collectors.toList()));
+        }
+
+        @Override
+        public boolean shouldCheckHistoricalEntry(FileKind kind) {
+            return true;
+        }
+    }
+
+    private static class MaterializeDvRowIdConflictCheck implements RowIdConflictCheckStrategy {
+
+        private static final MaterializeDvRowIdConflictCheck INSTANCE =
+                new MaterializeDvRowIdConflictCheck();
+
+        @Override
+        public boolean appliesTo(CommitKind commitKind) {
+            return commitKind == CommitKind.COMPACT;
+        }
+
+        @Override
+        public RowIdConflictChecker createChecker(
+                SchemaManager schemaManager, List<ManifestEntry> deltaFiles) {
+            // Materializing deletion vectors rewrites complete row ranges. A concurrent ADD in a
+            // deleted normal-file range can otherwise restore logically deleted rows.
+            List<DataFileMeta> deletedNormalFiles =
+                    deltaFiles.stream()
+                            .filter(entry -> entry.kind() == FileKind.DELETE)
+                            .map(ManifestEntry::file)
+                            .filter(file -> file.firstRowId() != null)
+                            .filter(
+                                    file ->
+                                            !isBlobFile(file.fileName())
+                                                    && !isVectorStoreFile(file.fileName()))
+                            .collect(Collectors.toList());
+            return RowIdRangeConflictChecker.fromDataFiles(deletedNormalFiles);
+        }
+
+        @Override
+        public boolean shouldCheckHistoricalEntry(FileKind kind) {
+            return kind == FileKind.ADD;
+        }
     }
 
     private Optional<RuntimeException> checkGlobalIndexRowIdExistence(
