@@ -86,6 +86,23 @@ public class ManifestFileTest {
     }
 
     @Test
+    void testWriteManifestFileToExplicitPath() throws Exception {
+        List<ManifestEntry> entries = generateData();
+        ManifestFile manifestFile = createManifestFile(tempDir.toString());
+        Path path = new Path(tempDir.toString() + "/manifest/explicit-manifest");
+
+        ManifestAvroWriter writer = manifestFile.createAvroWriter(path);
+        writer.write(entries);
+        writer.close();
+
+        assertThat(writer.result())
+                .singleElement()
+                .extracting(ManifestFileMeta::fileName)
+                .isEqualTo("explicit-manifest");
+        assertThat(manifestFile.read("explicit-manifest")).isEqualTo(entries);
+    }
+
+    @Test
     void testReadMissingManifestFile() {
         ManifestFile manifestFile = createManifestFile(tempDir.toString());
 

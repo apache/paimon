@@ -24,9 +24,9 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
 import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
+import org.apache.paimon.manifest.ManifestAvroWriter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -233,8 +233,7 @@ public class ManifestEntryExternalSort {
                 return Collections.emptyList();
             }
 
-            RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
-                    manifestFile.createRollingWriter();
+            ManifestAvroWriter writer = manifestFile.createAvroWriter();
             Exception exception = null;
             try {
                 MutableObjectIterator<BinaryRow> iterator = sortBuffer.sortedIterator();
@@ -267,10 +266,8 @@ public class ManifestEntryExternalSort {
                 return Pair.of(Collections.emptyList(), Collections.emptyList());
             }
 
-            RollingFileWriter<ManifestEntry, ManifestFileMeta> addWriter =
-                    manifestFile.createRollingWriter();
-            RollingFileWriter<ManifestEntry, ManifestFileMeta> deleteWriter =
-                    manifestFile.createRollingWriter();
+            ManifestAvroWriter addWriter = manifestFile.createAvroWriter();
+            ManifestAvroWriter deleteWriter = manifestFile.createAvroWriter();
             CompactFileIdentifierSet matchedEntries = new CompactFileIdentifierSet();
             CompactFileIdentifierSet emittedDeletes = new CompactFileIdentifierSet();
             ReusableIdentifier identifier = new ReusableIdentifier();

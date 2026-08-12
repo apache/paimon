@@ -25,6 +25,7 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
@@ -85,6 +86,21 @@ public class AvroFileFormat extends FileFormat {
         return new RowAvroWriterFactory(type);
     }
 
+    private Schema createAvroSchema(RowType rowType) {
+        return AvroSchemaConverter.convertToSchema(rowType, options.get(AVRO_ROW_NAME_MAPPING));
+    }
+
+    public AvroBlockWriter createBlockWriter(
+            PositionOutputStream out, RowType rowType, String compression) throws IOException {
+        Schema schema = createAvroSchema(rowType);
+        AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
+        DataFileWriter<InternalRow> writer = new DataFileWriter<>(datumWriter);
+        writer.setCodec(createCodecFactory(compression));
+        writer.setFlushOnEveryBlock(false);
+        writer.create(schema, new CloseShieldOutputStream(out));
+        return new AvroBlockWriter(writer, out);
+    }
+
     @Override
     public Optional<SimpleStatsExtractor> createStatsExtractor(
             RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
@@ -119,9 +135,7 @@ public class AvroFileFormat extends FileFormat {
             this.factory =
                     new AvroWriterFactory<>(
                             (out, compression) -> {
-                                Schema schema =
-                                        AvroSchemaConverter.convertToSchema(
-                                                rowType, options.get(AVRO_ROW_NAME_MAPPING));
+                                Schema schema = createAvroSchema(rowType);
                                 AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
                                 DataFileWriter<InternalRow> dataFileWriter =
                                         new DataFileWriter<>(datumWriter);
