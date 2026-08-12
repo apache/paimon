@@ -427,6 +427,48 @@ public abstract class FileIOContractTestBase extends FileIOBehaviorTestBase {
         assertThat(contractFileIO().delete(directory, false)).isTrue();
     }
 
+    @Test
+    void testDeleteLastChildKeepsExplicitParentDirectory() throws IOException {
+        Path parent = new Path(contractBasePath(), randomName());
+        contractFileIO().mkdirs(parent);
+        Path child = new Path(parent, randomName());
+        writeBytes(child, DEFAULT_CONTENT, false);
+
+        assertThat(contractFileIO().delete(child, false)).isTrue();
+
+        assertThat(contractFileIO().getFileStatus(parent).isDir()).isTrue();
+        assertThat(contractFileIO().listStatus(parent)).isEmpty();
+    }
+
+    @Test
+    void testDeleteLastChildAllowsImplicitParentToDisappear() throws IOException {
+        Path parent = new Path(contractBasePath(), randomName());
+        Path child = new Path(parent, randomName());
+        writeBytes(child, DEFAULT_CONTENT, false);
+        assertThat(contractFileIO().getFileStatus(parent).isDir()).isTrue();
+
+        assertThat(contractFileIO().delete(child, false)).isTrue();
+
+        assertMissingOrEmptyDirectory(parent);
+    }
+
+    @Test
+    void testDeleteChildKeepsImplicitParentVisibleWhileSiblingExists() throws IOException {
+        Path parent = new Path(contractBasePath(), randomName());
+        Path deleted = new Path(parent, randomName());
+        Path sibling = new Path(parent, randomName());
+        writeBytes(deleted, new byte[] {1}, false);
+        writeBytes(sibling, new byte[] {2}, false);
+
+        assertThat(contractFileIO().delete(deleted, false)).isTrue();
+
+        assertThat(contractFileIO().getFileStatus(parent).isDir()).isTrue();
+        assertThat(readBytes(sibling)).containsExactly(2);
+        assertThat(contractFileIO().listStatus(parent))
+                .extracting(FileStatus::getPath)
+                .containsExactly(sibling);
+    }
+
     // ------------------------------------------------------------------------
     //  Rename
     // ------------------------------------------------------------------------
@@ -441,6 +483,54 @@ public abstract class FileIOContractTestBase extends FileIOBehaviorTestBase {
 
         assertThat(contractFileIO().exists(source)).isFalse();
         assertThat(readBytes(destination)).containsExactly(content);
+    }
+
+    @Test
+    void testRenameLastChildKeepsExplicitSourceParentDirectory() throws IOException {
+        Path sourceParent = new Path(contractBasePath(), randomName());
+        contractFileIO().mkdirs(sourceParent);
+        Path source = new Path(sourceParent, randomName());
+        Path destination = new Path(contractBasePath(), randomName());
+        writeBytes(source, DEFAULT_CONTENT, false);
+
+        assertThat(contractFileIO().rename(source, destination)).isTrue();
+
+        assertThat(contractFileIO().getFileStatus(sourceParent).isDir()).isTrue();
+        assertThat(contractFileIO().listStatus(sourceParent)).isEmpty();
+        assertThat(readBytes(destination)).containsExactly(DEFAULT_CONTENT);
+    }
+
+    @Test
+    void testRenameLastChildAllowsImplicitSourceParentToDisappear() throws IOException {
+        Path sourceParent = new Path(contractBasePath(), randomName());
+        Path source = new Path(sourceParent, randomName());
+        Path destination = new Path(contractBasePath(), randomName());
+        writeBytes(source, DEFAULT_CONTENT, false);
+        assertThat(contractFileIO().getFileStatus(sourceParent).isDir()).isTrue();
+
+        assertThat(contractFileIO().rename(source, destination)).isTrue();
+
+        assertMissingOrEmptyDirectory(sourceParent);
+        assertThat(readBytes(destination)).containsExactly(DEFAULT_CONTENT);
+    }
+
+    @Test
+    void testRenameChildKeepsImplicitSourceParentVisibleWhileSiblingExists() throws IOException {
+        Path sourceParent = new Path(contractBasePath(), randomName());
+        Path source = new Path(sourceParent, randomName());
+        Path sibling = new Path(sourceParent, randomName());
+        Path destination = new Path(contractBasePath(), randomName());
+        writeBytes(source, new byte[] {1}, false);
+        writeBytes(sibling, new byte[] {2}, false);
+
+        assertThat(contractFileIO().rename(source, destination)).isTrue();
+
+        assertThat(contractFileIO().getFileStatus(sourceParent).isDir()).isTrue();
+        assertThat(readBytes(sibling)).containsExactly(2);
+        assertThat(contractFileIO().listStatus(sourceParent))
+                .extracting(FileStatus::getPath)
+                .containsExactly(sibling);
+        assertThat(readBytes(destination)).containsExactly(1);
     }
 
     @Test
@@ -792,6 +882,14 @@ public abstract class FileIOContractTestBase extends FileIOBehaviorTestBase {
             } catch (IOException ignoredAtClose) {
             }
         }
+    }
+
+    private void assertMissingOrEmptyDirectory(Path path) throws IOException {
+        if (!contractFileIO().exists(path)) {
+            return;
+        }
+        assertThat(contractFileIO().getFileStatus(path).isDir()).isTrue();
+        assertThat(contractFileIO().listStatus(path)).isEmpty();
     }
 
     private static byte[] readAll(SeekableInputStream in) throws IOException {

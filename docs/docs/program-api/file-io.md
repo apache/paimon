@@ -61,6 +61,13 @@ that the data is persistent and visible. Writing a file below a missing director
 parent paths visible as directories through `exists(...)` and `getFileStatus(...)`. Object store
 implementations do not need to create a physical directory marker for every parent.
 
+A missing directory successfully created by `mkdirs(...)` before its descendants are written is
+explicit: deleting or moving its last child does not delete that directory. A parent that becomes
+visible only because a descendant was written is implicit. It must remain visible while any
+descendant exists, but after the last descendant is deleted or moved away it may either remain as
+an empty directory or become missing. This difference does not require callers to inspect physical
+directory markers.
+
 ## File Status and Listing
 
 `getFileStatus(...)` returns a `FileStatus` for an existing path. `getPath()` returns the path,
@@ -93,7 +100,8 @@ from `getFileStatus(...)`, without requiring a separate `exists(...)` call.
 - `rename(...)` moves a file or directory to the exact destination path. Call it with an existing
   source, a different destination that does not exist, and an existing destination parent in the
   same underlying file system. On success, it returns `true`, removes the source path, and preserves
-  the file content or complete directory tree.
+  the file content or complete directory tree. Moving the last descendant out of an explicit source
+  parent leaves that parent as an empty directory; an implicit source parent may become missing.
 - `copyFile(...)` copies the source bytes to the exact destination. An existing destination is
   replaced only when `overwrite=true`. When a source directory contains files only,
   `copyFiles(...)` applies the same behavior to each direct file.
