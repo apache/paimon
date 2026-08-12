@@ -24,22 +24,21 @@ import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
@@ -59,388 +58,226 @@ public class IndexManifestFileHandler {
     }
 
     String write(@Nullable String previousIndexManifest, List<IndexManifestEntry> newIndexFiles) {
-        Map<String, ChangePlan> plans = createChangePlans(newIndexFiles);
-        observePreviousGlobalDeletionVectors(previousIndexManifest, plans);
-        CloseableIterator<BinaryIndexManifestEntry> previous =
+        List<IndexManifestEntry> entries =
                 previousIndexManifest == null
-                        ? CloseableIterator.empty()
-                        : indexManifestFile.scan(
-                                previousIndexManifest, BinaryIndexManifestEntry.FULL_PROJECTION);
-        return indexManifestFile.writeWithoutRolling(new MergedEntries(previous, plans));
+                        ? new ArrayList<>()
+                        : indexManifestFile.read(previousIndexManifest);
+        for (IndexManifestEntry entry : entries) {
+            checkArgument(entry.kind() == FileKind.ADD);
+        }
+
+        Map<String, List<IndexManifestEntry>> previous = separateIndexEntries(entries);
+        Map<String, List<IndexManifestEntry>> current = separateIndexEntries(newIndexFiles);
+
+        List<IndexManifestEntry> indexEntries = new ArrayList<>();
+        Set<String> indexes = new HashSet<>();
+        indexes.addAll(previous.keySet());
+        indexes.addAll(current.keySet());
+        for (String indexName : indexes) {
+            indexEntries.addAll(
+                    getIndexManifestFileCombine(indexName)
+                            .combine(
+                                    previous.getOrDefault(indexName, Collections.emptyList()),
+                                    current.getOrDefault(indexName, Collections.emptyList())));
+        }
+
+        return indexManifestFile.writeWithoutRolling(indexEntries);
     }
 
-    private Map<String, ChangePlan> createChangePlans(List<IndexManifestEntry> newIndexFiles) {
-        Map<String, List<IndexManifestEntry>> entriesByType = new LinkedHashMap<>();
-        for (IndexManifestEntry entry : newIndexFiles) {
-            entriesByType
-                    .computeIfAbsent(entry.indexFile().indexType(), ignored -> new ArrayList<>())
-                    .add(entry);
-        }
+    private Map<String, List<IndexManifestEntry>> separateIndexEntries(
+            List<IndexManifestEntry> indexFiles) {
+        Map<String, List<IndexManifestEntry>> result = new HashMap<>();
 
-        Map<String, ChangePlan> plans = new LinkedHashMap<>();
-        for (Map.Entry<String, List<IndexManifestEntry>> entry : entriesByType.entrySet()) {
-            String indexType = entry.getKey();
-            ChangePlan plan;
-            if (!DELETION_VECTORS_INDEX.equals(indexType) && !HASH_INDEX.equals(indexType)) {
-                plan = new GlobalIndexChangePlan(entry.getValue());
-            } else if (DELETION_VECTORS_INDEX.equals(indexType)
-                    && BucketMode.BUCKET_UNAWARE == bucketMode) {
-                plan = new GlobalDeletionVectorChangePlan(entry.getValue());
-            } else {
-                plan = new BucketedChangePlan(entry.getValue());
-            }
-            plans.put(indexType, plan);
+        for (IndexManifestEntry entry : indexFiles) {
+            String indexType = entry.indexFile().indexType();
+            result.computeIfAbsent(indexType, k -> new ArrayList<>()).add(entry);
         }
-        return plans;
+        return result;
     }
 
-    private void observePreviousGlobalDeletionVectors(
-            @Nullable String previousIndexManifest, Map<String, ChangePlan> plans) {
-        boolean needsObservation =
-                plans.values().stream().anyMatch(ChangePlan::needsPreviousObservation);
-        if (!needsObservation) {
-            return;
+    private IndexManifestFileCombiner getIndexManifestFileCombine(String indexType) {
+        if (!DELETION_VECTORS_INDEX.equals(indexType) && !HASH_INDEX.equals(indexType)) {
+            return new GlobalIndexCombiner();
         }
 
-        if (previousIndexManifest != null) {
-            try (CloseableIterator<BinaryIndexManifestEntry> previous =
-                    indexManifestFile.scan(
-                            previousIndexManifest, BinaryIndexManifestEntry.FULL_PROJECTION)) {
-                while (previous.hasNext()) {
-                    BinaryIndexManifestEntry binary = previous.next();
-                    checkArgument(binary != null && binary.isAdd());
-                    ChangePlan plan = plans.get(binary.indexType().toString());
-                    if (plan != null && plan.needsPreviousObservation()) {
-                        plan.observePrevious(binary.copy());
-                    }
-                }
-            } catch (RuntimeException e) {
-                throw e;
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to scan previous index manifest.", e);
-            }
-        }
-
-        for (ChangePlan plan : plans.values()) {
-            if (plan.needsPreviousObservation()) {
-                plan.finishObservation();
-            }
+        if (DELETION_VECTORS_INDEX.equals(indexType) && BucketMode.BUCKET_UNAWARE == bucketMode) {
+            return new GlobalCombiner();
+        } else {
+            return new BucketedCombiner();
         }
     }
 
-    private abstract static class ChangePlan {
-
-        boolean needsPreviousObservation() {
-            return false;
-        }
-
-        void observePrevious(IndexManifestEntry entry) {}
-
-        void finishObservation() {}
-
-        abstract boolean retainPrevious(IndexManifestEntry entry);
-
-        void finishPrevious() {}
-
-        abstract List<IndexManifestEntry> additions();
+    interface IndexManifestFileCombiner {
+        List<IndexManifestEntry> combine(
+                List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles);
     }
 
-    private static class GlobalDeletionVectorChangePlan extends ChangePlan {
-
-        private final List<IndexManifestEntry> changes;
-        private final Set<String> touchedIndexFiles = new HashSet<>();
-        private final Set<String> touchedDataFiles = new HashSet<>();
-        private final Map<String, IndexManifestEntry> touchedPrevious = new HashMap<>();
-        private final Set<String> existingDeletionVectors = new HashSet<>();
-        private List<IndexManifestEntry> additions;
-
-        private GlobalDeletionVectorChangePlan(List<IndexManifestEntry> changes) {
-            this.changes = changes;
-            for (IndexManifestEntry change : changes) {
-                touchedIndexFiles.add(change.indexFile().fileName());
-                LinkedHashMap<String, DeletionVectorMeta> ranges = change.indexFile().dvRanges();
-                if (ranges != null) {
-                    touchedDataFiles.addAll(ranges.keySet());
-                }
-            }
-        }
+    /**
+     * We combine the previous and new index files by the file name. This is only used for tables
+     * without bucket.
+     */
+    static class GlobalCombiner implements IndexManifestFileCombiner {
 
         @Override
-        boolean needsPreviousObservation() {
-            return true;
-        }
-
-        @Override
-        void observePrevious(IndexManifestEntry entry) {
-            if (touchedIndexFiles.contains(entry.indexFile().fileName())) {
-                touchedPrevious.put(entry.indexFile().fileName(), entry);
-            }
-            LinkedHashMap<String, DeletionVectorMeta> ranges = entry.indexFile().dvRanges();
-            if (ranges != null) {
-                for (String dataFile : ranges.keySet()) {
-                    if (touchedDataFiles.contains(dataFile)) {
-                        existingDeletionVectors.add(dataFile);
-                    }
+        public List<IndexManifestEntry> combine(
+                List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles) {
+            Map<String, IndexManifestEntry> indexEntries = new HashMap<>();
+            Set<String> dvDataFiles = new HashSet<>();
+            for (IndexManifestEntry entry : prevIndexFiles) {
+                indexEntries.put(entry.indexFile().fileName(), entry);
+                LinkedHashMap<String, DeletionVectorMeta> dvRanges = entry.indexFile().dvRanges();
+                if (dvRanges != null) {
+                    dvDataFiles.addAll(dvRanges.keySet());
                 }
             }
-        }
 
-        @Override
-        void finishObservation() {
-            Map<String, IndexManifestEntry> finalTouchedEntries =
-                    new LinkedHashMap<>(touchedPrevious);
-            for (IndexManifestEntry change : changes) {
-                String fileName = change.indexFile().fileName();
-                LinkedHashMap<String, DeletionVectorMeta> ranges = change.indexFile().dvRanges();
-                if (change.kind() == FileKind.ADD) {
+            for (IndexManifestEntry entry : newIndexFiles) {
+                String fileName = entry.indexFile().fileName();
+                LinkedHashMap<String, DeletionVectorMeta> dvRanges = entry.indexFile().dvRanges();
+                if (entry.kind() == FileKind.ADD) {
                     checkState(
-                            !finalTouchedEntries.containsKey(fileName),
+                            !indexEntries.containsKey(fileName),
                             "Trying to add file %s which is already added.",
                             fileName);
-                    if (ranges != null) {
-                        for (String dataFile : ranges.keySet()) {
+                    if (dvRanges != null) {
+                        for (String dataFile : dvRanges.keySet()) {
                             checkState(
-                                    existingDeletionVectors.add(dataFile),
+                                    !dvDataFiles.contains(dataFile),
                                     "Trying to add dv for data file %s which is already added.",
                                     dataFile);
+                            dvDataFiles.add(dataFile);
                         }
                     }
-                    finalTouchedEntries.put(fileName, change);
+                    indexEntries.put(fileName, entry);
                 } else {
                     checkState(
-                            finalTouchedEntries.containsKey(fileName),
+                            indexEntries.containsKey(fileName),
                             "Trying to delete file %s which is not exists.",
                             fileName);
-                    if (ranges != null) {
-                        for (String dataFile : ranges.keySet()) {
+                    if (dvRanges != null) {
+                        for (String dataFile : dvRanges.keySet()) {
                             checkState(
-                                    existingDeletionVectors.remove(dataFile),
+                                    dvDataFiles.contains(dataFile),
                                     "Trying to delete dv for data file %s which is not exists.",
                                     dataFile);
+                            dvDataFiles.remove(dataFile);
                         }
                     }
-                    finalTouchedEntries.remove(fileName);
+                    indexEntries.remove(fileName);
                 }
             }
-            additions = new ArrayList<>(finalTouchedEntries.values());
-        }
-
-        @Override
-        boolean retainPrevious(IndexManifestEntry entry) {
-            return !touchedIndexFiles.contains(entry.indexFile().fileName());
-        }
-
-        @Override
-        List<IndexManifestEntry> additions() {
-            return additions;
+            return new ArrayList<>(indexEntries.values());
         }
     }
 
-    private static class BucketedChangePlan extends ChangePlan {
-
-        private final Set<BucketIdentifier> changed = new HashSet<>();
-        private final Map<BucketIdentifier, IndexManifestEntry> added = new LinkedHashMap<>();
-
-        private BucketedChangePlan(List<IndexManifestEntry> changes) {
-            for (IndexManifestEntry change : changes) {
-                changed.add(identifier(change));
-            }
-            for (IndexManifestEntry change : changes) {
-                if (change.kind() == FileKind.ADD) {
-                    added.put(identifier(change), change);
-                }
-            }
-        }
+    /** We combine the previous and new index files by {@link BucketIdentifier}. */
+    static class BucketedCombiner implements IndexManifestFileCombiner {
 
         @Override
-        boolean retainPrevious(IndexManifestEntry entry) {
-            return !changed.contains(identifier(entry));
-        }
+        public List<IndexManifestEntry> combine(
+                List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles) {
+            Map<BucketIdentifier, IndexManifestEntry> indexEntries = new HashMap<>();
+            for (IndexManifestEntry entry : prevIndexFiles) {
+                indexEntries.put(identifier(entry), entry);
+            }
 
-        @Override
-        List<IndexManifestEntry> additions() {
-            return new ArrayList<>(added.values());
+            // The deleted entry is processed first to avoid overwriting a new entry.
+            List<IndexManifestEntry> removed =
+                    newIndexFiles.stream()
+                            .filter(f -> f.kind() == FileKind.DELETE)
+                            .collect(Collectors.toList());
+            List<IndexManifestEntry> added =
+                    newIndexFiles.stream()
+                            .filter(f -> f.kind() == FileKind.ADD)
+                            .collect(Collectors.toList());
+            for (IndexManifestEntry entry : removed) {
+                indexEntries.remove(identifier(entry));
+            }
+            for (IndexManifestEntry entry : added) {
+                indexEntries.put(identifier(entry), entry);
+            }
+            return new ArrayList<>(indexEntries.values());
         }
     }
 
-    private static class GlobalIndexChangePlan extends ChangePlan {
+    /** We combine the previous and new index files by file name. */
+    static class GlobalIndexCombiner implements IndexManifestFileCombiner {
 
-        private final List<String> deleted = new ArrayList<>();
-        private final Set<String> deletedNames = new HashSet<>();
-        private final Set<String> changed = new HashSet<>();
-        private final Set<String> existingDeleted = new HashSet<>();
-        private final List<IndexManifestEntry> added = new ArrayList<>();
-        private final Map<String, IndexManifestEntry> finalAdded = new LinkedHashMap<>();
-
-        private GlobalIndexChangePlan(List<IndexManifestEntry> changes) {
-            for (IndexManifestEntry change : changes) {
-                String fileName = change.indexFile().fileName();
-                changed.add(fileName);
-                if (change.kind() == FileKind.DELETE) {
-                    deleted.add(fileName);
-                    deletedNames.add(fileName);
-                } else {
-                    added.add(change);
-                    finalAdded.put(fileName, change);
-                }
+        @Override
+        public List<IndexManifestEntry> combine(
+                List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles) {
+            Map<String, IndexManifestEntry> indexEntries = new HashMap<>();
+            for (IndexManifestEntry entry : prevIndexFiles) {
+                indexEntries.put(entry.indexFile().fileName(), entry);
             }
-        }
 
-        @Override
-        boolean needsPreviousObservation() {
-            return true;
-        }
-
-        @Override
-        void observePrevious(IndexManifestEntry entry) {
-            String fileName = entry.indexFile().fileName();
-            if (deletedNames.contains(fileName)) {
-                existingDeleted.add(fileName);
-            } else {
-                validateRetainedIndexFile(entry, added);
-            }
-        }
-
-        @Override
-        void finishObservation() {
-            Set<String> remaining = new HashSet<>(existingDeleted);
-            for (String fileName : deleted) {
+            // The deleted entry is processed first to avoid overwriting a new entry.
+            List<IndexManifestEntry> removed =
+                    newIndexFiles.stream()
+                            .filter(f -> f.kind() == FileKind.DELETE)
+                            .collect(Collectors.toList());
+            List<IndexManifestEntry> added =
+                    newIndexFiles.stream()
+                            .filter(f -> f.kind() == FileKind.ADD)
+                            .collect(Collectors.toList());
+            for (IndexManifestEntry entry : removed) {
+                String fileName = entry.indexFile().fileName();
                 checkState(
-                        remaining.remove(fileName),
+                        indexEntries.containsKey(fileName),
                         "Trying to delete global index file %s which does not exist.",
                         fileName);
+                indexEntries.remove(fileName);
             }
-        }
-
-        @Override
-        boolean retainPrevious(IndexManifestEntry entry) {
-            return !changed.contains(entry.indexFile().fileName());
-        }
-
-        @Override
-        List<IndexManifestEntry> additions() {
-            return new ArrayList<>(finalAdded.values());
-        }
-
-        private static void validateRetainedIndexFile(
-                IndexManifestEntry retained, List<IndexManifestEntry> addedIndexFiles) {
-            GlobalIndexMeta retainedMeta = retained.indexFile().globalIndexMeta();
-            if (retainedMeta == null) {
-                return;
+            validateRetainedIndexFiles(indexEntries.values(), added);
+            for (IndexManifestEntry entry : added) {
+                indexEntries.put(entry.indexFile().fileName(), entry);
             }
+            return new ArrayList<>(indexEntries.values());
+        }
 
-            for (IndexManifestEntry added : addedIndexFiles) {
-                GlobalIndexMeta addedMeta = added.indexFile().globalIndexMeta();
-                if (addedMeta == null
-                        || (retainedMeta.sourceMeta() != null
-                                && addedMeta.sourceMeta() != null
-                                && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
-                                        retainedMeta.sourceMeta())
-                                && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
-                                        addedMeta.sourceMeta()))
-                        || retainedMeta.indexFieldId() != addedMeta.indexFieldId()
-                        || (Arrays.equals(retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
-                                && !Range.intersect(
-                                        retainedMeta.rowRangeStart(),
-                                        retainedMeta.rowRangeEnd(),
-                                        addedMeta.rowRangeStart(),
-                                        addedMeta.rowRangeEnd()))) {
+        private void validateRetainedIndexFiles(
+                Iterable<IndexManifestEntry> retainedIndexFiles,
+                List<IndexManifestEntry> addedIndexFiles) {
+            for (IndexManifestEntry retained : retainedIndexFiles) {
+                GlobalIndexMeta retainedMeta = retained.indexFile().globalIndexMeta();
+                if (retainedMeta == null) {
                     continue;
                 }
 
-                throw new IllegalStateException(
-                        String.format(
-                                "Trying to add global index file %s of type %s for index field %s"
-                                        + " with row range [%s, %s], but previous file %s still exists"
-                                        + " with overlapping row range [%s, %s]. Remove the previous file first.",
-                                added.indexFile().fileName(),
-                                added.indexFile().indexType(),
-                                addedMeta.indexFieldId(),
-                                addedMeta.rowRangeStart(),
-                                addedMeta.rowRangeEnd(),
-                                retained.indexFile().fileName(),
-                                retainedMeta.rowRangeStart(),
-                                retainedMeta.rowRangeEnd()));
-            }
-        }
-    }
+                for (IndexManifestEntry added : addedIndexFiles) {
+                    GlobalIndexMeta addedMeta = added.indexFile().globalIndexMeta();
+                    if (addedMeta == null
+                            || (retainedMeta.sourceMeta() != null
+                                    && addedMeta.sourceMeta() != null
+                                    && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
+                                            retainedMeta.sourceMeta())
+                                    && !DataEvolutionIndexSourceMeta.isDataEvolutionMeta(
+                                            addedMeta.sourceMeta()))
+                            || retainedMeta.indexFieldId() != addedMeta.indexFieldId()
+                            || (Arrays.equals(
+                                            retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
+                                    && !Range.intersect(
+                                            retainedMeta.rowRangeStart(),
+                                            retainedMeta.rowRangeEnd(),
+                                            addedMeta.rowRangeStart(),
+                                            addedMeta.rowRangeEnd()))) {
+                        continue;
+                    }
 
-    private static class MergedEntries implements CloseableIterator<IndexManifestEntry> {
-
-        private final CloseableIterator<BinaryIndexManifestEntry> previous;
-        private final Map<String, ChangePlan> plans;
-        private final Iterator<ChangePlan> planIterator;
-        private Iterator<IndexManifestEntry> additions;
-        private IndexManifestEntry next;
-        private boolean previousFinished;
-        private boolean previousClosed;
-
-        private MergedEntries(
-                CloseableIterator<BinaryIndexManifestEntry> previous,
-                Map<String, ChangePlan> plans) {
-            this.previous = previous;
-            this.plans = plans;
-            this.planIterator = plans.values().iterator();
-        }
-
-        @Override
-        public boolean hasNext() {
-            while (next == null && !previousFinished && previous.hasNext()) {
-                BinaryIndexManifestEntry binary = previous.next();
-                checkArgument(binary != null && binary.isAdd());
-                IndexManifestEntry entry = binary.copy();
-                ChangePlan plan = plans.get(entry.indexFile().indexType());
-                if (plan == null || plan.retainPrevious(entry)) {
-                    next = entry;
+                    throw new IllegalStateException(
+                            String.format(
+                                    "Trying to add global index file %s of type %s for index field %s"
+                                            + " with row range [%s, %s], but previous file %s still exists"
+                                            + " with overlapping row range [%s, %s]. Remove the previous file first.",
+                                    added.indexFile().fileName(),
+                                    added.indexFile().indexType(),
+                                    addedMeta.indexFieldId(),
+                                    addedMeta.rowRangeStart(),
+                                    addedMeta.rowRangeEnd(),
+                                    retained.indexFile().fileName(),
+                                    retainedMeta.rowRangeStart(),
+                                    retainedMeta.rowRangeEnd()));
                 }
-            }
-            if (next != null) {
-                return true;
-            }
-            if (!previousFinished) {
-                previousFinished = true;
-                closePrevious();
-                for (ChangePlan plan : plans.values()) {
-                    plan.finishPrevious();
-                }
-            }
-            while (next == null) {
-                if (additions != null && additions.hasNext()) {
-                    next = additions.next();
-                    break;
-                }
-                if (!planIterator.hasNext()) {
-                    break;
-                }
-                additions = planIterator.next().additions().iterator();
-            }
-            return next != null;
-        }
-
-        @Override
-        public IndexManifestEntry next() {
-            if (!hasNext()) {
-                throw new NoSuchElementException();
-            }
-            IndexManifestEntry result = next;
-            next = null;
-            return result;
-        }
-
-        @Override
-        public void close() {
-            closePrevious();
-        }
-
-        private void closePrevious() {
-            if (previousClosed) {
-                return;
-            }
-            previousClosed = true;
-            try {
-                previous.close();
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to close previous index manifest.", e);
             }
         }
     }

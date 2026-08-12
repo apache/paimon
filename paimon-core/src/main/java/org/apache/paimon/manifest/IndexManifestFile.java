@@ -136,16 +136,6 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
         return handler.write(previousIndexManifest, newIndexFiles);
     }
 
-    String writeWithoutRolling(CloseableIterator<IndexManifestEntry> entries) {
-        try (CloseableIterator<IndexManifestEntry> closeableEntries = entries) {
-            return super.writeWithoutRolling(closeableEntries).getKey();
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to close index manifest entries.", e);
-        }
-    }
-
     /** Creator of {@link IndexManifestFile}. */
     public static class Factory {
 

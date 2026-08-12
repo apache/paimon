@@ -34,11 +34,6 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 /** Reusable binary view of a projected index manifest entry. */
 public final class BinaryIndexManifestEntry {
 
-    private static final IndexManifestEntrySerializer FULL_SERIALIZER =
-            new IndexManifestEntrySerializer();
-
-    public static final Projection FULL_PROJECTION =
-            Projection.create(IndexManifestEntry.MANIFEST_ROW_TYPE);
     public static final Projection GLOBAL_INDEX_PROJECTION = createGlobalIndexProjection();
 
     private final Projection projection;
@@ -153,14 +148,6 @@ public final class BinaryIndexManifestEntry {
                 requiredPosition(projection.extraFieldIdsPosition, GlobalIndexMeta.EXTRA_FIELD_IDS);
         InternalRow global = globalIndex();
         return !global.isNullAt(position) && global.getArray(position).size() > 0;
-    }
-
-    /** Copies this reusable view into a complete, independently owned manifest entry. */
-    public IndexManifestEntry copy() {
-        checkState(
-                projection.projectedType.equals(IndexManifestEntry.MANIFEST_ROW_TYPE),
-                "A complete index manifest projection is required to copy an entry.");
-        return FULL_SERIALIZER.fromRow(current());
     }
 
     private InternalRow globalIndex() {

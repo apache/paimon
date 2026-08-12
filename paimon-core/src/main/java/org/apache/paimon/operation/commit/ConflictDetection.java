@@ -28,7 +28,6 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.BinaryIndexManifestEntry;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -38,7 +37,6 @@ import org.apache.paimon.manifest.SimpleFileEntryWithDV;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
@@ -204,7 +202,13 @@ public class ConflictDetection {
             // If the delta file is <DELETE deltaFile2, DELETE dv2>,
             // then the base file must be <ADD baseFile2, ADD dv2>.
             try {
-                baseEntries = buildBaseEntriesWithDV(baseEntries, latestSnapshot);
+                baseEntries =
+                        buildBaseEntriesWithDV(
+                                baseEntries,
+                                latestSnapshot.indexManifest() == null
+                                        ? Collections.emptyList()
+                                        : indexFileHandler.readManifest(
+                                                latestSnapshot.indexManifest()));
                 deltaEntries =
                         buildDeltaEntriesWithDV(baseEntries, deltaEntries, deltaIndexEntries);
             } catch (Throwable e) {
@@ -839,49 +843,6 @@ public class ConflictDetection {
             }
         }
 
-        return attachDeletionVectors(baseEntries, fileNameToDVFileName);
-    }
-
-    private List<SimpleFileEntry> buildBaseEntriesWithDV(
-            List<SimpleFileEntry> baseEntries, Snapshot snapshot) {
-        if (baseEntries.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        Set<String> baseFileNames =
-                baseEntries.stream().map(SimpleFileEntry::fileName).collect(Collectors.toSet());
-        Map<String, String> fileNameToDVFileName = new HashMap<>();
-        try (CloseableIterator<BinaryIndexManifestEntry> entries =
-                indexFileHandler.scan(snapshot, BinaryIndexManifestEntry.FULL_PROJECTION)) {
-            while (entries.hasNext()) {
-                BinaryIndexManifestEntry binaryEntry = entries.next();
-                if (!binaryEntry.isAdd()
-                        || !DELETION_VECTORS_INDEX.equals(binaryEntry.indexType().toString())) {
-                    continue;
-                }
-                IndexFileMeta indexFile = binaryEntry.copy().indexFile();
-                LinkedHashMap<String, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
-                if (dvRanges == null) {
-                    continue;
-                }
-                for (DeletionVectorMeta value : dvRanges.values()) {
-                    if (!baseFileNames.contains(value.dataFileName())) {
-                        continue;
-                    }
-                    checkState(
-                            !fileNameToDVFileName.containsKey(value.dataFileName()),
-                            "One file should correspond to only one dv entry.");
-                    fileNameToDVFileName.put(value.dataFileName(), indexFile.fileName());
-                }
-            }
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to scan deletion vectors for conflict checking.", e);
-        }
-        return attachDeletionVectors(baseEntries, fileNameToDVFileName);
-    }
-
-    private static List<SimpleFileEntry> attachDeletionVectors(
-            List<SimpleFileEntry> baseEntries, Map<String, String> fileNameToDVFileName) {
         // Attach dv name to file entries.
         List<SimpleFileEntry> entriesWithDV = new ArrayList<>(baseEntries.size());
         for (SimpleFileEntry fileEntry : baseEntries) {

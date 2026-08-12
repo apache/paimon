@@ -31,7 +31,6 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.manifest.BinaryIndexManifestEntry;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -77,7 +76,6 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
@@ -124,7 +122,6 @@ import static org.apache.paimon.partition.PartitionPredicate.createPartitionPred
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
-import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
  * Default implementation of {@link FileStoreCommit}.
@@ -819,24 +816,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // latest snapshot here guarantees that an index committed concurrently is either
             // deleted by this attempt or makes this attempt retry and is deleted by the next one.
             if (latestSnapshot != null && latestSnapshot.indexManifest() != null) {
-                try (CloseableIterator<BinaryIndexManifestEntry> entries =
-                        indexManifestFile.scan(
-                                latestSnapshot.indexManifest(),
-                                BinaryIndexManifestEntry.FULL_PROJECTION)) {
-                    while (entries.hasNext()) {
-                        BinaryIndexManifestEntry binaryEntry = entries.next();
-                        if (binaryEntry.hasGlobalIndexMeta()
-                                && materializedBuckets.contains(
-                                        Pair.of(
-                                                deserializeBinaryRow(binaryEntry.partitionBytes()),
-                                                binaryEntry.bucket()))) {
-                            indexFiles.add(binaryEntry.copy().toDeleteEntry());
-                        }
+                for (IndexManifestEntry entry :
+                        indexManifestFile.read(latestSnapshot.indexManifest())) {
+                    if (entry.indexFile().globalIndexMeta() != null
+                            && materializedBuckets.contains(
+                                    Pair.of(entry.partition(), entry.bucket()))) {
+                        indexFiles.add(entry.toDeleteEntry());
                     }
-                } catch (Exception e) {
-                    throw new RuntimeException("Failed to scan the latest index manifest.", e);
                 }
             }
+
             return new CommitChanges(
                     changes.compactTableFiles, changes.compactChangelog, indexFiles);
         };

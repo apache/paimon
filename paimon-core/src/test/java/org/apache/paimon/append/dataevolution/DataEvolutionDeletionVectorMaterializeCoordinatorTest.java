@@ -22,16 +22,17 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.manifest.BinaryIndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
-import org.apache.paimon.utils.CloseableIterator;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
+
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -54,8 +55,8 @@ public class DataEvolutionDeletionVectorMaterializeCoordinatorTest {
         when(table.coreOptions()).thenReturn(new CoreOptions(options));
         when(table.store()).thenReturn(store);
         when(store.newIndexFileHandler()).thenReturn(indexFileHandler);
-        when(indexFileHandler.scan(snapshot, BinaryIndexManifestEntry.FULL_PROJECTION))
-                .thenReturn(CloseableIterator.empty());
+        when(indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX))
+                .thenReturn(Collections.emptyList());
 
         DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
                 new DataEvolutionDeletionVectorMaterializeCoordinator(table, null, snapshot);
