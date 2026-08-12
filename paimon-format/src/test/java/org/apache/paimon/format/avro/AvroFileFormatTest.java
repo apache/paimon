@@ -340,9 +340,8 @@ public class AvroFileFormatTest {
         }
 
         try (AvroBlockReader blockReader = new AvroBlockReader(fileIO.newInputStream(file))) {
-            AvroRawBlock block = blockReader.nextRawBlock(null);
+            AvroRawBlock block = blockReader.nextBorrowedRawBlock();
             assertThat(block.recordCount()).isEqualTo(1);
-            assertThat(block.compressedSize()).isPositive();
             ByteBuffer decoded = block.decompress(null);
             assertThat(decoded.remaining()).isGreaterThan(payload.length);
             assertThat(decoded.get(10)).isEqualTo((byte) 7);

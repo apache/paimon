@@ -57,13 +57,6 @@ public final class RawBlock {
         return block.getNumEntries();
     }
 
-    public int compressedSize() {
-        if (decompressed) {
-            throw new IllegalStateException("The Avro block has already been decompressed.");
-        }
-        return block.getBlockSize();
-    }
-
     public ByteBuffer decompress(ByteBuffer reuse) throws IOException {
         if (!decompressed) {
             if (codec instanceof ZstandardCodec) {

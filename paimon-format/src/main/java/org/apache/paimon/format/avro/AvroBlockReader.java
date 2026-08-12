@@ -56,8 +56,7 @@ public final class AvroBlockReader implements Closeable {
         }
     }
 
-    /** Returns the writer schema stored in the Avro file header. */
-    public Schema schema() {
+    Schema schema() {
         return reader.getSchema();
     }
 
@@ -112,24 +111,19 @@ public final class AvroBlockReader implements Closeable {
      * to this method. Consume the block before advancing this reader.
      */
     public AvroRawBlock nextBorrowedRawBlock() throws IOException {
-        borrowedRawBlock = nextRawBlock(borrowedRawBlock);
-        return borrowedRawBlock;
-    }
-
-    /**
-     * Returns the next compressed block, optionally reusing the supplied holder and its storage.
-     *
-     * <p>A block returned with a non-null reuse argument remains valid only until that holder is
-     * reused again. The block can be skipped without decompression, decompressed lazily, or copied
-     * directly to a compatible Avro writer.
-     */
-    public AvroRawBlock nextRawBlock(@Nullable AvroRawBlock reuse) throws IOException {
         RawBlock block =
                 replaceAvroRuntimeException(
-                        () -> reader.nextRawBlock(reuse == null ? null : reuse.rawBlock()));
-        AvroRawBlock result = reuse == null ? new AvroRawBlock(block) : reuse.replace(block);
-        currentBlockRecordCount = result.recordCount();
-        return result;
+                        () ->
+                                reader.nextRawBlock(
+                                        borrowedRawBlock == null
+                                                ? null
+                                                : borrowedRawBlock.rawBlock()));
+        borrowedRawBlock =
+                borrowedRawBlock == null
+                        ? new AvroRawBlock(block)
+                        : borrowedRawBlock.replace(block);
+        currentBlockRecordCount = borrowedRawBlock.recordCount();
+        return borrowedRawBlock;
     }
 
     /** Returns the record count of the last block returned by a block-reading method. */

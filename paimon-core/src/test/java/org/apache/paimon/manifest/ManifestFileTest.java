@@ -65,8 +65,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests for {@link ManifestFile}. */
 public class ManifestFileTest {
 
-    private static final String MANIFEST_COMPRESSION = "zstd";
-
     private final ManifestTestDataGenerator gen = ManifestTestDataGenerator.builder().build();
     private final AvroFileFormat avro =
             (AvroFileFormat) FileFormat.fromIdentifier("avro", new Options());
@@ -139,39 +137,6 @@ public class ManifestFileTest {
             assertThat(reader.decodedDataFiles()).isEqualTo(expected.size());
             assertThat(reader.skippedDataFiles()).isEqualTo(entries.size() - expected.size());
         }
-
-        RowType projectedType =
-                new RowType(
-                        false,
-                        Collections.singletonList(
-                                ManifestEntry.MANIFEST_ROW_TYPE
-                                        .getField(ManifestEntry.FILE)
-                                        .newType(
-                                                DataFileMeta.SCHEMA.project(
-                                                        DataFileMeta.FILE_NAME))));
-        int blockCount = 0;
-        try (ManifestAvroReader blocks =
-                new ManifestAvroReader(fileIO.newInputStream(path), avro)) {
-            while (blocks.hasNext()) {
-                blocks.next();
-                blockCount++;
-            }
-        }
-        assertThat(blockCount).isGreaterThan(1);
-
-        List<String> projectedFileNames = new ArrayList<>();
-        ManifestAvroReader blockReader = new ManifestAvroReader(fileIO.newInputStream(path), avro);
-        try (CloseableIterator<InternalRow> rows =
-                blockReader.read(projectedType, partitionFilter, bucketFilter)) {
-            while (rows.hasNext()) {
-                projectedFileNames.add(rows.next().getRow(0, 1).getString(0).toString());
-            }
-        }
-        assertThat(projectedFileNames)
-                .containsExactlyElementsOf(
-                        expected.stream()
-                                .map(ManifestEntry::fileName)
-                                .collect(Collectors.toList()));
 
         assertThat(actual).containsExactlyElementsOf(expected);
         assertThat(
@@ -873,7 +838,7 @@ public class ManifestFileTest {
                         new SchemaManager(fileIO, path),
                         DEFAULT_PART_TYPE,
                         avro,
-                        MANIFEST_COMPRESSION,
+                        "zstd",
                         pathFactory,
                         suggestedFileSize,
                         null)

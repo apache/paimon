@@ -88,9 +88,10 @@ public final class AvroRecordDecoder {
 
     /** Creates a decoder for one writer field. */
     public FieldDecoder createFieldDecoder(int position, @Nullable DataType readType) {
-        return new FieldDecoder(
+        FieldReader reader =
                 new FieldReaderFactory()
-                        .visit(recordSchema.getFields().get(position).schema(), readType));
+                        .visit(recordSchema.getFields().get(position).schema(), readType);
+        return new FieldDecoder(reader);
     }
 
     /** Reuses this decoder for another block. */
@@ -101,21 +102,6 @@ public final class AvroRecordDecoder {
         if (borrowedView == null || borrowedView.array() != bytes) {
             borrowedView = ByteBuffer.wrap(bytes);
         }
-    }
-
-    /** Reuses this decoder for another decompressed block. */
-    public void reset(ByteBuffer block) {
-        int position = block.position();
-        int length = block.remaining();
-        if (block.hasArray()) {
-            reset(block.array(), block.arrayOffset() + position, length);
-            return;
-        }
-
-        byte[] bytes = new byte[length];
-        block.get(bytes);
-        block.position(position);
-        reset(bytes, 0, length);
     }
 
     /** Returns whether a block has been supplied through {@link #reset(byte[], int, int)}. */

@@ -43,19 +43,14 @@ import java.util.NoSuchElementException;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
-/** Reader which exposes reusable raw blocks from a Manifest Avro file. */
+/**
+ * Schema-aware Avro reader which projects fields and filters before decoding data file metadata.
+ *
+ * <p>This reader also exposes reusable raw Avro blocks.
+ */
 public final class ManifestAvroReader implements AutoCloseable {
 
-    private static final String[] TOP_LEVEL_FIELDS = {
-        ManifestSchemaUtils.FORMAT_IDENTIFIER_FIELD,
-        ManifestEntry.KIND,
-        ManifestEntry.PARTITION,
-        ManifestEntry.BUCKET,
-        ManifestEntry.TOTAL_BUCKETS,
-        ManifestEntry.FILE
-    };
-
-    private final AvroBlockReader stream;
+    private final AvroBlockReader blockReader;
     private final DecoderContext decoderContext;
     private final boolean rawBlockCopySupported;
     private final ReadStatistics readStatistics = new ReadStatistics();
@@ -63,22 +58,23 @@ public final class ManifestAvroReader implements AutoCloseable {
     private long blockOrdinal = -1;
 
     ManifestAvroReader(InputStream input, AvroFileFormat avroFileFormat) throws IOException {
-        AvroBlockReader stream = null;
+        AvroBlockReader blockReader = null;
         try {
-            stream = new AvroBlockReader(input);
-            this.stream = stream;
-            this.decoderContext = new DecoderContext(stream.createRecordDecoder());
+            blockReader = new AvroBlockReader(input);
+            this.blockReader = blockReader;
+            this.decoderContext = new DecoderContext(blockReader.createRecordDecoder());
             this.rawBlockCopySupported =
-                    stream.supportsRawBlockCopy(avroFileFormat, ManifestEntry.MANIFEST_ROW_TYPE);
+                    blockReader.supportsRawBlockCopy(
+                            avroFileFormat, ManifestEntry.MANIFEST_ROW_TYPE);
         } catch (IOException | RuntimeException | Error failure) {
-            IOUtils.closeQuietly(stream == null ? input : stream);
+            IOUtils.closeQuietly(blockReader == null ? input : blockReader);
             throw failure;
         }
     }
 
     /** Returns whether another raw Avro block is available. */
     public boolean hasNext() throws IOException {
-        return stream.hasNextBlock();
+        return blockReader.hasNextBlock();
     }
 
     /** Returns the next raw block without decompressing it. */
@@ -89,7 +85,7 @@ public final class ManifestAvroReader implements AutoCloseable {
         return new RawBlock(
                 decoderContext,
                 rawBlockCopySupported,
-                stream.nextBorrowedRawBlock(),
+                blockReader.nextBorrowedRawBlock(),
                 ++blockOrdinal);
     }
 
@@ -159,7 +155,173 @@ public final class ManifestAvroReader implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
-        stream.close();
+        blockReader.close();
+    }
+
+    private static class ManifestRecordDecoder {
+
+        private static final String[] TOP_LEVEL_FIELDS = {
+            ManifestSchemaUtils.FORMAT_IDENTIFIER_FIELD,
+            ManifestEntry.KIND,
+            ManifestEntry.PARTITION,
+            ManifestEntry.BUCKET,
+            ManifestEntry.TOTAL_BUCKETS,
+            ManifestEntry.FILE
+        };
+
+        private final int projectedFieldCount;
+        private final int versionPosition;
+        private final int kindPosition;
+        private final int partitionPosition;
+        private final int bucketPosition;
+        private final int totalBucketsPosition;
+        private final int filePosition;
+        private final FieldDecoder fileReader;
+
+        private ManifestRecordDecoder(AvroRecordDecoder decoder, RowType projectedType) {
+            this.projectedFieldCount = projectedType.getFieldCount();
+            this.versionPosition =
+                    projectedType.getFieldIndex(ManifestSchemaUtils.FORMAT_IDENTIFIER_FIELD);
+            this.kindPosition = projectedType.getFieldIndex(ManifestEntry.KIND);
+            this.partitionPosition = projectedType.getFieldIndex(ManifestEntry.PARTITION);
+            this.bucketPosition = projectedType.getFieldIndex(ManifestEntry.BUCKET);
+            this.totalBucketsPosition = projectedType.getFieldIndex(ManifestEntry.TOTAL_BUCKETS);
+            this.filePosition = projectedType.getFieldIndex(ManifestEntry.FILE);
+
+            validateTopLevelFields(decoder);
+            // Manifest v2 has a fixed top-level layout, but DataFileMeta has gained nullable
+            // fields. Build this reader from the writer schema so legacy files with fewer nested
+            // fields still decode and expose the missing projected fields as null.
+            fileReader =
+                    decoder.createFieldDecoder(
+                            5, filePosition >= 0 ? projectedType.getTypeAt(filePosition) : null);
+        }
+
+        private GenericRow createRow() {
+            return new GenericRow(projectedFieldCount);
+        }
+
+        private boolean read(
+                AvroRecordDecoder decoder,
+                GenericRow row,
+                @Nullable PartitionPredicate partitionFilter,
+                @Nullable BucketFilter bucketFilter)
+                throws IOException {
+            if (!decoder.readRecordStart()) {
+                throw new IOException("Unexpected null or non-record Manifest Avro value.");
+            }
+
+            int version = decoder.readInt();
+            ManifestEntrySerializer.checkFormatIdentifier(version);
+            int kind = decoder.readInt();
+            boolean partitionNeededForFilter = partitionFilter != null || bucketFilter != null;
+            byte[] partitionBytes;
+            if (partitionPosition >= 0 || partitionNeededForFilter) {
+                partitionBytes = decoder.readBytes();
+            } else {
+                decoder.skipBytes();
+                partitionBytes = null;
+            }
+
+            BinaryRow partition =
+                    partitionNeededForFilter ? deserializeBinaryRow(partitionBytes) : null;
+            if (partitionFilter != null && !partitionFilter.test(partition)) {
+                skipBucketAndFile(decoder);
+                return false;
+            }
+
+            boolean bucketNeededForFilter = bucketFilter != null;
+            int bucket;
+            if (bucketPosition >= 0 || bucketNeededForFilter) {
+                bucket = decoder.readInt();
+            } else {
+                decoder.readInt();
+                bucket = 0;
+            }
+
+            int totalBuckets;
+            if (totalBucketsPosition >= 0 || bucketNeededForFilter) {
+                totalBuckets = decoder.readInt();
+            } else {
+                decoder.readInt();
+                totalBuckets = 0;
+            }
+
+            if (bucketFilter != null && !bucketFilter.test(partition, bucket, totalBuckets)) {
+                skipFile(decoder);
+                return false;
+            }
+
+            Object file;
+            if (filePosition >= 0) {
+                file = fileReader.read(decoder, row.getField(filePosition));
+            } else {
+                fileReader.skip(decoder);
+                file = null;
+            }
+
+            setProjected(row, versionPosition, version);
+            setProjected(row, kindPosition, (byte) kind);
+            setProjected(row, partitionPosition, partitionBytes);
+            setProjected(row, bucketPosition, bucket);
+            setProjected(row, totalBucketsPosition, totalBuckets);
+            setProjected(row, filePosition, file);
+            return true;
+        }
+
+        private void skipBucketAndFile(AvroRecordDecoder decoder) throws IOException {
+            decoder.readInt();
+            decoder.readInt();
+            skipFile(decoder);
+        }
+
+        private void skipFile(AvroRecordDecoder decoder) throws IOException {
+            fileReader.skip(decoder);
+        }
+
+        private static void setProjected(
+                GenericRow row, int outputPosition, @Nullable Object value) {
+            if (outputPosition >= 0) {
+                row.setField(outputPosition, value);
+            }
+        }
+
+        private static void validateTopLevelFields(AvroRecordDecoder decoder) {
+            if (decoder.fieldCount() != TOP_LEVEL_FIELDS.length) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Manifest Avro schema has %s top-level fields, expected %s.",
+                                decoder.fieldCount(), TOP_LEVEL_FIELDS.length));
+            }
+            for (int i = 0; i < TOP_LEVEL_FIELDS.length; i++) {
+                String actual = decoder.fieldName(i);
+                String expected = TOP_LEVEL_FIELDS[i];
+                if (!expected.equals(actual)) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Unexpected Manifest Avro field at position %s: expected %s but found %s.",
+                                    i, expected, actual));
+                }
+            }
+
+            validateFieldType(decoder, 0, FieldType.INT);
+            validateFieldType(decoder, 1, FieldType.INT);
+            validateFieldType(decoder, 2, FieldType.BYTES);
+            validateFieldType(decoder, 3, FieldType.INT);
+            validateFieldType(decoder, 4, FieldType.INT);
+            validateFieldType(decoder, 5, FieldType.RECORD);
+        }
+
+        private static void validateFieldType(
+                AvroRecordDecoder decoder, int position, FieldType expectedType) {
+            FieldType actualType = decoder.fieldType(position);
+            if (actualType != expectedType) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Unexpected Manifest Avro type for field %s: expected %s but found %s.",
+                                decoder.fieldName(position), expectedType, actualType));
+            }
+        }
     }
 
     /** Borrowed raw block which must be consumed before the enclosing reader advances. */
@@ -184,20 +346,23 @@ public final class ManifestAvroReader implements AutoCloseable {
         }
 
         /** Lazily decompresses this block and returns an iterator over one reusable row. */
-        public RowIterator toRows(RowType projectRowType) throws IOException {
-            return toRows(projectRowType, null, null, null);
+        public RowIterator toRows(RowType projectedType) throws IOException {
+            return toRows(projectedType, null, null, null);
         }
 
         private RowIterator toRows(
-                RowType projectRowType,
+                RowType projectedType,
                 @Nullable PartitionPredicate partitionFilter,
                 @Nullable BucketFilter bucketFilter,
                 @Nullable ReadStatistics readStatistics)
                 throws IOException {
-            ManifestEntryDecoder recordDecoder = decoderContext.recordDecoder(projectRowType);
+            ManifestRecordDecoder recordDecoder = decoderContext.recordDecoder(projectedType);
 
             ByteBuffer decompressed = decoderContext.decompress(block);
-            decoderContext.decoder.reset(decompressed);
+            decoderContext.decoder.reset(
+                    decompressed.array(),
+                    decompressed.arrayOffset() + decompressed.position(),
+                    decompressed.remaining());
             GenericRow row = recordDecoder.createRow();
             return new RowIterator(
                     blockRecordCount,
@@ -233,7 +398,7 @@ public final class ManifestAvroReader implements AutoCloseable {
 
         private @Nullable ByteBuffer decompressionBuffer;
         private RowType projectedRowType;
-        private ManifestEntryDecoder recordDecoder;
+        private ManifestRecordDecoder recordDecoder;
 
         private DecoderContext(AvroRecordDecoder decoder) {
             this.decoder = decoder;
@@ -244,9 +409,9 @@ public final class ManifestAvroReader implements AutoCloseable {
             return decompressionBuffer;
         }
 
-        private ManifestEntryDecoder recordDecoder(RowType rowType) {
+        private ManifestRecordDecoder recordDecoder(RowType rowType) {
             if (!rowType.equals(projectedRowType)) {
-                recordDecoder = new ManifestEntryDecoder(decoder, rowType);
+                recordDecoder = new ManifestRecordDecoder(decoder, rowType);
                 projectedRowType = rowType;
             }
             return recordDecoder;
@@ -257,7 +422,7 @@ public final class ManifestAvroReader implements AutoCloseable {
     public static final class RowIterator implements Iterator<GenericRow> {
 
         private final AvroRecordDecoder decoder;
-        private final ManifestEntryDecoder recordDecoder;
+        private final ManifestRecordDecoder recordDecoder;
         private final GenericRow row;
         private final @Nullable PartitionPredicate partitionFilter;
         private final @Nullable BucketFilter bucketFilter;
@@ -272,7 +437,7 @@ public final class ManifestAvroReader implements AutoCloseable {
         private RowIterator(
                 long recordCount,
                 AvroRecordDecoder decoder,
-                ManifestEntryDecoder recordDecoder,
+                ManifestRecordDecoder recordDecoder,
                 GenericRow row,
                 @Nullable PartitionPredicate partitionFilter,
                 @Nullable BucketFilter bucketFilter,
@@ -361,7 +526,7 @@ public final class ManifestAvroReader implements AutoCloseable {
 
         private void recordRead(boolean selected) {
             if (readStatistics != null) {
-                if (selected && recordDecoder.decodesDataFile()) {
+                if (selected && recordDecoder.filePosition >= 0) {
                     readStatistics.decodedDataFiles++;
                 } else {
                     readStatistics.skippedDataFiles++;
@@ -386,143 +551,5 @@ public final class ManifestAvroReader implements AutoCloseable {
 
         private long decodedDataFiles;
         private long skippedDataFiles;
-    }
-
-    private static final class ManifestEntryDecoder {
-
-        private final int projectedFieldCount;
-        private final int versionPosition;
-        private final int kindPosition;
-        private final int partitionPosition;
-        private final int bucketPosition;
-        private final int totalBucketsPosition;
-        private final int filePosition;
-        private final FieldDecoder fileReader;
-
-        private ManifestEntryDecoder(AvroRecordDecoder decoder, RowType projectedType) {
-            validateTopLevelSchema(decoder);
-            this.projectedFieldCount = projectedType.getFieldCount();
-            this.filePosition = projectedType.getFieldIndex(ManifestEntry.FILE);
-            this.versionPosition =
-                    projectedType.getFieldIndex(ManifestSchemaUtils.FORMAT_IDENTIFIER_FIELD);
-            this.kindPosition = projectedType.getFieldIndex(ManifestEntry.KIND);
-            this.partitionPosition = projectedType.getFieldIndex(ManifestEntry.PARTITION);
-            this.bucketPosition = projectedType.getFieldIndex(ManifestEntry.BUCKET);
-            this.totalBucketsPosition = projectedType.getFieldIndex(ManifestEntry.TOTAL_BUCKETS);
-
-            this.fileReader =
-                    decoder.createFieldDecoder(
-                            5, filePosition < 0 ? null : projectedType.getTypeAt(filePosition));
-        }
-
-        private GenericRow createRow() {
-            return new GenericRow(projectedFieldCount);
-        }
-
-        private boolean read(
-                AvroRecordDecoder decoder,
-                GenericRow row,
-                @Nullable PartitionPredicate partitionFilter,
-                @Nullable BucketFilter bucketFilter)
-                throws IOException {
-            if (!decoder.readRecordStart()) {
-                throw new IOException("Unexpected null or non-record Manifest Avro value.");
-            }
-
-            int version = decoder.readInt();
-            ManifestEntrySerializer.checkFormatIdentifier(version);
-            if (versionPosition >= 0) {
-                row.setField(versionPosition, version);
-            }
-
-            int kind = decoder.readInt();
-            if (kindPosition >= 0) {
-                row.setField(kindPosition, (byte) kind);
-            }
-
-            boolean partitionNeededForFilter = partitionFilter != null || bucketFilter != null;
-            byte[] partitionBytes;
-            if (partitionPosition < 0 && !partitionNeededForFilter) {
-                decoder.skipBytes();
-                partitionBytes = null;
-            } else {
-                partitionBytes = decoder.readBytes();
-                if (partitionPosition >= 0) {
-                    row.setField(partitionPosition, partitionBytes);
-                }
-            }
-
-            BinaryRow partition =
-                    partitionNeededForFilter ? deserializeBinaryRow(partitionBytes) : null;
-            if (partitionNeededForFilter) {
-                if (partitionFilter != null && !partitionFilter.test(partition)) {
-                    decoder.readInt();
-                    decoder.readInt();
-                    fileReader.skip(decoder);
-                    return false;
-                }
-            }
-
-            int bucket = decoder.readInt();
-            if (bucketPosition >= 0) {
-                row.setField(bucketPosition, bucket);
-            }
-
-            int totalBuckets = decoder.readInt();
-            if (totalBucketsPosition >= 0) {
-                row.setField(totalBucketsPosition, totalBuckets);
-            }
-
-            if (bucketFilter != null && !bucketFilter.test(partition, bucket, totalBuckets)) {
-                fileReader.skip(decoder);
-                return false;
-            }
-
-            if (filePosition < 0) {
-                fileReader.skip(decoder);
-            } else {
-                row.setField(filePosition, fileReader.read(decoder, row.getField(filePosition)));
-            }
-            return true;
-        }
-
-        private boolean decodesDataFile() {
-            return filePosition >= 0;
-        }
-
-        private static void validateTopLevelSchema(AvroRecordDecoder decoder) {
-            if (decoder.fieldCount() != TOP_LEVEL_FIELDS.length) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Manifest Avro schema has %s top-level fields, expected %s.",
-                                decoder.fieldCount(), TOP_LEVEL_FIELDS.length));
-            }
-
-            FieldType[] expectedTypes = {
-                FieldType.INT,
-                FieldType.INT,
-                FieldType.BYTES,
-                FieldType.INT,
-                FieldType.INT,
-                FieldType.RECORD
-            };
-            for (int i = 0; i < TOP_LEVEL_FIELDS.length; i++) {
-                String actualName = decoder.fieldName(i);
-                String expectedName = TOP_LEVEL_FIELDS[i];
-                if (!expectedName.equals(actualName)) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Unexpected Manifest Avro field at position %s: expected %s but found %s.",
-                                    i, expectedName, actualName));
-                }
-                FieldType actualType = decoder.fieldType(i);
-                if (actualType != expectedTypes[i]) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Unexpected Manifest Avro type for field %s: expected %s but found %s.",
-                                    actualName, expectedTypes[i], actualType));
-                }
-            }
-        }
     }
 }

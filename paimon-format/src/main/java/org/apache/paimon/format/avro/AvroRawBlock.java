@@ -48,11 +48,6 @@ public final class AvroRawBlock {
         return block.recordCount();
     }
 
-    /** Returns the compressed payload size. This block must not have been decompressed. */
-    public int compressedSize() {
-        return block.compressedSize();
-    }
-
     /**
      * Lazily decompresses this block, reusing the supplied heap buffer when possible.
      *

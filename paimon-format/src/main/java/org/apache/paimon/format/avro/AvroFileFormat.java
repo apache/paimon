@@ -85,12 +85,9 @@ public class AvroFileFormat extends FileFormat {
         return new RowAvroWriterFactory(type);
     }
 
-    public Schema createAvroSchema(RowType rowType) {
-        return AvroSchemaConverter.convertToSchema(rowType, options.get(AVRO_ROW_NAME_MAPPING));
-    }
-
-    public boolean supportsRawBlockCopy(RowType rowType, Schema encodedSchema) {
-        return createAvroSchema(rowType).equals(encodedSchema);
+    boolean supportsRawBlockCopy(RowType rowType, Schema encodedSchema) {
+        return AvroSchemaConverter.convertToSchema(rowType, options.get(AVRO_ROW_NAME_MAPPING))
+                .equals(encodedSchema);
     }
 
     @Override
@@ -127,7 +124,9 @@ public class AvroFileFormat extends FileFormat {
             this.factory =
                     new AvroWriterFactory<>(
                             (out, compression) -> {
-                                Schema schema = createAvroSchema(rowType);
+                                Schema schema =
+                                        AvroSchemaConverter.convertToSchema(
+                                                rowType, options.get(AVRO_ROW_NAME_MAPPING));
                                 AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
                                 DataFileWriter<InternalRow> dataFileWriter =
                                         new DataFileWriter<>(datumWriter);
