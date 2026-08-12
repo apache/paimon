@@ -1202,6 +1202,46 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testPrimaryKeyWriteHttpNotFoundWithMissingFileRetainsPreflight() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/missing_pk_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            httpServer.enqueueResponse("", 404);
+            httpServer.enqueueResponse("", 404);
+
+            tEnv.executeSql(
+                    "CREATE TABLE missing_pk_blob_table ("
+                            + "id INT, picture BYTES, PRIMARY KEY (id) NOT ENFORCED)"
+                            + " WITH ('bucket'='1',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-missing-file'='true')");
+
+            batchSql(
+                    "INSERT INTO missing_pk_blob_table VALUES"
+                            + " (1, sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            assertThat(batchSql("SELECT * FROM missing_pk_blob_table"))
+                    .containsExactly(Row.of(1, null));
+
+            RecordedRequest headRequest = httpServer.takeRequest(1, TimeUnit.SECONDS);
+            assertThat(headRequest).isNotNull();
+            assertThat(headRequest.getMethod()).isEqualTo("HEAD");
+
+            RecordedRequest rangeRequest = httpServer.takeRequest(1, TimeUnit.SECONDS);
+            assertThat(rangeRequest).isNotNull();
+            assertThat(rangeRequest.getMethod()).isEqualTo("GET");
+            assertThat(rangeRequest.getHeader("Range")).isEqualTo("bytes=0-0");
+            assertThat(httpServer.takeRequest(100, TimeUnit.MILLISECONDS)).isNull();
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
     public void testWriteExistingHttpBlobWithMissingFileUsesSingleGet() throws Exception {
         TestHttpWebServer httpServer = new TestHttpWebServer("/existing_blob");
         httpServer.start();

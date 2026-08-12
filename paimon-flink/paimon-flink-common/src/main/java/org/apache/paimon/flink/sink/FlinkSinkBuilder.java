@@ -219,6 +219,13 @@ public class FlinkSinkBuilder {
         UriReaderFactory readerFactoryForDescriptor = BlobDescriptorReaderFactory.create(table);
         blobDescriptorReaderFactory = readerFactoryForDescriptor;
 
+        // Primary-key tables externalize BLOBs after merging records, and that path does not apply
+        // the write-null fallback while fetching descriptors. Retain the existence preflight there.
+        Set<Integer> materializedBlobFields =
+                table.schema().primaryKeys().isEmpty()
+                        ? materializedBlobFieldIndexes(
+                                table.rowType(), table.coreOptions().blobInlineField())
+                        : Collections.emptySet();
         DataStream<InternalRow> input =
                 mapToInternalRowWithUriReaderFactory(
                         this.input,
@@ -226,8 +233,7 @@ public class FlinkSinkBuilder {
                         readerFactoryForDescriptor,
                         table.coreOptions().blobWriteNullOnMissingFile(),
                         table.coreOptions().blobWriteNullOnFetchFailure(),
-                        materializedBlobFieldIndexes(
-                                table.rowType(), table.coreOptions().blobInlineField()));
+                        materializedBlobFields);
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
