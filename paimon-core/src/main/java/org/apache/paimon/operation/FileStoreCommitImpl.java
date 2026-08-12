@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
@@ -1059,14 +1060,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     retryResult instanceof CommitFailRetryResult
                             ? (CommitFailRetryResult) retryResult
                             : null;
-            List<Range> changedRowRanges =
-                    options.dataEvolutionEnabled() && commitKind == CommitKind.COMPACT
-                            ? deltaFiles.stream()
-                                    .map(ManifestEntry::file)
-                                    .filter(file -> file.firstRowId() != null)
-                                    .map(DataFileMeta::nonNullRowIdRange)
-                                    .collect(Collectors.toList())
-                            : Collections.emptyList();
+            List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles, commitKind);
             // An overwrite may replace the base manifest list without recording the replacements
             // in its delta manifest, so the cached base cannot always be refreshed incrementally.
             if (!changedRowRanges.isEmpty()) {
@@ -1385,6 +1379,30 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot, identifier);
         commitCallbacks.forEach(callback -> callback.call(context));
         return new SuccessCommitResult();
+    }
+
+    private List<Range> changedRowRanges(
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            CommitKind commitKind) {
+        if (!options.dataEvolutionEnabled() || commitKind != CommitKind.COMPACT) {
+            return Collections.emptyList();
+        }
+
+        List<Range> ranges =
+                deltaFiles.stream()
+                        .map(ManifestEntry::file)
+                        .filter(file -> file.firstRowId() != null)
+                        .map(DataFileMeta::nonNullRowIdRange)
+                        .collect(Collectors.toList());
+        indexFiles.stream()
+                .filter(entry -> entry.kind() == FileKind.ADD)
+                .map(IndexManifestEntry::indexFile)
+                .map(IndexFileMeta::globalIndexMeta)
+                .filter(Objects::nonNull)
+                .map(GlobalIndexMeta::rowRange)
+                .forEach(ranges::add);
+        return Range.sortAndMergeOverlap(ranges, true);
     }
 
     @Nullable

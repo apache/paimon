@@ -1206,6 +1206,43 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testSmallFileCompactConflictsWithConcurrentPartialUpdate() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeFullRows(table, 0);
+        writeFullRows(table, 1);
+
+        FileStoreTable compactTable = withCompactOptions(table, "1 MB");
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(
+                        compactTable, false, false, compactTable.latestSnapshot().get());
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isEqualTo(1);
+        assertThat(
+                        tasks.get(0).compactBefore().stream()
+                                .map(DataFileMeta::nonNullRowIdRange)
+                                .collect(Collectors.toList()))
+                .isEqualTo(Arrays.asList(new Range(0L, 0L), new Range(1L, 1L)));
+        CommitMessage message =
+                tasks.get(0).doCompact(compactTable, "test-small-file-concurrent-update");
+
+        updateF2(table, 0L, 100);
+        long concurrentSnapshotId = table.latestSnapshot().get().id();
+
+        assertThatThrownBy(
+                        () -> {
+                            try (BatchTableCommit commit =
+                                    compactTable.newBatchWriteBuilder().newCommit()) {
+                                commit.commit(Collections.singletonList(message));
+                            }
+                        })
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("conflict");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(concurrentSnapshotId);
+        assertThat(readF0AndF2(table)).isEqualTo(Arrays.asList("0|updated-100", "1|base-1"));
+    }
+
+    @Test
     public void testCompactKeepsConcurrentAppendForNextSmallFileMerge() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();

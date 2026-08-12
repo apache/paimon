@@ -315,6 +315,114 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testStaleMultiVersionCompactIsRejectedAfterRowIdReassign() throws Exception {
+        FileStoreTable table =
+                createPartitionedReassignTable("stale_multi_version_compact_table", false);
+        writePartitionRows(table, "a", 0, 1);
+        writePartitionRows(table, "b", 2);
+        writePartitionRows(table, "a", 3);
+        writePartialStrings(table, "a", 0L, 0, 1);
+
+        FileStoreTable compactTable =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2"));
+        Snapshot compactSnapshot = compactTable.latestSnapshot().get();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(compactTable, false, false, compactSnapshot);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks).hasSize(1);
+        assertThat(fileRanges(tasks.get(0).compactBefore()))
+                .containsExactly(new Range(0, 1), new Range(0, 1));
+        List<CommitMessage> staleCompactMessages =
+                prepareCompactionMessages(compactTable, compactSnapshot, tasks);
+
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(table)
+                        .reassign("test-before-stale-multi-version-compact");
+        assertThat(result.reassigned).isTrue();
+        List<String> reassignedRows = readPartitionedRowsWithRowIds(table);
+        long reassignSnapshotId = table.latestSnapshot().get().id();
+
+        assertThatThrownBy(() -> commit(table, staleCompactMessages))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("conflict");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(reassignSnapshotId);
+        assertThat(readPartitionedRowsWithRowIds(table)).isEqualTo(reassignedRows);
+    }
+
+    @Test
+    public void testStaleSmallFileCompactIsRejectedAfterRowIdReassign() throws Exception {
+        FileStoreTable table =
+                createPartitionedReassignTable("stale_small_file_compact_table", false);
+        writePartitionRows(table, "a", 0);
+        writePartitionRows(table, "a", 1);
+        writePartitionRows(table, "b", 2);
+        writePartitionRows(table, "a", 3);
+
+        FileStoreTable compactTable =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2"));
+        Snapshot compactSnapshot = compactTable.latestSnapshot().get();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(compactTable, false, false, compactSnapshot);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks).hasSize(1);
+        assertThat(fileRanges(tasks.get(0).compactBefore()))
+                .containsExactly(new Range(0, 0), new Range(1, 1));
+        List<CommitMessage> staleCompactMessages =
+                prepareCompactionMessages(compactTable, compactSnapshot, tasks);
+
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(table)
+                        .reassign("test-before-stale-small-file-compact");
+        assertThat(result.reassigned).isTrue();
+        List<String> reassignedRows = readPartitionedRowsWithRowIds(table);
+        long reassignSnapshotId = table.latestSnapshot().get().id();
+
+        assertThatThrownBy(() -> commit(table, staleCompactMessages))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("conflict");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(reassignSnapshotId);
+        assertThat(readPartitionedRowsWithRowIds(table)).isEqualTo(reassignedRows);
+    }
+
+    @Test
+    public void testStaleGlobalIndexCompactIsRejectedAfterRowIdReassign() throws Exception {
+        FileStoreTable table =
+                createPartitionedReassignTable("stale_global_index_compact_table", false);
+        writePartitionRows(table, "a", 0, 1);
+        writePartitionRows(table, "b", 2);
+        writePartitionRows(table, "a", 3);
+        BinaryRow partitionA = partition(table, "a");
+        IndexFileMeta oldIndex = globalIndexFile("old-index", new Range(0, 1));
+        commitGlobalIndex(table, partitionA, oldIndex);
+
+        IndexFileMeta organizedIndex = globalIndexFile("organized-index", new Range(0, 1));
+        commit(
+                table,
+                Collections.singletonList(
+                        indexCompactMessage(partitionA, oldIndex, organizedIndex)));
+        assertThat(table.latestSnapshot().get().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+
+        IndexFileMeta compactedIndex = globalIndexFile("compacted-index", new Range(0, 1));
+        CommitMessage staleIndexCompact =
+                indexCompactMessage(partitionA, organizedIndex, compactedIndex);
+
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(table)
+                        .reassign("test-before-stale-global-index-compact");
+        assertThat(result.reassigned).isTrue();
+        long reassignSnapshotId = table.latestSnapshot().get().id();
+
+        assertThatThrownBy(() -> commit(table, Collections.singletonList(staleIndexCompact)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Global index row ID existence conflict");
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(reassignSnapshotId);
+        assertThat(liveGlobalIndexFileNames(table)).doesNotContain("compacted-index");
+    }
+
+    @Test
     public void testReadAfterAddingColumnAndDeletionVectors() throws Exception {
         // DVs with adding new columns.
         Schema.Builder schemaBuilder = Schema.newBuilder();
@@ -1006,6 +1114,18 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         return commitMessages;
     }
 
+    private List<CommitMessage> prepareCompactionMessages(
+            FileStoreTable table, Snapshot snapshot, List<DataEvolutionCompactTask> tasks)
+            throws Exception {
+        List<CommitMessage> messages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            messages.add(task.doCompact(table, "test-stale-compact"));
+        }
+        messages.addAll(
+                new DataEvolutionCompactionCommitPreparation(table, snapshot).prepare(messages));
+        return messages;
+    }
+
     private void materializeDeletionVectors(FileStoreTable table) throws Exception {
         materializeDeletionVectors(table, null);
     }
@@ -1040,25 +1160,42 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         }
     }
 
-    private void commitGlobalIndex(FileStoreTable table, String fileName, Range rowRange)
-            throws Exception {
-        IndexFileMeta indexFile =
-                new IndexFileMeta(
-                        "test-global-index",
-                        fileName,
-                        1,
-                        rowRange.count(),
-                        new GlobalIndexMeta(rowRange.from, rowRange.to, 0, null, null),
-                        null);
+    private void commitGlobalIndex(
+            FileStoreTable table, BinaryRow partition, IndexFileMeta indexFile) throws Exception {
         commit(
                 table,
                 Collections.singletonList(
                         new CommitMessageImpl(
-                                BinaryRow.EMPTY_ROW,
+                                partition,
                                 UNAWARE_BUCKET,
                                 null,
                                 DataIncrement.indexIncrement(Collections.singletonList(indexFile)),
                                 CompactIncrement.emptyIncrement())));
+    }
+
+    private static IndexFileMeta globalIndexFile(String fileName, Range rowRange) {
+        return new IndexFileMeta(
+                "test-global-index",
+                fileName,
+                1,
+                rowRange.count(),
+                new GlobalIndexMeta(rowRange.from, rowRange.to, 0, null, null),
+                null);
+    }
+
+    private static CommitMessage indexCompactMessage(
+            BinaryRow partition, IndexFileMeta before, IndexFileMeta after) {
+        return new CommitMessageImpl(
+                partition,
+                UNAWARE_BUCKET,
+                null,
+                DataIncrement.emptyIncrement(),
+                new CompactIncrement(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList(after),
+                        Collections.singletonList(before)));
     }
 
     private static List<String> liveGlobalIndexFileNames(FileStoreTable table) {
@@ -1436,6 +1573,13 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     private static List<Range> normalFileRowRanges(List<DataFileMeta> dataFiles) {
         return dataFiles.stream()
                 .filter(DataEvolutionDeletionVectorTest::isNormalFile)
+                .map(DataFileMeta::nonNullRowIdRange)
+                .sorted(Comparator.comparingLong(range -> range.from))
+                .collect(Collectors.toList());
+    }
+
+    private static List<Range> fileRanges(List<DataFileMeta> dataFiles) {
+        return dataFiles.stream()
                 .map(DataFileMeta::nonNullRowIdRange)
                 .sorted(Comparator.comparingLong(range -> range.from))
                 .collect(Collectors.toList());
