@@ -1338,10 +1338,15 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             for (int i = 0; i < numFields; i++) {
                 IcebergPartitionSummary summary = fileMeta.partitions().get(i);
                 DataType fieldType = partitionType.getTypeAt(i);
-                minValues.setField(
-                        i, IcebergConversions.toPaimonObject(fieldType, summary.lowerBound()));
-                maxValues.setField(
-                        i, IcebergConversions.toPaimonObject(fieldType, summary.upperBound()));
+                // an omitted bound means the value is unknown; keep the slot null
+                byte[] lowerBound = summary.lowerBound();
+                byte[] upperBound = summary.upperBound();
+                if (lowerBound != null) {
+                    minValues.setField(i, IcebergConversions.toPaimonObject(fieldType, lowerBound));
+                }
+                if (upperBound != null) {
+                    maxValues.setField(i, IcebergConversions.toPaimonObject(fieldType, upperBound));
+                }
                 // IcebergPartitionSummary only has `containsNull` field and does not have the
                 // exact number of nulls.
                 nullCounts[i] = summary.containsNull() ? 1 : 0;
