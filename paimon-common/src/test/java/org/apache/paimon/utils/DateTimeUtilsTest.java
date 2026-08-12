@@ -24,9 +24,11 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link DateTimeUtils}. */
 public class DateTimeUtilsTest {
@@ -67,6 +69,29 @@ public class DateTimeUtilsTest {
         ts = DateTimeUtils.parseTimestampData(dt, 3);
         assertThat(dt)
                 .isEqualTo(ts.toLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")));
+    }
+
+    @Test
+    public void testParseTimestampDataRejectsMissingSeparator() {
+        assertThatThrownBy(() -> DateTimeUtils.parseTimestampData("2024-01-0112:30", 3))
+                .isInstanceOf(DateTimeParseException.class);
+        assertThatThrownBy(() -> DateTimeUtils.parseTimestampData("2024-01-14 19:35", 3))
+                .isInstanceOf(DateTimeParseException.class);
+    }
+
+    @Test
+    public void testParseTimestampDataWrittenByToString() {
+        for (LocalDateTime time :
+                new LocalDateTime[] {
+                    LocalDateTime.of(2024, 1, 1, 12, 30),
+                    LocalDateTime.of(2024, 1, 1, 0, 0),
+                    LocalDateTime.of(2024, 1, 1, 1, 2, 3),
+                    LocalDateTime.of(2024, 1, 1, 1, 2, 3, 456_000),
+                    LocalDateTime.of(1, 1, 1, 0, 0)
+                }) {
+            String dt = Timestamp.fromLocalDateTime(time).toString();
+            assertThat(DateTimeUtils.parseTimestampData(dt, 6).toLocalDateTime()).isEqualTo(time);
+        }
     }
 
     @Test

@@ -26,11 +26,11 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.manifest.BinaryManifestEntry;
-import org.apache.paimon.manifest.DeletedIdentifierSet;
+import org.apache.paimon.manifest.CompactFileIdentifierSet;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -72,7 +72,7 @@ public class ManifestFileSorter {
         final boolean fullCompaction;
         final ManifestSortKey sortKey;
         final ManifestEntryExternalSort.ExternalSortConfig externalSortConfig;
-        final DeletedIdentifierSet deleteEntries;
+        final CompactFileIdentifierSet deleteEntries;
         /**
          * Manifest files that need unsorted compaction.
          *
@@ -90,7 +90,7 @@ public class ManifestFileSorter {
                 boolean fullCompaction,
                 ManifestSortKey sortKey,
                 ManifestEntryExternalSort.ExternalSortConfig externalSortConfig,
-                DeletedIdentifierSet deleteEntries,
+                CompactFileIdentifierSet deleteEntries,
                 Map<ManifestFileMeta, Boolean> compactWithoutSort,
                 List<ManifestAdjacentSortedRun> levelRuns,
                 List<ManifestAdjacentSortedRun> pickedRuns) {
@@ -112,7 +112,7 @@ public class ManifestFileSorter {
     /** Result of classifying manifest files. */
     private static class ClassifyResult {
         final List<ManifestFileMeta> lsmFiles;
-        final DeletedIdentifierSet deleteEntries;
+        final CompactFileIdentifierSet deleteEntries;
         /**
          * Manifest files that need unsorted compaction.
          *
@@ -125,7 +125,7 @@ public class ManifestFileSorter {
 
         ClassifyResult(
                 List<ManifestFileMeta> lsmFiles,
-                DeletedIdentifierSet deleteEntries,
+                CompactFileIdentifierSet deleteEntries,
                 Map<ManifestFileMeta, Boolean> compactWithoutSort) {
             this.lsmFiles = lsmFiles;
             this.deleteEntries = deleteEntries;
@@ -135,10 +135,10 @@ public class ManifestFileSorter {
 
     /** Binary identifiers and partition values collected from DELETE entries. */
     private static class DeletedEntryInfo {
-        final DeletedIdentifierSet identifiers;
+        final CompactFileIdentifierSet identifiers;
         final Set<BinaryRow> partitions;
 
-        private DeletedEntryInfo(DeletedIdentifierSet identifiers, Set<BinaryRow> partitions) {
+        private DeletedEntryInfo(CompactFileIdentifierSet identifiers, Set<BinaryRow> partitions) {
             this.identifiers = identifiers;
             this.partitions = partitions;
         }
@@ -511,7 +511,7 @@ public class ManifestFileSorter {
         // Initialize classification containers and read delete entries
         Map<ManifestFileMeta, Boolean> compactWithoutSort = new LinkedHashMap<>();
         List<ManifestFileMeta> lsmFiles = new LinkedList<>(input);
-        DeletedIdentifierSet classifiedDeleteEntries = new DeletedIdentifierSet();
+        CompactFileIdentifierSet classifiedDeleteEntries = new CompactFileIdentifierSet();
         Set<BinaryRow> deletePartitions = Collections.emptySet();
         PartitionPredicate predicate = null;
         if (fullCompaction) {
@@ -557,7 +557,7 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifestFiles,
             @Nullable Integer manifestReadParallelism) {
-        DeletedIdentifierSet identifiers = new DeletedIdentifierSet();
+        CompactFileIdentifierSet identifiers = new CompactFileIdentifierSet();
         Set<BinaryRow> partitions = new HashSet<>();
         List<ManifestFileMeta> filesWithDeletes = new ArrayList<>();
         for (ManifestFileMeta meta : manifestFiles) {
@@ -588,16 +588,14 @@ public class ManifestFileSorter {
     private static void collectDeletedEntries(
             ManifestFileMeta meta,
             ManifestFile manifestFile,
-            DeletedIdentifierSet identifiers,
+            CompactFileIdentifierSet identifiers,
             Set<BinaryRow> partitions,
             boolean synchronize) {
-        try (CloseableIterator<BinaryManifestEntry> entries =
+        try (CloseableIterator<ProjectedManifestEntry> entries =
                 manifestFile.scan(
-                        meta.fileName(),
-                        meta.fileSize(),
-                        BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                        meta.fileName(), ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
             while (entries.hasNext()) {
-                BinaryManifestEntry entry = entries.next();
+                ProjectedManifestEntry entry = entries.next();
                 if (!entry.isDelete()) {
                     continue;
                 }
@@ -1261,8 +1259,8 @@ public class ManifestFileSorter {
             row.setField(1, entry.kind().toByteValue());
             row.setField(
                     2,
-                    entry instanceof BinaryManifestEntry
-                            ? ((BinaryManifestEntry) entry).file().fileNameBinary()
+                    entry instanceof ProjectedManifestEntry
+                            ? ((ProjectedManifestEntry) entry).file().fileNameBinary()
                             : BinaryString.fromString(entry.file().fileName()));
             row.setField(3, binaryManifestRow);
         }
@@ -1362,8 +1360,8 @@ public class ManifestFileSorter {
             row.setField(pos++, Long.MAX_VALUE - entry.file().maxSequenceNumber());
             row.setField(
                     pos++,
-                    entry instanceof BinaryManifestEntry
-                            ? ((BinaryManifestEntry) entry).file().fileNameBinary()
+                    entry instanceof ProjectedManifestEntry
+                            ? ((ProjectedManifestEntry) entry).file().fileNameBinary()
                             : BinaryString.fromString(entry.file().fileName()));
             row.setField(pos, binaryManifestRow);
         }

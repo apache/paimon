@@ -285,6 +285,35 @@ SELECT * FROM my_table$files /*+ OPTIONS('scan.snapshot-id'='1') */;
 */
 ```
 
+### File Indexes Table
+
+You can query the file indexes of every data file in a specific snapshot through the
+`file_indexes` table. Each row represents one index type for one column in one data file.
+Multiple rows can therefore refer to the same index container.
+
+```sql
+SELECT * FROM my_table$file_indexes;
+
+/*
++-----------+--------+--------------------------------+--------------------+--------------+-----------+-------------+--------------+--------------+--------------------------------+--------------------+----------------------------+----------+
+| partition | bucket |                      file_path | file_size_in_bytes | record_count | schema_id | column_name |  index_type  | storage_type |               index_file_path | index_size_in_bytes | index_container_size_in_bytes | is_empty |
++-----------+--------+--------------------------------+--------------------+--------------+-----------+-------------+--------------+--------------+--------------------------------+--------------------+----------------------------+----------+
+|       {1} |      0 | data-8f64af95-29cc-4342-adc... |                593 |            2 |         0 |          id |      bitmap |     EMBEDDED |                         <NULL> |                 12 |                           48 |    false |
+|       {1} |      0 | data-8f64af95-29cc-4342-adc... |                593 |            2 |         0 |          id | bloom-filter |     EMBEDDED |                         <NULL> |                 16 |                           48 |    false |
+|       {2} |      0 | data-8b369068-0d37-4011-aa5... |                593 |            2 |         0 |          id |      bitmap |         FILE | data-8b369068-0d37-4011-aa5... |                 12 |                           48 |    false |
+|       {2} |      0 | data-8b369068-0d37-4011-aa5... |                593 |            2 |         0 |          id | bloom-filter |         FILE | data-8b369068-0d37-4011-aa5... |                 16 |                           48 |    false |
++-----------+--------+--------------------------------+--------------------+--------------+-----------+-------------+--------------+--------------+--------------------------------+--------------------+----------------------------+----------+
+4 rows in set
+*/
+```
+
+The system table reads only file index headers and does not load index payloads. It lists indexes
+that physically exist in the selected snapshot; data files without file indexes do not produce
+rows.
+
+This table is different from `table_indexes`, which lists independently managed index files from
+the snapshot's index manifest, such as deletion vectors and global indexes.
+
 ### File Key Ranges Table
 
 You can query the key ranges and file location of each data file through the file key ranges table.

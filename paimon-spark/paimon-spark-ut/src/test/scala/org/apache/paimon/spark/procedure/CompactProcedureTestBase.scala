@@ -19,13 +19,16 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.Snapshot.CommitKind
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
 import org.apache.paimon.fs.Path
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 
+import org.apache.spark.api.java.JavaSparkContext
 import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted}
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
@@ -1711,5 +1714,206 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       }
       Assertions.assertThat(e.getMessage.contains("Partition keys [pt] are invalid"))
     }
+  }
+
+  test("Paimon Procedure: materialize deletion vectors across planner batches") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING, pt STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'false',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+      sql(
+        "INSERT INTO T SELECT /*+ REPARTITION(1) */ id, concat('value-', id), 'p0' FROM range(0, 5)")
+      sql(
+        "INSERT INTO T SELECT /*+ REPARTITION(1) */ id, concat('value-', id), 'p1' FROM range(5, 10)")
+      sql(
+        "INSERT INTO T SELECT /*+ REPARTITION(1) */ id, concat('value-', id), 'p0' FROM range(10, 15)")
+      sql("DELETE FROM T WHERE pt = 'p0' AND id IN (1, 11)")
+
+      val table = loadTable("T")
+      Assertions.assertThat(deletionVectorIndexFileCount(table)).isEqualTo(1)
+      val snapshotBefore = lastSnapshotId(table)
+
+      executeDeletionVectorMaterialization(table, deletionFilesPerBatch = 1)
+
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 2)
+      Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(0)
+      checkAnswer(
+        sql("SELECT id, pt FROM T ORDER BY id"),
+        Seq(
+          Row(0, "p0"),
+          Row(2, "p0"),
+          Row(3, "p0"),
+          Row(4, "p0"),
+          Row(5, "p1"),
+          Row(6, "p1"),
+          Row(7, "p1"),
+          Row(8, "p1"),
+          Row(9, "p1"),
+          Row(10, "p0"),
+          Row(12, "p0"),
+          Row(13, "p0"),
+          Row(14, "p0")
+        )
+      )
+      assert(
+        sql("SELECT _ROW_ID FROM T WHERE pt = 'p0'")
+          .collect()
+          .map(_.getLong(0))
+          .sorted
+          .sameElements(15L to 22L))
+    }
+  }
+
+  test("Paimon Procedure: reject legacy row id rewrite for empty data evolution table") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+
+      val exception = intercept[IllegalArgumentException] {
+        sql(
+          "CALL sys.compact(table => 'T', options => " +
+            "'data-evolution.compaction.rewrite-row-ids=true')").collect()
+      }
+      Assertions
+        .assertThat(exception.getMessage)
+        .contains("data-evolution.compaction.rewrite-row-ids=true")
+        .contains("materialize_deletion_vectors")
+    }
+  }
+
+  test("Paimon Procedure: materialize deletion vectors enables snapshot expiration") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'true',
+            |  'snapshot.num-retained.min' = '1',
+            |  'snapshot.num-retained.max' = '1',
+            |  'snapshot.time-retained' = '0 ms',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 'one'), (2, 'two')")
+      sql("DELETE FROM T WHERE id = 1")
+
+      checkAnswer(sql("CALL sys.materialize_deletion_vectors(table => 'T')"), Row(true) :: Nil)
+
+      val table = loadTable("T")
+      Assertions
+        .assertThat(table.snapshotManager().earliestSnapshotId())
+        .isEqualTo(table.snapshotManager().latestSnapshotId())
+      Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(0)
+      checkAnswer(sql("SELECT id, value FROM T"), Row(2, "two") :: Nil)
+    }
+  }
+
+  test("Paimon Procedure: preserve deletion vectors across compact planner batches") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING, pt STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'false',
+            |  'snapshot.num-retained.min' = '1',
+            |  'snapshot.num-retained.max' = '1',
+            |  'snapshot.time-retained' = '0 ms',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'compaction.min.file-num' = '2')
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (0, 'value-0', 'p0')")
+      sql("INSERT INTO T VALUES (1, 'value-1', 'p0')")
+      sql("INSERT INTO T VALUES (2, 'value-2', 'p1')")
+      sql("INSERT INTO T VALUES (3, 'value-3', 'p0')")
+      sql("INSERT INTO T VALUES (4, 'value-4', 'p0')")
+      sql("DELETE FROM T WHERE pt = 'p0' AND id IN (0, 3)")
+
+      val table = loadTable("T")
+      Assertions.assertThat(deletionVectorIndexFileCount(table)).isEqualTo(1)
+      val snapshotBefore = lastSnapshotId(table)
+
+      executeDataEvolutionCompaction(table, candidateFilesPerBatch = 2)
+
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 2)
+      Assertions
+        .assertThat(table.snapshotManager().earliestSnapshotId())
+        .isEqualTo(table.snapshotManager().latestSnapshotId())
+      Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(2)
+      checkAnswer(
+        sql("SELECT id, pt, _ROW_ID FROM T ORDER BY id"),
+        Seq(Row(1, "p0", 1L), Row(2, "p1", 2L), Row(4, "p0", 4L))
+      )
+    }
+  }
+
+  private def executeDataEvolutionCompaction(
+      table: FileStoreTable,
+      candidateFilesPerBatch: Int): Unit = {
+    CompactProcedure.executeDataEvolutionCompaction(
+      table,
+      p0PartitionPredicate(table),
+      null,
+      new JavaSparkContext(spark.sparkContext),
+      spark,
+      Int.box(candidateFilesPerBatch)
+    )
+  }
+
+  private def executeDeletionVectorMaterialization(
+      table: FileStoreTable,
+      deletionFilesPerBatch: Int): Unit = {
+    MaterializeDeletionVectorsProcedure.executeDeletionVectorMaterialization(
+      table,
+      p0PartitionPredicate(table),
+      new JavaSparkContext(spark.sparkContext),
+      spark,
+      Int.box(deletionFilesPerBatch)
+    )
+  }
+
+  private def p0PartitionPredicate(table: FileStoreTable): PartitionPredicate = {
+    val partitionPredicate = PartitionPredicate.fromMap(
+      table.schema().logicalPartitionType(),
+      util.Collections.singletonMap("pt", "p0"),
+      table.coreOptions().partitionDefaultName()
+    )
+    partitionPredicate
+  }
+
+  private def deletionVectorIndexFileCount(table: FileStoreTable): Int = {
+    table
+      .store()
+      .newIndexFileHandler()
+      .scan(table.latestSnapshot().get(), DELETION_VECTORS_INDEX)
+      .size()
+  }
+
+  private def deletionVectorCardinality(table: FileStoreTable): Long = {
+    table
+      .store()
+      .newIndexFileHandler()
+      .scan(table.latestSnapshot().get(), DELETION_VECTORS_INDEX)
+      .asScala
+      .flatMap(entry => Option(entry.indexFile().dvRanges()).toSeq)
+      .flatMap(_.values().asScala)
+      .flatMap(meta => Option(meta.cardinality()).map(_.longValue()))
+      .sum
   }
 }

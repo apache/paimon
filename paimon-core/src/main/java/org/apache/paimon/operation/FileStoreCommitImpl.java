@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
@@ -83,6 +84,7 @@ import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RetryWaiter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -97,6 +99,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -1057,9 +1060,39 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     retryResult instanceof CommitFailRetryResult
                             ? (CommitFailRetryResult) retryResult
                             : null;
+            List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles, commitKind);
             // An overwrite may replace the base manifest list without recording the replacements
             // in its delta manifest, so the cached base cannot always be refreshed incrementally.
-            if (commitFailRetry != null
+            if (!changedRowRanges.isEmpty()) {
+                baseDataFiles =
+                        scanner.readAllEntriesFromChangedRowRanges(
+                                latestSnapshot, changedPartitions, changedRowRanges);
+                Set<String> dataFilesToDelete =
+                        deltaFiles.stream()
+                                .filter(entry -> entry.kind() == FileKind.DELETE)
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toSet());
+                for (IndexManifestEntry indexFile : indexFiles) {
+                    if (indexFile.indexFile().dvRanges() != null) {
+                        dataFilesToDelete.addAll(indexFile.indexFile().dvRanges().keySet());
+                    }
+                }
+                if (!dataFilesToDelete.isEmpty()) {
+                    baseDataFiles.addAll(
+                            scanner.readAllEntriesFromDataFiles(
+                                    latestSnapshot, changedPartitions, dataFilesToDelete));
+                    baseDataFiles =
+                            new ArrayList<>(
+                                    baseDataFiles.stream()
+                                            .collect(
+                                                    Collectors.toMap(
+                                                            FileEntry::identifier,
+                                                            entry -> entry,
+                                                            (left, right) -> left,
+                                                            LinkedHashMap::new))
+                                            .values());
+                }
+            } else if (commitFailRetry != null
                     && commitFailRetry.latestSnapshot != null
                     && commitFailRetry.baseDataFiles != null
                     && !hasOverwriteSinceLastAttempt) {
@@ -1346,6 +1379,30 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot, identifier);
         commitCallbacks.forEach(callback -> callback.call(context));
         return new SuccessCommitResult();
+    }
+
+    private List<Range> changedRowRanges(
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            CommitKind commitKind) {
+        if (!options.dataEvolutionEnabled() || commitKind != CommitKind.COMPACT) {
+            return Collections.emptyList();
+        }
+
+        List<Range> ranges =
+                deltaFiles.stream()
+                        .map(ManifestEntry::file)
+                        .filter(file -> file.firstRowId() != null)
+                        .map(DataFileMeta::nonNullRowIdRange)
+                        .collect(Collectors.toList());
+        indexFiles.stream()
+                .filter(entry -> entry.kind() == FileKind.ADD)
+                .map(IndexManifestEntry::indexFile)
+                .map(IndexFileMeta::globalIndexMeta)
+                .filter(Objects::nonNull)
+                .map(GlobalIndexMeta::rowRange)
+                .forEach(ranges::add);
+        return Range.sortAndMergeOverlap(ranges, true);
     }
 
     @Nullable

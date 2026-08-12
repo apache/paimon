@@ -278,5 +278,8 @@ class KeyValueDataWriter(DataWriter):
         if '_SEQUENCE_NUMBER' in data.schema.names:
             sort_keys.append(('_SEQUENCE_NUMBER', 'ascending'))
 
-        sorted_indices = pc.sort_indices(data, sort_keys=sort_keys)
+        # Java MergeTree comparators order null keys first. Keep Python-written files in the same
+        # order so their key ranges and sorted-run invariants are interoperable with Java readers.
+        sorted_indices = pc.sort_indices(
+            data, sort_keys=sort_keys, null_placement='at_start')
         return data.take(sorted_indices)

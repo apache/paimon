@@ -21,10 +21,12 @@ package org.apache.paimon.fs.cache;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.VectoredReadUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.FileType;
@@ -38,17 +40,28 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_DIR;
 import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_MAX_SIZE;
 import static org.apache.paimon.options.CatalogOptions.LOCAL_CACHE_WHITELIST;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -57,6 +70,19 @@ import static org.mockito.Mockito.when;
 
 /** Tests for {@link CachingFileIO} and {@link CachingSeekableInputStream}. */
 class CachingFileIOTest {
+
+    private static final int VECTOR_RANGES = 8;
+    private static final int VECTOR_LENGTH = 256;
+    private static final int VECTOR_STRIDE = 32 * 1024;
+    // BlockingExecutor has exactly this many permits; below VECTOR_RANGES, readVectored would block
+    // the calling thread, which is also the only thread that can release the open gate
+    private static final int VECTOR_PARALLELISM = 32;
+
+    static {
+        if (VECTOR_PARALLELISM < VECTOR_RANGES) {
+            throw new AssertionError("VECTOR_PARALLELISM must be at least VECTOR_RANGES");
+        }
+    }
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -583,6 +609,341 @@ class CachingFileIOTest {
         assertThat(cachingIO.isObjectStore()).isFalse();
     }
 
+    @Test
+    void testConcurrentFirstReadOpensSingleRemoteStream() throws Exception {
+        byte[] data = positionMarkedBytes(256);
+        MockFileIO delegate = new MockFileIO();
+        delegate.addFile("global-index-concurrent.index", data);
+        CountDownLatch openGate = new CountDownLatch(1);
+        delegate.blockOpensUntil(openGate);
+
+        CachingSeekableInputStream stream =
+                new CachingSeekableInputStream(
+                        delegate,
+                        new Path("global-index-concurrent.index"),
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        "concurrent",
+                        data.length);
+
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        byte[] firstBlock = new byte[64];
+        byte[] secondBlock = new byte[64];
+        Thread first = readerThread("first", stream, 0, firstBlock, failure);
+        Thread second = readerThread("second", stream, 64, secondBlock, failure);
+
+        try {
+            // parks inside delegate.newInputStream, holding the lazy initialisation lock
+            first.start();
+            assertThat(awaitCondition(() -> delegate.openCount() == 1, 30_000)).isTrue();
+
+            // a different block, so this reader has to go remote as well
+            second.start();
+
+            // guarded, second queues on the lock; unguarded, it opens a stream of its own. The
+            // BLOCKED sample is only a fast exit for the passing case - a guard built on something
+            // other than an intrinsic lock would simply wait out the budget and still pass.
+            awaitCondition(
+                    () -> second.getState() == Thread.State.BLOCKED || delegate.openCount() == 2,
+                    5_000);
+            assertThat(delegate.openCount()).as("remote streams opened").isEqualTo(1);
+        } finally {
+            openGate.countDown();
+        }
+
+        first.join(30_000);
+        second.join(30_000);
+        assertThat(first.isAlive()).isFalse();
+        assertThat(second.isAlive()).isFalse();
+        assertThat(failure.get()).isNull();
+
+        assertThat(firstBlock).isEqualTo(Arrays.copyOfRange(data, 0, 64));
+        assertThat(secondBlock).isEqualTo(Arrays.copyOfRange(data, 64, 128));
+
+        stream.close();
+        assertThat(delegate.unclosedStreamCount()).as("remote streams left open").isZero();
+        assertThat(delegate.openCount()).as("remote streams opened").isEqualTo(1);
+    }
+
+    @Test
+    void testReadAfterCloseDoesNotReopenRemoteStream() throws Exception {
+        byte[] data = positionMarkedBytes(256);
+        MockFileIO delegate = new MockFileIO();
+        delegate.addFile("global-index-after-close.index", data);
+
+        CachingSeekableInputStream stream =
+                new CachingSeekableInputStream(
+                        delegate,
+                        new Path("global-index-after-close.index"),
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        "after-close",
+                        data.length);
+
+        byte[] firstBlock = new byte[64];
+        stream.preadFully(0, firstBlock, 0, firstBlock.length);
+        assertThat(delegate.openCount()).isEqualTo(1);
+
+        stream.close();
+        assertThat(delegate.unclosedStreamCount()).as("remote streams left open").isZero();
+
+        // a read that still needs the remote must fail rather than open a stream with no owner
+        byte[] secondBlock = new byte[64];
+        assertThatThrownBy(() -> stream.preadFully(64, secondBlock, 0, secondBlock.length))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Stream is closed");
+        assertThat(delegate.openCount()).as("remote streams opened").isEqualTo(1);
+        assertThat(delegate.unclosedStreamCount()).as("remote streams left open").isZero();
+
+        // and block 0 is still cached, so without a guard on the read itself this would quietly
+        // succeed and post-close behaviour would depend on whether a block happened to be resident
+        assertThatThrownBy(() -> stream.preadFully(0, new byte[64], 0, 64))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Stream is closed");
+        stream.seek(0);
+        assertThatThrownBy(() -> stream.read(new byte[64], 0, 64))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Stream is closed");
+        assertThatThrownBy(stream::read)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Stream is closed");
+    }
+
+    @Test
+    void testCloseDoesNotWaitForAnInFlightOpenAndLeavesNothingBehind() throws Exception {
+        byte[] data = positionMarkedBytes(256);
+        MockFileIO delegate = new MockFileIO();
+        delegate.addFile("global-index-close-race.index", data);
+        CountDownLatch openGate = new CountDownLatch(1);
+        delegate.blockOpensUntil(openGate);
+
+        CachingSeekableInputStream stream =
+                new CachingSeekableInputStream(
+                        delegate,
+                        new Path("global-index-close-race.index"),
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        "close-race",
+                        data.length);
+
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread reader = readerThread("reader", stream, 0, new byte[64], failure);
+        Thread closer = new Thread(() -> closeRecordingFailure(stream, failure), "closer");
+        closer.setDaemon(true);
+
+        try {
+            reader.start();
+            assertThat(awaitCondition(() -> delegate.openCount() == 1, 30_000)).isTrue();
+
+            // the reader is parked inside newInputStream, so a close that took the initialisation
+            // lock would sit here until the remote gave up. This half does not regress against the
+            // old code, which took no lock either - it guards against the obvious wrong fix.
+            closer.start();
+            closer.join(60_000);
+            assertThat(closer.isAlive())
+                    .as("close() blocked behind an in-flight remote open")
+                    .isFalse();
+        } finally {
+            openGate.countDown();
+        }
+
+        // close is already gone, so the thread that opened the stream has to hand it back itself
+        reader.join(30_000);
+        assertThat(reader.isAlive()).isFalse();
+        assertThat(failure.get())
+                .as("the reader that lost the race should be told the stream is closed")
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("Stream is closed");
+        assertThat(delegate.openCount()).as("remote streams opened").isEqualTo(1);
+        assertThat(delegate.unclosedStreamCount()).as("remote streams left open").isZero();
+    }
+
+    @Test
+    void testFailedOpenLeavesNoStateBehind() throws Exception {
+        byte[] data = positionMarkedBytes(256);
+        MockFileIO delegate = new MockFileIO();
+        delegate.addFile("global-index-failed-open.index", data);
+        delegate.failOpensWith(new IOException("boom"));
+
+        CachingSeekableInputStream stream =
+                new CachingSeekableInputStream(
+                        delegate,
+                        new Path("global-index-failed-open.index"),
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        "failed-open",
+                        data.length);
+
+        byte[] block = new byte[64];
+        assertThatThrownBy(() -> stream.preadFully(0, block, 0, block.length))
+                .isInstanceOf(IOException.class)
+                .hasMessage("boom");
+        assertThat(delegate.openCount()).isZero();
+
+        // the failure must not have poisoned the stream: a retry opens exactly once
+        delegate.failOpensWith(null);
+        stream.preadFully(0, block, 0, block.length);
+        assertThat(block).isEqualTo(Arrays.copyOfRange(data, 0, 64));
+        assertThat(delegate.openCount()).as("remote streams opened").isEqualTo(1);
+
+        stream.close();
+        stream.close();
+        assertThat(delegate.unclosedStreamCount()).as("remote streams left open").isZero();
+    }
+
+    @Test
+    void testVectoredReadOpensSingleRemoteStream() throws Exception {
+        byte[] data = positionMarkedBytes(VECTOR_STRIDE * VECTOR_RANGES);
+        MockFileIO delegate = new MockFileIO();
+        delegate.addFile("global-index-vectored.index", data);
+        CountDownLatch openGate = new CountDownLatch(1);
+        delegate.blockOpensUntil(openGate);
+
+        // the file size is resolved lazily here, as CachingFileIO does for the memory cache
+        CachingSeekableInputStream stream =
+                new CachingSeekableInputStream(
+                        delegate,
+                        new Path("global-index-vectored.index"),
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 512));
+
+        List<FileRange> ranges = vectorRanges();
+        try {
+            VectoredReadUtils.readVectored(stream, ranges, vectorReadOptions(stream));
+            // with the first opener parked, every other task piles into the lazy init. A guarded
+            // init can never reach two, so waiting out the full budget here is the passing case.
+            assertThat(awaitCondition(() -> delegate.openCount() >= 2, 2_000))
+                    .as("a second remote stream was opened while the first open was in flight")
+                    .isFalse();
+        } finally {
+            openGate.countDown();
+        }
+
+        for (int i = 0; i < VECTOR_RANGES; i++) {
+            int offset = i * VECTOR_STRIDE;
+            assertThat(ranges.get(i).getData().get(60, TimeUnit.SECONDS))
+                    .isEqualTo(Arrays.copyOfRange(data, offset, offset + VECTOR_LENGTH));
+        }
+
+        stream.close();
+        assertThat(delegate.unclosedStreamCount()).as("remote streams left open").isZero();
+        assertThat(delegate.openCount()).as("remote streams opened").isEqualTo(1);
+    }
+
+    @Test
+    void testCloseDuringVectoredFanOutLeavesNothingBehind() throws Exception {
+        byte[] data = positionMarkedBytes(VECTOR_STRIDE * VECTOR_RANGES);
+
+        // the production shutdown shape: the owner closes while pool tasks are still reading
+        for (int attempt = 0; attempt < 20; attempt++) {
+            MockFileIO delegate = new MockFileIO();
+            delegate.addFile("global-index-close-fanout.index", data);
+            CachingSeekableInputStream stream =
+                    new CachingSeekableInputStream(
+                            delegate,
+                            new Path("global-index-close-fanout.index"),
+                            new LocalMemoryCacheManager(Long.MAX_VALUE, 512),
+                            "close-fanout-" + attempt,
+                            data.length);
+
+            List<FileRange> ranges = vectorRanges();
+            VectoredReadUtils.readVectored(stream, ranges, vectorReadOptions(stream));
+            stream.close();
+
+            for (int i = 0; i < VECTOR_RANGES; i++) {
+                int offset = i * VECTOR_STRIDE;
+                try {
+                    // a range that made it through must still carry its own bytes, not another's
+                    assertThat(ranges.get(i).getData().get(60, TimeUnit.SECONDS))
+                            .isEqualTo(Arrays.copyOfRange(data, offset, offset + VECTOR_LENGTH));
+                } catch (ExecutionException e) {
+                    // losing the race against close is legitimate, but only for that reason
+                    assertThat(e.getCause())
+                            .as("attempt %d, range %d", attempt, i)
+                            .isInstanceOf(IOException.class)
+                            .hasMessageContaining("closed");
+                }
+            }
+
+            // whichever way the interleaving fell, the accounting has to come out even
+            assertThat(delegate.openCount())
+                    .as("attempt %d: remote streams opened", attempt)
+                    .isLessThanOrEqualTo(1);
+            assertThat(delegate.unclosedStreamCount())
+                    .as("attempt %d: remote streams left open", attempt)
+                    .isZero();
+        }
+    }
+
+    private static List<FileRange> vectorRanges() {
+        List<FileRange> ranges = new ArrayList<>();
+        for (int i = 0; i < VECTOR_RANGES; i++) {
+            ranges.add(FileRange.createFileRange((long) i * VECTOR_STRIDE, VECTOR_LENGTH));
+        }
+        return ranges;
+    }
+
+    /** The options NativeVectorGlobalIndexReader uses for global index files. */
+    private static VectoredReadUtils.ReadOptions vectorReadOptions(
+            CachingSeekableInputStream stream) {
+        // the stride clears the minimum seek, so the ranges stay unmerged and each becomes its own
+        // task; parallelism must stay >= VECTOR_RANGES or readVectored blocks the calling thread
+        return VectoredReadUtils.ReadOptions.from(stream)
+                .withMinSeekForVectorReads(16 * 1024)
+                .withParallelismForVectorReads(VECTOR_PARALLELISM)
+                .withSequentialReadFallback(false);
+    }
+
+    private static void closeRecordingFailure(
+            CachingSeekableInputStream stream, AtomicReference<Throwable> failure) {
+        try {
+            stream.close();
+        } catch (Throwable t) {
+            failure.compareAndSet(null, t);
+        }
+    }
+
+    private static Thread readerThread(
+            String name,
+            CachingSeekableInputStream stream,
+            long position,
+            byte[] buffer,
+            AtomicReference<Throwable> failure) {
+        Thread thread =
+                new Thread(
+                        () -> {
+                            try {
+                                stream.preadFully(position, buffer, 0, buffer.length);
+                            } catch (Throwable t) {
+                                failure.compareAndSet(null, t);
+                            }
+                        },
+                        name);
+        thread.setDaemon(true);
+        return thread;
+    }
+
+    /** Returns whether the condition became true before the timeout elapsed. */
+    private static boolean awaitCondition(BooleanSupplier condition, long timeoutMillis)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() - deadline >= 0) {
+                return false;
+            }
+            Thread.sleep(1);
+        }
+        return true;
+    }
+
+    /**
+     * Position-dependent filler. A plain {@code (byte) i} repeats every 256 bytes, so every vector
+     * range would hold identical content and a range served another range's bytes would go
+     * unnoticed - exactly the corruption a shared remote stream can produce.
+     */
+    private static byte[] positionMarkedBytes(int size) {
+        byte[] data = new byte[size];
+        for (int i = 0; i < size; i++) {
+            data[i] = (byte) (i ^ (i >> 5) ^ (i >> 11));
+        }
+        return data;
+    }
+
     private byte[] readAll(SeekableInputStream s, int size) throws IOException {
         byte[] buf = new byte[size];
         int off = 0;
@@ -615,11 +976,43 @@ class CachingFileIOTest {
                 new ConcurrentHashMap<>();
 
         private final Map<String, byte[]> files = new HashMap<>();
-        private final Map<String, Integer> fileStatusCalls = new HashMap<>();
-        private final Map<String, Integer> newInputStreamCalls = new HashMap<>();
+        // concurrent so the thread-safety tests below can count from several reader threads
+        private final Map<String, Integer> fileStatusCalls = new ConcurrentHashMap<>();
+        private final Map<String, Integer> newInputStreamCalls = new ConcurrentHashMap<>();
+        private final List<ByteArraySeekableInputStream> openedStreams =
+                new CopyOnWriteArrayList<>();
+
+        private final AtomicInteger openCount = new AtomicInteger();
+
+        @Nullable private volatile CountDownLatch openGate;
+        @Nullable private volatile IOException openFailure;
 
         static void resetGlobalInputStreamCalls() {
             GLOBAL_INPUT_STREAM_CALLS.clear();
+        }
+
+        /** Parks every open inside {@link #newInputStream} until the latch is counted down. */
+        void blockOpensUntil(CountDownLatch gate) {
+            this.openGate = gate;
+        }
+
+        /** Makes the next opens fail, until cleared with {@code null}. */
+        void failOpensWith(@Nullable IOException failure) {
+            this.openFailure = failure;
+        }
+
+        int openCount() {
+            return openCount.get();
+        }
+
+        int unclosedStreamCount() {
+            int unclosed = 0;
+            for (ByteArraySeekableInputStream stream : openedStreams) {
+                if (!stream.isClosed()) {
+                    unclosed++;
+                }
+            }
+            return unclosed;
         }
 
         static int globalInputStreamCallCount(String name) {
@@ -642,6 +1035,11 @@ class CachingFileIOTest {
         @Override
         public SeekableInputStream newInputStream(Path path) throws IOException {
             String name = path.getName();
+            // rejected before any counter moves, so all of them agree on what was handed out
+            IOException failure = openFailure;
+            if (failure != null) {
+                throw failure;
+            }
             newInputStreamCalls.merge(name, 1, Integer::sum);
             GLOBAL_INPUT_STREAM_CALLS
                     .computeIfAbsent(name, ignored -> new AtomicInteger())
@@ -650,7 +1048,24 @@ class CachingFileIOTest {
             if (data == null) {
                 throw new IOException("File not found: " + name);
             }
-            return new ByteArraySeekableInputStream(data);
+            // registered before parking, so openCount() never over-reports what is tracked
+            ByteArraySeekableInputStream stream = new ByteArraySeekableInputStream(data);
+            openedStreams.add(stream);
+            openCount.incrementAndGet();
+            CountDownLatch gate = openGate;
+            if (gate != null) {
+                try {
+                    // far beyond every budget gated behind the countdown, so a slow machine can
+                    // never release the gate early and turn a correct run red
+                    if (!gate.await(5, TimeUnit.MINUTES)) {
+                        throw new IOException("open gate was never released");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException(e);
+                }
+            }
+            return stream;
         }
 
         @Override
@@ -723,10 +1138,12 @@ class CachingFileIOTest {
         public void configure(CatalogContext context) {}
     }
 
-    /** SeekableInputStream backed by a byte array. */
+    /** SeekableInputStream backed by a byte array, recording whether it was closed. */
     private static class ByteArraySeekableInputStream extends SeekableInputStream {
 
         private final byte[] data;
+        private final AtomicBoolean closed = new AtomicBoolean();
+
         private int pos;
 
         ByteArraySeekableInputStream(byte[] data) {
@@ -734,8 +1151,21 @@ class CachingFileIOTest {
             this.pos = 0;
         }
 
+        boolean isClosed() {
+            return closed.get();
+        }
+
+        // a real remote stream rejects reads once closed, so this one has to as well: otherwise no
+        // test could ever observe a read racing a close
+        private void checkNotClosed() throws IOException {
+            if (closed.get()) {
+                throw new IOException("Stream is closed");
+            }
+        }
+
         @Override
-        public void seek(long desired) {
+        public void seek(long desired) throws IOException {
+            checkNotClosed();
             this.pos = (int) Math.max(0, Math.min(desired, data.length));
         }
 
@@ -745,7 +1175,8 @@ class CachingFileIOTest {
         }
 
         @Override
-        public int read() {
+        public int read() throws IOException {
+            checkNotClosed();
             if (pos >= data.length) {
                 return -1;
             }
@@ -753,7 +1184,8 @@ class CachingFileIOTest {
         }
 
         @Override
-        public int read(byte[] b, int off, int len) {
+        public int read(byte[] b, int off, int len) throws IOException {
+            checkNotClosed();
             if (pos >= data.length) {
                 return -1;
             }
@@ -764,6 +1196,8 @@ class CachingFileIOTest {
         }
 
         @Override
-        public void close() {}
+        public void close() {
+            closed.set(true);
+        }
     }
 }

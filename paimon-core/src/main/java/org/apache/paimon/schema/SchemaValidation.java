@@ -120,7 +120,8 @@ public class SchemaValidation {
                     ArrayType.class,
                     RowType.class,
                     MultisetType.class,
-                    VectorType.class);
+                    VectorType.class,
+                    VariantType.class);
 
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
@@ -144,13 +145,11 @@ public class SchemaValidation {
 
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
         validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
-        validateOnlyContainPrimitiveType(schema.fields(), options.upsertKey(), "upsert key");
-
-        if (!options.upsertKey().isEmpty() && !schema.primaryKeys().isEmpty()) {
-            throw new RuntimeException(
+        if (options.primaryKeyNullable() && schema.primaryKeys().isEmpty()) {
+            throw new IllegalArgumentException(
                     String.format(
-                            "Cannot define 'upsert-key' %s with 'primary-key' %s.",
-                            options.upsertKey(), schema.primaryKeys()));
+                            "Option '%s' can only be enabled for a table with primary keys.",
+                            CoreOptions.PRIMARY_KEY_NULLABLE.key()));
         }
 
         validateBucket(schema, options);

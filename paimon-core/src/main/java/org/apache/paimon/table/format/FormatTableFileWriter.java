@@ -24,7 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.io.FormatTableWrittenFile;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -97,15 +97,15 @@ public class FormatTableFileWriter {
     }
 
     public List<CommitMessage> prepareCommit() throws Exception {
-        List<TwoPhaseOutputStream.Committer> committers = new ArrayList<>();
+        List<FormatTableWrittenFile> writtenFiles = new ArrayList<>();
         try {
             for (FormatTableRecordWriter writer : writers.values()) {
-                committers.addAll(writer.closeAndGetCommitters());
+                writtenFiles.addAll(writer.closeAndGetWrittenFiles());
             }
         } catch (Exception e) {
-            for (TwoPhaseOutputStream.Committer committer : committers) {
+            for (FormatTableWrittenFile writtenFile : writtenFiles) {
                 try {
-                    committer.discard(fileIO);
+                    writtenFile.committer().discard(fileIO);
                 } catch (Exception cleanupException) {
                     e.addSuppressed(cleanupException);
                 }
@@ -119,8 +119,12 @@ public class FormatTableFileWriter {
         }
 
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (TwoPhaseOutputStream.Committer committer : committers) {
-            commitMessages.add(new TwoPhaseCommitMessage(committer));
+        for (FormatTableWrittenFile writtenFile : writtenFiles) {
+            commitMessages.add(
+                    new TwoPhaseCommitMessage(
+                            writtenFile.committer(),
+                            writtenFile.recordCount(),
+                            writtenFile.fileSizeInBytes()));
         }
         return commitMessages;
     }

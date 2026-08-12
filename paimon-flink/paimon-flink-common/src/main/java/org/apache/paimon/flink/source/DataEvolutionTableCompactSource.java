@@ -41,6 +41,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.function.Supplier;
 
 /** Source for data-evolution table Compaction. */
 public class DataEvolutionTableCompactSource
@@ -79,17 +80,18 @@ public class DataEvolutionTableCompactSource
     /** BucketUnawareCompactSourceReader. */
     public static class CompactSourceReader
             extends AbstractNonCoordinatedSourceReader<DataEvolutionCompactTask> {
-        private final DataEvolutionCompactCoordinator compactionCoordinator;
+        private final Supplier<List<DataEvolutionCompactTask>> taskPlanner;
 
         public CompactSourceReader(
                 FileStoreTable table, @Nullable PartitionPredicate partitions, Snapshot snapshot) {
-            compactionCoordinator =
+            DataEvolutionCompactCoordinator coordinator =
                     new DataEvolutionCompactCoordinator(
                             table,
                             partitions,
                             table.coreOptions().blobCompactionEnabled(),
                             false,
                             snapshot);
+            taskPlanner = coordinator::plan;
         }
 
         @Override
@@ -97,7 +99,7 @@ public class DataEvolutionTableCompactSource
                 throws Exception {
             try {
                 // do scan and plan action, emit data-evolution compaction tasks.
-                List<DataEvolutionCompactTask> tasks = compactionCoordinator.plan();
+                List<DataEvolutionCompactTask> tasks = taskPlanner.get();
                 tasks.forEach(readerOutput::collect);
             } catch (EndOfScanException esf) {
                 LOG.info("Catching EndOfScanException, the job is finished.");

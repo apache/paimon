@@ -301,24 +301,38 @@ class In(Tester):
         return val in literals
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
-        return any(min_v <= l <= max_v for l in literals)
+        return any(
+            min_v <= literal <= max_v
+            for literal in literals
+            if literal is not None
+        )
 
     def test_by_arrow(self, val, literals) -> bool:
-        return val.isin(literals)
+        # Arrow treats null as a set member, while SQL IN never returns true
+        # solely because both the field and an IN literal are null.
+        non_null_literals = [literal for literal in literals if literal is not None]
+        if not non_null_literals:
+            return val.is_valid() & val.is_null()
+        return val.isin(non_null_literals) & val.is_valid()
 
 
 class NotIn(Tester):
     name = "notIn"
 
     def test_by_value(self, val, literals) -> bool:
-        if val is None:
+        if val is None or any(literal is None for literal in literals):
             return False
         return val not in literals
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
+        if any(literal is None for literal in literals):
+            return False
         return not any(min_v == l == max_v for l in literals)
 
     def test_by_arrow(self, val, literals) -> bool:
+        # Any null literal makes SQL NOT IN unknown for every non-matching row.
+        if any(literal is None for literal in literals):
+            return val.is_valid() & val.is_null()
         return (~val.isin(literals)) & val.is_valid()
 
 

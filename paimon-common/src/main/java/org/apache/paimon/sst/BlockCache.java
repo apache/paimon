@@ -25,6 +25,7 @@ import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.io.cache.CacheManager.SegmentContainer;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.IOUtils;
 
 import java.io.Closeable;
@@ -85,9 +86,33 @@ public class BlockCache implements Closeable {
 
     @Override
     public void close() throws IOException {
+        // Every page has to be handed back to the shared cache manager. Stopping at the first
+        // failure would leave the rest of this file's pages resident in a cache that is shared
+        // across readers, with nothing left holding a reference to invalidate them later.
         Set<CacheKey> sets = new HashSet<>(blocks.keySet());
+        Throwable collected = null;
         for (CacheKey key : sets) {
-            cacheManager.invalidPage(key);
+            try {
+                cacheManager.invalidPage(key);
+            } catch (Throwable t) {
+                collected = ExceptionUtils.firstOrSuppressed(t, collected);
+            }
         }
+        if (collected != null) {
+            rethrowAsIOException(collected);
+        }
+    }
+
+    private static void rethrowAsIOException(Throwable failure) throws IOException {
+        if (failure instanceof IOException) {
+            throw (IOException) failure;
+        }
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure instanceof RuntimeException) {
+            throw (RuntimeException) failure;
+        }
+        throw new IOException(failure);
     }
 }

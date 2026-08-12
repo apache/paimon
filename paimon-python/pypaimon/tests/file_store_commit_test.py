@@ -140,7 +140,8 @@ class TestFileStoreCommit(unittest.TestCase):
     def _run_manifest_commit_attempt(self, commit_side_effect=None,
                                      commit_result=None, retry_result=None,
                                      existing_manifests=None,
-                                     merged_manifests=None):
+                                     merged_manifests=None,
+                                     latest_watermark=None):
         file_store_commit = self._create_file_store_commit()
         self.mock_table.identifier = 'default.test_table'
         self.mock_table.table_schema.id = 7
@@ -179,6 +180,7 @@ class TestFileStoreCommit(unittest.TestCase):
             uuid='base-snapshot-uuid',
             total_record_count=10,
             index_manifest=None,
+            watermark=latest_watermark,
         )
         commit_entry = Mock(kind=0)
         commit_entry.file.row_count = 2
@@ -191,6 +193,18 @@ class TestFileStoreCommit(unittest.TestCase):
             latest_snapshot=latest_snapshot,
         )
         return file_store_commit, result
+
+    def test_append_commit_inherits_watermark(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit, result = self._run_manifest_commit_attempt(
+            commit_result=True,
+            latest_watermark=123,
+        )
+
+        self.assertTrue(result.is_success())
+        committed_snapshot = (
+            file_store_commit.snapshot_commit.commit.call_args[0][1])
+        self.assertEqual(123, committed_snapshot.watermark)
 
     def test_false_atomic_commit_retains_manifest_merge_result(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
@@ -750,6 +764,7 @@ class TestFileStoreCommit(unittest.TestCase):
         latest_snapshot.uuid = "base-snapshot-uuid"
         latest_snapshot.total_record_count = 10
         latest_snapshot.index_manifest = "index-manifest-existing"
+        latest_snapshot.watermark = None
 
         commit_entry = Mock()
         commit_entry.kind = 0

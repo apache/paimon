@@ -27,6 +27,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.Decimal;
@@ -93,6 +94,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -111,6 +113,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
@@ -133,6 +136,7 @@ public class JavaPyE2ETest {
     private static final Logger LOG = LoggerFactory.getLogger(JavaPyE2ETest.class);
 
     java.nio.file.Path tempDir = Paths.get("../paimon-python/pypaimon/tests/e2e").toAbsolutePath();
+    @TempDir java.nio.file.Path ioTempDir;
 
     // Fields from TableTestBase that we need
     protected final String commitUser = UUID.randomUUID().toString();
@@ -386,40 +390,42 @@ public class JavaPyE2ETest {
         String tableName = "test_pk_dv";
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
         FileStoreTable table = createFileStoreTable(optionsSetter, tablePath);
-        StreamTableWrite write = table.newWrite(commitUser);
-        IOManager ioManager = IOManager.create(tablePath.toString());
-        write.withIOManager(ioManager);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        try (IOManager ioManager = IOManager.create(ioTempDir.toString());
+                StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
 
-        write.write(createRow3Cols(1, 10, 100L));
-        write.write(createRow3Cols(2, 20, 200L));
-        write.write(createRow3Cols(1, 11, 101L));
-        commit.commit(0, write.prepareCommit(true, 0));
+            write.write(createRow3Cols(1, 10, 100L));
+            write.write(createRow3Cols(2, 20, 200L));
+            write.write(createRow3Cols(1, 11, 101L));
+            commit.commit(0, write.prepareCommit(true, 0));
 
-        write.write(createRow3Cols(1, 10, 1000L));
-        write.write(createRow3Cols(2, 21, 201L));
-        write.write(createRow3Cols(2, 21, 2001L));
-        commit.commit(1, write.prepareCommit(true, 1));
+            write.write(createRow3Cols(1, 10, 1000L));
+            write.write(createRow3Cols(2, 21, 201L));
+            write.write(createRow3Cols(2, 21, 2001L));
+            commit.commit(1, write.prepareCommit(true, 1));
 
-        write.write(createRow3Cols(1, 11, 1001L));
-        write.write(createRow3Cols(2, 21, 20001L));
-        write.write(createRow3Cols(2, 22, 202L));
-        write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 11, 1001L));
-        commit.commit(2, write.prepareCommit(true, 2));
-        write.write(createRow3ColsWithKind(RowKind.DELETE, 2, 20, 200L));
-        commit.commit(2, write.prepareCommit(true, 2));
+            write.write(createRow3Cols(1, 11, 1001L));
+            write.write(createRow3Cols(2, 21, 20001L));
+            write.write(createRow3Cols(2, 22, 202L));
+            write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 11, 1001L));
+            commit.commit(2, write.prepareCommit(true, 2));
+            write.write(createRow3ColsWithKind(RowKind.DELETE, 2, 20, 200L));
+            commit.commit(2, write.prepareCommit(true, 2));
 
-        // test result
-        Function<InternalRow, String> rowDataToString =
-                row ->
-                        internalRowToString(
-                                row,
-                                DataTypes.ROW(
-                                        DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
-        List<String> result =
-                getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
-        assertThat(result)
-                .containsExactlyInAnyOrder("+I[1, 10, 1000]", "+I[2, 21, 20001]", "+I[2, 22, 202]");
+            // test result
+            Function<InternalRow, String> rowDataToString =
+                    row ->
+                            internalRowToString(
+                                    row,
+                                    DataTypes.ROW(
+                                            DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
+            List<String> result =
+                    getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
+            assertThat(result)
+                    .containsExactlyInAnyOrder(
+                            "+I[1, 10, 1000]", "+I[2, 21, 20001]", "+I[2, 22, 202]");
+        }
+        assertSpillDirectoryEmpty();
     }
 
     @Test
@@ -434,37 +440,38 @@ public class JavaPyE2ETest {
         String tableName = "test_pk_dv_multi_batch";
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
         FileStoreTable table = createFileStoreTable(optionsSetter, tablePath);
-        StreamTableWrite write = table.newWrite(commitUser);
-        IOManager ioManager = IOManager.create(tablePath.toString());
-        write.withIOManager(ioManager);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        try (IOManager ioManager = IOManager.create(ioTempDir.toString());
+                StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
 
-        // Write 10000 records
-        for (int i = 1; i <= 10000; i++) {
-            write.write(createRow3Cols(1, i * 10, (long) i * 100));
+            // Write 10000 records
+            for (int i = 1; i <= 10000; i++) {
+                write.write(createRow3Cols(1, i * 10, (long) i * 100));
+            }
+            commit.commit(0, write.prepareCommit(false, 0));
+
+            // Delete the 81930th record
+            write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 81930, 819300L));
+            commit.commit(1, write.prepareCommit(true, 1));
+
+            Function<InternalRow, String> rowDataToString =
+                    row ->
+                            internalRowToString(
+                                    row,
+                                    DataTypes.ROW(
+                                            DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
+            List<String> result =
+                    getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
+
+            // Verify the count is 9999
+            assertThat(result).hasSize(9999);
+
+            assertThat(result).doesNotContain("+I[1, 81930, 819300]");
+
+            assertThat(result).contains("+I[1, 10, 100]");
+            assertThat(result).contains("+I[1, 100000, 1000000]");
         }
-        commit.commit(0, write.prepareCommit(false, 0));
-
-        // Delete the 81930th record
-        write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 81930, 819300L));
-        commit.commit(1, write.prepareCommit(true, 1));
-
-        Function<InternalRow, String> rowDataToString =
-                row ->
-                        internalRowToString(
-                                row,
-                                DataTypes.ROW(
-                                        DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
-        List<String> result =
-                getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
-
-        // Verify the count is 9999
-        assertThat(result).hasSize(9999);
-
-        assertThat(result).doesNotContain("+I[1, 81930, 819300]");
-
-        assertThat(result).contains("+I[1, 10, 100]");
-        assertThat(result).contains("+I[1, 100000, 1000000]");
+        assertSpillDirectoryEmpty();
     }
 
     @Test
@@ -477,35 +484,36 @@ public class JavaPyE2ETest {
         String tableName = "test_pk_dv_raw_convertable";
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
         FileStoreTable table = createFileStoreTable(optionsSetter, tablePath);
-        StreamTableWrite write = table.newWrite(commitUser);
-        IOManager ioManager = IOManager.create(tablePath.toString());
-        write.withIOManager(ioManager);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        try (IOManager ioManager = IOManager.create(ioTempDir.toString());
+                StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
 
-        for (int i = 1; i <= 10000; i++) {
-            write.write(createRow3Cols(1, i * 10, (long) i * 100));
+            for (int i = 1; i <= 10000; i++) {
+                write.write(createRow3Cols(1, i * 10, (long) i * 100));
+            }
+            commit.commit(0, write.prepareCommit(false, 0));
+
+            write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 81930, 819300L));
+            commit.commit(1, write.prepareCommit(true, 1));
+
+            Function<InternalRow, String> rowDataToString =
+                    row ->
+                            internalRowToString(
+                                    row,
+                                    DataTypes.ROW(
+                                            DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
+            List<String> result =
+                    getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
+
+            assertThat(result).hasSize(9999);
+
+            assertThat(result).doesNotContain("+I[1, 81930, 819300]");
+
+            // Verify some sample records exist
+            assertThat(result).contains("+I[1, 10, 100]");
+            assertThat(result).contains("+I[1, 100000, 1000000]");
         }
-        commit.commit(0, write.prepareCommit(false, 0));
-
-        write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 81930, 819300L));
-        commit.commit(1, write.prepareCommit(true, 1));
-
-        Function<InternalRow, String> rowDataToString =
-                row ->
-                        internalRowToString(
-                                row,
-                                DataTypes.ROW(
-                                        DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
-        List<String> result =
-                getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
-
-        assertThat(result).hasSize(9999);
-
-        assertThat(result).doesNotContain("+I[1, 81930, 819300]");
-
-        // Verify some sample records exist
-        assertThat(result).contains("+I[1, 10, 100]");
-        assertThat(result).contains("+I[1, 100000, 1000000]");
+        assertSpillDirectoryEmpty();
     }
 
     @Test
@@ -607,6 +615,12 @@ public class JavaPyE2ETest {
                         1,
                         -1);
         return assigner.assign(BinaryRow.EMPTY_ROW, keyHash);
+    }
+
+    private void assertSpillDirectoryEmpty() throws Exception {
+        try (Stream<java.nio.file.Path> files = Files.list(ioTempDir)) {
+            assertThat(files).isEmpty();
+        }
     }
 
     @Test
@@ -1460,6 +1474,12 @@ public class JavaPyE2ETest {
                                 DataTypes.MAP(DataTypes.DECIMAL(20, 2), DataTypes.BLOB()))
                         .column("date_payloads", DataTypes.MAP(DataTypes.DATE(), DataTypes.BLOB()))
                         .column("time_payloads", DataTypes.MAP(DataTypes.TIME(3), DataTypes.BLOB()))
+                        .column(
+                                "binary_payloads",
+                                DataTypes.MAP(DataTypes.BINARY(4), DataTypes.BLOB()))
+                        .column(
+                                "varbinary_payloads",
+                                DataTypes.MAP(DataTypes.VARBINARY(8), DataTypes.BLOB()))
                         .option(ROW_TRACKING_ENABLED.key(), "true")
                         .option(DATA_EVOLUTION_ENABLED.key(), "true")
                         .option(BUCKET.key(), "-1")
@@ -1486,6 +1506,13 @@ public class JavaPyE2ETest {
         datePayloads.put(-1, new BlobData("java-date".getBytes(StandardCharsets.UTF_8)));
         Map<Object, Object> timePayloads = new LinkedHashMap<>();
         timePayloads.put(45_296_789, new BlobData("java-time".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> binaryPayloads = new LinkedHashMap<>();
+        binaryPayloads.put(
+                new byte[] {0, (byte) 0xff, 1, 2},
+                new BlobData("java-binary".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> varbinaryPayloads = new LinkedHashMap<>();
+        varbinaryPayloads.put(
+                new byte[0], new BlobData("java-varbinary".getBytes(StandardCharsets.UTF_8)));
 
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
@@ -1499,7 +1526,9 @@ public class JavaPyE2ETest {
                             new GenericMap(compactDecimalPayloads),
                             new GenericMap(highDecimalPayloads),
                             new GenericMap(datePayloads),
-                            new GenericMap(timePayloads)));
+                            new GenericMap(timePayloads),
+                            new GenericMap(binaryPayloads),
+                            new GenericMap(varbinaryPayloads)));
             write.write(
                     GenericRow.of(
                             2,
@@ -1508,9 +1537,13 @@ public class JavaPyE2ETest {
                             null,
                             null,
                             null,
+                            null,
+                            null,
                             null));
-            write.write(GenericRow.of(3, null, null, null, null, null, null));
-            write.write(GenericRow.of(4, new GenericMap(last), null, null, null, null, null));
+            write.write(GenericRow.of(3, null, null, null, null, null, null, null, null));
+            write.write(
+                    GenericRow.of(
+                            4, new GenericMap(last), null, null, null, null, null, null, null));
             commit.commit(write.prepareCommit());
         }
 
@@ -1604,6 +1637,19 @@ public class JavaPyE2ETest {
                         InternalMap timeMap = row.getMap(6);
                         assertThat(timeMap.keyArray().getInt(0)).isEqualTo(45_296_789);
                         assertSingleBlobValue(timeMap, valuePrefix + "-time");
+
+                        GenericMap binaryMap = (GenericMap) row.getMap(7);
+                        byte[] binaryKey = new byte[] {0, (byte) 0xff, 1, 2};
+                        assertThat(binaryMap.keyArray().getBinary(0)).isEqualTo(binaryKey);
+                        assertThat(binaryMap.contains(binaryKey)).isTrue();
+                        assertThat(((Blob) binaryMap.get(binaryKey)).toData())
+                                .isEqualTo(
+                                        (valuePrefix + "-binary").getBytes(StandardCharsets.UTF_8));
+                        assertThat(binaryMap.size()).isOne();
+
+                        InternalMap varbinaryMap = row.getMap(8);
+                        assertThat(varbinaryMap.keyArray().getBinary(0)).isEmpty();
+                        assertSingleBlobValue(varbinaryMap, valuePrefix + "-varbinary");
                     });
         }
         assertThat(found[0]).isTrue();

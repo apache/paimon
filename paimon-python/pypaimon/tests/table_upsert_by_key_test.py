@@ -620,6 +620,66 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         }
         self.assertEqual(99, rows[2])
 
+    def test_compaction_rewrite_rejects_update_after_compaction(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['Alice', 'Bob'],
+            'age': [25, 30],
+            'city': ['NYC', 'LA'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [3, 4],
+            'name': ['Carol', 'Dave'],
+            'age': [35, 40],
+            'city': ['Chicago', 'Houston'],
+        }, schema=self.pa_schema))
+
+        wb = self._make_write_builder(table)
+        update = wb.new_update().with_update_type(['age'])
+        commit_identifier = self._next_commit_id()
+        stale_messages = self._apply_upsert(
+            update,
+            pa.Table.from_pydict({
+                'id': [2],
+                'name': ['ignored'],
+                'age': [31],
+                'city': ['ignored'],
+            }, schema=self.pa_schema),
+            ['id'],
+            commit_identifier,
+        )
+
+        self._compact_all_data_files(table)
+        self._upsert(
+            table,
+            pa.Table.from_pydict({
+                'id': [2],
+                'name': ['ignored'],
+                'age': [99],
+                'city': ['ignored'],
+            }, schema=self.pa_schema),
+            ['id'],
+            update_cols=['age'],
+        )
+
+        commit = wb.new_commit()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "multiple 'MERGE INTO' operations have encountered conflicts"):
+            self._apply_commit(
+                commit,
+                stale_messages,
+                commit_identifier,
+            )
+        commit.close()
+
+        rows = {
+            row['id']: row['age']
+            for row in self._read_all(table).to_pylist()
+        }
+        self.assertEqual(99, rows[2])
+
     def test_large_table_upsert(self):
         """Upsert that touches a wide selection of rows in a 200-row table."""
         table = self._create_table()

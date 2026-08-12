@@ -40,6 +40,10 @@ import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergRef;
+import org.apache.paimon.iceberg.metadata.IcebergSchema;
+import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
+import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -55,6 +59,8 @@ import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 
 import org.apache.avro.Schema.Field;
 import org.apache.avro.Schema.Type;
@@ -454,6 +460,420 @@ public class IcebergCompatibilityTest {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testCommitAfterRollbackDoesNotDuplicateSchemas() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        table.createTag("before-evolution", 1);
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
+        table = table.copyWithLatestSchema();
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(2, 20, 200));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        TableCommitImpl rollbackCommit = table.newCommit(commitUser);
+        rollbackCommit.rollbackToAsLatest(table.tagManager().getOrThrow("before-evolution"));
+        rollbackCommit.close();
+
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(3, 30, 300));
+        commit.commit(3, write.prepareCommit(false, 3));
+        write.close();
+        commit.close();
+
+        long latestId = table.snapshotManager().latestSnapshotId();
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(latestId));
+        List<Integer> schemaIds =
+                metadata.schemas().stream()
+                        .map(IcebergSchema::schemaId)
+                        .collect(Collectors.toList());
+        assertThat(schemaIds).doesNotHaveDuplicates();
+        assertThat(metadata.currentSchemaId())
+                .isEqualTo((int) table.snapshotManager().snapshot(latestId).schemaId());
+    }
+
+    @Test
+    public void testRollbackSnapshotRecordsItsOwnSchema() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        table.createTag("before-evolution", 1);
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
+        table = table.copyWithLatestSchema();
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(2, 20, 200));
+        commit.commit(2, write.prepareCommit(false, 2));
+        int evolvedSchemaId = (int) table.snapshotManager().snapshot(2).schemaId();
+        int evolvedLastColumnId =
+                IcebergMetadata.fromPath(
+                                table.fileIO(),
+                                new IcebergPathFactory(new Path(table.location(), "metadata"))
+                                        .toMetadataPath(2))
+                        .lastColumnId();
+        write.close();
+        commit.close();
+
+        TableCommitImpl rollbackCommit = table.newCommit(commitUser);
+        rollbackCommit.rollbackToAsLatest(table.tagManager().getOrThrow("before-evolution"));
+        rollbackCommit.close();
+        long rolledBackId = table.snapshotManager().latestSnapshotId();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergMetadata rebuilt =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(rolledBackId));
+        assertThat(rebuilt.currentSchemaId()).isEqualTo(evolvedSchemaId);
+        assertThat(rebuilt.currentSnapshot().schemaId())
+                .isEqualTo((int) table.snapshotManager().snapshot(rolledBackId).schemaId());
+        assertThat(rebuilt.currentSnapshot().schemaId()).isLessThan(evolvedSchemaId);
+        assertThat(rebuilt.lastColumnId()).isGreaterThanOrEqualTo(evolvedLastColumnId);
+    }
+
+    @Test
+    public void testBaseLessRebuildRecordsRollbackSnapshotSchema() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        table.createTag("before-evolution", 1);
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
+        FileStoreTable evolved = table.copyWithLatestSchema();
+        TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
+        TableCommitImpl commit2 = evolved.newCommit(commitUser);
+        write2.write(GenericRow.of(2, 20, 200));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        for (org.apache.paimon.fs.FileStatus st :
+                table.fileIO().listStatus(pathFactory.metadataDirectory())) {
+            if (st.getPath().getName().endsWith(".metadata.json")) {
+                table.fileIO().deleteQuietly(st.getPath());
+            }
+        }
+
+        TableCommitImpl rollbackCommit = evolved.newCommit(commitUser);
+        rollbackCommit.rollbackToAsLatest(evolved.tagManager().getOrThrow("before-evolution"));
+        rollbackCommit.close();
+
+        long latestId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata rebuilt =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(latestId));
+        assertThat(rebuilt.currentSchemaId()).isEqualTo(1);
+        assertThat(rebuilt.currentSnapshot().schemaId())
+                .isEqualTo((int) table.snapshotManager().snapshot(latestId).schemaId());
+        assertThat(rebuilt.schemas()).anyMatch(s -> s.schemaId() == 1);
+        assertThat(rebuilt.lastColumnId())
+                .isEqualTo(
+                        rebuilt.schemas().stream()
+                                .mapToInt(IcebergSchema::highestFieldId)
+                                .max()
+                                .getAsInt());
+    }
+
+    @Test
+    public void testBaseLessRebuildKeepsLastColumnIdAboveDroppedFields() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
+        schemaManager.commitChanges(SchemaChange.dropColumn("w"));
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        for (org.apache.paimon.fs.FileStatus st :
+                table.fileIO().listStatus(pathFactory.metadataDirectory())) {
+            if (st.getPath().getName().endsWith(".metadata.json")) {
+                table.fileIO().deleteQuietly(st.getPath());
+            }
+        }
+
+        FileStoreTable latest = table.copyWithLatestSchema();
+        TableWriteImpl<?> write2 = latest.newWrite(commitUser);
+        TableCommitImpl commit2 = latest.newCommit(commitUser);
+        write2.write(GenericRow.of(2, 20));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        long latestId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata rebuilt =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(latestId));
+        int maxFieldId =
+                rebuilt.schemas().stream().mapToInt(IcebergSchema::highestFieldId).max().getAsInt();
+        assertThat(rebuilt.lastColumnId()).isGreaterThanOrEqualTo(maxFieldId);
+    }
+
+    @Test
+    public void testSchemaPointerRollbackKeepsHistory() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        table.createTag("before-evolution", 1);
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
+        FileStoreTable evolved = table.copyWithLatestSchema();
+        TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
+        TableCommitImpl commit2 = evolved.newCommit(commitUser);
+        write2.write(GenericRow.of(2, 20, 200));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        TableCommitImpl rollbackCommit = evolved.newCommit(commitUser);
+        rollbackCommit.rollbackToAsLatest(evolved.tagManager().getOrThrow("before-evolution"));
+        rollbackCommit.close();
+        table.deleteTag("before-evolution");
+        table.newExpireSnapshots()
+                .config(ExpireConfig.builder().snapshotRetainMax(1).snapshotRetainMin(1).build())
+                .expire();
+        schemaManager.rollbackTo(
+                0, table.snapshotManager(), table.tagManager(), table.changelogManager());
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        long rollbackId = table.snapshotManager().latestSnapshotId();
+        String uuidBefore =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(rollbackId))
+                        .tableUuid();
+
+        TableWriteImpl<?> write3 = table.newWrite(commitUser);
+        TableCommitImpl commit3 = table.newCommit(commitUser);
+        write3.write(GenericRow.of(3, 30));
+        commit3.commit(3, write3.prepareCommit(false, 3));
+        write3.close();
+        commit3.close();
+
+        long latestId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(latestId));
+        assertThat(metadata.tableUuid()).isEqualTo(uuidBefore);
+        assertThat(metadata.currentSchemaId()).isEqualTo(0);
+        assertThat(metadata.snapshots().stream().map(IcebergSnapshot::snapshotId))
+                .contains(rollbackId, latestId);
+    }
+
+    @Test
+    public void testSchemaRollbackWithAbandonedBaseRebuildsMetadata() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
+        FileStoreTable evolved = table.copyWithLatestSchema();
+        TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
+        TableCommitImpl commit2 = evolved.newCommit(commitUser);
+        write2.write(GenericRow.of(2, 20, 200));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        table.rollbackTo(1);
+        schemaManager.rollbackTo(
+                0, table.snapshotManager(), table.tagManager(), table.changelogManager());
+
+        TableWriteImpl<?> write3 = table.newWrite(commitUser);
+        TableCommitImpl commit3 = table.newCommit(commitUser);
+        write3.write(GenericRow.of(3, 30));
+        commit3.commit(2, write3.prepareCommit(false, 2));
+        write3.write(GenericRow.of(4, 40));
+        commit3.commit(3, write3.prepareCommit(false, 3));
+        write3.close();
+        commit3.close();
+
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(3, 30)", "Record(4, 40)");
+    }
+
+    @Test
+    public void testReusedSchemaIdAfterSchemaRollbackRebuildsMetadata() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
+        FileStoreTable evolved = table.copyWithLatestSchema();
+        TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
+        TableCommitImpl commit2 = evolved.newCommit(commitUser);
+        write2.write(GenericRow.of(2, 20, 200));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        table.rollbackTo(1);
+        schemaManager.rollbackTo(
+                0, table.snapshotManager(), table.tagManager(), table.changelogManager());
+        schemaManager.commitChanges(SchemaChange.addColumn("x", DataTypes.STRING()));
+
+        FileStoreTable reEvolved = table.copyWithLatestSchema();
+        TableWriteImpl<?> write3 = reEvolved.newWrite(commitUser);
+        TableCommitImpl commit3 = reEvolved.newCommit(commitUser);
+        write3.write(GenericRow.of(3, 30, BinaryString.fromString("three")));
+        commit3.commit(2, write3.prepareCommit(false, 2));
+        write3.write(GenericRow.of(4, 40, BinaryString.fromString("four")));
+        commit3.commit(3, write3.prepareCommit(false, 3));
+        write3.close();
+        commit3.close();
+
+        long latestId = table.snapshotManager().latestSnapshotId();
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(latestId));
+        assertThat(
+                        metadata.schemas().stream()
+                                .filter(sch -> sch.schemaId() == 1)
+                                .flatMap(sch -> sch.fields().stream())
+                                .map(f -> f.name()))
+                .contains("x")
+                .doesNotContain("w");
+    }
+
+    @Test
+    public void testRebuildAfterSchemaRollbackKeepsLastColumnIdHighWaterMark() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
+        schemaManager.commitChanges(SchemaChange.addColumn("y", DataTypes.INT()));
+        FileStoreTable evolved = table.copyWithLatestSchema();
+        TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
+        TableCommitImpl commit2 = evolved.newCommit(commitUser);
+        write2.write(GenericRow.of(2, 20, 200, 2000));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        int oldLastColumnId =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(2))
+                        .lastColumnId();
+
+        table.rollbackTo(1);
+        schemaManager.rollbackTo(
+                0, table.snapshotManager(), table.tagManager(), table.changelogManager());
+        schemaManager.commitChanges(SchemaChange.addColumn("x", DataTypes.STRING()));
+
+        FileStoreTable reEvolved = table.copyWithLatestSchema();
+        TableWriteImpl<?> write3 = reEvolved.newWrite(commitUser);
+        TableCommitImpl commit3 = reEvolved.newCommit(commitUser);
+        write3.write(GenericRow.of(3, 30, BinaryString.fromString("three")));
+        commit3.commit(2, write3.prepareCommit(false, 2));
+        write3.write(GenericRow.of(4, 40, BinaryString.fromString("four")));
+        commit3.commit(3, write3.prepareCommit(false, 3));
+        write3.close();
+        commit3.close();
+
+        long latestId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata rebuilt =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(latestId));
+        assertThat(rebuilt.lastColumnId()).isGreaterThanOrEqualTo(oldLastColumnId);
     }
 
     @Test
@@ -949,6 +1369,73 @@ public class IcebergCompatibilityTest {
         }
 
         assertThat(sawNanPartitionSummary).isTrue();
+    }
+
+    @Test
+    public void testNullPartitionValue() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.VARCHAR(10), DataTypes.INT()},
+                        new String[] {"pt", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.singletonList("pt"), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(BinaryString.fromString("a"), 1), 1);
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // every entry of this manifest has a null partition value, so its partition
+        // statistics are unknown and the summary must omit both bounds
+        write.write(GenericRow.of(null, 2), 1);
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        FileIO fileIO = table.fileIO();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        fileIO, new Path(table.location(), "metadata/v2.metadata.json"));
+        List<String> partitionSummaries = new ArrayList<>();
+        try (DataFileReader<GenericRecord> dataFileReader =
+                new DataFileReader<>(
+                        new SeekableFileInput(new File(metadata.currentSnapshot().manifestList())),
+                        new GenericDatumReader<>())) {
+            while (dataFileReader.hasNext()) {
+                partitionSummaries.add(dataFileReader.next().get("partitions").toString());
+            }
+        }
+        assertThat(partitionSummaries)
+                .anySatisfy(
+                        summary ->
+                                assertThat(summary)
+                                        .contains("\"contains_null\": true")
+                                        .contains("\"lower_bound\": null")
+                                        .contains("\"upper_bound\": null"));
+        // known bounds are still recorded for non-null partition values
+        assertThat(partitionSummaries)
+                .anySatisfy(
+                        summary ->
+                                assertThat(summary)
+                                        .contains("\"lower_bound\": \"a\"")
+                                        .contains("\"upper_bound\": \"a\""));
+
+        write.write(GenericRow.of(BinaryString.fromString("b"), 3), 1);
+        commit.commit(3, write.prepareCommit(false, 3));
+
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(a, 1)", "Record(null, 2)", "Record(b, 3)");
+
+        // a non add-only commit reads the omitted bounds back from the base manifests
+        Map<String, String> partition = new HashMap<>();
+        partition.put("pt", "a");
+        commit.truncatePartitions(Collections.singletonList(partition));
+
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(null, 2)", "Record(b, 3)");
+
+        write.close();
+        commit.close();
     }
 
     @Test
@@ -1683,6 +2170,437 @@ public class IcebergCompatibilityTest {
             this.partition = partition;
             this.record = record;
         }
+    }
+
+    @Test
+    public void testDeepRollbackRetiresAbandonedSuffixWhenReusedVersionExpired() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        for (int i = 1; i <= 4; i++) {
+            write.write(GenericRow.of(i, i * 10));
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+        write.close();
+        commit.close();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(2))).isFalse();
+        String uuidBefore =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(4)).tableUuid();
+
+        table.rollbackTo(1);
+        TableWriteImpl<?> write2 = table.newWrite(commitUser);
+        TableCommitImpl commit2 = table.newCommit(commitUser);
+        write2.write(GenericRow.of(9, 90));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(3))).isFalse();
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(4))).isFalse();
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(9, 90)");
+        long latestId = table.snapshotManager().latestSnapshotId();
+        assertThat(
+                        IcebergMetadata.fromPath(
+                                        table.fileIO(), pathFactory.toMetadataPath(latestId))
+                                .tableUuid())
+                .isEqualTo(uuidBefore);
+    }
+
+    @Test
+    public void testRetryRecommitsMetadataToExternalCatalog() throws Exception {
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1)
+                        .copy(
+                                Collections.singletonMap(
+                                        IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                                        IcebergOptions.StorageType.HADOOP_CATALOG.toString()));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+        assertThat(RecordingIcebergMetadataCommitter.COMMITS).isNotEmpty();
+
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
+        IcebergCommitCallback callback = new IcebergCommitCallback(table, commitUser);
+        callback.retry(new ManifestCommittable(2));
+        callback.close();
+        assertThat(RecordingIcebergMetadataCommitter.COMMITS).isNotEmpty();
+    }
+
+    @Test
+    public void testRetryOfOldSnapshotDoesNotMoveCatalogPointer() throws Exception {
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1)
+                        .copy(
+                                Collections.singletonMap(
+                                        IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                                        IcebergOptions.StorageType.HADOOP_CATALOG.toString()));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        for (int i = 1; i <= 3; i++) {
+            write.write(GenericRow.of(i, i * 10));
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+        write.close();
+        commit.close();
+        assertThat(RecordingIcebergMetadataCommitter.COMMITS).isNotEmpty();
+
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
+        IcebergCommitCallback callback = new IcebergCommitCallback(table, commitUser);
+        callback.retry(new ManifestCommittable(2));
+        callback.close();
+        assertThat(RecordingIcebergMetadataCommitter.COMMITS).isEmpty();
+    }
+
+    @Test
+    public void testDeepRollbackRetiresSuffixWhenVersionHintLagsBehind() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        for (int i = 1; i <= 4; i++) {
+            write.write(GenericRow.of(i, i * 10));
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+        write.close();
+        commit.close();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(2))).isFalse();
+        String uuidBefore =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(4)).tableUuid();
+
+        table.rollbackTo(1);
+        table.fileIO()
+                .overwriteFileUtf8(
+                        new Path(pathFactory.metadataDirectory(), "version-hint.text"), "1");
+        TableWriteImpl<?> write2 = table.newWrite(commitUser);
+        TableCommitImpl commit2 = table.newCommit(commitUser);
+        write2.write(GenericRow.of(9, 90));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(3))).isFalse();
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(4))).isFalse();
+        long latestId = table.snapshotManager().latestSnapshotId();
+        assertThat(
+                        IcebergMetadata.fromPath(
+                                        table.fileIO(), pathFactory.toMetadataPath(latestId))
+                                .tableUuid())
+                .isEqualTo(uuidBefore);
+    }
+
+    @Test
+    public void testDelayedReplayOfReusedSnapshotDoesNotMoveHeadBack() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        table.rollbackTo(1);
+
+        FileStoreTable disabled =
+                table.copy(
+                        Collections.singletonMap(
+                                IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "disabled"));
+        TableWriteImpl<?> write2 = disabled.newWrite(commitUser);
+        TableCommitImpl commit2 = disabled.newCommit(commitUser);
+        write2.write(GenericRow.of(3, 30));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        TableWriteImpl<?> write3 = table.newWrite(commitUser);
+        TableCommitImpl commit3 = table.newCommit(commitUser);
+        write3.write(GenericRow.of(4, 40));
+        commit3.commit(3, write3.prepareCommit(false, 3));
+        write3.close();
+        commit3.close();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        String hintBefore =
+                table.fileIO()
+                        .readFileUtf8(
+                                new Path(pathFactory.metadataDirectory(), "version-hint.text"))
+                        .trim();
+        assertThat(hintBefore).isEqualTo("3");
+
+        IcebergCommitCallback callback = new IcebergCommitCallback(table, commitUser);
+        callback.retry(new ManifestCommittable(2));
+        callback.close();
+
+        assertThat(
+                        table.fileIO()
+                                .readFileUtf8(
+                                        new Path(
+                                                pathFactory.metadataDirectory(),
+                                                "version-hint.text"))
+                                .trim())
+                .isEqualTo("3");
+    }
+
+    @Test
+    public void testRetryAfterCatalogFailureKeepsItsBase() throws Exception {
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
+        RecordingIcebergMetadataCommitter.BASES.clear();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> overrides = new HashMap<>();
+        overrides.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.HADOOP_CATALOG.toString());
+        overrides.put(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX.key(), "0");
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1)
+                        .copy(overrides);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        RecordingIcebergMetadataCommitter.failNextCommit = true;
+        write.write(GenericRow.of(2, 20));
+        assertThatThrownBy(() -> commit.commit(2, write.prepareCommit(false, 2)))
+                .hasStackTraceContaining("injected catalog failure");
+        write.close();
+        try {
+            commit.close();
+        } catch (Exception ignored) {
+        }
+
+        RecordingIcebergMetadataCommitter.BASES.clear();
+        IcebergCommitCallback callback = new IcebergCommitCallback(table, commitUser);
+        callback.retry(new ManifestCommittable(2));
+        callback.close();
+        assertThat(RecordingIcebergMetadataCommitter.BASES).hasSize(1);
+        assertThat(RecordingIcebergMetadataCommitter.BASES.get(0)).isNotNull();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(IcebergCommitCallback.catalogTableMetadataPath(table));
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(1))).isFalse();
+    }
+
+    @Test
+    public void testDeepRollbackRecoversUuidWhenVersionHintMissing() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        for (int i = 1; i <= 4; i++) {
+            write.write(GenericRow.of(i, i * 10));
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+        write.close();
+        commit.close();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(2))).isFalse();
+        String uuidBefore =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(4)).tableUuid();
+
+        table.rollbackTo(1);
+        table.fileIO()
+                .deleteQuietly(new Path(pathFactory.metadataDirectory(), "version-hint.text"));
+        TableWriteImpl<?> write2 = table.newWrite(commitUser);
+        TableCommitImpl commit2 = table.newCommit(commitUser);
+        write2.write(GenericRow.of(9, 90));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(3))).isFalse();
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(4))).isFalse();
+        long latestId = table.snapshotManager().latestSnapshotId();
+        assertThat(
+                        IcebergMetadata.fromPath(
+                                        table.fileIO(), pathFactory.toMetadataPath(latestId))
+                                .tableUuid())
+                .isEqualTo(uuidBefore);
+    }
+
+    @Test
+    public void testRecommitAfterRollbackIgnoresStaleSnapshotCache() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable stale =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+        stale.setSnapshotCache(Caffeine.newBuilder().maximumSize(128).build());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = stale.newWrite(commitUser);
+        TableCommitImpl commit = stale.newCommit(commitUser);
+        for (int i = 1; i <= 4; i++) {
+            write.write(GenericRow.of(i, i * 10));
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+        write.close();
+        commit.close();
+        stale.snapshotManager().snapshot(2);
+
+        try (FileSystemCatalog freshCatalog =
+                new FileSystemCatalog(LocalFileIO.create(), new Path(tempDir.toString()))) {
+            FileStoreTable fresh =
+                    (FileStoreTable) freshCatalog.getTable(Identifier.create("mydb", "t"));
+            fresh.rollbackTo(1);
+        }
+
+        TableWriteImpl<?> write2 = stale.newWrite(commitUser);
+        TableCommitImpl commit2 = stale.newCommit(commitUser);
+        write2.write(GenericRow.of(9, 90));
+        commit2.commit(5, write2.prepareCommit(false, 5));
+        write2.close();
+        commit2.close();
+
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(9, 90)");
+    }
+
+    @Test
+    public void testRecommitAfterRollbackReplacesStaleMetadata() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        TableWriteImpl<?> writeExtra = table.newWrite(commitUser);
+        TableCommitImpl commitExtra = table.newCommit(commitUser);
+        writeExtra.write(GenericRow.of(9, 90));
+        commitExtra.commit(3, writeExtra.prepareCommit(false, 3));
+        writeExtra.close();
+        commitExtra.close();
+
+        table.rollbackTo(1);
+        TableWriteImpl<?> write2 = table.newWrite(commitUser);
+        TableCommitImpl commit2 = table.newCommit(commitUser);
+        write2.write(GenericRow.of(3, 30));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        IcebergPathFactory suffixPathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        assertThat(table.fileIO().exists(suffixPathFactory.toMetadataPath(3))).isFalse();
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(3, 30)");
+
+        TableWriteImpl<?> write3 = table.newWrite(commitUser);
+        TableCommitImpl commit3 = table.newCommit(commitUser);
+        write3.write(GenericRow.of(4, 40));
+        commit3.commit(3, write3.prepareCommit(false, 3));
+        write3.close();
+        commit3.close();
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(3, 30)", "Record(4, 40)");
+    }
+
+    @Test
+    public void testRollbackMarksRetirementAcrossVersionGaps() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1)
+                        .copy(
+                                Collections.singletonMap(
+                                        IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX.key(), "0"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        for (int i = 1; i <= 4; i++) {
+            write.write(GenericRow.of(i, i * 10));
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+        write.close();
+        commit.close();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(4))).isTrue();
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(3))).isFalse();
+        String uuidBefore =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(4)).tableUuid();
+
+        table.fileIO()
+                .overwriteFileUtf8(
+                        new Path(pathFactory.metadataDirectory(), "version-hint.text"), "1");
+        table.rollbackTo(1);
+
+        TableWriteImpl<?> write2 = table.newWrite(commitUser);
+        TableCommitImpl commit2 = table.newCommit(commitUser);
+        write2.write(GenericRow.of(9, 90));
+        commit2.commit(5, write2.prepareCommit(false, 5));
+        write2.close();
+        commit2.close();
+
+        assertThat(table.fileIO().exists(pathFactory.toMetadataPath(4))).isFalse();
+        assertThat(
+                        IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(2))
+                                .tableUuid())
+                .isEqualTo(uuidBefore);
     }
 
     // ------------------------------------------------------------------------

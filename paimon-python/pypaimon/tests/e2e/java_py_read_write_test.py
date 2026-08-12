@@ -28,7 +28,7 @@ from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
-from pypaimon.schema.data_types import VectorType
+from pypaimon.schema.data_types import PyarrowFieldParser, VectorType
 from pypaimon.schema.schema import Schema
 from pypaimon.read.read_builder import ReadBuilder
 
@@ -1567,6 +1567,12 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'time_payloads': {
                 datetime.time(12, 34, 56, 789000): b'java-time',
             },
+            'binary_payloads': {
+                bytes([0, 255, 1, 2]): b'java-binary',
+            },
+            'varbinary_payloads': {
+                b'': b'java-varbinary',
+            },
         }
         for name, expected in expected_additional_payloads.items():
             self.assertEqual(
@@ -1584,6 +1590,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
             pa.decimal128(20, 2), pa.large_binary())
         date_map_blob_type = pa.map_(pa.date32(), pa.large_binary())
         time_map_blob_type = pa.map_(pa.time32('ms'), pa.large_binary())
+        binary_schema_type = pa.map_(pa.binary(4), pa.large_binary())
+        varbinary_schema_type = pa.map_(pa.binary(), pa.large_binary())
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('payloads', map_blob_type),
@@ -1592,6 +1600,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ('high_decimal_payloads', high_decimal_map_blob_type),
             ('date_payloads', date_map_blob_type),
             ('time_payloads', time_map_blob_type),
+            ('binary_payloads', binary_schema_type),
+            ('varbinary_payloads', varbinary_schema_type),
         ])
         schema = Schema.from_pyarrow_schema(
             pa_schema,
@@ -1601,6 +1611,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 'bucket': '-1',
             },
         )
+        pa_schema = PyarrowFieldParser.from_paimon_schema(schema.fields)
+        binary_map_blob_type = pa_schema.field('binary_payloads').type
+        varbinary_map_blob_type = pa_schema.field('varbinary_payloads').type
         table_name = 'default.map_blob_python_test'
         self.catalog.drop_table(table_name, True)
         self.catalog.create_table(table_name, schema, False)
@@ -1647,6 +1660,21 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 )], None, None, None],
                 type=time_map_blob_type,
             ),
+            'binary_payloads': pa.array(
+                [
+                    [
+                        (bytes([0, 255, 1, 2]), b'python-binary'),
+                    ],
+                    None,
+                    None,
+                    None,
+                ],
+                type=binary_map_blob_type,
+            ),
+            'varbinary_payloads': pa.array(
+                [[(b'', b'python-varbinary')], None, None, None],
+                type=varbinary_map_blob_type,
+            ),
         }, schema=pa_schema)
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -1684,6 +1712,12 @@ class JavaPyReadWriteTest(unittest.TestCase):
             },
             'time_payloads': {
                 datetime.time(12, 34, 56, 789000): b'python-time',
+            },
+            'binary_payloads': {
+                bytes([0, 255, 1, 2]): b'python-binary',
+            },
+            'varbinary_payloads': {
+                b'': b'python-varbinary',
             },
         }
         for name, expected in expected_additional_payloads.items():

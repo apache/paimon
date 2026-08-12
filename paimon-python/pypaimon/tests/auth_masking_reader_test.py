@@ -292,6 +292,18 @@ class TestMaskingFieldValidation(unittest.TestCase):
 
 class TestAuthFilterReader(unittest.TestCase):
 
+    def test_adopts_reader_metadata(self):
+        inner = _FakeBatchReader([])
+        inner.file_io = object()
+        inner.blob_field_indices = frozenset([1])
+        inner.vector_field_indices = frozenset([2])
+
+        reader = AuthFilterReader(inner, lambda batch: None)
+
+        self.assertIs(reader.file_io, inner.file_io)
+        self.assertEqual(reader.blob_field_indices, inner.blob_field_indices)
+        self.assertEqual(reader.vector_field_indices, inner.vector_field_indices)
+
     def test_filters_rows(self):
         import pyarrow.compute as pc
 

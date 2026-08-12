@@ -99,7 +99,9 @@ public class MultipleBlobFileWriter implements Closeable {
                                             asyncFileWrite,
                                             statsDenseStore,
                                             pathFactory.isExternalPath(),
-                                            singletonList(blobFieldName)),
+                                            singletonList(blobFieldName),
+                                            null,
+                                            null),
                             targetFileSize,
                             writeSchema.projectIndexes(singletonList(blobFieldName))));
         }

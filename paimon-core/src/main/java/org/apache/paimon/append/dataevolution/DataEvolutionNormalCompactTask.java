@@ -43,6 +43,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compacts normal structured files of a data evolution table. */
@@ -52,6 +53,7 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
 
     public DataEvolutionNormalCompactTask(BinaryRow partition, List<DataFileMeta> files) {
         super(partition, files);
+        checkContiguousRowRange(files);
     }
 
     @Override

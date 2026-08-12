@@ -50,6 +50,7 @@ public class FormatTableSingleFileWriter {
     private TwoPhaseOutputStream.Committer committer;
 
     protected long outputBytes;
+    protected long recordCount;
     protected boolean closed;
 
     public FormatTableSingleFileWriter(
@@ -99,6 +100,7 @@ public class FormatTableSingleFileWriter {
 
         try {
             writer.addElement(record);
+            recordCount++;
         } catch (Throwable e) {
             LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
             abort();
@@ -140,6 +142,22 @@ public class FormatTableSingleFileWriter {
         return Lists.newArrayList(committer);
     }
 
+    /** Rows written to this file. Exact, counted as they were written. */
+    public long recordCount() {
+        if (!closed) {
+            throw new RuntimeException("Writer should be closed before getting record count!");
+        }
+        return recordCount;
+    }
+
+    /** Bytes this file holds, taken from the stream position at close. */
+    public long outputBytes() {
+        if (!closed) {
+            throw new RuntimeException("Writer should be closed before getting output bytes!");
+        }
+        return outputBytes;
+    }
+
     public FileWriterAbortExecutor abortExecutor() {
         if (!closed) {
             throw new RuntimeException("Writer should be closed!");
@@ -168,9 +186,13 @@ public class FormatTableSingleFileWriter {
                 committer = ((TwoPhaseOutputStream) out).closeForCommit();
                 out = null;
             }
-        } catch (IOException e) {
+        } catch (Throwable e) {
             LOG.warn("Exception occurs when closing file {}. Cleaning up.", path, e);
-            abort();
+            try {
+                abort();
+            } catch (Throwable t) {
+                e.addSuppressed(t);
+            }
             throw e;
         } finally {
             closed = true;

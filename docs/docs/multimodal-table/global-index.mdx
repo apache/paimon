@@ -311,7 +311,7 @@ catalog.alter_table(
 
 Global index files cover row-id ranges. If more rows are appended after an index is built, those
 new rows are not automatically covered by the existing index files. Build the global index again
-to create index files for newly uncovered data. Scalar queries default to `full` search, while
+to create index files for newly uncovered data. Scalar queries default to `fast` search, while
 vector and full-text queries default to `fast` and only search indexed row ranges.
 
 To improve freshness for query types that support raw-data search, set:

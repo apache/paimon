@@ -509,12 +509,6 @@ public class CoreOptions implements Serializable {
                                     + "in the previous file. This must not exceed "
                                     + "'variant.shredding.minFieldCardinalityRatio'.");
 
-    public static final ConfigOption<String> MANIFEST_FORMAT =
-            key("manifest.format")
-                    .stringType()
-                    .defaultValue(CoreOptions.FILE_FORMAT_AVRO)
-                    .withDescription("Specify the message format of manifest files.");
-
     public static final ConfigOption<String> MANIFEST_COMPRESSION =
             key("manifest.compression")
                     .stringType()
@@ -594,13 +588,6 @@ public class CoreOptions implements Serializable {
                                     + " sort rewrite pass. Sections exceeding this limit are"
                                     + " skipped. Set to a larger value to allow more aggressive"
                                     + " sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.");
-
-    public static final ConfigOption<String> UPSERT_KEY =
-            key("upsert-key")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Define upsert key to do MERGE INTO when executing INSERT INTO, cannot be defined with primary key.");
 
     public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
             key("partition.default-name")
@@ -1486,6 +1473,14 @@ public class CoreOptions implements Serializable {
                             "Define primary key by table options, cannot define primary key on DDL and table options at the same time.");
 
     @Immutable
+    public static final ConfigOption<Boolean> PRIMARY_KEY_NULLABLE =
+            key("primary-key.nullable")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether primary key fields can contain null values. Null values use null-safe equality when records are merged.");
+
+    @Immutable
     public static final ConfigOption<String> PARTITION =
             key("partition")
                     .stringType()
@@ -2165,9 +2160,10 @@ public class CoreOptions implements Serializable {
                     .enumType(RangeStrategy.class)
                     .defaultValue(RangeStrategy.SIZE)
                     .withDescription(
-                            "The range strategy of sort compaction, the default value is quantity.\n"
-                                    + "If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, "
-                                    + "the config can be set to size.");
+                            "The range strategy of sort compaction, the default value is size.\n"
+                                    + "The size strategy ranges by the data size allocated to each sorting task, which avoids "
+                                    + "the performance bottlenecks caused by uneven data size. "
+                                    + "The config can be set to quantity to range by the number of rows instead.");
 
     public static final ConfigOption<Integer> SORT_COMPACTION_SAMPLE_MAGNIFICATION =
             key("sort-compaction.local-sample.magnification")
@@ -2569,9 +2565,12 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether data-evolution compaction may rewrite row IDs while physically applying deletion vectors. "
-                                    + "Enable only when callers do not rely on stable _ROW_ID; "
-                                    + "this invalidates row-id based references and drops global indexes for affected partitions.");
+                            "Legacy compatibility option. Setting this option to true fails. "
+                                    + "Data-evolution compaction preserves row IDs and logical "
+                                    + "deletions. Use the 'materialize_deletion_vectors' procedure "
+                                    + "to apply deletion vectors to the latest table state and "
+                                    + "assign new row IDs. Reclaiming files retained by historical "
+                                    + "snapshots or tags requires snapshot expiration.");
 
     public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
             key("blob-compaction.enabled")
@@ -3042,10 +3041,6 @@ public class CoreOptions implements Serializable {
         return normalizeFileFormat(options.get(FILE_FORMAT));
     }
 
-    public String manifestFormatString() {
-        return normalizeFileFormat(options.get(MANIFEST_FORMAT));
-    }
-
     public String manifestCompression() {
         return options.get(MANIFEST_COMPRESSION);
     }
@@ -3152,12 +3147,13 @@ public class CoreOptions implements Serializable {
         return options.get(FIELDS_DEFAULT_AGG_FUNC);
     }
 
-    public List<String> upsertKey() {
-        String upsertKey = options.get(UPSERT_KEY);
-        if (StringUtils.isEmpty(upsertKey)) {
-            return Collections.emptyList();
-        }
-        return Arrays.asList(upsertKey.split(","));
+    public boolean primaryKeyNullable() {
+        return options.get(PRIMARY_KEY_NULLABLE);
+    }
+
+    public static boolean primaryKeyNullable(Map<String, String> options) {
+        return Options.fromMap(options)
+                .getBoolean(PRIMARY_KEY_NULLABLE.key(), PRIMARY_KEY_NULLABLE.defaultValue());
     }
 
     public static String createCommitUser(Options options) {

@@ -30,7 +30,6 @@ import org.apache.paimon.flink.compact.IncrementalClusterCompact;
 import org.apache.paimon.flink.postpone.PostponeBucketCompactOperator;
 import org.apache.paimon.flink.postpone.PostponeBucketCompactSplitSource;
 import org.apache.paimon.flink.postpone.RewritePostponeBucketCommittableOperator;
-import org.apache.paimon.flink.predicate.SimpleSqlPredicateConvertor;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
@@ -42,17 +41,12 @@ import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.PartitionPredicateVisitor;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.PostponeUtils.CompactBucket;
 import org.apache.paimon.table.PostponeUtils.PostponeBucketNumResolver;
 import org.apache.paimon.table.sink.ChannelComputer;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 
@@ -64,8 +58,6 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.table.data.RowData;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -80,14 +72,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
-import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Table compact action for Flink. */
 public class CompactAction extends TableActionBase {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(CompactAction.class);
 
     protected List<Map<String, String>> partitions;
 
@@ -248,62 +236,8 @@ public class CompactAction extends TableActionBase {
     }
 
     protected PartitionPredicate getPartitionPredicate() throws Exception {
-        checkArgument(
-                partitions == null || whereSql == null,
-                "partitions and where cannot be used together.");
-        Predicate predicate = null;
-        RowType partitionType = table.rowType().project(table.partitionKeys());
-        String partitionDefaultName = ((FileStoreTable) table).coreOptions().partitionDefaultName();
-        if (partitions != null) {
-            boolean fullMode =
-                    partitions.stream()
-                            .allMatch(part -> part.size() == partitionType.getFieldCount());
-            if (fullMode) {
-                List<BinaryRow> binaryPartitions =
-                        createBinaryPartitions(partitions, partitionType, partitionDefaultName);
-                return PartitionPredicate.fromMultiple(partitionType, binaryPartitions);
-            } else {
-                // partitions may be partial partition fields, so here must to use predicate way.
-                predicate =
-                        partitions.stream()
-                                .map(
-                                        partition ->
-                                                createPartitionPredicate(
-                                                        partition,
-                                                        table.rowType(),
-                                                        partitionDefaultName))
-                                .reduce(PredicateBuilder::or)
-                                .orElseThrow(
-                                        () ->
-                                                new RuntimeException(
-                                                        "Failed to get partition filter."));
-            }
-        } else if (whereSql != null) {
-            SimpleSqlPredicateConvertor simpleSqlPredicateConvertor =
-                    new SimpleSqlPredicateConvertor(table.rowType());
-            predicate = simpleSqlPredicateConvertor.convertSqlToPredicate(whereSql);
-        }
-
-        // Check whether predicate contain non partition key.
-        if (predicate != null) {
-            LOGGER.info("the partition predicate of compaction is {}", predicate);
-            PartitionPredicateVisitor partitionPredicateVisitor =
-                    new PartitionPredicateVisitor(table.partitionKeys());
-            checkArgument(
-                    predicate.visit(partitionPredicateVisitor),
-                    "Only partition key can be specialized in compaction action.");
-            predicate =
-                    predicate
-                            .visit(
-                                    PredicateProjectionConverter.fromProjection(
-                                            table.rowType().projectIndexes(table.partitionKeys())))
-                            .orElseThrow(
-                                    () ->
-                                            new RuntimeException(
-                                                    "Failed to convert partition predicate."));
-        }
-
-        return PartitionPredicate.fromPredicate(partitionType, predicate);
+        return ActionPartitionPredicate.create(
+                (FileStoreTable) table, partitions, whereSql, "compaction");
     }
 
     protected boolean buildForPostponeBucketCompaction(

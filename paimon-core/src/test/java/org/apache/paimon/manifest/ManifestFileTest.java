@@ -19,14 +19,19 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.types.DataField;
@@ -40,14 +45,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_PART_TYPE;
@@ -77,6 +83,296 @@ public class ManifestFileTest {
                         .flatMap(m -> manifestFile.read(m.fileName(), m.fileSize()).stream())
                         .collect(Collectors.toList());
         assertThat(actualEntries).isEqualTo(entries);
+    }
+
+    @Test
+    void testReadMissingManifestFile() {
+        ManifestFile manifestFile = createManifestFile(tempDir.toString());
+
+        assertThatThrownBy(
+                        () ->
+                                manifestFile.read(
+                                        "missing-manifest",
+                                        null,
+                                        null,
+                                        null,
+                                        row -> true,
+                                        entry -> true))
+                .hasMessageContaining("not found");
+    }
+
+    @Test
+    void testAvroReaderSkipsDataFileMetaBeforeMaterialization() throws Exception {
+        List<ManifestEntry> entries = generateData();
+        ManifestEntry selected = entries.get(0);
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromMultiple(
+                        DEFAULT_PART_TYPE, Collections.singletonList(selected.partition()));
+        BucketFilter bucketFilter = new BucketFilter(false, selected.bucket(), null, null);
+        List<ManifestEntry> expected =
+                entries.stream()
+                        .filter(
+                                entry ->
+                                        entry.partition().equals(selected.partition())
+                                                && entry.bucket() == selected.bucket())
+                        .collect(Collectors.toList());
+
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+        FileIO fileIO = LocalFileIO.create();
+        Path path = new Path(new Path(tempDir.toUri()), "manifest/" + manifest.fileName());
+        ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+        List<ManifestEntry> actual = new ArrayList<>();
+
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                CloseableIterator<InternalRow> rows =
+                        reader.read(
+                                ManifestEntry.MANIFEST_ROW_TYPE, partitionFilter, bucketFilter)) {
+            while (rows.hasNext()) {
+                InternalRow row = rows.next();
+                actual.add(serializer.fromRow(row));
+            }
+        }
+
+        assertThat(actual).containsExactlyElementsOf(expected);
+        assertThat(
+                        manifestFile.read(
+                                manifest.fileName(),
+                                manifest.fileSize(),
+                                partitionFilter,
+                                bucketFilter,
+                                row -> true,
+                                entry -> true))
+                .containsExactlyElementsOf(expected);
+    }
+
+    @Test
+    void testAvroReaderSupportsReorderedNestedProjection() throws Exception {
+        List<ManifestEntry> entries = generateData();
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+        Path path = new Path(new Path(tempDir.toUri()), "manifest/" + manifest.fileName());
+        LocalFileIO fileIO = LocalFileIO.create();
+
+        List<DataField> fields = ManifestEntry.MANIFEST_ROW_TYPE.getFields();
+        RowType projectedFileType =
+                DataFileMeta.SCHEMA.project(DataFileMeta.FILE_NAME, DataFileMeta.ROW_COUNT);
+        RowType projectedType =
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                fields.get(5).newType(projectedFileType),
+                                fields.get(2),
+                                fields.get(1)));
+        ProjectedManifestEntry projectedEntry =
+                ProjectedManifestEntry.Projection.create(projectedType).createEntry();
+
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                CloseableIterator<InternalRow> rows = reader.read(projectedType, null, null)) {
+            for (ManifestEntry expected : entries) {
+                assertThat(rows.hasNext()).isTrue();
+                InternalRow row = rows.next();
+                assertThat(row.getFieldCount()).isEqualTo(3);
+                assertThat(row.getRow(0, projectedFileType.getFieldCount()).getFieldCount())
+                        .isEqualTo(2);
+
+                projectedEntry.replace(row);
+                assertThat(projectedEntry.fileName()).isEqualTo(expected.fileName());
+                assertThat(projectedEntry.rowCount()).isEqualTo(expected.rowCount());
+                assertThat(projectedEntry.partition()).isEqualTo(expected.partition());
+                assertThat(projectedEntry.kind()).isEqualTo(expected.kind());
+            }
+            assertThat(rows.hasNext()).isFalse();
+        }
+    }
+
+    @Test
+    void testAvroReaderSkipsUnprojectedDataFile() throws Exception {
+        List<ManifestEntry> entries = generateData();
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+        Path path = new Path(new Path(tempDir.toUri()), "manifest/" + manifest.fileName());
+        LocalFileIO fileIO = LocalFileIO.create();
+
+        List<DataField> fields = ManifestEntry.MANIFEST_ROW_TYPE.getFields();
+        RowType projectedType = new RowType(false, Arrays.asList(fields.get(2), fields.get(1)));
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                CloseableIterator<InternalRow> rows = reader.read(projectedType, null, null)) {
+            for (ManifestEntry expected : entries) {
+                assertThat(rows.hasNext()).isTrue();
+                InternalRow row = rows.next();
+                assertThat(row.getFieldCount()).isEqualTo(2);
+                assertThat(row.getBinary(0))
+                        .containsExactly(
+                                org.apache.paimon.utils.SerializationUtils.serializeBinaryRow(
+                                        expected.partition()));
+                assertThat(FileKind.fromByteValue(row.getByte(1))).isEqualTo(expected.kind());
+            }
+            assertThat(rows.hasNext()).isFalse();
+        }
+    }
+
+    @Test
+    void testAvroReaderRejectsTrailingUndecodedRecords() throws Exception {
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest =
+                writeSingleManifest(manifestFile, Arrays.asList(gen.next(), gen.next()));
+        Path path = new Path(new Path(tempDir.toUri()), "manifest/" + manifest.fileName());
+        lowerFirstBlockRecordCount(path);
+
+        try (ManifestAvroReader reader =
+                        new ManifestAvroReader(LocalFileIO.create().newInputStream(path));
+                CloseableIterator<InternalRow> rows =
+                        reader.read(ManifestEntry.MANIFEST_ROW_TYPE, null, null)) {
+            assertThat(rows.hasNext()).isTrue();
+            rows.next();
+            assertThatThrownBy(rows::hasNext)
+                    .isInstanceOf(UncheckedIOException.class)
+                    .hasRootCauseInstanceOf(IOException.class)
+                    .hasStackTraceContaining("trailing undecoded bytes");
+        }
+    }
+
+    @Test
+    void testProjectedScanRejectsUnsupportedFormatIdentifier() throws Exception {
+        ManifestEntry entry = gen.next();
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest =
+                writeSingleManifest(manifestFile, Collections.singletonList(entry));
+        Path path = new Path(new Path(tempDir.toUri()), "manifest/" + manifest.fileName());
+        LocalFileIO fileIO = LocalFileIO.create();
+        ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+        InternalRow valid = serializer.toRow(entry);
+
+        try (PositionOutputStream out = fileIO.newOutputStream(path, true);
+                FormatWriter writer =
+                        avro.createWriterFactory(ManifestEntry.MANIFEST_ROW_TYPE)
+                                .create(out, "zstd")) {
+            writer.addElement(
+                    GenericRow.of(
+                            1,
+                            valid.getByte(1),
+                            valid.getBinary(2),
+                            valid.getInt(3),
+                            valid.getInt(4),
+                            valid.getRow(5, DataFileMeta.SCHEMA.getFieldCount())));
+        }
+
+        try (CloseableIterator<ProjectedManifestEntry> entries =
+                manifestFile.scan(
+                        manifest.fileName(), ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
+            assertThat(entries.hasNext()).isTrue();
+            assertThatThrownBy(entries::next)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("not compatible");
+        }
+    }
+
+    @Test
+    void testAvroReaderReadsLegacyDataFileMetaWithFewerFields() throws Exception {
+        ManifestEntry generated = gen.next();
+        DataFileMeta sourceFile = generated.file().newFirstRowId(42L);
+        ManifestEntry source =
+                ManifestEntry.create(
+                        FileKind.ADD,
+                        generated.partition(),
+                        generated.bucket(),
+                        generated.totalBuckets(),
+                        sourceFile);
+        RowType legacyFileType =
+                DataFileMeta.SCHEMA.project(
+                        new int[] {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17});
+        List<DataField> legacyManifestFields =
+                ManifestEntry.MANIFEST_ROW_TYPE.getFields().stream()
+                        .map(
+                                field ->
+                                        ManifestEntry.FILE.equals(field.name())
+                                                ? field.newType(legacyFileType)
+                                                : field)
+                        .collect(Collectors.toList());
+        RowType legacyManifestType = new RowType(false, legacyManifestFields);
+        Path path = new Path(new Path(tempDir.toUri()), "legacy-manifest.avro");
+        LocalFileIO fileIO = LocalFileIO.create();
+        ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false);
+                FormatWriter writer =
+                        avro.createWriterFactory(legacyManifestType).create(out, "zstd")) {
+            writer.addElement(serializer.toRow(source));
+        }
+
+        ManifestEntry actual;
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                CloseableIterator<InternalRow> rows =
+                        reader.read(ManifestEntry.MANIFEST_ROW_TYPE, null, null)) {
+            assertThat(rows.hasNext()).isTrue();
+            actual = serializer.fromRow(rows.next());
+            assertThat(rows.hasNext()).isFalse();
+        }
+
+        assertThat(actual.fileName()).isEqualTo(source.fileName());
+        assertThat(actual.file().firstRowId()).isNull();
+        assertThat(actual.file().writeCols()).isNull();
+
+        ProjectedManifestEntry.Projection projection = ProjectedManifestEntry.ROW_RANGE_PROJECTION;
+        ProjectedManifestEntry binaryEntry = projection.createEntry();
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path))) {
+            assertThat(reader.hasNext()).isTrue();
+            ManifestAvroReader.RawBlock block = reader.next();
+            assertThat(block.rawBlockCopySupported()).isFalse();
+            ManifestAvroReader.RowIterator rows = block.toRows(projection.projectedType());
+            assertThat(rows.hasNext()).isTrue();
+            binaryEntry.replace(rows.next());
+            assertThat(binaryEntry.rowCount()).isEqualTo(source.rowCount());
+            assertThat(binaryEntry.firstRowId()).isNull();
+            assertThat(rows.hasNext()).isFalse();
+            assertThat(reader.hasNext()).isFalse();
+        }
+    }
+
+    @Test
+    void testAvroReaderRejectsReorderedTopLevelFields() throws Exception {
+        ManifestEntry entry = gen.next();
+        List<DataField> fields = ManifestEntry.MANIFEST_ROW_TYPE.getFields();
+        RowType reorderedType =
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                fields.get(0),
+                                fields.get(5),
+                                fields.get(1),
+                                fields.get(2),
+                                fields.get(3),
+                                fields.get(4)));
+        Path path = new Path(new Path(tempDir.toUri()), "reordered-manifest.avro");
+        LocalFileIO fileIO = LocalFileIO.create();
+        ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false);
+                FormatWriter writer = avro.createWriterFactory(reorderedType).create(out, "zstd")) {
+            InternalRow row = serializer.toRow(entry);
+            writer.addElement(
+                    GenericRow.of(
+                            row.getInt(0),
+                            row.getRow(5, DataFileMeta.SCHEMA.getFieldCount()),
+                            row.getByte(1),
+                            row.getBinary(2),
+                            row.getInt(3),
+                            row.getInt(4)));
+        }
+
+        assertThatThrownBy(
+                        () -> {
+                            try (ManifestAvroReader reader =
+                                            new ManifestAvroReader(fileIO.newInputStream(path));
+                                    CloseableIterator<InternalRow> rows =
+                                            reader.read(
+                                                    ManifestEntry.MANIFEST_ROW_TYPE, null, null)) {
+                                rows.hasNext();
+                            }
+                        })
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("expected _KIND but found _FILE");
     }
 
     @RepeatedTest(10)
@@ -130,7 +426,7 @@ public class ManifestFileTest {
     }
 
     @Test
-    void testReadDeletedEntriesWithProjectedScan() {
+    void testReadDeletedEntriesWithProjectedScan() throws Exception {
         ManifestEntry first = gen.next();
         ManifestEntry second = gen.next();
         DataFileMeta firstFile =
@@ -179,6 +475,14 @@ public class ManifestFileTest {
         ManifestFileMeta secondManifest =
                 writeSingleManifest(manifestFile, Arrays.asList(secondAdd, secondDelete));
 
+        try (CloseableIterator<ProjectedManifestEntry> entries =
+                manifestFile.scan(
+                        firstManifest.fileName(), ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
+            assertThat(entries.next().file().nonNullFirstRowId()).isEqualTo(10L);
+            assertThat(entries.next().file().nonNullFirstRowId()).isEqualTo(10L);
+            assertThat(entries.hasNext()).isFalse();
+        }
+
         Set<FileEntry.Identifier> deleted =
                 FileEntry.readDeletedEntries(
                         manifestFile, Arrays.asList(firstManifest, secondManifest), 2);
@@ -213,8 +517,7 @@ public class ManifestFileTest {
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
 
-        List<ExpireFileEntry> actual =
-                manifestFile.readExpireFileEntries(manifest.fileName(), manifest.fileSize());
+        List<ExpireFileEntry> actual = manifestFile.readExpireFileEntries(manifest.fileName());
         List<ExpireFileEntry> expected =
                 entries.stream().map(ExpireFileEntry::from).collect(Collectors.toList());
 
@@ -227,26 +530,24 @@ public class ManifestFileTest {
     }
 
     @Test
-    void testScanProjectedManifestEntries() throws Exception {
+    void testScanProjectedManifestCreatesDistinctEntryWrappers() throws Exception {
         List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
-        BinaryManifestEntry.Projection projection =
+        ProjectedManifestEntry.Projection projection =
                 projection(DataFileMeta.FILE_NAME, DataFileMeta.ROW_COUNT);
         List<String> fileNames = new ArrayList<>();
         List<Long> rowCounts = new ArrayList<>();
-        AtomicReference<BinaryManifestEntry> retained = new AtomicReference<>();
+        ProjectedManifestEntry previous = null;
 
-        try (CloseableIterator<BinaryManifestEntry> iterator =
-                manifestFile.scan(manifest.fileName(), manifest.fileSize(), projection)) {
+        try (CloseableIterator<ProjectedManifestEntry> iterator =
+                manifestFile.scan(manifest.fileName(), projection)) {
             while (iterator.hasNext()) {
-                BinaryManifestEntry entry = iterator.next();
-                BinaryManifestEntry previous = retained.getAndSet(entry);
-                if (previous != null) {
-                    assertThat(entry).isSameAs(previous);
-                }
-                fileNames.add(entry.fileName());
-                rowCounts.add(entry.rowCount());
+                ProjectedManifestEntry current = iterator.next();
+                assertThat(current).isNotSameAs(previous);
+                fileNames.add(current.fileName());
+                rowCounts.add(current.rowCount());
+                previous = current;
             }
         }
 
@@ -256,29 +557,162 @@ public class ManifestFileTest {
         assertThat(rowCounts)
                 .containsExactlyElementsOf(
                         entries.stream().map(ManifestEntry::rowCount).collect(Collectors.toList()));
-        assertCleared(retained.get());
     }
 
     @Test
-    void testScanProjectedManifestInvalidatesEntryWhenAdvancing() throws Exception {
+    void testBlockReaderConvertsRawBlocksToProjectedRows() throws Exception {
+        List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+        ProjectedManifestEntry.Projection projection =
+                projection(DataFileMeta.FILE_NAME, DataFileMeta.ROW_COUNT);
+        ProjectedManifestEntry actual = projection.createEntry();
+        InternalRow reusedRow = null;
+        InternalRow reusedFileRow = null;
+        int position = 0;
+
+        try (ManifestAvroReader reader = openManifestReader(manifest)) {
+            while (reader.hasNext()) {
+                ManifestAvroReader.RawBlock block = reader.next();
+                assertThat(block.rawBlockCopySupported()).isTrue();
+                ManifestAvroReader.RowIterator rows = block.toRows(projection.projectedType());
+                ByteBuffer reusedEncodedRecord = null;
+                while (rows.hasNext()) {
+                    GenericRow row = rows.next();
+                    ByteBuffer encodedRecord = rows.encodedRecord();
+                    assertThat(encodedRecord.remaining()).isPositive();
+                    if (reusedEncodedRecord != null) {
+                        assertThat(encodedRecord).isSameAs(reusedEncodedRecord);
+                    }
+                    reusedEncodedRecord = encodedRecord;
+                    InternalRow fileRow = row.getRow(2, 2);
+                    if (reusedRow != null) {
+                        assertThat(row).isSameAs(reusedRow);
+                        assertThat(fileRow).isSameAs(reusedFileRow);
+                    }
+                    reusedRow = row;
+                    reusedFileRow = fileRow;
+                    actual.replace(row);
+                    ManifestEntry expected = entries.get(position++);
+                    assertThat(actual.kind()).isEqualTo(expected.kind());
+                    assertThat(actual.partition()).isEqualTo(expected.partition());
+                    assertThat(actual.fileName()).isEqualTo(expected.fileName());
+                    assertThat(actual.rowCount()).isEqualTo(expected.rowCount());
+                }
+            }
+        }
+
+        assertThat(position).isEqualTo(entries.size());
+    }
+
+    @Test
+    void testBlockReaderReadsAcrossMultipleBlocks() throws Exception {
+        List<ManifestEntry> entries = Collections.nCopies(1_000, gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+        ProjectedManifestEntry.Projection projection = projection(DataFileMeta.FILE_NAME);
+        int blockCount = 0;
+        int rowCount = 0;
+
+        try (ManifestAvroReader reader = openManifestReader(manifest)) {
+            while (reader.hasNext()) {
+                ManifestAvroReader.RowIterator rows =
+                        reader.next().toRows(projection.projectedType());
+                assertThat(rows.hasNext()).isTrue();
+                while (rows.hasNext()) {
+                    rows.next();
+                    rowCount++;
+                }
+                blockCount++;
+            }
+        }
+
+        assertThat(blockCount).isGreaterThan(1);
+        assertThat(rowCount).isEqualTo(entries.size());
+    }
+
+    @Test
+    void testBlockReaderSupportsReorderedProjection() throws Exception {
+        List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
+        RowType fileType =
+                DataFileMeta.SCHEMA.project(DataFileMeta.ROW_COUNT, DataFileMeta.FILE_NAME);
+        RowType projectedType =
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                manifestType.getField(ManifestEntry.FILE).newType(fileType),
+                                manifestType.getField(ManifestEntry.PARTITION),
+                                manifestType.getField(ManifestEntry.KIND)));
+        ProjectedManifestEntry.Projection projection =
+                ProjectedManifestEntry.Projection.create(projectedType);
+        ProjectedManifestEntry actual = projection.createEntry();
+        int position = 0;
+
+        try (ManifestAvroReader reader = openManifestReader(manifest)) {
+            while (reader.hasNext()) {
+                ManifestAvroReader.RowIterator rows =
+                        reader.next().toRows(projection.projectedType());
+                while (rows.hasNext()) {
+                    InternalRow row = rows.next();
+                    assertThat(row.getRow(0, 2).getLong(0))
+                            .isEqualTo(entries.get(position).rowCount());
+                    actual.replace(row);
+                    assertThat(actual.fileName()).isEqualTo(entries.get(position).fileName());
+                    assertThat(actual.partition()).isEqualTo(entries.get(position).partition());
+                    assertThat(actual.kind()).isEqualTo(entries.get(position).kind());
+                    position++;
+                }
+            }
+        }
+
+        assertThat(position).isEqualTo(entries.size());
+    }
+
+    @Test
+    void testBlockReaderSupportsFullManifestProjection() throws Exception {
+        List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
+        ProjectedManifestEntry.Projection projection = ProjectedManifestEntry.fullProjection();
+        ProjectedManifestEntry binaryEntry = projection.createEntry();
+        ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+        int position = 0;
+
+        try (ManifestAvroReader reader = openManifestReader(manifest)) {
+            while (reader.hasNext()) {
+                ManifestAvroReader.RowIterator rows =
+                        reader.next().toRows(projection.projectedType());
+                while (rows.hasNext()) {
+                    binaryEntry.replace(rows.next());
+                    assertThat(serializer.fromRow(binaryEntry.fullRow()))
+                            .isEqualTo(entries.get(position++));
+                }
+            }
+        }
+
+        assertThat(position).isEqualTo(entries.size());
+    }
+
+    @Test
+    void testScanProjectedManifestKeepsEntryValidWhenAdvancing() throws Exception {
         List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next());
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
 
-        try (CloseableIterator<BinaryManifestEntry> iterator =
-                manifestFile.scan(
-                        manifest.fileName(),
-                        manifest.fileSize(),
-                        projection(DataFileMeta.FILE_NAME))) {
+        try (CloseableIterator<ProjectedManifestEntry> iterator =
+                manifestFile.scan(manifest.fileName(), projection(DataFileMeta.FILE_NAME))) {
             assertThat(iterator.hasNext()).isTrue();
-            BinaryManifestEntry first = iterator.next();
+            ProjectedManifestEntry first = iterator.next();
             assertThat(first.fileName()).isEqualTo(entries.get(0).fileName());
 
             assertThat(iterator.hasNext()).isTrue();
-            assertCleared(first);
-            BinaryManifestEntry second = iterator.next();
-            assertThat(second).isSameAs(first);
+            ProjectedManifestEntry second = iterator.next();
+            assertThat(second).isNotSameAs(first);
             assertThat(second.fileName()).isEqualTo(entries.get(1).fileName());
+            assertThat(first.fileName()).isEqualTo(entries.get(0).fileName());
         }
     }
 
@@ -287,49 +721,42 @@ public class ManifestFileTest {
         List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next(), gen.next());
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
-        AtomicInteger visited = new AtomicInteger();
-        AtomicReference<BinaryManifestEntry> retained = new AtomicReference<>();
+        List<String> processedFileNames = new ArrayList<>();
 
-        try (CloseableIterator<BinaryManifestEntry> iterator =
-                manifestFile.scan(
-                        manifest.fileName(),
-                        manifest.fileSize(),
-                        projection(DataFileMeta.FILE_NAME))) {
+        try (CloseableIterator<ProjectedManifestEntry> iterator =
+                manifestFile.scan(manifest.fileName(), projection(DataFileMeta.FILE_NAME))) {
             while (iterator.hasNext()) {
-                BinaryManifestEntry entry = iterator.next();
-                retained.set(entry);
-                visited.incrementAndGet();
+                ProjectedManifestEntry entry = iterator.next();
+                processedFileNames.add(entry.fileName());
                 break;
             }
         }
 
-        assertThat(visited).hasValue(1);
-        assertCleared(retained.get());
+        assertThat(processedFileNames).containsExactly(entries.get(0).fileName());
     }
 
     @Test
-    void testScanProjectedManifestClearsEntryWhenProcessingFails() {
+    void testScanProjectedManifestKeepsEntryWhenProcessingFails() {
         List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next());
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
         RuntimeException failure = new RuntimeException("Expected processing failure.");
-        AtomicReference<BinaryManifestEntry> retained = new AtomicReference<>();
+        List<String> processedFileNames = new ArrayList<>();
 
         assertThatThrownBy(
                         () -> {
-                            try (CloseableIterator<BinaryManifestEntry> iterator =
+                            try (CloseableIterator<ProjectedManifestEntry> iterator =
                                     manifestFile.scan(
                                             manifest.fileName(),
-                                            manifest.fileSize(),
                                             projection(DataFileMeta.FILE_NAME))) {
                                 assertThat(iterator.hasNext()).isTrue();
-                                BinaryManifestEntry entry = iterator.next();
-                                retained.set(entry);
+                                ProjectedManifestEntry entry = iterator.next();
+                                processedFileNames.add(entry.fileName());
                                 throw failure;
                             }
                         })
                 .isSameAs(failure);
-        assertCleared(retained.get());
+        assertThat(processedFileNames).containsExactly(entries.get(0).fileName());
     }
 
     private List<ManifestEntry> generateData() {
@@ -338,6 +765,38 @@ public class ManifestFileTest {
             entries.add(gen.next());
         }
         return entries;
+    }
+
+    private ManifestAvroReader openManifestReader(ManifestFileMeta manifest) throws IOException {
+        FileIO fileIO = LocalFileIO.create();
+        Path path = new Path(new Path(tempDir.toUri()), "manifest/" + manifest.fileName());
+        return new ManifestAvroReader(fileIO.newInputStream(path));
+    }
+
+    private void lowerFirstBlockRecordCount(Path path) throws IOException {
+        java.nio.file.Path localPath = java.nio.file.Paths.get(path.toUri());
+        byte[] bytes = java.nio.file.Files.readAllBytes(localPath);
+        byte[] syncMarker = Arrays.copyOfRange(bytes, bytes.length - 16, bytes.length);
+        int headerSyncPosition = indexOf(bytes, syncMarker, 4, bytes.length - syncMarker.length);
+        assertThat(headerSyncPosition).isGreaterThanOrEqualTo(0);
+
+        int blockCountPosition = headerSyncPosition + syncMarker.length;
+        assertThat(bytes[blockCountPosition]).isEqualTo((byte) 4);
+        bytes[blockCountPosition] = 2;
+        java.nio.file.Files.write(localPath, bytes);
+    }
+
+    private static int indexOf(byte[] bytes, byte[] target, int from, int limit) {
+        for (int position = from; position + target.length <= limit; position++) {
+            int index = 0;
+            while (index < target.length && bytes[position + index] == target[index]) {
+                index++;
+            }
+            if (index == target.length) {
+                return position;
+            }
+        }
+        return -1;
     }
 
     private ManifestFile createManifestFile(String pathStr) {
@@ -383,7 +842,7 @@ public class ManifestFileTest {
         return manifests.get(0);
     }
 
-    private BinaryManifestEntry.Projection projection(String... projectedFileFields) {
+    private ProjectedManifestEntry.Projection projection(String... projectedFileFields) {
         RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
         List<DataField> fields =
                 Arrays.asList(
@@ -392,13 +851,7 @@ public class ManifestFileTest {
                         manifestType
                                 .getField(ManifestEntry.FILE)
                                 .newType(DataFileMeta.SCHEMA.project(projectedFileFields)));
-        return BinaryManifestEntry.Projection.create(new RowType(false, fields));
-    }
-
-    private static void assertCleared(BinaryManifestEntry entry) {
-        assertThatThrownBy(entry::fileName)
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("not backed by a row");
+        return ProjectedManifestEntry.Projection.create(new RowType(false, fields));
     }
 
     private void checkRollingFiles(

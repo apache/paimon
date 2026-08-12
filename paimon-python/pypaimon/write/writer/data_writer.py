@@ -283,7 +283,8 @@ class DataWriter(ABC):
         }
         key_fields = self.trimmed_primary_keys_fields
         key_stats = self._collect_value_stats(data, key_fields, column_stats)
-        if not all(count == 0 for count in key_stats.null_counts):
+        if not self.options.primary_key_nullable() and not all(
+                count == 0 for count in key_stats.null_counts):
             raise RuntimeError("Primary key should not be null")
 
         value_fields = stats_fields if value_stats_enabled else []

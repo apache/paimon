@@ -19,10 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -305,28 +301,9 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         .withVectorColumn(VECTOR_FIELD_NAME);
         VectorScan.Plan plan = builder.newVectorScan().scan();
 
+        // A deletion vector committed after planning must not affect the snapshot pinned by the
+        // plan, including its raw fallback side.
         commitDeletionVectors(table, 0L);
-        Map<String, String> compactOptions = new HashMap<>();
-        compactOptions.put(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key(), "true");
-        FileStoreTable compactTable = table.copy(compactOptions);
-        Snapshot compactSnapshot = compactTable.latestSnapshot().get();
-        DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(compactTable, false, false, compactSnapshot);
-        List<DataEvolutionCompactTask> tasks = coordinator.plan();
-        assertThat(tasks)
-                .singleElement()
-                .extracting(DataEvolutionCompactTask::type)
-                .isEqualTo(DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION);
-        List<CommitMessage> messages = new ArrayList<>();
-        for (DataEvolutionCompactTask task : tasks) {
-            messages.add(task.doCompact(compactTable, "test-vector-snapshot-pin"));
-        }
-        messages.addAll(
-                new DataEvolutionCompactionCommitPreparation(compactTable, compactSnapshot)
-                        .prepare(messages));
-        try (BatchTableCommit commit = compactTable.newBatchWriteBuilder().newCommit()) {
-            commit.commit(messages);
-        }
 
         GlobalIndexResult result = builder.newVectorRead().read(plan);
         assertThat(result.results()).containsExactlyInAnyOrder(0L, 1L);
@@ -1319,6 +1296,17 @@ public class VectorSearchBuilderTest extends TableTestBase {
         GlobalIndexResult result =
                 searchBuilder.newVectorRead().read(searchBuilder.newVectorScan().scan());
         assertThat(result.results().isEmpty()).isTrue();
+
+        VectorSearchBuilder fullFallback =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter)
+                        .withOption(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "full");
+        GlobalIndexResult fallbackResult =
+                fullFallback.newVectorRead().read(fullFallback.newVectorScan().scan());
+        assertThat(fallbackResult.results()).containsExactly(8L);
     }
 
     @Test

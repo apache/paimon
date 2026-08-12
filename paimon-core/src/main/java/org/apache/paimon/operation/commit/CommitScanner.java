@@ -28,11 +28,13 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -98,6 +100,45 @@ public class CommitScanner {
                     .readSimpleEntries();
         } catch (Throwable e) {
             throw new RuntimeException("Cannot read manifest entries from changed partitions.", e);
+        }
+    }
+
+    public List<SimpleFileEntry> readAllEntriesFromChangedRowRanges(
+            Snapshot snapshot, List<BinaryRow> changedPartitions, List<Range> changedRowRanges) {
+        try {
+            FileStoreScan freshScan = scanSupplier.get();
+            if (dropStats) {
+                freshScan.dropStats();
+            }
+            return freshScan
+                    .withSnapshot(snapshot)
+                    .withKind(ScanMode.ALL)
+                    .withPartitionFilter(changedPartitions)
+                    .withRowRanges(changedRowRanges)
+                    .readSimpleEntries();
+        } catch (Throwable e) {
+            throw new RuntimeException("Cannot read manifest entries from changed row ranges.", e);
+        }
+    }
+
+    public List<SimpleFileEntry> readAllEntriesFromDataFiles(
+            Snapshot snapshot, List<BinaryRow> changedPartitions, Set<String> dataFiles) {
+        if (dataFiles.isEmpty()) {
+            return Collections.emptyList();
+        }
+        try {
+            FileStoreScan freshScan = scanSupplier.get();
+            if (dropStats) {
+                freshScan.dropStats();
+            }
+            return freshScan
+                    .withSnapshot(snapshot)
+                    .withKind(ScanMode.ALL)
+                    .withPartitionFilter(changedPartitions)
+                    .withDataFileNameFilter(dataFiles::contains)
+                    .readSimpleEntries();
+        } catch (Throwable e) {
+            throw new RuntimeException("Cannot read requested data file entries.", e);
         }
     }
 

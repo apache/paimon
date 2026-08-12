@@ -160,6 +160,7 @@ For the 2.0.0 release, use matching Java and Python versions:
 
 ```shell
 PAIMON_VERSION="2.0.0"
+DOC_VERSION="2.0"
 RC_NUMBER="1"
 RELEASE_BRANCH="release-2.0"
 
@@ -168,7 +169,7 @@ RELEASE_TAG="release-${PAIMON_VERSION}"
 ```
 
 Use these exact values in the local working branch, tag, workflow inputs, SVN
-directories, vote email, and Java package manifests.
+directories, vote email, Java package manifests, and documentation URLs.
 
 ### Work from a clean clone
 
@@ -512,10 +513,47 @@ svn mv -m "Release PyPaimon ${PAIMON_VERSION}" \
 ### Publish and announce
 
 Create a GitHub release from `release-PAIMON_VERSION`, review the generated
-notes, and link both source releases. Update the Paimon download page and
-versioned documentation. After ASF mirrors, Maven Central, and PyPI are all
-available, announce the release to `dev@paimon.apache.org` and
-`announce@apache.org` from an `@apache.org` address.
+notes, and link both source releases.
+
+Before announcing the release, publish the versioned documentation and update
+the project website. Treat the documentation in `apache/paimon` and the project
+website in `apache/paimon-website` as two separate, required updates.
+
+1. In `apache/paimon`, publish documentation for `DOC_VERSION` from the release
+   branch so that the published content matches the released code:
+   - On `RELEASE_BRANCH`, update `docs/docusaurus.config.js` with the released
+     `baseUrl`, `version`, `versionTitle`, `branch`, `editUrl`, `isStable`,
+     `stableDocs`, `previousDocs`, and navbar version menu.
+   - On `master`, set the next development version and update `stableDocs`,
+     `previousDocs`, and the navbar version menu to include `DOC_VERSION` as
+     the stable release.
+   - Review `docs/docs/project/download.mdx` and any release-specific engine or
+     compatibility information. The `@@VERSION@@`, `<Stable>`, and `<Unstable>`
+     sections must render the released artifacts on the stable site.
+   - Run `yarn build` from the `docs` directory for both configurations.
+2. In `apache/paimon-website`, update every public release entry point:
+   - Add the Paimon and PyPaimon source archives, checksums, signatures, and
+     current dependency examples to `community/docs/downloads.md`.
+   - Create or update the appropriate
+     `community/docs/releases/release-${DOC_VERSION}.md` release note. Its
+     `version` front matter must equal `PAIMON_VERSION`, and its weight must
+     place it correctly in the release list.
+   - Add `DOC_VERSION` to the `versions` list in
+     `src/app/components/header/header.component.ts`. If the menu keeps a fixed
+     number of versions, remove the oldest entry.
+   - Run `pnpm build` to parse the release metadata and build the website.
+3. After deployment, verify all public entry points before sending the
+   announcement:
+   - `https://paimon.apache.org/docs/${DOC_VERSION}/` serves the released docs
+     and the version switcher identifies it as stable;
+   - the homepage `DOCUMENT` menu includes `DOC_VERSION` on desktop and mobile;
+   - `https://paimon.apache.org/downloads/` lists both signed source releases;
+   - `https://paimon.apache.org/releases/${PAIMON_VERSION}` shows the release
+     note.
+
+After ASF mirrors, Maven Central, PyPI, the versioned documentation, and the
+project website are all available, announce the release to
+`dev@paimon.apache.org` and `announce@apache.org` from an `@apache.org` address.
 
 Remove superseded releases from the live ASF distribution area when required;
 they remain available from the

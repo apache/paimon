@@ -71,6 +71,13 @@ public class DateTimeUtils {
                     .appendPattern(" [HH][H]:[mm][m]:[ss][s]")
                     .appendFraction(NANO_OF_SECOND, 0, 9, true)
                     .optionalEnd()
+                    .optionalStart()
+                    .appendPattern("'T'[HH][H]:[mm][m]")
+                    .optionalStart()
+                    .appendPattern(":[ss][s]")
+                    .appendFraction(NANO_OF_SECOND, 0, 9, true)
+                    .optionalEnd()
+                    .optionalEnd()
                     .toFormatter();
 
     /**

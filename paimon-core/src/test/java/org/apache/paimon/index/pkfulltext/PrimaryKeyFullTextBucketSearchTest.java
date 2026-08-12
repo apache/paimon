@@ -51,6 +51,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -60,6 +65,62 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 /** Tests payload-local full-text search and cross-payload score merging. */
 class PrimaryKeyFullTextBucketSearchTest {
+
+    @Test
+    void testStartsPayloadsBeforeWaitingForResults() throws Exception {
+        CompletableFuture<Optional<ScoredGlobalIndexResult>> futureA = new CompletableFuture<>();
+        CompletableFuture<Optional<ScoredGlobalIndexResult>> futureB = new CompletableFuture<>();
+        CountDownLatch started = new CountDownLatch(2);
+        AtomicInteger closes = new AtomicInteger();
+        PrimaryKeyFullTextBucketSearch search =
+                new PrimaryKeyFullTextBucketSearch(
+                        (payload, ignoredTotalRowCount) -> {
+                            String source =
+                                    PrimaryKeyIndexSourceMeta.fromIndexFile(payload)
+                                            .sourceFile()
+                                            .fileName();
+                            return new FullTextOnlyReader() {
+                                @Override
+                                public CompletableFuture<Optional<ScoredGlobalIndexResult>>
+                                        visitFullTextSearch(FullTextSearch fullTextSearch) {
+                                    started.countDown();
+                                    return source.equals("a") ? futureA : futureB;
+                                }
+
+                                @Override
+                                public void close() {
+                                    closes.incrementAndGet();
+                                }
+                            };
+                        });
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            Future<CompletableFuture<List<List<PrimaryKeySearchPosition>>>> invocation =
+                    executor.submit(
+                            () ->
+                                    search.searchRankingsAsync(
+                                            split(),
+                                            Collections.emptyMap(),
+                                            "content",
+                                            "hello",
+                                            2));
+            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            CompletableFuture<List<List<PrimaryKeySearchPosition>>> resultFuture =
+                    invocation.get(5, TimeUnit.SECONDS);
+            assertThat(resultFuture.isDone()).isFalse();
+            futureB.complete(Optional.empty());
+            assertThat(resultFuture.isDone()).isFalse();
+            futureA.complete(Optional.empty());
+            assertThat(resultFuture.get(5, TimeUnit.SECONDS)).isEmpty();
+        } finally {
+            futureA.complete(Optional.empty());
+            futureB.complete(Optional.empty());
+            executor.shutdownNow();
+        }
+        assertThat(closes).hasValue(2);
+    }
 
     @Test
     void testFiltersDeletedRowsAndSelectsGlobalScores() {

@@ -22,15 +22,15 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.io.BinaryDataFileMeta;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.BinaryManifestEntry;
-import org.apache.paimon.manifest.BinaryManifestEntry.Projection;
-import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
-import org.apache.paimon.manifest.DeletedIdentifierSet;
+import org.apache.paimon.io.ProjectedDataFileMeta;
+import org.apache.paimon.manifest.CompactFileIdentifierSet;
+import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
+import org.apache.paimon.manifest.ProjectedManifestEntry.Projection;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -190,13 +190,12 @@ final class DataEvolutionRowIdAssignmentPlanner {
             if (manifestMeta.numDeletedFiles() <= 0) {
                 continue;
             }
-            try (CloseableIterator<BinaryManifestEntry> entries =
+            try (CloseableIterator<ProjectedManifestEntry> entries =
                     manifestFile.scan(
                             manifestMeta.fileName(),
-                            manifestMeta.fileSize(),
-                            BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                            ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
                 while (entries.hasNext()) {
-                    BinaryManifestEntry entry = entries.next();
+                    ProjectedManifestEntry entry = entries.next();
                     if (!entry.isDelete()) {
                         continue;
                     }
@@ -227,11 +226,10 @@ final class DataEvolutionRowIdAssignmentPlanner {
                 continue;
             }
             int manifestOrdinal = ordinal(manifestMeta);
-            try (CloseableIterator<BinaryManifestEntry> entries =
-                    manifestFile.scan(
-                            manifestMeta.fileName(), manifestMeta.fileSize(), addProjection)) {
+            try (CloseableIterator<ProjectedManifestEntry> entries =
+                    manifestFile.scan(manifestMeta.fileName(), addProjection)) {
                 while (entries.hasNext()) {
-                    BinaryManifestEntry entry = entries.next();
+                    ProjectedManifestEntry entry = entries.next();
                     if (!entry.isAdd()) {
                         continue;
                     }
@@ -246,7 +244,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
                         }
                     }
 
-                    BinaryDataFileMeta file = entry.file();
+                    ProjectedDataFileMeta file = entry.file();
                     BinaryString fileName = file.fileNameBinary();
                     readRowRange(file, manifestOrdinal, fileName, rowRangeScratch);
                     checkState(
@@ -278,11 +276,10 @@ final class DataEvolutionRowIdAssignmentPlanner {
             if (!manifestMayContainSelectedRange(manifestMeta)) {
                 continue;
             }
-            try (CloseableIterator<BinaryManifestEntry> entries =
-                    manifestFile.scan(
-                            manifestMeta.fileName(), manifestMeta.fileSize(), REWRITE_PROJECTION)) {
+            try (CloseableIterator<ProjectedManifestEntry> entries =
+                    manifestFile.scan(manifestMeta.fileName(), REWRITE_PROJECTION)) {
                 while (entries.hasNext()) {
-                    BinaryManifestEntry entry = entries.next();
+                    ProjectedManifestEntry entry = entries.next();
                     lookup.reset(entry.partitionBytes());
                     SelectedPartition selection;
                     try {
@@ -293,7 +290,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
                     if (selection == null) {
                         continue;
                     }
-                    BinaryDataFileMeta file = entry.file();
+                    ProjectedDataFileMeta file = entry.file();
                     readRowRange(file, manifestOrdinal, null, rowRangeScratch);
                     if (!selection.logicalRanges.covers(rowRangeScratch[0], rowRangeScratch[1])) {
                         continue;
@@ -436,7 +433,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
     }
 
     private static void readRowRange(
-            BinaryDataFileMeta file,
+            ProjectedDataFileMeta file,
             int manifestOrdinal,
             @Nullable BinaryString fileName,
             long[] result) {
@@ -556,7 +553,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
     private static final class GroupState {
 
         private final GroupPartitionDictionary partitions;
-        private final DeletedIdentifierSet deletedIdentifiers = new DeletedIdentifierSet();
+        private final CompactFileIdentifierSet deletedIdentifiers = new CompactFileIdentifierSet();
         private final LiveFileRowIdRangeCollector liveFileRanges;
 
         private GroupState(

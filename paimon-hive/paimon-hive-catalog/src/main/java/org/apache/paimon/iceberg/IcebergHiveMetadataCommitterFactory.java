@@ -25,7 +25,7 @@ public class IcebergHiveMetadataCommitterFactory implements IcebergMetadataCommi
 
     @Override
     public String identifier() {
-        return IcebergOptions.StorageType.HIVE_CATALOG.toString();
+        return IcebergOptions.StorageType.HIVE_CATALOG.committerFactoryIdentifier();
     }
 
     @Override

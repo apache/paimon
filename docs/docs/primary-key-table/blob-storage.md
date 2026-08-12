@@ -94,8 +94,8 @@ array order, a null array, and null elements are preserved. An empty array write
 
 `MAP<K, BLOB>` is externalized value by value. Keys remain in the normal data file and every non-null value is replaced
 with a descriptor to managed storage. A null map, an empty map, and null values are preserved. Supported key types are
-the integer family, `BOOLEAN`, `DECIMAL`, `DATE`, `TIME`, `CHAR`, and `VARCHAR`; `blob-descriptor-field` and
-`blob-view-field` remain scalar-only declarations.
+the integer family, `BOOLEAN`, `DECIMAL`, `DATE`, `TIME`, `BINARY`, `VARBINARY` (`BYTES`), `CHAR`, and `VARCHAR`;
+`blob-descriptor-field` and `blob-view-field` remain scalar-only declarations.
 
 `blob.target-file-size` controls when a writer rolls to a new managed payload pack. A pack can contain payloads from
 multiple rows, and a row descriptor records its URI, offset, and length.
