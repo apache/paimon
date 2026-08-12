@@ -86,7 +86,7 @@ public class DataEvolutionCompactCoordinatorTest {
                                         table, false, false, mock(Snapshot.class)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key())
-                .hasMessageContaining("does not materialize deleted rows");
+                .hasMessageContaining("materialize_deletion_vectors");
     }
 
     @Test

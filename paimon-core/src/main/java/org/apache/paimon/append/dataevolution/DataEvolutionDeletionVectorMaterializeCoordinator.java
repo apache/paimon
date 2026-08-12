@@ -20,6 +20,7 @@ package org.apache.paimon.append.dataevolution;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -68,6 +69,15 @@ public class DataEvolutionDeletionVectorMaterializeCoordinator {
             FileStoreTable table,
             @Nullable PartitionPredicate partitionPredicate,
             Snapshot snapshot) {
+        this(table, partitionPredicate, snapshot, FILES_PER_BATCH);
+    }
+
+    @VisibleForTesting
+    public DataEvolutionDeletionVectorMaterializeCoordinator(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            Snapshot snapshot,
+            int filesPerBatch) {
         CoreOptions options = table.coreOptions();
         checkArgument(
                 options.dataEvolutionEnabled(),
@@ -80,7 +90,8 @@ public class DataEvolutionDeletionVectorMaterializeCoordinator {
                 new MaterializeScanner(
                         table.newSnapshotReader().withPartitionFilter(partitionPredicate),
                         table.store().newScan().withPartitionFilter(partitionPredicate).dropStats(),
-                        snapshot);
+                        snapshot,
+                        filesPerBatch);
         this.planner =
                 new MaterializePlanner(
                         table.store().newIndexFileHandler(),
@@ -103,11 +114,17 @@ public class DataEvolutionDeletionVectorMaterializeCoordinator {
         private final FileStoreScan scan;
         private final Snapshot snapshot;
         private final Queue<List<ManifestFileMeta>> manifestGroups;
+        private final int filesPerBatch;
 
         private MaterializeScanner(
-                SnapshotReader snapshotReader, FileStoreScan scan, Snapshot snapshot) {
+                SnapshotReader snapshotReader,
+                FileStoreScan scan,
+                Snapshot snapshot,
+                int filesPerBatch) {
             this.scan = scan;
             this.snapshot = snapshot;
+            checkArgument(filesPerBatch > 0, "Files per batch must be positive.");
+            this.filesPerBatch = filesPerBatch;
 
             List<ManifestFileMeta> manifests =
                     snapshotReader.manifestsReader().read(snapshot, ScanMode.ALL).filteredManifests;
@@ -129,7 +146,7 @@ public class DataEvolutionDeletionVectorMaterializeCoordinator {
 
         private List<ManifestEntry> scan() {
             List<ManifestEntry> result = new ArrayList<>();
-            while (!manifestGroups.isEmpty() && result.size() < FILES_PER_BATCH) {
+            while (!manifestGroups.isEmpty() && result.size() < filesPerBatch) {
                 scan.readFileIterator(manifestGroups.poll()).forEachRemaining(result::add);
             }
             if (result.isEmpty()) {

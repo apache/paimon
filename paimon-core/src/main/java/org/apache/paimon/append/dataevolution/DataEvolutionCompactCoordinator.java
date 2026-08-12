@@ -78,6 +78,23 @@ public class DataEvolutionCompactCoordinator {
             boolean compactBlob,
             boolean compactVector,
             Snapshot snapshot) {
+        this(
+                table,
+                partitionPredicate,
+                compactBlob,
+                compactVector,
+                snapshot,
+                DataEvolutionCompactRangePlanner.CANDIDATE_FILES_PER_BATCH);
+    }
+
+    @VisibleForTesting
+    public DataEvolutionCompactCoordinator(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            boolean compactBlob,
+            boolean compactVector,
+            Snapshot snapshot,
+            int candidateFilesPerBatch) {
         CoreOptions options = table.coreOptions();
         checkArgument(
                 !options.dataEvolutionCompactionRewriteRowIds(),
@@ -119,7 +136,8 @@ public class DataEvolutionCompactCoordinator {
                         table.store().newScan().withPartitionFilter(partitionPredicate).dropStats(),
                         table.store().manifestFileFactory(),
                         snapshot,
-                        candidateOptions);
+                        candidateOptions,
+                        candidateFilesPerBatch);
         this.planner =
                 new CompactPlanner(
                         compactBlob,
@@ -161,7 +179,8 @@ public class DataEvolutionCompactCoordinator {
                 FileStoreScan scan,
                 ManifestFile.Factory manifestFileFactory,
                 Snapshot snapshot,
-                DataEvolutionCompactRangePlanner.CandidateOptions candidateOptions) {
+                DataEvolutionCompactRangePlanner.CandidateOptions candidateOptions,
+                int candidateFilesPerBatch) {
             this.scan = scan;
             this.snapshot = snapshot;
 
@@ -172,7 +191,7 @@ public class DataEvolutionCompactCoordinator {
                     new DataEvolutionCompactRangePlanner(
                                     manifestFileFactory.create(),
                                     manifestsReader.partitionFilter(),
-                                    DataEvolutionCompactRangePlanner.CANDIDATE_FILES_PER_BATCH,
+                                    candidateFilesPerBatch,
                                     candidateOptions)
                             .plan(manifestFileMetas);
         }

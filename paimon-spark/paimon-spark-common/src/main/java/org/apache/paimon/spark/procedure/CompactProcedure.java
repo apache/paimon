@@ -565,6 +565,24 @@ public class CompactProcedure extends BaseProcedure {
             JavaSparkContext javaSparkContext,
             SparkSession sparkSession,
             boolean materializeDeletionVectors) {
+        executeDataEvolutionCompaction(
+                table,
+                partitionPredicate,
+                partitionIdleTime,
+                javaSparkContext,
+                sparkSession,
+                materializeDeletionVectors,
+                null);
+    }
+
+    static void executeDataEvolutionCompaction(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            @Nullable Duration partitionIdleTime,
+            JavaSparkContext javaSparkContext,
+            SparkSession sparkSession,
+            boolean materializeDeletionVectors,
+            @Nullable Integer filesPerBatch) {
         List<DataEvolutionCompactTask> compactionTasks;
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         if (snapshot == null) {
@@ -574,22 +592,34 @@ public class CompactProcedure extends BaseProcedure {
         Supplier<List<DataEvolutionCompactTask>> taskPlanner;
         if (materializeDeletionVectors) {
             DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
-                    new DataEvolutionDeletionVectorMaterializeCoordinator(
-                            table, partitionPredicate, snapshot);
+                    filesPerBatch == null
+                            ? new DataEvolutionDeletionVectorMaterializeCoordinator(
+                                    table, partitionPredicate, snapshot)
+                            : new DataEvolutionDeletionVectorMaterializeCoordinator(
+                                    table, partitionPredicate, snapshot, filesPerBatch);
             taskPlanner = coordinator::plan;
         } else {
             DataEvolutionCompactCoordinator coordinator =
-                    new DataEvolutionCompactCoordinator(
-                            table,
-                            partitionPredicate,
-                            table.coreOptions().blobCompactionEnabled(),
-                            false,
-                            snapshot);
+                    filesPerBatch == null
+                            ? new DataEvolutionCompactCoordinator(
+                                    table,
+                                    partitionPredicate,
+                                    table.coreOptions().blobCompactionEnabled(),
+                                    false,
+                                    snapshot)
+                            : new DataEvolutionCompactCoordinator(
+                                    table,
+                                    partitionPredicate,
+                                    table.coreOptions().blobCompactionEnabled(),
+                                    false,
+                                    snapshot,
+                                    filesPerBatch);
             taskPlanner = coordinator::plan;
         }
         CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         int round = 0;
+        Snapshot preparationSnapshot = snapshot;
         try {
             while (true) {
                 compactionTasks = taskPlanner.get();
@@ -682,9 +712,22 @@ public class CompactProcedure extends BaseProcedure {
                             deserializeCommitMessagesAndReleaseSerializedBytes(
                                     messageSerializerser, serializedMessages);
                     messages.addAll(
-                            new DataEvolutionCompactionCommitPreparation(table, snapshot)
+                            new DataEvolutionCompactionCommitPreparation(table, preparationSnapshot)
                                     .prepare(messages));
                     commit.commit(messages);
+                    Snapshot committedSnapshot =
+                            table.snapshotManager()
+                                    .latestSnapshotOfUser(commitUser)
+                                    .orElseThrow(
+                                            () ->
+                                                    new IllegalStateException(
+                                                            "Cannot find the committed data evolution compaction snapshot."));
+                    checkArgument(
+                            committedSnapshot.id() > preparationSnapshot.id(),
+                            "Committed data evolution compaction snapshot %s must be newer than preparation snapshot %s.",
+                            committedSnapshot.id(),
+                            preparationSnapshot.id());
+                    preparationSnapshot = committedSnapshot;
                 } catch (Exception e) {
                     throw new RuntimeException("Deserialize commit message failed", e);
                 }
