@@ -125,6 +125,66 @@ public class ManifestFileTest {
     }
 
     @Test
+    void testWriteEncodedRecords() throws Exception {
+        ManifestEntry source = gen.next();
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        ManifestEntry.create(
+                                FileKind.ADD,
+                                source.partition(),
+                                source.bucket(),
+                                source.totalBuckets(),
+                                source.file().newFirstRowId(10L)),
+                        ManifestEntry.create(
+                                FileKind.DELETE,
+                                source.partition(),
+                                source.bucket(),
+                                source.totalBuckets(),
+                                source.file().newFirstRowId(20L)));
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta sourceMeta = writeSingleManifest(manifestFile, entries);
+        ManifestAvroWriter writer = manifestFile.createAvroWriter();
+        ManifestAvroWriter.EncodedEntry metadata = new ManifestAvroWriter.EncodedEntry();
+        int position = 0;
+
+        try (ManifestAvroReader reader = openManifestReader(sourceMeta)) {
+            while (reader.hasNext()) {
+                ManifestAvroReader.RowIterator rows =
+                        reader.next().toRows(ManifestEntry.MANIFEST_ROW_TYPE);
+                while (rows.hasNext()) {
+                    rows.next();
+                    ManifestEntry entry = entries.get(position++);
+                    writer.writeEncoded(
+                            rows.encodedRecord(),
+                            metadata.replace(
+                                    entry.kind().toByteValue(),
+                                    entry.partition(),
+                                    entry.bucket(),
+                                    entry.level(),
+                                    entry.file().schemaId(),
+                                    entry.file().firstRowId(),
+                                    entry.file().rowCount()));
+                }
+            }
+        }
+        writer.close();
+
+        assertThat(position).isEqualTo(entries.size());
+        ManifestFileMeta result = writer.result().get(0);
+        assertThat(result.numAddedFiles()).isEqualTo(sourceMeta.numAddedFiles());
+        assertThat(result.numDeletedFiles()).isEqualTo(sourceMeta.numDeletedFiles());
+        assertThat(result.partitionStats()).isEqualTo(sourceMeta.partitionStats());
+        assertThat(result.schemaId()).isEqualTo(sourceMeta.schemaId());
+        assertThat(result.minBucket()).isEqualTo(sourceMeta.minBucket());
+        assertThat(result.maxBucket()).isEqualTo(sourceMeta.maxBucket());
+        assertThat(result.minLevel()).isEqualTo(sourceMeta.minLevel());
+        assertThat(result.maxLevel()).isEqualTo(sourceMeta.maxLevel());
+        assertThat(result.minRowId()).isEqualTo(sourceMeta.minRowId());
+        assertThat(result.maxRowId()).isEqualTo(sourceMeta.maxRowId());
+        assertThat(manifestFile.read(result.fileName())).containsExactlyElementsOf(entries);
+    }
+
+    @Test
     void testReadMissingManifestFile() {
         ManifestFile manifestFile = createManifestFile(tempDir.toString());
 
