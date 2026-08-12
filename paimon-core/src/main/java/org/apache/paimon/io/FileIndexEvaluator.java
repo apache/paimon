@@ -44,6 +44,9 @@ import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
 /** Evaluate file index result. */
 public class FileIndexEvaluator {
 
+    // Roaring array containers hold at most 4096 values; larger results favor bulk operations.
+    private static final int MAX_POINT_LOOKUPS = 4096;
+
     public static FileIndexResult evaluate(
             FileIO fileIO,
             TableSchema dataSchema,
@@ -90,7 +93,9 @@ public class FileIndexEvaluator {
                         return FileIndexResult.REMAIN;
                     }
                     if (dv instanceof Bitmap64DeletionVector) {
-                        result = excludeDeletedPositions(bitmapResult, dv);
+                        result =
+                                excludeDeletedPositions(
+                                        bitmapResult, (Bitmap64DeletionVector) dv, file.rowCount());
                     } else if (supportsBitmapSelection(dv)) {
                         selection = createBaseSelection(file, dv);
                         result = result.and(selection);
@@ -128,24 +133,11 @@ public class FileIndexEvaluator {
                     () -> RoaringBitmap32.bitmapOfRange(0, Math.min(file.rowCount(), limit)));
         }
 
-        if (dv instanceof BitmapDeletionVector && file.rowCount() <= RoaringBitmap32.MAX_VALUE) {
-            return createBaseSelection(file, dv).limit(limit);
+        if (file.rowCount() > RoaringBitmap32.MAX_VALUE || !supportsBitmapSelection(dv)) {
+            return FileIndexResult.REMAIN;
         }
 
-        RoaringBitmap32 selection = new RoaringBitmap32();
-        long position = 0;
-        int remaining = limit;
-        while (remaining > 0 && position < file.rowCount()) {
-            if (position > RoaringBitmap32.MAX_VALUE) {
-                return FileIndexResult.REMAIN;
-            }
-            if (!dv.isDeleted(position)) {
-                selection.add((int) position);
-                remaining--;
-            }
-            position++;
-        }
-        return new BitmapIndexResult(() -> selection);
+        return createBaseSelection(file, dv).limit(limit);
     }
 
     private static BitmapIndexResult createBaseSelection(
@@ -177,11 +169,17 @@ public class FileIndexEvaluator {
     }
 
     private static BitmapIndexResult excludeDeletedPositions(
-            BitmapIndexResult candidates, DeletionVector dv) {
+            BitmapIndexResult candidates, Bitmap64DeletionVector dv, long rowCount) {
         return new BitmapIndexResult(
                 () -> {
+                    RoaringBitmap32 candidateBitmap = candidates.get();
+                    if (candidateBitmap.getCardinality() > MAX_POINT_LOOKUPS) {
+                        return RoaringBitmap32.andNot(
+                                candidateBitmap, dv.projectToBitmap32(rowCount));
+                    }
+
                     RoaringBitmap32 result = new RoaringBitmap32();
-                    Iterator<Integer> iterator = candidates.get().iterator();
+                    Iterator<Integer> iterator = candidateBitmap.iterator();
                     while (iterator.hasNext()) {
                         int position = iterator.next();
                         if (!dv.isDeleted(position)) {

@@ -80,9 +80,16 @@ class FileIndexEvaluatorTest {
     }
 
     @Test
-    void testLimitWithHighBitmap64DeletionPosition() throws Exception {
+    void testLimitAbandonsBitmapPushdownForLargeFile() throws Exception {
         DataFileMeta file = fileWithRowCount(Integer.MAX_VALUE + 2L);
-        DeletionVector deletionVector = new Bitmap64DeletionVector();
+        DeletionVector deletionVector =
+                new Bitmap64DeletionVector() {
+                    @Override
+                    public boolean isDeleted(long position) {
+                        throw new AssertionError(
+                                "Limit evaluation must not scan a large file by position.");
+                    }
+                };
         deletionVector.delete(0);
         deletionVector.delete(Integer.MAX_VALUE + 1L);
 
@@ -90,20 +97,18 @@ class FileIndexEvaluatorTest {
                 FileIndexEvaluator.evaluate(
                         null, null, Collections.emptyList(), null, 10, null, file, deletionVector);
 
-        assertThat(result).isInstanceOf(BitmapIndexResult.class);
-        assertThat(((BitmapIndexResult) result).get())
-                .isEqualTo(RoaringBitmap32.bitmapOfRange(1, 11));
+        assertThat(result).isSameAs(FileIndexResult.REMAIN);
     }
 
     @Test
-    void testLimitDoesNotIterateBitmap64DeletionVector() throws Exception {
+    void testLimitDoesNotScanBitmap64DeletionVectorByPosition() throws Exception {
         DataFileMeta file = DataFileTestUtils.newFile("data.avro", 0, 0, 19, 0L);
         DeletionVector deletionVector =
                 new Bitmap64DeletionVector() {
                     @Override
-                    public void forEachDeletedPosition(LongConsumer consumer) {
+                    public boolean isDeleted(long position) {
                         throw new AssertionError(
-                                "Limit evaluation must not expand the deletion vector.");
+                                "Limit evaluation must not scan the deletion vector by position.");
                     }
                 };
         deletionVector.delete(0);
@@ -114,6 +119,48 @@ class FileIndexEvaluatorTest {
 
         assertThat(result).isInstanceOf(BitmapIndexResult.class);
         assertThat(((BitmapIndexResult) result).get()).isEqualTo(RoaringBitmap32.bitmapOf(1));
+    }
+
+    @Test
+    void testFilterProjectsBitmap64ForBroadCandidates() throws Exception {
+        int rowCount = 10_000;
+        TableSchema schema = tableSchema();
+        FileIndexWriter indexWriter =
+                new BitmapFileIndex(DataTypes.INT(), new Options()).createWriter();
+        for (int position = 0; position < rowCount; position++) {
+            indexWriter.writeRecord(position == rowCount - 1 ? 1 : 0);
+        }
+        DataFileMeta file =
+                DataFileTestUtils.newFile("data.avro", 0, 0, rowCount - 1, 0L)
+                        .copy(embeddedIndex(BitmapFileIndexFactory.BITMAP_INDEX, indexWriter));
+        DeletionVector deletionVector =
+                new Bitmap64DeletionVector() {
+                    @Override
+                    public boolean isDeleted(long position) {
+                        throw new AssertionError(
+                                "Broad bitmap candidates must not be checked one by one.");
+                    }
+                };
+        deletionVector.delete(0);
+        deletionVector.delete(2);
+        Predicate filter = new PredicateBuilder(schema.logicalRowType()).equal(0, 0);
+
+        FileIndexResult result =
+                FileIndexEvaluator.evaluate(
+                        null,
+                        schema,
+                        Collections.singletonList(filter),
+                        null,
+                        null,
+                        null,
+                        file,
+                        deletionVector);
+
+        RoaringBitmap32 expected = RoaringBitmap32.bitmapOfRange(0, rowCount - 1);
+        expected.remove(0);
+        expected.remove(2);
+        assertThat(result).isInstanceOf(BitmapIndexResult.class);
+        assertThat(((BitmapIndexResult) result).get()).isEqualTo(expected);
     }
 
     @Test
