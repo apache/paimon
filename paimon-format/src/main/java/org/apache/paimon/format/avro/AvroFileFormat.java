@@ -85,11 +85,6 @@ public class AvroFileFormat extends FileFormat {
         return new RowAvroWriterFactory(type);
     }
 
-    boolean supportsRawBlockCopy(RowType rowType, Schema encodedSchema) {
-        return AvroSchemaConverter.convertToSchema(rowType, options.get(AVRO_ROW_NAME_MAPPING))
-                .equals(encodedSchema);
-    }
-
     @Override
     public Optional<SimpleStatsExtractor> createStatsExtractor(
             RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {

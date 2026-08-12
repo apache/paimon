@@ -32,6 +32,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.util.Collections;
 
 /**
  * Reader which exposes compressed and decompressed blocks from an Avro object container file.
@@ -65,9 +66,10 @@ public final class AvroBlockReader implements Closeable {
         return new AvroRecordDecoder(reader.getSchema());
     }
 
-    /** Returns whether blocks can be copied directly to the given Avro format. */
-    public boolean supportsRawBlockCopy(AvroFileFormat fileFormat, RowType rowType) {
-        return fileFormat.supportsRawBlockCopy(rowType, reader.getSchema());
+    /** Returns whether blocks use the default Avro schema for the given row type. */
+    public boolean supportsRawBlockCopy(RowType rowType) {
+        return AvroSchemaConverter.convertToSchema(rowType, Collections.emptyMap())
+                .equals(reader.getSchema());
     }
 
     /** Returns whether another block is available. */

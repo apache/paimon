@@ -22,7 +22,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.avro.AvroBlockReader;
-import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.format.avro.AvroRawBlock;
 import org.apache.paimon.format.avro.AvroRecordDecoder;
 import org.apache.paimon.format.avro.AvroRecordDecoder.FieldDecoder;
@@ -56,15 +55,14 @@ public final class ManifestAvroReader implements AutoCloseable {
 
     private long blockOrdinal = -1;
 
-    ManifestAvroReader(InputStream input, AvroFileFormat avroFileFormat) throws IOException {
+    ManifestAvroReader(InputStream input) throws IOException {
         AvroBlockReader blockReader = null;
         try {
             blockReader = new AvroBlockReader(input);
             this.blockReader = blockReader;
             this.decoderContext = new DecoderContext(blockReader.createRecordDecoder());
             this.rawBlockCopySupported =
-                    blockReader.supportsRawBlockCopy(
-                            avroFileFormat, ManifestEntry.MANIFEST_ROW_TYPE);
+                    blockReader.supportsRawBlockCopy(ManifestEntry.MANIFEST_ROW_TYPE);
         } catch (IOException | RuntimeException | Error failure) {
             IOUtils.closeQuietly(blockReader == null ? input : blockReader);
             throw failure;
@@ -91,8 +89,7 @@ public final class ManifestAvroReader implements AutoCloseable {
     /**
      * Returns an iterator over projected rows from all remaining blocks.
      *
-     * <p>The returned row is reused within each block and must be consumed before the iterator
-     * advances. Closing the iterator closes this reader.
+     * <p>Every returned row has independent backing data. Closing the iterator closes this reader.
      */
     public CloseableIterator<InternalRow> read(
             RowType projectedType,
@@ -116,7 +113,11 @@ public final class ManifestAvroReader implements AutoCloseable {
                         rows =
                                 ManifestAvroReader.this
                                         .next()
-                                        .toRows(projectedType, partitionFilter, bucketFilter);
+                                        .toRows(
+                                                projectedType,
+                                                partitionFilter,
+                                                bucketFilter,
+                                                false);
                     }
                     return true;
                 } catch (IOException e) {
@@ -334,13 +335,14 @@ public final class ManifestAvroReader implements AutoCloseable {
 
         /** Lazily decompresses this block and returns an iterator over one reusable row. */
         public RowIterator toRows(RowType projectedType) throws IOException {
-            return toRows(projectedType, null, null);
+            return toRows(projectedType, null, null, true);
         }
 
         private RowIterator toRows(
                 RowType projectedType,
                 @Nullable PartitionPredicate partitionFilter,
-                @Nullable BucketFilter bucketFilter)
+                @Nullable BucketFilter bucketFilter,
+                boolean reuseRow)
                 throws IOException {
             ManifestRecordDecoder recordDecoder = decoderContext.recordDecoder(projectedType);
 
@@ -356,7 +358,8 @@ public final class ManifestAvroReader implements AutoCloseable {
                     recordDecoder,
                     row,
                     partitionFilter,
-                    bucketFilter);
+                    bucketFilter,
+                    reuseRow);
         }
 
         public long blockOrdinal() {
@@ -408,10 +411,11 @@ public final class ManifestAvroReader implements AutoCloseable {
 
         private final AvroRecordDecoder decoder;
         private final ManifestRecordDecoder recordDecoder;
-        private final GenericRow row;
+        private GenericRow row;
         private final @Nullable PartitionPredicate partitionFilter;
         private final @Nullable BucketFilter bucketFilter;
         private final boolean filtered;
+        private final boolean reuseRow;
 
         private long blockRemaining;
         private long blockRecordIndex = -1;
@@ -424,7 +428,8 @@ public final class ManifestAvroReader implements AutoCloseable {
                 ManifestRecordDecoder recordDecoder,
                 GenericRow row,
                 @Nullable PartitionPredicate partitionFilter,
-                @Nullable BucketFilter bucketFilter) {
+                @Nullable BucketFilter bucketFilter,
+                boolean reuseRow) {
             blockRemaining = recordCount;
             this.decoder = decoder;
             this.recordDecoder = recordDecoder;
@@ -432,6 +437,7 @@ public final class ManifestAvroReader implements AutoCloseable {
             this.partitionFilter = partitionFilter;
             this.bucketFilter = bucketFilter;
             this.filtered = partitionFilter != null || bucketFilter != null;
+            this.reuseRow = reuseRow;
         }
 
         @Override
@@ -446,6 +452,9 @@ public final class ManifestAvroReader implements AutoCloseable {
                 }
                 while (blockRemaining > 0) {
                     blockRecordIndex++;
+                    if (!reuseRow && blockRecordIndex > 0) {
+                        row = recordDecoder.createRow();
+                    }
                     int recordStart = decoder.absolutePosition();
                     boolean selected =
                             recordDecoder.read(decoder, row, partitionFilter, bucketFilter);
@@ -479,6 +488,9 @@ public final class ManifestAvroReader implements AutoCloseable {
                     throw new NoSuchElementException();
                 }
                 blockRecordIndex++;
+                if (!reuseRow && blockRecordIndex > 0) {
+                    row = recordDecoder.createRow();
+                }
                 int recordStart = decoder.absolutePosition();
                 recordDecoder.read(decoder, row, null, null);
                 encodedRecord = decoder.borrowedView(recordStart, decoder.absolutePosition());
