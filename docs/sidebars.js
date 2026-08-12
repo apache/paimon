@@ -114,6 +114,7 @@ const sidebars = {
     },
     "items": [
       "multimodal-table/data-evolution",
+      "multimodal-table/variant",
       "multimodal-table/blob",
       "multimodal-table/vector",
       {

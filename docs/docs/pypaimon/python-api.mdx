@@ -1119,8 +1119,9 @@ sub-columns for column-skipping via sub-field projection.
 Fields not listed in `variant.shreddingSchema` are stored in the overflow `value` bytes and remain
 fully accessible on the read path.
 
-Supported Paimon type strings for shredded sub-fields: `BOOLEAN`, `INT`, `BIGINT`, `FLOAT`, `DOUBLE`,
-`VARCHAR`, `DECIMAL(p,s)`, and nested `ROW` types for recursive object shredding.
+Supported Paimon type strings for shredded sub-fields: `BOOLEAN`, `TINYINT`, `SMALLINT`, `INT`,
+`BIGINT`, `FLOAT`, `DOUBLE`, `VARCHAR`, `BINARY`, `VARBINARY`, `DECIMAL(p,s)`, `ARRAY`, and nested
+`ROW` types for recursive object shredding.
 
 </TabItem>
 

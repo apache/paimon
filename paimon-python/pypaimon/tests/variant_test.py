@@ -47,6 +47,9 @@ import shutil
 import struct as _struct
 import tempfile
 import unittest
+import datetime
+import uuid
+from decimal import Decimal
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -361,6 +364,38 @@ class TestGenericVariantContainer(unittest.TestCase):
         self.assertIn('hello', repr(gv))
         self.assertIn('hello', str(gv))
 
+    def test_from_python_date(self):
+        value = datetime.date(2024, 1, 15)
+        gv = GenericVariant.from_python(value)
+        self.assertEqual(gv.to_python(), value)
+
+    def test_from_python_timestamp_ntz(self):
+        value = datetime.datetime(2024, 1, 15, 12, 30, 45, 123456)
+        gv = GenericVariant.from_python(value)
+        self.assertEqual(gv.to_python(), value)
+
+    def test_from_python_timestamp_ltz(self):
+        value = datetime.datetime(
+            2024, 1, 15, 12, 30, 45, 123456, tzinfo=datetime.timezone.utc
+        )
+        gv = GenericVariant.from_python(value)
+        self.assertEqual(gv.to_python(), value)
+
+    def test_from_python_nested_datetime(self):
+        obj = {'created_at': datetime.datetime(2024, 1, 15, 12, 0)}
+        gv = GenericVariant.from_python(obj)
+        self.assertEqual(gv.to_python(), obj)
+
+    def test_from_python_uuid(self):
+        value = uuid.UUID('12345678-1234-5678-1234-567812345678')
+        gv = GenericVariant.from_python(value)
+        self.assertEqual(gv.to_python(), value)
+
+    def test_from_python_nested_uuid(self):
+        obj = {'id': uuid.UUID('12345678-1234-5678-1234-567812345678')}
+        gv = GenericVariant.from_python(obj)
+        self.assertEqual(gv.to_python(), obj)
+
 
 class TestToArrowArray(unittest.TestCase):
 
@@ -618,13 +653,50 @@ class TestEncodeScalar(unittest.TestCase):
         gv = GenericVariant(value_bytes, b'\x01\x00')
         return gv.to_python()
 
+    def test_tinyint(self):
+        self.assertEqual(self._roundtrip('42', pa.int8()), 42)
+
+    def test_smallint(self):
+        self.assertEqual(self._roundtrip('1000', pa.int16()), 1000)
+
     def test_int(self):
-        self.assertEqual(self._roundtrip('42', pa.int64()), 42)
+        self.assertEqual(self._roundtrip('1000000', pa.int32()), 1000000)
+
+    def test_bigint(self):
+        self.assertEqual(self._roundtrip('12345678901234', pa.int64()), 12345678901234)
 
     def test_float(self):
-        value_bytes = _encode_scalar_to_value_bytes(3.14, pa.float64())
+        self.assertAlmostEqual(self._roundtrip('3.14159', pa.float32()), 3.14159, places=5)
+
+    def test_double(self):
+        self.assertEqual(self._roundtrip('1.012345678901234567890123456789012345678',
+                         pa.float64()), 1.012345678901234567890123456789012345678)
+
+    def test_decimal(self):
+        value = Decimal('12345.6789')
+        value_bytes = _encode_scalar_to_value_bytes(value, pa.decimal128(10, 4))
         gv = GenericVariant(value_bytes, b'\x01\x00')
-        self.assertAlmostEqual(gv.to_python(), 3.14, places=5)
+        self.assertEqual(gv.to_python(), value)
+
+    def test_date(self):
+        value = datetime.date(2024, 1, 15)
+        value_bytes = _encode_scalar_to_value_bytes(value, pa.date32())
+        gv = GenericVariant(value_bytes, b'\x01\x00')
+        self.assertEqual(gv.to_python(), value)
+
+    def test_timestamp_ntz(self):
+        value = datetime.datetime(2024, 1, 15, 12, 30, 45, 123456)
+        value_bytes = _encode_scalar_to_value_bytes(value, pa.timestamp('us'))
+        gv = GenericVariant(value_bytes, b'\x01\x00')
+        self.assertEqual(gv.to_python(), value)
+
+    def test_timestamp_ltz(self):
+        value = datetime.datetime(
+            2024, 1, 15, 12, 30, 45, 123456, tzinfo=datetime.timezone.utc
+        )
+        value_bytes = _encode_scalar_to_value_bytes(value, pa.timestamp('us', tz='UTC'))
+        gv = GenericVariant(value_bytes, b'\x01\x00')
+        self.assertEqual(gv.to_python(), value)
 
     def test_bool_true(self):
         self.assertEqual(self._roundtrip('true', pa.bool_()), True)
@@ -634,6 +706,11 @@ class TestEncodeScalar(unittest.TestCase):
 
     def test_string(self):
         self.assertEqual(self._roundtrip('"hello"', pa.string()), 'hello')
+
+    def test_binary(self):
+        value_bytes = _encode_scalar_to_value_bytes(b'\x00\x01\x02', pa.binary())
+        gv = GenericVariant(value_bytes, b'\x01\x00')
+        self.assertEqual(gv.to_python(), b'\x00\x01\x02')
 
     def test_null(self):
         value_bytes = _encode_scalar_to_value_bytes(None, pa.int64())
@@ -1073,28 +1150,62 @@ class TestVariantPaimonTable(unittest.TestCase):
         self.catalog.create_table('default.plain_variant', schema, False)
         table = self.catalog.get_table('default.plain_variant')
 
+        test_uuid = uuid.UUID('12345678-1234-5678-1234-567812345678')
         gvs = [
             GenericVariant.from_python({'age': 30, 'city': 'Beijing'}),
             GenericVariant.from_python({'score': 99, 'active': True}),
             GenericVariant.from_python([1, 2, 3]),
+            GenericVariant.from_python({'dt': datetime.date(2024, 1, 15)}),
+            GenericVariant.from_python(
+                {'ts': datetime.datetime(2024, 1, 15, 12, 30, 45, 123456)}
+            ),
+            GenericVariant.from_python(
+                {'ts_ltz': datetime.datetime(
+                    2024, 1, 15, 12, 30, 45, 123456, tzinfo=datetime.timezone.utc
+                )}
+            ),
+            GenericVariant.from_python({'id': test_uuid}),
+            GenericVariant.from_python(test_uuid),
         ]
         data = pa.table(
-            {'id': [1, 2, 3], 'payload': GenericVariant.to_arrow_array(gvs)},
+            {'id': list(range(1, 9)), 'payload': GenericVariant.to_arrow_array(gvs)},
             schema=self._pa_schema(),
         )
         result = self._write_and_read(table, data)
 
-        self.assertEqual(result.num_rows, 3)
+        self.assertEqual(result.num_rows, 8)
         payload_col = result.column('payload')
 
-        gv0 = GenericVariant.from_arrow_struct(payload_col[0].as_py())
-        self.assertEqual(gv0.to_python(), {'age': 30, 'city': 'Beijing'})
+        self.assertEqual(
+            GenericVariant.from_arrow_struct(payload_col[0].as_py()).to_python(),
+            {'age': 30, 'city': 'Beijing'},
+        )
+        self.assertEqual(
+            GenericVariant.from_arrow_struct(payload_col[1].as_py()).to_python(),
+            {'score': 99, 'active': True},
+        )
+        self.assertEqual(
+            GenericVariant.from_arrow_struct(payload_col[2].as_py()).to_python(),
+            [1, 2, 3],
+        )
 
-        gv1 = GenericVariant.from_arrow_struct(payload_col[1].as_py())
-        self.assertEqual(gv1.to_python(), {'score': 99, 'active': True})
+        py3 = GenericVariant.from_arrow_struct(payload_col[3].as_py()).to_python()
+        self.assertEqual(py3['dt'], datetime.date(2024, 1, 15))
 
-        gv2 = GenericVariant.from_arrow_struct(payload_col[2].as_py())
-        self.assertEqual(gv2.to_python(), [1, 2, 3])
+        py4 = GenericVariant.from_arrow_struct(payload_col[4].as_py()).to_python()
+        self.assertEqual(py4['ts'], datetime.datetime(2024, 1, 15, 12, 30, 45, 123456))
+
+        py5 = GenericVariant.from_arrow_struct(payload_col[5].as_py()).to_python()
+        self.assertEqual(
+            py5['ts_ltz'],
+            datetime.datetime(2024, 1, 15, 12, 30, 45, 123456, tzinfo=datetime.timezone.utc),
+        )
+
+        py6 = GenericVariant.from_arrow_struct(payload_col[6].as_py()).to_python()
+        self.assertEqual(py6['id'], test_uuid)
+
+        py7 = GenericVariant.from_arrow_struct(payload_col[7].as_py()).to_python()
+        self.assertEqual(py7, test_uuid)
 
     def test_plain_variant_null_row(self):
         """SQL-NULL VARIANT rows are stored and retrieved as None."""
@@ -1116,7 +1227,46 @@ class TestVariantPaimonTable(unittest.TestCase):
 
     def test_shredded_variant_write_and_read(self):
         """Shredded VARIANT: writer shreds automatically, reader assembles transparently."""
-        shredding_json = _schema_json('payload', [('age', 'BIGINT'), ('city', 'VARCHAR')])
+        # Build shredding schema manually because nested ARRAY/ROW require JSON objects,
+        # not just atomic type strings.
+        shredding_json = json.dumps({
+            'type': 'ROW',
+            'fields': [
+                {
+                    'id': 0,
+                    'name': 'payload',
+                    'type': {
+                        'type': 'ROW',
+                        'fields': [
+                            {'name': 'name', 'type': 'VARCHAR'},
+                            {'name': 'active', 'type': 'BOOLEAN'},
+                            {'name': 'age', 'type': 'TINYINT'},
+                            {'name': 'score', 'type': 'SMALLINT'},
+                            {'name': 'count', 'type': 'INT'},
+                            {'name': 'id', 'type': 'BIGINT'},
+                            {'name': 'ratio', 'type': 'DOUBLE'},
+                            {'name': 'amount', 'type': 'DECIMAL(10,2)'},
+                            {'name': 'fixed', 'type': 'BINARY'},
+                            {'name': 'raw', 'type': 'VARBINARY'},
+                            {
+                                'name': 'tags',
+                                'type': {'type': 'ARRAY', 'element': 'INT'},
+                            },
+                            {
+                                'name': 'address',
+                                'type': {
+                                    'type': 'ROW',
+                                    'fields': [
+                                        {'name': 'city', 'type': 'VARCHAR'},
+                                        {'name': 'zip', 'type': 'INT'},
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                }
+            ],
+        })
         schema = Schema.from_pyarrow_schema(
             self._pa_schema(),
             options={'variant.shreddingSchema': shredding_json},
@@ -1125,8 +1275,40 @@ class TestVariantPaimonTable(unittest.TestCase):
         table = self.catalog.get_table('default.shredded_variant')
 
         gvs = [
-            GenericVariant.from_python({'age': 28, 'city': 'Beijing'}),
-            GenericVariant.from_python({'age': 35, 'city': 'Shanghai'}),
+            GenericVariant.from_python(
+                {
+                    'name': 'Apache Paimon',
+                    'active': True,
+                    'age': 3,
+                    'score': 3000,
+                    'count': 400000,
+                    'id': 12345678901234,
+                    'ratio': 1.012345678901234567890123456789,
+                    'amount': Decimal('100.99'),
+                    # BINARY stores raw bytes; fixed-length semantics are Parquet-level.
+                    'fixed': 'Apache Paimon'.encode('utf-8'),
+                    # VARBINARY stores raw bytes without padding.
+                    'raw': b'\x01\x02\x03\x04\x05',
+                    'tags': [1, 2, 3],
+                    'address': {'city': 'Beijing', 'zip': 100000},
+                }
+            ),
+            GenericVariant.from_python(
+                {
+                    'name': 'Pypaimon',
+                    'active': False,
+                    'age': 1,
+                    'score': 100,
+                    'count': 42,
+                    'id': 98765432109876,
+                    'ratio': 2.718281828459045,
+                    'amount': Decimal('42.50'),
+                    'fixed': b'\x00\x01\x02\x03',
+                    'raw': 'hello'.encode('utf-8'),
+                    'tags': [10, 20],
+                    'address': {'city': 'Shanghai', 'zip': 200000},
+                }
+            ),
         ]
         data = pa.table(
             {'id': [1, 2], 'payload': GenericVariant.to_arrow_array(gvs)},
@@ -1138,12 +1320,32 @@ class TestVariantPaimonTable(unittest.TestCase):
         payload_col = result.column('payload')
 
         py0 = GenericVariant.from_arrow_struct(payload_col[0].as_py()).to_python()
-        self.assertEqual(py0['age'], 28)
-        self.assertEqual(py0['city'], 'Beijing')
+        self.assertEqual(py0['name'], 'Apache Paimon')
+        self.assertEqual(py0['active'], True)
+        self.assertEqual(py0['age'], 3)
+        self.assertEqual(py0['score'], 3000)
+        self.assertEqual(py0['count'], 400000)
+        self.assertEqual(py0['id'], 12345678901234)
+        self.assertAlmostEqual(py0['ratio'], 1.012345678901234567890123456789)
+        self.assertEqual(py0['amount'], Decimal('100.99'))
+        self.assertEqual(py0['fixed'], 'Apache Paimon'.encode('utf-8'))
+        self.assertEqual(py0['raw'], b'\x01\x02\x03\x04\x05')
+        self.assertEqual(py0['tags'], [1, 2, 3])
+        self.assertEqual(py0['address'], {'city': 'Beijing', 'zip': 100000})
 
         py1 = GenericVariant.from_arrow_struct(payload_col[1].as_py()).to_python()
-        self.assertEqual(py1['age'], 35)
-        self.assertEqual(py1['city'], 'Shanghai')
+        self.assertEqual(py1['name'], 'Pypaimon')
+        self.assertEqual(py1['active'], False)
+        self.assertEqual(py1['age'], 1)
+        self.assertEqual(py1['score'], 100)
+        self.assertEqual(py1['count'], 42)
+        self.assertEqual(py1['id'], 98765432109876)
+        self.assertAlmostEqual(py1['ratio'], 2.718281828459045)
+        self.assertEqual(py1['amount'], Decimal('42.50'))
+        self.assertEqual(py1['fixed'], b'\x00\x01\x02\x03')
+        self.assertEqual(py1['raw'], 'hello'.encode('utf-8'))
+        self.assertEqual(py1['tags'], [10, 20])
+        self.assertEqual(py1['address'], {'city': 'Shanghai', 'zip': 200000})
 
     def test_shredded_variant_overflow_preserved(self):
         """Fields outside the shredding schema survive in overflow bytes end-to-end."""
