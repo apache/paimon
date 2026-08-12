@@ -31,7 +31,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.ManifestAvroReader.BlockRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -622,25 +621,15 @@ public class ManifestFileTest {
                 ManifestAvroReader.RawBlock block = reader.next();
                 assertThat(block.rawBlockCopySupported()).isTrue();
                 ManifestAvroReader.RowIterator rows = block.toRows(projection.projectedType());
-                ByteBuffer reusedPartition = null;
                 ByteBuffer reusedEncodedRecord = null;
                 while (rows.hasNext()) {
-                    BlockRow row = rows.next();
-                    ByteBuffer encodedRecord = row.encodedRecord();
+                    GenericRow row = rows.next();
+                    ByteBuffer encodedRecord = rows.encodedRecord();
                     assertThat(encodedRecord.remaining()).isPositive();
                     if (reusedEncodedRecord != null) {
                         assertThat(encodedRecord).isSameAs(reusedEncodedRecord);
                     }
                     reusedEncodedRecord = encodedRecord;
-                    ByteBuffer partition =
-                            row.getByteBuffer(
-                                    projection
-                                            .projectedType()
-                                            .getFieldIndex(ManifestEntry.PARTITION));
-                    if (reusedPartition != null) {
-                        assertThat(partition).isSameAs(reusedPartition);
-                    }
-                    reusedPartition = partition;
                     InternalRow fileRow = row.getRow(2, 2);
                     if (reusedRow != null) {
                         assertThat(row).isSameAs(reusedRow);
@@ -662,33 +651,29 @@ public class ManifestFileTest {
     }
 
     @Test
-    void testBlockReaderReusesDecompressionBufferAcrossBlocks() throws Exception {
+    void testBlockReaderReadsAcrossMultipleBlocks() throws Exception {
         List<ManifestEntry> entries = Collections.nCopies(1_000, gen.next());
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest = writeSingleManifest(manifestFile, entries);
         ProjectedManifestEntry.Projection projection = projection(DataFileMeta.FILE_NAME);
-        int partitionPosition = projection.projectedType().getFieldIndex(ManifestEntry.PARTITION);
-        byte[] previousBlockBytes = null;
-        boolean reused = false;
         int blockCount = 0;
+        int rowCount = 0;
 
         try (ManifestAvroReader reader = openManifestReader(manifest)) {
             while (reader.hasNext()) {
                 ManifestAvroReader.RowIterator rows =
                         reader.next().toRows(projection.projectedType());
                 assertThat(rows.hasNext()).isTrue();
-                byte[] currentBlockBytes = rows.next().getByteBuffer(partitionPosition).array();
-                reused |= currentBlockBytes == previousBlockBytes;
-                previousBlockBytes = currentBlockBytes;
                 while (rows.hasNext()) {
                     rows.next();
+                    rowCount++;
                 }
                 blockCount++;
             }
         }
 
         assertThat(blockCount).isGreaterThan(1);
-        assertThat(reused).isTrue();
+        assertThat(rowCount).isEqualTo(entries.size());
     }
 
     @Test

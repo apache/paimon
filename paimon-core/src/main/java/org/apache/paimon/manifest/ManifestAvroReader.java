@@ -19,7 +19,6 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.avro.AvroBlockReader;
@@ -28,8 +27,6 @@ import org.apache.paimon.format.avro.AvroRawBlock;
 import org.apache.paimon.format.avro.AvroRecordDecoder;
 import org.apache.paimon.format.avro.AvroRecordDecoder.FieldDecoder;
 import org.apache.paimon.format.avro.AvroRecordDecoder.FieldType;
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
@@ -41,9 +38,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
+
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /** Reader which exposes reusable raw blocks from a Manifest Avro file. */
 public final class ManifestAvroReader implements AutoCloseable {
@@ -157,7 +155,7 @@ public final class ManifestAvroReader implements AutoCloseable {
 
             ByteBuffer decompressed = decoderContext.decompress(block);
             decoderContext.decoder.reset(decompressed);
-            BlockRow row = recordDecoder.createRow(decompressed.array());
+            GenericRow row = recordDecoder.createRow();
             return new RowIterator(
                     blockRecordCount,
                     decoderContext.decoder,
@@ -271,11 +269,11 @@ public final class ManifestAvroReader implements AutoCloseable {
     }
 
     /** Iterator over the reusable row decoded from one borrowed block. */
-    public static final class RowIterator implements Iterator<BlockRow> {
+    public static final class RowIterator implements Iterator<GenericRow> {
 
         private final AvroRecordDecoder decoder;
         private final ManifestEntryDecoder recordDecoder;
-        private final BlockRow row;
+        private final GenericRow row;
         private final @Nullable PartitionPredicate partitionFilter;
         private final @Nullable BucketFilter bucketFilter;
         private final @Nullable ReadStatistics readStatistics;
@@ -284,12 +282,13 @@ public final class ManifestAvroReader implements AutoCloseable {
         private long blockRemaining;
         private long blockRecordIndex = -1;
         private boolean nextReady;
+        private @Nullable ByteBuffer encodedRecord;
 
         private RowIterator(
                 long recordCount,
                 AvroRecordDecoder decoder,
                 ManifestEntryDecoder recordDecoder,
-                BlockRow row,
+                GenericRow row,
                 @Nullable PartitionPredicate partitionFilter,
                 @Nullable BucketFilter bucketFilter,
                 @Nullable ReadStatistics readStatistics) {
@@ -315,11 +314,14 @@ public final class ManifestAvroReader implements AutoCloseable {
                 }
                 while (blockRemaining > 0) {
                     blockRecordIndex++;
+                    int recordStart = decoder.absolutePosition();
                     boolean selected =
                             recordDecoder.read(decoder, row, partitionFilter, bucketFilter);
                     recordRead(selected);
                     blockRemaining--;
                     if (selected) {
+                        encodedRecord =
+                                decoder.borrowedView(recordStart, decoder.absolutePosition());
                         nextReady = true;
                         return true;
                     }
@@ -333,7 +335,7 @@ public final class ManifestAvroReader implements AutoCloseable {
         }
 
         @Override
-        public BlockRow next() {
+        public GenericRow next() {
             if (filtered) {
                 if (!hasNext()) {
                     throw new NoSuchElementException();
@@ -346,7 +348,9 @@ public final class ManifestAvroReader implements AutoCloseable {
                     throw new NoSuchElementException();
                 }
                 blockRecordIndex++;
+                int recordStart = decoder.absolutePosition();
                 recordDecoder.read(decoder, row, null, null);
+                encodedRecord = decoder.borrowedView(recordStart, decoder.absolutePosition());
                 recordRead(true);
                 blockRemaining--;
                 return row;
@@ -361,9 +365,18 @@ public final class ManifestAvroReader implements AutoCloseable {
             return blockRecordIndex;
         }
 
+        /** Returns a borrowed encoded view of the current complete Avro record. */
+        public ByteBuffer encodedRecord() {
+            checkCurrentRecord();
+            if (encodedRecord == null) {
+                throw new IllegalStateException("No current Manifest Avro record.");
+            }
+            return encodedRecord;
+        }
+
         private void recordRead(boolean selected) {
             if (readStatistics != null) {
-                if (selected && recordDecoder.fileDecoder != null) {
+                if (selected && recordDecoder.decodesDataFile()) {
                     readStatistics.decodedDataFiles++;
                 } else {
                     readStatistics.skippedDataFiles++;
@@ -390,141 +403,21 @@ public final class ManifestAvroReader implements AutoCloseable {
         private long skippedDataFiles;
     }
 
-    /** Reusable {@link GenericRow} with borrowed views over fields in the current Avro block. */
-    public static final class BlockRow extends GenericRow {
-
-        private final RowType rowType;
-        private final @Nullable BlockRow fileRow;
-        private final ByteBuffer[] byteBuffers;
-        private final BinaryString[] stringViews;
-        private final MemorySegment[] blockSegments;
-        private @Nullable BinaryRow binaryRowView;
-        private ByteBuffer encodedRecord;
-
-        private BlockRow(
-                RowType rowType, int filePosition, @Nullable RowType fileType, byte[] blockBytes) {
-            super(rowType.getFieldCount());
-            this.rowType = rowType;
-            this.byteBuffers = new ByteBuffer[rowType.getFieldCount()];
-            this.stringViews = new BinaryString[rowType.getFieldCount()];
-            this.blockSegments = new MemorySegment[] {MemorySegment.wrap(blockBytes)};
-            this.fileRow = fileType == null ? null : new BlockRow(fileType, blockSegments);
-            if (fileRow != null) {
-                setField(filePosition, fileRow);
-            }
-        }
-
-        private BlockRow(RowType rowType, MemorySegment[] blockSegments) {
-            super(rowType.getFieldCount());
-            this.rowType = rowType;
-            this.fileRow = null;
-            this.byteBuffers = new ByteBuffer[rowType.getFieldCount()];
-            this.stringViews = new BinaryString[rowType.getFieldCount()];
-            this.blockSegments = blockSegments;
-        }
-
-        public ByteBuffer getByteBuffer(int pos) {
-            if (isNullAt(pos)) {
-                throw new IllegalStateException("Manifest field is null.");
-            }
-            ByteBuffer bytes = byteBuffers[pos];
-            if (bytes == null) {
-                throw new IllegalStateException("Manifest field has no raw Avro byte view.");
-            }
-            return bytes;
-        }
-
-        private BinaryRow binaryRow(ByteBuffer bytes) {
-            int arity = bytes.getInt(bytes.position());
-            if (binaryRowView == null || binaryRowView.getFieldCount() != arity) {
-                binaryRowView = new BinaryRow(arity);
-            }
-            binaryRowView.pointTo(
-                    blockSegments[0],
-                    bytes.arrayOffset() + bytes.position() + Integer.BYTES,
-                    bytes.remaining() - Integer.BYTES);
-            return binaryRowView;
-        }
-
-        /** Returns the reusable encoded view of the current complete Avro record. */
-        public ByteBuffer encodedRecord() {
-            if (encodedRecord == null) {
-                throw new IllegalStateException("No current Manifest Avro record.");
-            }
-            return encodedRecord;
-        }
-
-        @Override
-        public byte[] getBinary(int pos) {
-            ByteBuffer bytes = getByteBuffer(pos);
-            return Arrays.copyOfRange(
-                    bytes.array(),
-                    bytes.arrayOffset() + bytes.position(),
-                    bytes.arrayOffset() + bytes.limit());
-        }
-
-        private void setByteBuffer(int pos, ByteBuffer source) {
-            ByteBuffer target = byteBuffers[pos];
-            if (target == null || target.array() != source.array()) {
-                target = ByteBuffer.wrap(source.array());
-                byteBuffers[pos] = target;
-            }
-            target.clear();
-            target.position(source.arrayOffset() + source.position());
-            target.limit(source.arrayOffset() + source.limit());
-
-            switch (rowType.getTypeAt(pos).getTypeRoot()) {
-                case CHAR:
-                case VARCHAR:
-                    BinaryString string = stringViews[pos];
-                    if (string == null) {
-                        string =
-                                new BinaryString(
-                                        blockSegments,
-                                        target.arrayOffset() + target.position(),
-                                        target.remaining());
-                        stringViews[pos] = string;
-                    } else {
-                        string.pointTo(
-                                blockSegments,
-                                target.arrayOffset() + target.position(),
-                                target.remaining());
-                    }
-                    setField(pos, string);
-                    break;
-                case BINARY:
-                case VARBINARY:
-                    setField(pos, target);
-                    break;
-                default:
-                    break;
-            }
-        }
-
-        private void setEncodedRecord(AvroRecordDecoder decoder, int start, int end) {
-            encodedRecord = decoder.borrowedView(start, end);
-        }
-    }
-
     private static final class ManifestEntryDecoder {
 
-        private final RowType projectedType;
+        private final int projectedFieldCount;
         private final int versionPosition;
         private final int kindPosition;
         private final int partitionPosition;
         private final int bucketPosition;
         private final int totalBucketsPosition;
         private final int filePosition;
-        private final @Nullable RowType projectedFileType;
-        private final @Nullable DataFileDecoder fileDecoder;
-        private final FieldDecoder fileSkipper;
+        private final FieldDecoder fileReader;
 
         private ManifestEntryDecoder(AvroRecordDecoder decoder, RowType projectedType) {
             validateTopLevelSchema(decoder);
-            this.projectedType = projectedType;
+            this.projectedFieldCount = projectedType.getFieldCount();
             this.filePosition = projectedType.getFieldIndex(ManifestEntry.FILE);
-            this.projectedFileType =
-                    filePosition < 0 ? null : (RowType) projectedType.getTypeAt(filePosition);
             this.versionPosition =
                     projectedType.getFieldIndex(ManifestSchemaUtils.FORMAT_IDENTIFIER_FIELD);
             this.kindPosition = projectedType.getFieldIndex(ManifestEntry.KIND);
@@ -532,24 +425,21 @@ public final class ManifestAvroReader implements AutoCloseable {
             this.bucketPosition = projectedType.getFieldIndex(ManifestEntry.BUCKET);
             this.totalBucketsPosition = projectedType.getFieldIndex(ManifestEntry.TOTAL_BUCKETS);
 
-            this.fileSkipper = decoder.createFieldDecoder(5, null);
-            this.fileDecoder =
-                    projectedFileType == null
-                            ? null
-                            : new DataFileDecoder(decoder, projectedFileType);
+            this.fileReader =
+                    decoder.createFieldDecoder(
+                            5, filePosition < 0 ? null : projectedType.getTypeAt(filePosition));
         }
 
-        private BlockRow createRow(byte[] blockBytes) {
-            return new BlockRow(projectedType, filePosition, projectedFileType, blockBytes);
+        private GenericRow createRow() {
+            return new GenericRow(projectedFieldCount);
         }
 
         private boolean read(
                 AvroRecordDecoder decoder,
-                BlockRow row,
+                GenericRow row,
                 @Nullable PartitionPredicate partitionFilter,
                 @Nullable BucketFilter bucketFilter)
                 throws IOException {
-            int recordStart = decoder.absolutePosition();
             if (!decoder.readRecordStart()) {
                 throw new IOException("Unexpected null or non-record Manifest Avro value.");
             }
@@ -566,24 +456,24 @@ public final class ManifestAvroReader implements AutoCloseable {
             }
 
             boolean partitionNeededForFilter = partitionFilter != null || bucketFilter != null;
-            ByteBuffer partitionBytes;
+            byte[] partitionBytes;
             if (partitionPosition < 0 && !partitionNeededForFilter) {
                 decoder.skipBytes();
                 partitionBytes = null;
             } else {
-                partitionBytes = decoder.readBytesView();
+                partitionBytes = decoder.readBytes();
                 if (partitionPosition >= 0) {
-                    row.setByteBuffer(partitionPosition, partitionBytes);
+                    row.setField(partitionPosition, partitionBytes);
                 }
             }
 
-            BinaryRow partition = null;
+            BinaryRow partition =
+                    partitionNeededForFilter ? deserializeBinaryRow(partitionBytes) : null;
             if (partitionNeededForFilter) {
-                partition = row.binaryRow(partitionBytes);
                 if (partitionFilter != null && !partitionFilter.test(partition)) {
                     decoder.readInt();
                     decoder.readInt();
-                    fileSkipper.skip(decoder);
+                    fileReader.skip(decoder);
                     return false;
                 }
             }
@@ -599,17 +489,20 @@ public final class ManifestAvroReader implements AutoCloseable {
             }
 
             if (bucketFilter != null && !bucketFilter.test(partition, bucket, totalBuckets)) {
-                fileSkipper.skip(decoder);
+                fileReader.skip(decoder);
                 return false;
             }
 
-            if (fileDecoder == null) {
-                fileSkipper.skip(decoder);
+            if (filePosition < 0) {
+                fileReader.skip(decoder);
             } else {
-                fileDecoder.read(decoder, row.fileRow);
+                row.setField(filePosition, fileReader.read(decoder, row.getField(filePosition)));
             }
-            row.setEncodedRecord(decoder, recordStart, decoder.absolutePosition());
             return true;
+        }
+
+        private boolean decodesDataFile() {
+            return filePosition >= 0;
         }
 
         private static void validateTopLevelSchema(AvroRecordDecoder decoder) {
@@ -643,311 +536,6 @@ public final class ManifestAvroReader implements AutoCloseable {
                             String.format(
                                     "Unexpected Manifest Avro type for field %s: expected %s but found %s.",
                                     actualName, expectedTypes[i], actualType));
-                }
-            }
-        }
-    }
-
-    private static final class DataFileDecoder {
-
-        private static final int MINIMUM_FIELD_COUNT = 13;
-
-        private final int writerFieldCount;
-        private final int fileNameIndex;
-        private final int fileSizeIndex;
-        private final int rowCountIndex;
-        private final int minKeyIndex;
-        private final int maxKeyIndex;
-        private final int keyStatsIndex;
-        private final int valueStatsIndex;
-        private final int minSequenceNumberIndex;
-        private final int maxSequenceNumberIndex;
-        private final int schemaIdIndex;
-        private final int levelIndex;
-        private final int extraFilesIndex;
-        private final int creationTimeIndex;
-        private final int deleteRowCountIndex;
-        private final int embeddedFileIndex;
-        private final int fileSourceIndex;
-        private final int valueStatsColsIndex;
-        private final int externalPathIndex;
-        private final int firstRowIdIndex;
-        private final int writeColsIndex;
-
-        private final FieldDecoder keyStatsDecoder;
-        private final FieldDecoder valueStatsDecoder;
-        private final FieldDecoder extraFilesDecoder;
-        private final FieldDecoder creationTimeDecoder;
-        private final @Nullable FieldDecoder valueStatsColsDecoder;
-        private final @Nullable FieldDecoder writeColsDecoder;
-
-        private DataFileDecoder(AvroRecordDecoder decoder, RowType projectedType) {
-            writerFieldCount = decoder.nestedFieldCount(5);
-            if (writerFieldCount < MINIMUM_FIELD_COUNT
-                    || writerFieldCount > DataFileMeta.SCHEMA.getFieldCount()) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Unsupported Manifest Avro data file field count %s.",
-                                writerFieldCount));
-            }
-            for (int position = 0; position < writerFieldCount; position++) {
-                String actual = decoder.nestedFieldName(5, position);
-                String expected = DataFileMeta.SCHEMA.getField(position).name();
-                if (!actual.equals(expected)) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Unexpected Manifest Avro data file field at position %s: expected %s but found %s.",
-                                    position, expected, actual));
-                }
-            }
-
-            fileNameIndex = projectedType.getFieldIndex(DataFileMeta.FILE_NAME);
-            fileSizeIndex = projectedType.getFieldIndex(DataFileMeta.FILE_SIZE);
-            rowCountIndex = projectedType.getFieldIndex(DataFileMeta.ROW_COUNT);
-            minKeyIndex = projectedType.getFieldIndex(DataFileMeta.MIN_KEY);
-            maxKeyIndex = projectedType.getFieldIndex(DataFileMeta.MAX_KEY);
-            keyStatsIndex = projectedType.getFieldIndex(DataFileMeta.KEY_STATS);
-            valueStatsIndex = projectedType.getFieldIndex(DataFileMeta.VALUE_STATS);
-            minSequenceNumberIndex = projectedType.getFieldIndex(DataFileMeta.MIN_SEQUENCE_NUMBER);
-            maxSequenceNumberIndex = projectedType.getFieldIndex(DataFileMeta.MAX_SEQUENCE_NUMBER);
-            schemaIdIndex = projectedType.getFieldIndex(DataFileMeta.SCHEMA_ID);
-            levelIndex = projectedType.getFieldIndex(DataFileMeta.LEVEL);
-            extraFilesIndex = projectedType.getFieldIndex(DataFileMeta.EXTRA_FILES);
-            creationTimeIndex = projectedType.getFieldIndex(DataFileMeta.CREATION_TIME);
-            deleteRowCountIndex = projectedType.getFieldIndex(DataFileMeta.DELETE_ROW_COUNT);
-            embeddedFileIndex = projectedType.getFieldIndex(DataFileMeta.EMBEDDED_FILE_INDEX);
-            fileSourceIndex = projectedType.getFieldIndex(DataFileMeta.FILE_SOURCE);
-            valueStatsColsIndex = projectedType.getFieldIndex(DataFileMeta.VALUE_STATS_COLS);
-            externalPathIndex = projectedType.getFieldIndex(DataFileMeta.EXTERNAL_PATH);
-            firstRowIdIndex = projectedType.getFieldIndex(DataFileMeta.FIRST_ROW_ID);
-            writeColsIndex = projectedType.getFieldIndex(DataFileMeta.WRITE_COLS);
-
-            keyStatsDecoder =
-                    decoder.createNestedFieldDecoder(
-                            5,
-                            5,
-                            keyStatsIndex < 0 ? null : projectedType.getTypeAt(keyStatsIndex));
-            valueStatsDecoder =
-                    decoder.createNestedFieldDecoder(
-                            5,
-                            6,
-                            valueStatsIndex < 0 ? null : projectedType.getTypeAt(valueStatsIndex));
-            extraFilesDecoder =
-                    decoder.createNestedFieldDecoder(
-                            5,
-                            11,
-                            extraFilesIndex < 0 ? null : projectedType.getTypeAt(extraFilesIndex));
-            creationTimeDecoder =
-                    decoder.createNestedFieldDecoder(
-                            5,
-                            12,
-                            creationTimeIndex < 0
-                                    ? null
-                                    : projectedType.getTypeAt(creationTimeIndex));
-            valueStatsColsDecoder =
-                    writerFieldCount <= 16
-                            ? null
-                            : decoder.createNestedFieldDecoder(
-                                    5,
-                                    16,
-                                    valueStatsColsIndex < 0
-                                            ? null
-                                            : projectedType.getTypeAt(valueStatsColsIndex));
-            writeColsDecoder =
-                    writerFieldCount <= 19
-                            ? null
-                            : decoder.createNestedFieldDecoder(
-                                    5,
-                                    19,
-                                    writeColsIndex < 0
-                                            ? null
-                                            : projectedType.getTypeAt(writeColsIndex));
-        }
-
-        private void read(AvroRecordDecoder decoder, BlockRow row) throws IOException {
-            if (fileNameIndex < 0) {
-                decoder.skipBytes();
-            } else {
-                row.setByteBuffer(fileNameIndex, decoder.readBytesView());
-            }
-
-            long fileSize = decoder.readLong();
-            if (fileSizeIndex >= 0) {
-                row.setField(fileSizeIndex, fileSize);
-            }
-
-            long rowCount = decoder.readLong();
-            if (rowCountIndex >= 0) {
-                row.setField(rowCountIndex, rowCount);
-            }
-
-            if (minKeyIndex < 0) {
-                decoder.skipBytes();
-            } else {
-                row.setByteBuffer(minKeyIndex, decoder.readBytesView());
-            }
-
-            if (maxKeyIndex < 0) {
-                decoder.skipBytes();
-            } else {
-                row.setByteBuffer(maxKeyIndex, decoder.readBytesView());
-            }
-
-            if (keyStatsIndex < 0) {
-                keyStatsDecoder.skip(decoder);
-            } else {
-                row.setField(
-                        keyStatsIndex, keyStatsDecoder.read(decoder, row.getField(keyStatsIndex)));
-            }
-
-            if (valueStatsIndex < 0) {
-                valueStatsDecoder.skip(decoder);
-            } else {
-                row.setField(
-                        valueStatsIndex,
-                        valueStatsDecoder.read(decoder, row.getField(valueStatsIndex)));
-            }
-
-            long minSequenceNumber = decoder.readLong();
-            if (minSequenceNumberIndex >= 0) {
-                row.setField(minSequenceNumberIndex, minSequenceNumber);
-            }
-
-            long maxSequenceNumber = decoder.readLong();
-            if (maxSequenceNumberIndex >= 0) {
-                row.setField(maxSequenceNumberIndex, maxSequenceNumber);
-            }
-
-            long schemaId = decoder.readLong();
-            if (schemaIdIndex >= 0) {
-                row.setField(schemaIdIndex, schemaId);
-            }
-
-            int level = decoder.readInt();
-            if (levelIndex >= 0) {
-                row.setField(levelIndex, level);
-            }
-
-            if (extraFilesIndex < 0) {
-                extraFilesDecoder.skip(decoder);
-            } else {
-                int start = decoder.absolutePosition();
-                row.setField(
-                        extraFilesIndex,
-                        extraFilesDecoder.read(decoder, row.getField(extraFilesIndex)));
-                row.setByteBuffer(
-                        extraFilesIndex, decoder.borrowedView(start, decoder.absolutePosition()));
-            }
-
-            if (creationTimeIndex < 0) {
-                creationTimeDecoder.skip(decoder);
-            } else {
-                row.setField(
-                        creationTimeIndex,
-                        creationTimeDecoder.read(decoder, row.getField(creationTimeIndex)));
-            }
-
-            if (writerFieldCount > 13) {
-                int branch = decoder.readIndex();
-                if (branch == 0) {
-                    if (deleteRowCountIndex >= 0) {
-                        row.setField(deleteRowCountIndex, null);
-                    }
-                } else if (branch == 1) {
-                    long deleteRowCount = decoder.readLong();
-                    if (deleteRowCountIndex >= 0) {
-                        row.setField(deleteRowCountIndex, deleteRowCount);
-                    }
-                } else if (branch != 0) {
-                    throw new IOException(
-                            "Invalid nullable delete row count union branch " + branch);
-                }
-            }
-
-            if (writerFieldCount > 14) {
-                int branch = decoder.readIndex();
-                if (branch == 0) {
-                    if (embeddedFileIndex >= 0) {
-                        row.setField(embeddedFileIndex, null);
-                    }
-                } else if (branch == 1) {
-                    if (embeddedFileIndex < 0) {
-                        decoder.skipBytes();
-                    } else {
-                        row.setByteBuffer(embeddedFileIndex, decoder.readBytesView());
-                    }
-                } else if (branch != 0) {
-                    throw new IOException(
-                            "Invalid nullable embedded file index union branch " + branch);
-                }
-            }
-
-            if (writerFieldCount > 15) {
-                int branch = decoder.readIndex();
-                if (branch == 0) {
-                    if (fileSourceIndex >= 0) {
-                        row.setField(fileSourceIndex, null);
-                    }
-                } else if (branch == 1) {
-                    int fileSource = decoder.readInt();
-                    if (fileSourceIndex >= 0) {
-                        row.setField(fileSourceIndex, (byte) fileSource);
-                    }
-                } else if (branch != 0) {
-                    throw new IOException("Invalid nullable file source union branch " + branch);
-                }
-            }
-
-            if (writerFieldCount > 16) {
-                if (valueStatsColsIndex < 0) {
-                    valueStatsColsDecoder.skip(decoder);
-                } else {
-                    row.setField(
-                            valueStatsColsIndex,
-                            valueStatsColsDecoder.read(decoder, row.getField(valueStatsColsIndex)));
-                }
-            }
-
-            if (writerFieldCount > 17) {
-                int branch = decoder.readIndex();
-                if (branch == 0) {
-                    if (externalPathIndex >= 0) {
-                        row.setField(externalPathIndex, null);
-                    }
-                } else if (branch == 1) {
-                    if (externalPathIndex < 0) {
-                        decoder.skipBytes();
-                    } else {
-                        row.setByteBuffer(externalPathIndex, decoder.readBytesView());
-                    }
-                } else if (branch != 0) {
-                    throw new IOException("Invalid nullable external path union branch " + branch);
-                }
-            }
-
-            if (writerFieldCount > 18) {
-                int branch = decoder.readIndex();
-                if (branch == 0) {
-                    if (firstRowIdIndex >= 0) {
-                        row.setField(firstRowIdIndex, null);
-                    }
-                } else if (branch == 1) {
-                    long firstRowId = decoder.readLong();
-                    if (firstRowIdIndex >= 0) {
-                        row.setField(firstRowIdIndex, firstRowId);
-                    }
-                } else if (branch != 0) {
-                    throw new IOException("Invalid nullable first row id union branch " + branch);
-                }
-            }
-
-            if (writerFieldCount > 19) {
-                if (writeColsIndex < 0) {
-                    writeColsDecoder.skip(decoder);
-                } else {
-                    row.setField(
-                            writeColsIndex,
-                            writeColsDecoder.read(decoder, row.getField(writeColsIndex)));
                 }
             }
         }

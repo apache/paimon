@@ -289,33 +289,6 @@ public class AvroFileFormatTest {
     }
 
     @Test
-    void testRecordDecoderReturnsReusedBorrowedByteViews() throws IOException {
-        RowType rowType =
-                DataTypes.ROW(DataTypes.BYTES().notNull(), DataTypes.BYTES().notNull()).notNull();
-        LocalFileIO fileIO = LocalFileIO.create();
-        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
-
-        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
-            FormatWriter writer = fileFormat.createWriterFactory(rowType).create(out, "zstd");
-            writer.addElement(GenericRow.of(new byte[] {1, 2}, new byte[] {3, 4, 5}));
-            writer.close();
-        }
-
-        try (AvroBlockReader reader = new AvroBlockReader(fileIO.newInputStream(file))) {
-            AvroRecordDecoder decoder = reader.createRecordDecoder();
-            decoder.reset(reader.nextRawBlock(null).decompress(null));
-            assertThat(decoder.readRecordStart()).isTrue();
-
-            ByteBuffer first = decoder.readBytesView();
-            assertThat(bytes(first)).containsExactly(1, 2);
-            ByteBuffer second = decoder.readBytesView();
-            assertThat(second).isSameAs(first);
-            assertThat(bytes(second)).containsExactly(3, 4, 5);
-            assertThat(decoder.isEnd()).isTrue();
-        }
-    }
-
-    @Test
     void testRowReaderProjectsIntoReusedRow() throws IOException {
         Schema writerSchema =
                 SchemaBuilder.record("record")
@@ -452,11 +425,5 @@ public class AvroFileFormatTest {
             assertThatThrownBy(() -> format.createWriterFactory(rowType).create(out, "unsupported"))
                     .hasMessageContaining("Unrecognized codec: unsupported");
         }
-    }
-
-    private static byte[] bytes(ByteBuffer buffer) {
-        byte[] bytes = new byte[buffer.remaining()];
-        buffer.get(bytes);
-        return bytes;
     }
 }
