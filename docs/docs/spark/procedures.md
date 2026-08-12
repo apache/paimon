@@ -575,6 +575,18 @@ This section introduce all available spark procedures about paimon.
       </td>
    </tr>
    <tr>
+      <td>reassign_row_id</td>
+      <td>
+         To reassign row IDs for a data evolution table when partition row-id ranges overlap. The table must have <code>row-tracking.enabled=true</code> and <code>data-evolution.enabled=true</code>. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>partitions: partition filter to limit the partitions to reassign. The comma (",") represents "AND", the semicolon (";") represents "OR". Left empty for all partitions.</li>
+      </td>
+      <td>
+         CALL sys.reassign_row_id(table => 'default.T')<br/><br/>
+         CALL sys.reassign_row_id(table => 'default.T', partitions => 'dt=2026-05-19')
+      </td>
+   </tr>
+   <tr>
       <td>copy</td>
       <td>
          copy table files. Arguments:
