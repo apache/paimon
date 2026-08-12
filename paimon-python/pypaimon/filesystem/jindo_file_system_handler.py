@@ -47,17 +47,54 @@ from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 
 
+_JINDO_CONFIG_PREFIX = "fs."
+_PYPAIMON_ONLY_JINDO_CONFIG_KEYS = {OssOptions.OSS_IMPL.key()}
+_CASE_SENSITIVE_JINDO_CONFIG_KEYS = {
+    OssOptions.OSS_ACCESS_KEY_ID.key().lower(): OssOptions.OSS_ACCESS_KEY_ID.key(),
+    OssOptions.OSS_ACCESS_KEY_SECRET.key().lower(): OssOptions.OSS_ACCESS_KEY_SECRET.key(),
+    OssOptions.OSS_SECURITY_TOKEN.key().lower(): OssOptions.OSS_SECURITY_TOKEN.key(),
+}
+
+
+def _jindo_config_value(value) -> str:
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
+
+
 def build_jindo_config(catalog_options: Options):
-    """Build a pyjindo ``Config`` from OSS catalog options.
+    """Build a pyjindo ``Config`` from catalog options.
 
     Shared by ``JindoFileSystemHandler`` (the PyArrow FileIO path) and
     ``create_jindo_oss_filesystem`` (the PVFS fsspec path) so both jindo entry
-    points consume exactly the same credential / endpoint options.
+    points consume exactly the same native filesystem options.
     """
     if not JINDO_AVAILABLE:
         raise ImportError("Module pyjindo is not available. Please install pyjindosdk.")
 
-    config = jutil.Config()
+    # Match pyjindo's native OSS entry points: load jindosdk.cfg from
+    # JINDOSDK_CONF_DIR (and Hadoop configuration when enabled) before
+    # applying catalog-specific overrides. Older pyjindo versions without
+    # read_config retain the previous empty-Config behavior.
+    read_config = getattr(jutil, "read_config", None)
+    config = read_config() if callable(read_config) else jutil.Config()
+
+    # Keep this aligned with Java JindoFileIO. Forwarding only known fs.* keys
+    # would silently drop cache, metrics, networking, and future JindoSDK
+    # settings. Non-fs settings such as logger.* are loaded only from
+    # jutil.read_config().
+    for raw_key, value in catalog_options.to_map().items():
+        if (not isinstance(raw_key, str)
+                or not raw_key.startswith(_JINDO_CONFIG_PREFIX)
+                or value is None):
+            continue
+        key = _CASE_SENSITIVE_JINDO_CONFIG_KEYS.get(raw_key.lower(), raw_key)
+        if key in _PYPAIMON_ONLY_JINDO_CONFIG_KEYS:
+            # PyPaimon uses fs.oss.impl as the jindo/legacy backend selector.
+            # The Hadoop option with the same name expects a Java class name
+            # and is not a native PyJindo setting.
+            continue
+        config.set(key, _jindo_config_value(value))
 
     access_key_id = catalog_options.get(OssOptions.OSS_ACCESS_KEY_ID)
     access_key_secret = catalog_options.get(OssOptions.OSS_ACCESS_KEY_SECRET)

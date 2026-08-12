@@ -16,15 +16,141 @@
 # under the License.
 
 import os
+import types
 import unittest
 import uuid
+from unittest import mock
 
 import pyarrow.fs as pafs
 
 from pyarrow.fs import PyFileSystem
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
+from pypaimon.filesystem import jindo_file_system_handler as jindo_module
 from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
+
+
+class _RecordingConfig:
+    def __init__(self, values=None):
+        self.values = dict(values or {})
+
+    def set(self, key, value):
+        self.values[key] = value
+
+
+class JindoConfigTest(unittest.TestCase):
+
+    def test_forwards_native_options_to_connect(self):
+        loaded_config = _RecordingConfig()
+        read_config = mock.Mock(return_value=loaded_config)
+        fake_jutil = types.SimpleNamespace(
+            Config=_RecordingConfig,
+            read_config=read_config,
+        )
+        options = Options({
+            "fs.oss.accesskeyid": "ak",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "sk",
+            OssOptions.OSS_ENDPOINT.key(): "https://cache-seed:80",
+            OssOptions.OSS_IMPL.key(): "jindo",
+            "fs.oss.dlf-cache.consistent-hash.enabled": True,
+            "fs.oss.dlf-cache.server.address": "http://cache-server:18101",
+            "fs.oss.https.enable": False,
+            "fs.oss.second.level.domain.enable": "true",
+            "fs.jindocache.client.metrics.enable": True,
+            "logger.verbose": 3,
+            "fs.oss.unset.option": None,
+            "metastore": "rest",
+        })
+        connect = mock.Mock(return_value=mock.sentinel.jindo_fs)
+        fake_jfs = types.SimpleNamespace(connect=connect)
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jfs", fake_jfs), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil):
+            handler = JindoFileSystemHandler("oss://bucket/", options)
+
+        read_config.assert_called_once_with()
+        connect.assert_called_once_with("oss://bucket/", "root", mock.ANY)
+        self.assertIs(handler._jindo_fs, mock.sentinel.jindo_fs)
+        config = connect.call_args[0][2]
+        self.assertIs(config, loaded_config)
+        self.assertEqual(config.values["fs.oss.accessKeyId"], "ak")
+        self.assertEqual(config.values["fs.oss.endpoint"], "cache-seed:80")
+        self.assertEqual(
+            config.values["fs.oss.dlf-cache.consistent-hash.enabled"], "true")
+        self.assertEqual(
+            config.values["fs.oss.dlf-cache.server.address"],
+            "http://cache-server:18101")
+        self.assertEqual(config.values["fs.oss.https.enable"], "false")
+        self.assertEqual(
+            config.values["fs.oss.second.level.domain.enable"], "true")
+        self.assertEqual(
+            config.values["fs.jindocache.client.metrics.enable"], "true")
+        self.assertEqual(config.values["fs.oss.user.agent.features"], "pypaimon")
+        self.assertNotIn(OssOptions.OSS_IMPL.key(), config.values)
+        self.assertNotIn("fs.oss.unset.option", config.values)
+        self.assertNotIn("logger.verbose", config.values)
+        self.assertNotIn("metastore", config.values)
+
+    def test_loaded_config_is_preserved_and_catalog_options_override_it(self):
+        loaded_config = _RecordingConfig({
+            "logger.dir": "/var/log/emr/jindosdk",
+            "logger.verbose": "0",
+            "fs.oss.endpoint": "oss-from-emr-config",
+            "fs.oss.read.timeout": "30s",
+            "fs.oss.impl": "com.aliyun.jindodata.oss.JindoOssFileSystem",
+            "fs.oss.https.enable": "true",
+        })
+        read_config = mock.Mock(return_value=loaded_config)
+        fake_jutil = types.SimpleNamespace(
+            Config=_RecordingConfig,
+            read_config=read_config,
+        )
+        options = Options({
+            OssOptions.OSS_ENDPOINT.key(): "http://127.0.0.1:80",
+            OssOptions.OSS_IMPL.key(): "jindo",
+            "fs.oss.https.enable": False,
+            "logger.verbose": "3",
+        })
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil):
+            config = jindo_module.build_jindo_config(options)
+
+        read_config.assert_called_once_with()
+        self.assertIs(config, loaded_config)
+        self.assertEqual(config.values["logger.dir"], "/var/log/emr/jindosdk")
+        self.assertEqual(config.values["fs.oss.read.timeout"], "30s")
+        self.assertEqual(
+            config.values["fs.oss.impl"],
+            "com.aliyun.jindodata.oss.JindoOssFileSystem")
+        self.assertEqual(config.values["fs.oss.https.enable"], "false")
+        self.assertEqual(config.values["fs.oss.endpoint"], "127.0.0.1:80")
+        self.assertEqual(config.values["logger.verbose"], "0")
+
+    def test_falls_back_when_read_config_is_unavailable(self):
+        fake_jutil = types.SimpleNamespace(Config=_RecordingConfig)
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil):
+            config = jindo_module.build_jindo_config(Options({}))
+
+        self.assertIsInstance(config, _RecordingConfig)
+        self.assertEqual(config.values["fs.oss.user.agent.features"], "pypaimon")
+
+    def test_read_config_errors_are_not_silently_ignored(self):
+        config_factory = mock.Mock(return_value=_RecordingConfig())
+        fake_jutil = types.SimpleNamespace(
+            Config=config_factory,
+            read_config=mock.Mock(side_effect=FileNotFoundError("jindosdk.cfg")),
+        )
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil), \
+             self.assertRaises(FileNotFoundError):
+            jindo_module.build_jindo_config(Options({}))
+
+        config_factory.assert_not_called()
 
 
 class JindoFileSystemTest(unittest.TestCase):
