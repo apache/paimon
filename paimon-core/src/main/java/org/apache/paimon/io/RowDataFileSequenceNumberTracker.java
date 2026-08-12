@@ -82,6 +82,18 @@ public class RowDataFileSequenceNumberTracker {
         return hasNullSeqNumber ? 0 : maxSeqNumber;
     }
 
+    boolean supportsBulkUpdate() {
+        return seqNumberFieldIndex == -1;
+    }
+
+    void update(long rowCount) {
+        if (!supportsBulkUpdate()) {
+            throw new IllegalStateException(
+                    "Cannot bulk update sequence numbers in row-tracking mode.");
+        }
+        seqNumCounter.add(rowCount);
+    }
+
     /**
      * Processes one row: increments the sequence counter, in row-tracking mode, extracts and tracks
      * the sequence number from the row.

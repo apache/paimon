@@ -64,6 +64,10 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
         }
     }
 
+    protected boolean requiresPerRecordStats() {
+        return statsRequirePerRecord;
+    }
+
     @Override
     public void writeBundle(BundleRecords bundle) throws IOException {
         if (statsRequirePerRecord) {
