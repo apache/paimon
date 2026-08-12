@@ -49,8 +49,31 @@ public class SimpleHashBucketAssignerTest {
         // The first 400 rows fill each bucket to its target of 100. The remaining 600 go through
         // ListUtils.pickRandomly, so they must land across the four buckets rather than piling
         // into one. More than one bucket ending up past its target is what "spread" means here.
-        long bucketsPastTarget = rowsPerBucket.values().stream().filter(rows -> rows > 100).count();
-        assertThat(bucketsPastTarget).isGreaterThan(1);
+        // Every bucket must take a share of the overflow, the constructor's included. Asserting
+        // merely "more than one" would still pass with the first bucket frozen at its target.
+        assertThat(rowsPerBucket.values()).allMatch(rows -> rows > 100);
+    }
+
+    @Test
+    public void testSecondPartitionAfterTheCapIsExhausted() {
+        // maxBucketId is shared across partitions, so by the time a later partition starts, the
+        // create-a-new-bucket branch is already closed for it and it goes straight to
+        // pickRandomly. Its own first bucket must be in the pool or that call has nothing to
+        // choose from.
+        SimpleHashBucketAssigner assigner = new SimpleHashBucketAssigner(1, 0, 100, 4);
+
+        for (int hash = 0; hash < 500; hash++) {
+            assigner.assign(row(1), hash);
+        }
+
+        Map<Integer, Integer> rowsPerBucket = new HashMap<>();
+        for (int hash = 0; hash < 300; hash++) {
+            rowsPerBucket.merge(assigner.assign(row(2), hash), 1, Integer::sum);
+        }
+
+        assertThat(rowsPerBucket.keySet()).allMatch(bucket -> bucket >= 0 && bucket < 4);
+        assertThat(rowsPerBucket.values().stream().mapToInt(Integer::intValue).sum())
+                .isEqualTo(300);
     }
 
     @Test

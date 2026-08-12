@@ -95,7 +95,13 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
                 return hash2Bucket.get(hash);
             }
 
-            Long num = bucketInformation.computeIfAbsent(currentBucket, bucket -> 0L);
+            Long num =
+                    bucketInformation.computeIfAbsent(
+                            currentBucket,
+                            bucket -> {
+                                bucketList.add(bucket);
+                                return 0L;
+                            });
 
             if (num >= targetBucketRowNumber) {
                 if (-1 == maxBucketsNum
@@ -106,12 +112,12 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
                     currentBucket = ListUtils.pickRandomly(bucketList);
                 }
             }
-            // Register the bucket here rather than in the computeIfAbsent above. A bucket that
-            // loadNewBucket() has just switched to gets its bucketInformation entry created by
-            // this very call, so on the next assign() the computeIfAbsent finds it present and
-            // its mapping function never runs -- which is how every bucket after the first was
-            // missing from bucketList. PartitionIndex registers at the creation site for the
-            // same reason.
+            // A bucket is created by exactly one of these two calls, so both have to register
+            // it and neither can double-register. The first bucket of a partition is created by
+            // the computeIfAbsent above. Every later one is created here instead: loadNewBucket()
+            // switches currentBucket to an id that is absent from bucketInformation, and this
+            // compute() is what puts it there, so the next assign() finds it present and that
+            // computeIfAbsent's mapping function never runs for it.
             bucketInformation.compute(
                     currentBucket,
                     (i, l) -> {
