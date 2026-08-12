@@ -205,7 +205,8 @@ class PrimaryKeySortedIndexScanTest {
     void testReadMergedSourceGroupInFileLocalPositions() throws IOException {
         DataFileMeta first = dataFile("data-1", 2);
         DataFileMeta second = dataFile("data-2", 3);
-        DataSplit split = dataSplit(11, 0, true, second, first);
+        DataFileMeta third = dataFile("data-3", 4);
+        DataSplit split = dataSplit(11, 0, true, third, first, second);
         PrimaryKeyIndexDefinition definition =
                 definition(
                         7,
@@ -216,10 +217,11 @@ class PrimaryKeySortedIndexScanTest {
                         "btree-merged",
                         Arrays.asList(
                                 new PrimaryKeyIndexSourceFile("data-1", 2),
-                                new PrimaryKeyIndexSourceFile("data-2", 3)),
+                                new PrimaryKeyIndexSourceFile("data-2", 3),
+                                new PrimaryKeyIndexSourceFile("data-3", 4)),
                         "btree",
                         7,
-                        5);
+                        9);
         PrimaryKeySortedIndexScan.Plan plan =
                 PrimaryKeySortedIndexScan.plan(
                         11,
@@ -232,8 +234,10 @@ class PrimaryKeySortedIndexScanTest {
         AtomicInteger queries = new AtomicInteger();
         CountingRoaringNavigableMap64 groupPositions = new CountingRoaringNavigableMap64();
         groupPositions.add(1);
-        groupPositions.add(3);
+        groupPositions.add(2);
         groupPositions.add(4);
+        groupPositions.add(6);
+        groupPositions.add(7);
         GlobalIndexReader reader = mock(GlobalIndexReader.class);
         when(reader.visitEqual(any(), eq(42)))
                 .thenAnswer(
@@ -251,23 +255,26 @@ class PrimaryKeySortedIndexScanTest {
                         (ignoredFile, ignoredDefinition, payloads, totalRowCount) -> {
                             readersCreated.incrementAndGet();
                             assertThat(payloads).containsExactly(mergedPayload);
-                            assertThat(totalRowCount).isEqualTo(5);
+                            assertThat(totalRowCount).isEqualTo(9);
                             return reader;
                         });
         PrimaryKeySortedIndexResult result = new PrimaryKeySortedIndexResult(evaluated);
 
         assertThat(readersCreated).hasValue(1);
         assertThat(queries).hasValue(1);
-        assertThat(groupPositions.iteratedPositions()).isEqualTo(3);
+        assertThat(groupPositions.iteratedPositions()).isEqualTo(5);
         verify(reader, times(1)).close();
-        assertThat(result.splits()).hasSize(2);
+        assertThat(result.splits()).hasSize(3);
         assertThat(result.splits()).allMatch(IndexedSplit.class::isInstance);
-        IndexedSplit secondSplit = (IndexedSplit) result.splits().get(0);
-        assertThat(secondSplit.dataSplit().dataFiles()).containsExactly(second);
-        assertThat(secondSplit.rowRanges()).containsExactly(new Range(1, 2));
+        IndexedSplit thirdSplit = (IndexedSplit) result.splits().get(0);
+        assertThat(thirdSplit.dataSplit().dataFiles()).containsExactly(third);
+        assertThat(thirdSplit.rowRanges()).containsExactly(new Range(1, 2));
         IndexedSplit firstSplit = (IndexedSplit) result.splits().get(1);
         assertThat(firstSplit.dataSplit().dataFiles()).containsExactly(first);
         assertThat(firstSplit.rowRanges()).containsExactly(new Range(1, 1));
+        IndexedSplit secondSplit = (IndexedSplit) result.splits().get(2);
+        assertThat(secondSplit.dataSplit().dataFiles()).containsExactly(second);
+        assertThat(secondSplit.rowRanges()).containsExactly(new Range(0, 0), new Range(2, 2));
     }
 
     @Test
