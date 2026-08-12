@@ -388,7 +388,7 @@ public class JavaPyE2ETest {
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
         FileStoreTable table = createFileStoreTable(optionsSetter, tablePath);
         StreamTableWrite write = table.newWrite(commitUser);
-        IOManager ioManager = IOManager.create(tablePath.toString());
+        IOManager ioManager = IOManager.create(tempDir.toString());
         write.withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -436,7 +436,7 @@ public class JavaPyE2ETest {
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
         FileStoreTable table = createFileStoreTable(optionsSetter, tablePath);
         StreamTableWrite write = table.newWrite(commitUser);
-        IOManager ioManager = IOManager.create(tablePath.toString());
+        IOManager ioManager = IOManager.create(tempDir.toString());
         write.withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -479,7 +479,7 @@ public class JavaPyE2ETest {
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
         FileStoreTable table = createFileStoreTable(optionsSetter, tablePath);
         StreamTableWrite write = table.newWrite(commitUser);
-        IOManager ioManager = IOManager.create(tablePath.toString());
+        IOManager ioManager = IOManager.create(tempDir.toString());
         write.withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser);
 
