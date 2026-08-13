@@ -18,8 +18,11 @@
 
 package org.apache.paimon.arrow.writer;
 
+import org.apache.paimon.arrow.ArrowBundleRecords;
+import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.vector.ArrowFormatCWriter;
 import org.apache.paimon.arrow.vector.ArrowFormatWriter;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
@@ -28,10 +31,14 @@ import org.apache.paimon.data.columnar.heap.HeapLongVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.io.VectorizedBundleRecords;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.BigIntVector;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.junit.jupiter.api.Test;
@@ -39,12 +46,288 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ArrowBundleWriter}. */
 public class ArrowBundleWriterTest {
+
+    @Test
+    public void testArrowBundleFlushesBufferedRowsBeforeDirectWrite() throws Exception {
+        RowType rowType = RowType.builder().field("value", DataTypes.INT()).build();
+        ArrowFormatCWriter cWriter = new ArrowFormatCWriter(rowType, 1024, true);
+        List<String> events = new ArrayList<>();
+        NativeWriter nativeWriter =
+                new NativeWriter() {
+                    @Override
+                    public long nativeMemoryUsed() {
+                        return 0;
+                    }
+
+                    @Override
+                    public void writeIpcBytes(long arrayAddress, long schemaAddress) {
+                        events.add("rows");
+                        cWriter.release();
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        ArrowBundleWriter writer =
+                new ArrowBundleWriter(new NoOpPositionOutputStream(), cWriter, nativeWriter) {
+                    @Override
+                    public void add(VectorSchemaRoot vsr) {
+                        events.add("bundle");
+                    }
+                };
+
+        writer.addElement(GenericRow.of(1));
+        try (RootAllocator allocator = new RootAllocator();
+                VectorSchemaRoot root = ArrowUtils.createVectorSchemaRoot(rowType, allocator)) {
+            setInt((IntVector) root.getVector("value"), 2);
+            root.setRowCount(1);
+
+            writer.writeBundle(new ArrowBundleRecords(root, rowType, true));
+        }
+
+        assertThat(events).containsExactly("rows", "bundle");
+        writer.close();
+    }
+
+    @Test
+    public void testReorderedArrowBundleFallsBackToRows() throws Exception {
+        RowType writerType =
+                RowType.builder().field("a", DataTypes.INT()).field("b", DataTypes.INT()).build();
+        RowType sourceType =
+                RowType.builder().field("b", DataTypes.INT()).field("a", DataTypes.INT()).build();
+        ArrowFormatCWriter cWriter = new ArrowFormatCWriter(writerType, 1024, true);
+        VectorSchemaRoot writerRoot = cWriter.getVectorSchemaRoot();
+        CapturingNativeWriter nativeWriter = new CapturingNativeWriter(writerRoot, cWriter);
+        ArrowBundleWriter writer =
+                new ArrowBundleWriter(new NoOpPositionOutputStream(), cWriter, nativeWriter) {
+                    @Override
+                    public void add(VectorSchemaRoot vsr) {
+                        throw new AssertionError("Reordered Arrow bundle must use row fallback.");
+                    }
+                };
+
+        try (RootAllocator allocator = new RootAllocator();
+                VectorSchemaRoot root = ArrowUtils.createVectorSchemaRoot(sourceType, allocator)) {
+            setInt((IntVector) root.getVector("b"), 20);
+            setInt((IntVector) root.getVector("a"), 10);
+            root.setRowCount(1);
+
+            writer.writeBundle(new ArrowBundleRecords(root, writerType, true));
+        }
+        writer.close();
+
+        assertThat(nativeWriter.snapshots).hasSize(1);
+        assertThat(nativeWriter.snapshots.get(0).objectColumns.get(0)).containsExactly(10);
+        assertThat(nativeWriter.snapshots.get(0).objectColumns.get(1)).containsExactly(20);
+    }
+
+    @Test
+    public void testMissingColumnArrowBundleFallsBackToRows() throws Exception {
+        RowType writerType =
+                RowType.builder().field("a", DataTypes.INT()).field("b", DataTypes.INT()).build();
+        RowType sourceType = RowType.builder().field("a", DataTypes.INT()).build();
+        ArrowFormatCWriter cWriter = new ArrowFormatCWriter(writerType, 1024, true);
+        VectorSchemaRoot writerRoot = cWriter.getVectorSchemaRoot();
+        CapturingNativeWriter nativeWriter = new CapturingNativeWriter(writerRoot, cWriter);
+        ArrowBundleWriter writer =
+                new ArrowBundleWriter(new NoOpPositionOutputStream(), cWriter, nativeWriter) {
+                    @Override
+                    public void add(VectorSchemaRoot vsr) {
+                        throw new AssertionError(
+                                "Arrow bundle with a missing column must use row fallback.");
+                    }
+                };
+
+        try (RootAllocator allocator = new RootAllocator();
+                VectorSchemaRoot root = ArrowUtils.createVectorSchemaRoot(sourceType, allocator)) {
+            setInt((IntVector) root.getVector("a"), 10);
+            root.setRowCount(1);
+
+            writer.writeBundle(new ArrowBundleRecords(root, writerType, true));
+        }
+        writer.close();
+
+        assertThat(nativeWriter.snapshots).hasSize(1);
+        assertThat(nativeWriter.snapshots.get(0).objectColumns.get(0)).containsExactly(10);
+        assertThat(nativeWriter.snapshots.get(0).objectColumns.get(1))
+                .containsExactly((Object) null);
+    }
+
+    @Test
+    public void testDescriptionOnlyRowTypeDifferenceUsesDirectWrite() throws Exception {
+        RowType writerType = RowType.builder().field("value", DataTypes.INT()).build();
+        RowType bundleType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(
+                                        0, "value", DataTypes.INT(), "different description")));
+        ArrowFormatCWriter cWriter = new ArrowFormatCWriter(writerType, 1024, true);
+        VectorSchemaRoot writerRoot = cWriter.getVectorSchemaRoot();
+        CapturingNativeWriter nativeWriter = new CapturingNativeWriter(writerRoot, cWriter);
+        int[] directWrites = {0};
+        ArrowBundleWriter writer =
+                new ArrowBundleWriter(new NoOpPositionOutputStream(), cWriter, nativeWriter) {
+                    @Override
+                    public void add(VectorSchemaRoot vsr) {
+                        directWrites[0]++;
+                    }
+                };
+
+        try (RootAllocator allocator = new RootAllocator();
+                VectorSchemaRoot root = ArrowUtils.createVectorSchemaRoot(writerType, allocator)) {
+            setInt((IntVector) root.getVector("value"), 10);
+            root.setRowCount(1);
+
+            writer.writeBundle(new ArrowBundleRecords(root, bundleType, true));
+        }
+        writer.close();
+
+        assertThat(directWrites[0]).isEqualTo(1);
+        assertThat(nativeWriter.snapshots).isEmpty();
+    }
+
+    @Test
+    public void testNonIdentityNameMappingFallsBackToRows() throws Exception {
+        RowType writerType =
+                RowType.builder().field("A", DataTypes.INT()).field("a", DataTypes.INT()).build();
+        ArrowFormatCWriter cWriter = new ArrowFormatCWriter(writerType, 1024, true);
+        VectorSchemaRoot writerRoot = cWriter.getVectorSchemaRoot();
+        CapturingNativeWriter nativeWriter = new CapturingNativeWriter(writerRoot, cWriter);
+        ArrowBundleWriter writer =
+                new ArrowBundleWriter(new NoOpPositionOutputStream(), cWriter, nativeWriter) {
+                    @Override
+                    public void add(VectorSchemaRoot vsr) {
+                        throw new AssertionError(
+                                "Non-identity Arrow name mapping must use row fallback.");
+                    }
+                };
+
+        try (RootAllocator allocator = new RootAllocator();
+                VectorSchemaRoot root = ArrowUtils.createVectorSchemaRoot(writerType, allocator)) {
+            setInt((IntVector) root.getVector("A"), 10);
+            setInt((IntVector) root.getVector("a"), 20);
+            root.setRowCount(1);
+
+            writer.writeBundle(new ArrowBundleRecords(root, writerType, false));
+        }
+        writer.close();
+
+        assertThat(nativeWriter.snapshots).hasSize(1);
+        assertThat(nativeWriter.snapshots.get(0).objectColumns.get(0)).containsExactly(20);
+        assertThat(nativeWriter.snapshots.get(0).objectColumns.get(1)).containsExactly(20);
+    }
+
+    @Test
+    public void testMixedAllocatorRootsFallBackToRows() throws Exception {
+        RowType rowType =
+                RowType.builder().field("a", DataTypes.INT()).field("b", DataTypes.INT()).build();
+        ArrowFormatCWriter cWriter = new ArrowFormatCWriter(rowType, 1024, true);
+        VectorSchemaRoot writerRoot = cWriter.getVectorSchemaRoot();
+        CapturingNativeWriter nativeWriter = new CapturingNativeWriter(writerRoot, cWriter);
+        ArrowBundleWriter writer =
+                new ArrowBundleWriter(new NoOpPositionOutputStream(), cWriter, nativeWriter) {
+                    @Override
+                    public void add(VectorSchemaRoot vsr) {
+                        throw new AssertionError("Mixed-root Arrow bundle must use row fallback.");
+                    }
+                };
+
+        try (RootAllocator firstAllocator = new RootAllocator();
+                RootAllocator secondAllocator = new RootAllocator()) {
+            FieldVector firstVector =
+                    writerRoot.getSchema().getFields().get(0).createVector(firstAllocator);
+            FieldVector secondVector =
+                    writerRoot.getSchema().getFields().get(1).createVector(secondAllocator);
+            try (VectorSchemaRoot root =
+                    new VectorSchemaRoot(
+                            writerRoot.getSchema(), Arrays.asList(firstVector, secondVector), 1)) {
+                setInt((IntVector) firstVector, 10);
+                setInt((IntVector) secondVector, 20);
+
+                writer.writeBundle(new ArrowBundleRecords(root, rowType, true));
+            }
+        }
+        writer.close();
+
+        assertThat(nativeWriter.snapshots).hasSize(1);
+        assertThat(nativeWriter.snapshots.get(0).objectColumns.get(0)).containsExactly(10);
+        assertThat(nativeWriter.snapshots.get(0).objectColumns.get(1)).containsExactly(20);
+    }
+
+    @Test
+    public void testDirectWriteFailureReleasesExportedReferences() throws Exception {
+        RowType rowType = RowType.builder().field("value", DataTypes.INT()).build();
+        ArrowFormatCWriter cWriter = new ArrowFormatCWriter(rowType, 1024, true);
+        RuntimeException failure = new RuntimeException("Expected native write failure.");
+        NativeWriter nativeWriter =
+                new NativeWriter() {
+                    @Override
+                    public long nativeMemoryUsed() {
+                        return 0;
+                    }
+
+                    @Override
+                    public void writeIpcBytes(long arrayAddress, long schemaAddress) {
+                        throw failure;
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        ArrowBundleWriter writer =
+                new ArrowBundleWriter(new NoOpPositionOutputStream(), cWriter, nativeWriter);
+
+        try {
+            try (RootAllocator allocator = new RootAllocator()) {
+                try (VectorSchemaRoot root =
+                        ArrowUtils.createVectorSchemaRoot(rowType, allocator)) {
+                    setInt((IntVector) root.getVector("value"), 10);
+                    root.setRowCount(1);
+
+                    assertThatThrownBy(
+                                    () ->
+                                            writer.writeBundle(
+                                                    new ArrowBundleRecords(root, rowType, true)))
+                            .isSameAs(failure);
+                }
+
+                assertThat(allocator.getAllocatedMemory()).isZero();
+            }
+        } finally {
+            writer.close();
+        }
+    }
+
+    @Test
+    public void testVectorizedBundleFlushesBufferedRowsBeforeWrite() throws Exception {
+        RowType rowType = RowType.builder().field("value", DataTypes.INT()).build();
+        ArrowFormatCWriter cWriter = new ArrowFormatCWriter(rowType, 1024, true);
+        CapturingNativeWriter nativeWriter =
+                new CapturingNativeWriter(cWriter.getVectorSchemaRoot(), cWriter);
+        ArrowBundleWriter writer =
+                new ArrowBundleWriter(new NoOpPositionOutputStream(), cWriter, nativeWriter);
+
+        writer.addElement(GenericRow.of(1));
+        HeapIntVector vector = new HeapIntVector(2);
+        vector.setInt(0, 2);
+        vector.setInt(1, 3);
+        VectorizedColumnBatch batch = new VectorizedColumnBatch(new ColumnVector[] {vector});
+        batch.setNumRows(2);
+        writer.writeBundle(new VectorizedBundleRecords(batch, null));
+        writer.close();
+
+        assertThat(nativeWriter.snapshots).hasSize(2);
+        assertThat(nativeWriter.snapshots.get(0).objectColumns.get(0)).containsExactly(1);
+        assertThat(nativeWriter.snapshots.get(1).objectColumns.get(0)).containsExactly(2, 3);
+    }
 
     @Test
     public void testAddBatchWithoutDeletionVector() throws IOException {
@@ -578,12 +861,12 @@ public class ArrowBundleWriterTest {
                 if (fv instanceof IntVector) {
                     intValues = new int[rowCount];
                     for (int i = 0; i < rowCount; i++) {
-                        intValues[i] = ((IntVector) fv).get(i);
+                        intValues[i] = fv.isNull(i) ? 0 : ((IntVector) fv).get(i);
                     }
                 } else if (fv instanceof BigIntVector) {
                     longValues = new long[rowCount];
                     for (int i = 0; i < rowCount; i++) {
-                        longValues[i] = ((BigIntVector) fv).get(i);
+                        longValues[i] = fv.isNull(i) ? 0L : ((BigIntVector) fv).get(i);
                     }
                 }
                 List<Object> colObjects = new ArrayList<>();
@@ -616,6 +899,12 @@ public class ArrowBundleWriterTest {
                 this.objectColumns = objectColumns;
             }
         }
+    }
+
+    private static void setInt(IntVector vector, int value) {
+        vector.allocateNew(1);
+        vector.setSafe(0, value);
+        vector.setValueCount(1);
     }
 
     private static class NoOpPositionOutputStream extends PositionOutputStream {
