@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.AppendFileStoreWrite;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -98,6 +99,7 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
                 store.newDataEvolutionRead().withReadType(readWriteType).createReader(dataSplit);
         AppendFileStoreWrite storeWrite = (AppendFileStoreWrite) store.newWrite(commitUser);
         storeWrite.withWriteType(readWriteType);
+        storeWrite.withFileSource(FileSource.COMPACT);
         RecordWriter<InternalRow> writer = storeWrite.createWriter(partition, 0);
 
         reader.forEachRemaining(

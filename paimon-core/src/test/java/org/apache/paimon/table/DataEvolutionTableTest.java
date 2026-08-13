@@ -32,6 +32,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -1646,6 +1647,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         }
 
         assertThat(entries.size()).isEqualTo(1);
+        assertThat(entries.get(0).file().fileSource()).contains(FileSource.COMPACT);
         assertThat(entries.get(0).file().nonNullFirstRowId()).isEqualTo(0);
         assertThat(entries.get(0).file().rowCount()).isEqualTo(500000L);
     }

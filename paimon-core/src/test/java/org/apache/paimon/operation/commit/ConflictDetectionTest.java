@@ -1187,6 +1187,26 @@ class ConflictDetectionTest {
     }
 
     @Test
+    void testCheckRowIdRangeConflictsUsesRetryableExceptionForDataFiles() {
+        DataEvolutionConflictDetection detection = createConflictDetection();
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Arrays.asList(
+                                createFileEntryWithRowId("f1", ADD, 0L, 2L),
+                                createFileEntryWithRowId("f2", ADD, 2L, 2L)),
+                        Collections.singletonList(
+                                createFileEntryWithRowId("compacted", ADD, 0L, 4L)),
+                        Collections.emptyList(),
+                        null,
+                        Snapshot.CommitKind.COMPACT);
+
+        assertThat(exception).isPresent();
+        assertThat(exception.get()).isInstanceOf(DataEvolutionRowRangeConflictException.class);
+    }
+
+    @Test
     void testCheckRowIdRangeConflictsReportsDedicatedFileSpanningDataFiles() {
         DataEvolutionConflictDetection detection = createConflictDetection();
 
@@ -1203,6 +1223,7 @@ class ConflictDetectionTest {
 
         assertThat(exception).isPresent();
         assertThat(exception.get())
+                .isNotInstanceOf(DataEvolutionRowRangeConflictException.class)
                 .hasMessageContaining("dedicated file")
                 .hasMessageContaining("p1.blob")
                 .hasMessageContaining("spans multiple data file ranges")

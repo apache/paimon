@@ -361,7 +361,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         for (List<SimpleFileEntry> dataFileGroup : rangeHelper.mergeOverlappingRanges(dataFiles)) {
             if (!rangeHelper.areAllRangesSame(dataFileGroup)) {
                 return Optional.of(
-                        new RuntimeException(
+                        new DataEvolutionRowRangeConflictException(
                                 "For Data Evolution table, multiple 'MERGE INTO' and 'COMPACT' "
                                         + "operations "
                                         + "have encountered conflicts, data files: "
