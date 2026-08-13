@@ -232,6 +232,8 @@ public final class ProjectedDataFileMeta implements DataFileMeta {
 
     @Override
     public long nonNullFirstRowId() {
+        // Read the primitive value directly on manifest scan hot paths. Calling firstRowId()
+        // here would box every value as Long before immediately unboxing it again.
         int position = requiredPosition(Fields.FIRST_ROW_ID);
         InternalRow row = currentRow();
         checkState(!row.isNullAt(position), "First row id cannot be null.");
