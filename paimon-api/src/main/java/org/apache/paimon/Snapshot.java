@@ -148,11 +148,11 @@ public class Snapshot implements Serializable {
     @JsonProperty(FIELD_TIME_MILLIS)
     protected final long timeMillis;
 
-    // record count of all changes occurred in this snapshot
+    // unmerged record count of all live data files in this snapshot
     @JsonProperty(FIELD_TOTAL_RECORD_COUNT)
     protected final long totalRecordCount;
 
-    // record count of all new changes occurred in this snapshot
+    // net change of the unmerged record count from data files added and deleted in this snapshot
     @JsonProperty(FIELD_DELTA_RECORD_COUNT)
     protected final long deltaRecordCount;
 

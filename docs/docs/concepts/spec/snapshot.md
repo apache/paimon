@@ -58,11 +58,16 @@ Snapshot File is JSON, it includes:
 11. commitKind: type of changes in this snapshot, including append, compact, overwrite and analyze.
 12. timeMillis: commit time millis.
 13. logOffsets: commit log offsets.
-14. totalRecordCount: record count of all changes occurred in this snapshot.
-15. deltaRecordCount: record count of all new changes occurred in this snapshot.
+14. totalRecordCount: unmerged record count of all live data files in this snapshot.
+15. deltaRecordCount: net change of the unmerged record count from data files added and deleted in this snapshot.
 16. changelogRecordCount: record count of all changelog produced in this snapshot.
 17. watermark: watermark for input records, from Flink watermark mechanism, Long.MIN_VALUE if there is no watermark.
 18. statistics: stats file name for statistics of this table.
 19. properties: additional key-value properties of this snapshot.
 20. nextRowId: next row id for row tracking.
 21. operation: logical operation type, e.g. WRITE, DELETE, UPDATE, MERGE. Null if not set.
+
+The record counts are calculated per data file and are not logical row counts. For example, a
+Dedicated Format table stores the regular columns and each dedicated BLOB column in separate data
+files. Appending `N` logical rows to a table with one dedicated BLOB column therefore increases the
+`deltaRecordCount` by `2 * N`. Use `COUNT(*)` when you need the logical row count.
