@@ -16,6 +16,7 @@
 # under the License.
 
 import collections
+import struct
 from typing import Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
@@ -28,7 +29,65 @@ from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
 from pypaimon.utils.range import Range
 
-_MAX_CONCAT_BYTES = (1 << 31) - 1
+_MAX_ARROW_OFFSET = (1 << 31) - 1
+
+
+def _offset_bounds(array, width=4):
+    offsets = array.buffers()[1]
+    if offsets is None:
+        return 0, 0
+    value_format = "=i" if width == 4 else "=q"
+    start = struct.unpack_from(
+        value_format, offsets, array.offset * width)[0]
+    end = struct.unpack_from(
+        value_format, offsets, (array.offset + len(array)) * width)[0]
+    return start, end
+
+
+def _collect_offset_usage(array, path, usage):
+    data_type = array.type
+    if pa.types.is_string(data_type) or pa.types.is_binary(data_type):
+        start, end = _offset_bounds(array)
+        usage[path] = end - start
+        return
+
+    if pa.types.is_list(data_type) or pa.types.is_map(data_type):
+        start, end = _offset_bounds(array)
+        usage[path] = end - start
+        if pa.types.is_map(data_type):
+            _collect_offset_usage(
+                array.keys.slice(start, end - start), path + ("key",), usage)
+            _collect_offset_usage(
+                array.items.slice(start, end - start), path + ("item",), usage)
+        else:
+            _collect_offset_usage(
+                array.values.slice(start, end - start), path + ("item",), usage)
+        return
+
+    if pa.types.is_large_list(data_type):
+        start, end = _offset_bounds(array, 8)
+        _collect_offset_usage(
+            array.values.slice(start, end - start), path + ("item",), usage)
+        return
+
+    if pa.types.is_fixed_size_list(data_type):
+        size = data_type.list_size
+        start = array.offset * size
+        _collect_offset_usage(
+            array.values.slice(start, len(array) * size), path + ("item",), usage)
+        return
+
+    if pa.types.is_struct(data_type):
+        for index in range(data_type.num_fields):
+            _collect_offset_usage(
+                array.field(index), path + ("field", index), usage)
+
+
+def _batch_offset_usage(batch):
+    usage = {}
+    for index in range(batch.num_columns):
+        _collect_offset_usage(batch.column(index), (index,), usage)
+    return usage
 
 
 class _BlobFileState:
@@ -96,7 +155,7 @@ class MergeAllBatchReader(RecordBatchReader):
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         batches = []
         num_rows = 0
-        num_bytes = 0
+        offset_usage = {}
         while True:
             batch = self._remainder
             self._remainder = None
@@ -109,16 +168,22 @@ class MergeAllBatchReader(RecordBatchReader):
 
             take = min(batch.num_rows, self._batch_size - num_rows)
             piece = batch.slice(0, take)
-            if batches and num_bytes + piece.nbytes > _MAX_CONCAT_BYTES:
+            piece_usage = _batch_offset_usage(piece)
+            if batches and any(
+                    offset_usage.get(path, 0) + value > _MAX_ARROW_OFFSET
+                    for path, value in piece_usage.items()):
                 self._remainder = batch
                 break
 
             batches.append(piece)
             num_rows += take
-            num_bytes += piece.nbytes
+            for path, value in piece_usage.items():
+                offset_usage[path] = offset_usage.get(path, 0) + value
             if take < batch.num_rows:
                 self._remainder = batch.slice(take)
-            if num_rows == self._batch_size or num_bytes >= _MAX_CONCAT_BYTES:
+            if num_rows == self._batch_size or any(
+                    value >= _MAX_ARROW_OFFSET
+                    for value in offset_usage.values()):
                 break
 
         if not batches:

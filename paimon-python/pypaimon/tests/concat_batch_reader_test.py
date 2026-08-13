@@ -71,8 +71,8 @@ class ConcatBatchReaderTest(unittest.TestCase):
         )
 
         with patch(
-                "pypaimon.read.reader.concat_batch_reader._MAX_CONCAT_BYTES",
-                batches[0].nbytes):
+                "pypaimon.read.reader.concat_batch_reader._MAX_ARROW_OFFSET",
+                4):
             actual = []
             while True:
                 batch = reader.read_arrow_batch()
@@ -81,6 +81,65 @@ class ConcatBatchReaderTest(unittest.TestCase):
                 actual.append(batch.column(0).to_pylist())
 
         self.assertEqual(actual, [["aaaa"], ["bbbb"]])
+
+    def test_merge_all_flushes_before_list_offset_limit(self):
+        child_count = 1100000000
+
+        def batch():
+            values = pa.nulls(child_count)
+            offsets = pa.array([0, child_count], type=pa.int32())
+            return pa.record_batch(
+                [pa.ListArray.from_arrays(offsets, values)], names=["value"])
+
+        batches = [batch(), batch()]
+        self.assertEqual([item.nbytes for item in batches], [4, 4])
+        reader = MergeAllBatchReader(
+            [lambda item=item: _BatchReader([item]) for item in batches],
+            batch_size=2,
+        )
+
+        actual = []
+        while True:
+            item = reader.read_arrow_batch()
+            if item is None:
+                break
+            actual.append(item.column(0).value_lengths()[0].as_py())
+
+        self.assertEqual(actual, [child_count, child_count])
+
+    def test_merge_all_checks_nested_and_map_offsets(self):
+        arrays = [
+            pa.array([["aaa"]], type=pa.list_(pa.string())),
+            pa.array(
+                [[("a", 1), ("b", 2)]],
+                type=pa.map_(pa.string(), pa.int32()),
+            ),
+        ]
+        for array in arrays:
+            with self.subTest(data_type=array.type):
+                batches = [
+                    pa.record_batch([array], names=["value"]),
+                    pa.record_batch([array], names=["value"]),
+                ]
+                reader = MergeAllBatchReader(
+                    [
+                        lambda item=item: _BatchReader([item])
+                        for item in batches
+                    ],
+                    batch_size=2,
+                )
+                with patch(
+                        "pypaimon.read.reader.concat_batch_reader."
+                        "_MAX_ARROW_OFFSET",
+                        3):
+                    sizes = []
+                    while True:
+                        item = reader.read_arrow_batch()
+                        if item is None:
+                            break
+                        sizes.append(item.num_rows)
+
+                self.assertEqual(sizes, [1, 1])
 
     def test_misaligned_small_files_keep_bounded_batch_count(self):
         row_count = 10000
