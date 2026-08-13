@@ -43,6 +43,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -93,6 +94,53 @@ public class BlobFileFormatTest {
     @Test
     public void testReadBlobInlineBytes() throws IOException {
         innerTest(false);
+    }
+
+    @Test
+    public void testSkipDoesNotReadBlobPayload() throws IOException {
+        BlobFileFormat format =
+                new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+            writer.addElement(GenericRow.of(new BlobData("first".getBytes())));
+            writer.addElement(GenericRow.of(new BlobData("second".getBytes())));
+            writer.addElement(GenericRow.of(new BlobData("third".getBytes())));
+            writer.close();
+        }
+
+        RoaringBitmap32 selection = new RoaringBitmap32();
+        selection.add(0);
+        selection.add(1);
+        selection.add(2);
+        TrackingLocalFileIO trackingFileIO = new TrackingLocalFileIO();
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(
+                        trackingFileIO, file, trackingFileIO.getFileSize(file), selection);
+
+        try (FileRecordReader<InternalRow> reader = readerFactory.createReader(context)) {
+            TrackingSeekableInputStream stream = trackingFileIO.lastInputStream;
+            FileRecordIterator<InternalRow> iterator = reader.readBatch();
+
+            int readCount = stream.readCount;
+            int seekCount = stream.seekCount;
+            assertThat(iterator.skip()).isTrue();
+            assertThat(iterator.returnedPosition()).isZero();
+            assertThat(stream.readCount).isEqualTo(readCount);
+            assertThat(stream.seekCount).isEqualTo(seekCount);
+
+            assertThat(iterator.next().getBlob(0).toData()).isEqualTo("second".getBytes());
+            assertThat(iterator.returnedPosition()).isOne();
+
+            readCount = stream.readCount;
+            seekCount = stream.seekCount;
+            assertThat(iterator.skip()).isTrue();
+            assertThat(iterator.returnedPosition()).isEqualTo(2L);
+            assertThat(stream.readCount).isEqualTo(readCount);
+            assertThat(stream.seekCount).isEqualTo(seekCount);
+            assertThat(iterator.skip()).isFalse();
+        }
     }
 
     @Test
@@ -1131,6 +1179,8 @@ public class BlobFileFormatTest {
 
         private final SeekableInputStream delegate;
         private int closeCount;
+        private int readCount;
+        private int seekCount;
 
         private TrackingSeekableInputStream(SeekableInputStream delegate) {
             this.delegate = delegate;
@@ -1138,6 +1188,7 @@ public class BlobFileFormatTest {
 
         @Override
         public void seek(long desired) throws IOException {
+            seekCount++;
             delegate.seek(desired);
         }
 
@@ -1148,12 +1199,20 @@ public class BlobFileFormatTest {
 
         @Override
         public int read() throws IOException {
-            return delegate.read();
+            int value = delegate.read();
+            if (value >= 0) {
+                readCount++;
+            }
+            return value;
         }
 
         @Override
         public int read(byte[] bytes, int offset, int length) throws IOException {
-            return delegate.read(bytes, offset, length);
+            int read = delegate.read(bytes, offset, length);
+            if (read > 0) {
+                readCount += read;
+            }
+            return read;
         }
 
         @Override
