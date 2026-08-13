@@ -19,16 +19,18 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.Snapshot
+import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
+import org.apache.paimon.manifest.FileSource
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.{DataSplit, IncrementalSplit}
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.types.VectorType.isVectorStoreFile
-import org.apache.paimon.utils.Range
+import org.apache.paimon.utils.{Range, RowRangeIndex}
 
 import org.apache.spark.sql.{functions, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -84,20 +86,14 @@ class DataEvolutionCompactMergeConflictRewriter(
     if (!targetIndex.valid) {
       return JOptional.empty()
     }
+    val targetScan = new TargetScan(targets)
 
-    // Snapshot.operation is optional and Python MERGE currently does not persist it. Validate
-    // the portable partial-column file contract below instead.
-    val additions = targetReader(latestSnapshot, targets)
-      .readIncrementalDiff(baseSnapshot)
-      .splits()
-      .asScala
-      .collect { case split: IncrementalSplit => split }
-      .flatMap(
-        split =>
-          split
-            .afterFiles()
-            .asScala
-            .map(file => AddedFile(split.partition(), split.bucket(), file)))
+    // Snapshot.operation is optional and Python MERGE currently does not persist it. CommitKind
+    // and the portable partial-column file contract are available across engines.
+    val additions = mergeAdditions(baseSnapshot, latestSnapshot, targetScan, targetIndex) match {
+      case Some(files) => files
+      case None => return JOptional.empty()
+    }
 
     val additionsByTarget =
       mutable.HashMap.empty[CompactTarget, mutable.ArrayBuffer[AddedFile]]
@@ -143,7 +139,7 @@ class DataEvolutionCompactMergeConflictRewriter(
       return JOptional.empty()
     }
 
-    val currentSplits = targetReader(latestSnapshot, targetRewrites.map(_.target))
+    val currentSplits = targetReader(latestSnapshot, targetScan)
       .read()
       .splits()
       .asScala
@@ -161,16 +157,58 @@ class DataEvolutionCompactMergeConflictRewriter(
     JOptional.of((messageImpls ++ rewrittenMessages).map(_.asInstanceOf[CommitMessage]).asJava)
   }
 
-  private def targetReader(snapshot: Snapshot, targets: Seq[CompactTarget]): SnapshotReader = {
-    val partitions = targets.map(_.message.partition()).distinct
-    val buckets = targets.map(_.message.bucket()).toSet
-    val ranges = targets.map(_.range).distinct.sortBy(_.from)
+  private def targetReader(snapshot: Snapshot, targetScan: TargetScan): SnapshotReader = {
     table
       .newSnapshotReader()
       .withSnapshot(snapshot)
-      .withPartitionFilter(partitions.asJava)
-      .withBucketFilter(bucket => buckets.contains(bucket))
-      .withRowRanges(ranges.asJava)
+      .withPartitionFilter(targetScan.partitions)
+      .withBucketFilter(bucket => targetScan.buckets.contains(bucket))
+      .withRowRangeIndex(targetScan.rowRangeIndex)
+  }
+
+  private def mergeAdditions(
+      baseSnapshot: Snapshot,
+      latestSnapshot: Snapshot,
+      targetScan: TargetScan,
+      targetIndex: CompactTargetIndex): Option[Seq[AddedFile]] = {
+    val additions = mutable.ArrayBuffer.empty[AddedFile]
+    val snapshotManager = table.snapshotManager()
+    var snapshotId = baseSnapshot.id() + 1
+    while (snapshotId <= latestSnapshot.id()) {
+      if (!snapshotManager.snapshotExists(snapshotId)) {
+        return None
+      }
+
+      val snapshot = snapshotManager.snapshot(snapshotId)
+      val changes = targetReader(snapshot, targetScan)
+        .readChanges()
+        .splits()
+        .asScala
+        .collect { case split: IncrementalSplit => split }
+      changes.foreach {
+        split =>
+          val before = split
+            .beforeFiles()
+            .asScala
+            .map(file => AddedFile(split.partition(), split.bucket(), file))
+          val after = split
+            .afterFiles()
+            .asScala
+            .map(file => AddedFile(split.partition(), split.bucket(), file))
+          if (snapshot.commitKind() != CommitKind.APPEND) {
+            if ((before ++ after).exists(file => targetIndex.intersecting(file).nonEmpty)) {
+              return None
+            }
+          } else {
+            if (before.exists(file => targetIndex.intersecting(file).nonEmpty)) {
+              return None
+            }
+            additions ++= after
+          }
+      }
+      snapshotId += 1
+    }
+    Some(additions.toSeq)
   }
 
   private def rewriteFiles(
@@ -297,6 +335,15 @@ private object DataEvolutionCompactMergeConflictRewriter {
 
   private case class Bucket(partition: BinaryRow, bucket: Int)
 
+  private class TargetScan(targets: Seq[CompactTarget]) {
+
+    val partitions: JList[BinaryRow] =
+      targets.map(_.message.partition()).distinct.asJava
+    val buckets: Set[Int] = targets.map(_.message.bucket()).toSet
+    val rowRangeIndex: RowRangeIndex =
+      RowRangeIndex.create(targets.map(_.range).distinct.asJava)
+  }
+
   private class CompactTargetIndex(targets: Seq[CompactTarget]) {
 
     private val targetsByBucket = targets
@@ -365,6 +412,7 @@ private object DataEvolutionCompactMergeConflictRewriter {
 
   private def isRegularPartialFile(file: DataFileMeta): Boolean = {
     isNormalRowIdFile(file) &&
+    file.fileSource().orElse(null) == FileSource.APPEND &&
     file.writeCols() != null &&
     !file.writeCols().isEmpty &&
     file.writeCols().asScala.forall(column => !SpecialFields.isSystemField(column))

@@ -49,6 +49,11 @@ public interface FileStoreCommit extends AutoCloseable {
     FileStoreCommit rowIdCheckConflictForMaterializeDvCompaction(
             @Nullable Long rowIdCheckFromSnapshot);
 
+    default FileStoreCommit rowIdCheckConflictForDataEvolutionCompaction(
+            @Nullable Long rowIdCheckFromSnapshot) {
+        return rowIdCheckConflict(rowIdCheckFromSnapshot);
+    }
+
     FileStoreCommit withOperation(Snapshot.Operation operation);
 
     /** Find out which committables need to be retried when recovering from the failure. */

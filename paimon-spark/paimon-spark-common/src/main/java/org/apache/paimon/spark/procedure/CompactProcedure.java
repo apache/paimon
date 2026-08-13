@@ -95,6 +95,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -629,25 +630,32 @@ public class CompactProcedure extends BaseProcedure {
             LOG.info("Table {} has no snapshot yet, skip this compact job.", table.fullName());
             return;
         }
-        DataEvolutionCompactCoordinator coordinator =
-                candidateFilesPerBatch == null
-                        ? new DataEvolutionCompactCoordinator(
-                                table,
-                                partitionPredicate,
-                                table.coreOptions().blobCompactionEnabled(),
-                                false,
-                                snapshot)
-                        : new DataEvolutionCompactCoordinator(
-                                table,
-                                partitionPredicate,
-                                table.coreOptions().blobCompactionEnabled(),
-                                false,
-                                snapshot,
-                                candidateFilesPerBatch);
+        AtomicReference<DataEvolutionCompactCoordinator> coordinatorRef = new AtomicReference<>();
         Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner =
-                ignored ->
-                        filterIdlePartitions(
-                                coordinator.plan(), table, partitionPredicate, partitionIdleTime);
+                planningSnapshot -> {
+                    DataEvolutionCompactCoordinator coordinator = coordinatorRef.get();
+                    if (coordinator == null
+                            || coordinator.snapshot().id() != planningSnapshot.id()) {
+                        coordinator =
+                                candidateFilesPerBatch == null
+                                        ? new DataEvolutionCompactCoordinator(
+                                                table,
+                                                partitionPredicate,
+                                                table.coreOptions().blobCompactionEnabled(),
+                                                false,
+                                                planningSnapshot)
+                                        : new DataEvolutionCompactCoordinator(
+                                                table,
+                                                partitionPredicate,
+                                                table.coreOptions().blobCompactionEnabled(),
+                                                false,
+                                                planningSnapshot,
+                                                candidateFilesPerBatch);
+                        coordinatorRef.set(coordinator);
+                    }
+                    return filterIdlePartitions(
+                            coordinator.plan(), table, partitionPredicate, partitionIdleTime);
+                };
         DataEvolutionRewriteExecutor.execute(
                 table,
                 snapshot,

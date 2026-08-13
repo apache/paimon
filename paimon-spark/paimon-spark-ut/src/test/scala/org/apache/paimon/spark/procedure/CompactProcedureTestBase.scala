@@ -18,18 +18,24 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.Snapshot.CommitKind
+import org.apache.paimon.append.dataevolution.{DataEvolutionCompactTask, DataEvolutionNormalCompactTask}
+import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
+import org.apache.paimon.format.blob.BlobFileFormat
 import org.apache.paimon.fs.Path
+import org.apache.paimon.io.DataFileMeta
+import org.apache.paimon.manifest.FileSource
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
-import org.apache.paimon.spark.commands.{DataEvolutionPaimonWriter, PaimonSparkWriter}
+import org.apache.paimon.spark.commands.{DataEvolutionCompactMergeConflictRewriter, DataEvolutionPaimonWriter, PaimonSparkWriter}
 import org.apache.paimon.spark.commands.CompactRowIdRangeIndex
 import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.table.source.{DataSplit, EndOfScanException, IncrementalSplit}
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.utils.Range
 
@@ -1920,6 +1926,204 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: retry rebased compact after same-boundary partial update") {
+    withTable("T") {
+      val table = createCompactMergeRaceTable()
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      val javaSparkContext = new JavaSparkContext(spark.sparkContext)
+      val attempts = new AtomicInteger()
+      partialUpdate(table, "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)")
+      val normalFiles = normalDataFiles(table)
+      assert(normalFiles.size == 2)
+      val stagedTask = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalFiles.asJava
+      )
+      val taskSnapshot = table.latestSnapshot().get()
+      val planned = new AtomicBoolean(false)
+      val rewriter = new DataEvolutionCompactMergeConflictRewriter(table, relation)
+
+      val planner: java.util.function.Function[Snapshot, util.List[DataEvolutionCompactTask]] =
+        _ => {
+          if (planned.compareAndSet(false, true)) {
+            util.Collections.singletonList(stagedTask)
+          } else {
+            throw new EndOfScanException()
+          }
+        }
+      val configurer: DataEvolutionRewriteExecutor.CommitConfigurer =
+        _ => {
+          attempts.getAndIncrement() match {
+            case 0 =>
+              partialUpdate(
+                table,
+                "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)"
+              )
+              throw new DataEvolutionRowRangeConflictException("Injected MERGE range conflict.")
+            case 1 =>
+              // This MERGE lands after the retry file has been rewritten. Without a commit-time
+              // row-id check, the stale retry file gets the later sequence and loses this update.
+              val mergeFile = partialUpdate(
+                table,
+                "SELECT * FROM VALUES (1, 11), (2, 21) AS S(id, value)"
+              )
+              assert(mergeFile.nonNullFirstRowId() == 0L)
+              assert(mergeFile.rowCount() == 2L)
+            case _ =>
+          }
+        }
+      val messageRewriter: DataEvolutionRewriteExecutor.CommitMessageRewriter =
+        (session, base, latest, messages) => rewriter.rewrite(session, base, latest, messages)
+
+      DataEvolutionRewriteExecutor.execute(
+        table,
+        taskSnapshot,
+        planner,
+        javaSparkContext,
+        spark,
+        configurer,
+        messageRewriter
+      )
+
+      Assertions.assertThat(attempts.get()).isEqualTo(3)
+      checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 21)))
+    }
+  }
+
+  test("Paimon Procedure: reject compact rebase over concurrent compact") {
+    withTable("T") {
+      val table = createCompactMergeRaceTable()
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      partialUpdate(table, "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)")
+      val normalFiles = normalDataFiles(table)
+      assert(normalFiles.size == 2)
+
+      val stagedTask = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalFiles.asJava
+      )
+      val stagedUser = "staged-compact"
+      val stagedMessage = stagedTask.doCompact(table, stagedUser)
+      val baseSnapshot = table.latestSnapshot().get()
+
+      val mergeFile = partialUpdate(
+        table,
+        "SELECT * FROM VALUES (1, 11), (2, 21) AS S(id, value)"
+      )
+      assert(mergeFile.fileSource().get() == FileSource.APPEND)
+
+      val concurrentTask = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalDataFiles(table).asJava
+      )
+      val concurrentUser = "concurrent-compact"
+      val concurrentMessage = concurrentTask.doCompact(table, concurrentUser)
+      val concurrentCommit = table.newCommit(concurrentUser)
+      try {
+        concurrentCommit.commit(util.Collections.singletonList(concurrentMessage))
+      } finally {
+        concurrentCommit.close()
+      }
+
+      val latestSnapshot = table.latestSnapshot().get()
+      assert(latestSnapshot.commitKind() == CommitKind.COMPACT)
+      assert(concurrentTask.compactAfter().get(0).fileSource().get() == FileSource.COMPACT)
+
+      val rewritten = new DataEvolutionCompactMergeConflictRewriter(table, relation)
+        .rewrite(
+          spark,
+          baseSnapshot,
+          latestSnapshot,
+          util.Collections.singletonList(stagedMessage)
+        )
+      assert(!rewritten.isPresent)
+      checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 21)))
+    }
+  }
+
+  test("Paimon Procedure: reject compact rebase when compact lands after rewrite") {
+    withTable("T") {
+      val table = createCompactMergeRaceTable()
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      val javaSparkContext = new JavaSparkContext(spark.sparkContext)
+      val attempts = new AtomicInteger()
+      partialUpdate(table, "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)")
+      val normalFiles = normalDataFiles(table)
+      assert(normalFiles.size == 2)
+      val stagedTask = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalFiles.asJava
+      )
+      val taskSnapshot = table.latestSnapshot().get()
+      val planned = new AtomicBoolean(false)
+      val rewriter = new DataEvolutionCompactMergeConflictRewriter(table, relation)
+
+      val planner: java.util.function.Function[Snapshot, util.List[DataEvolutionCompactTask]] =
+        _ => {
+          if (planned.compareAndSet(false, true)) {
+            util.Collections.singletonList(stagedTask)
+          } else {
+            throw new EndOfScanException()
+          }
+        }
+      val configurer: DataEvolutionRewriteExecutor.CommitConfigurer =
+        _ => {
+          attempts.getAndIncrement() match {
+            case 0 =>
+              partialUpdate(
+                table,
+                "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)"
+              )
+              throw new DataEvolutionRowRangeConflictException("Injected MERGE range conflict.")
+            case 1 =>
+              val concurrentTask = new DataEvolutionNormalCompactTask(
+                BinaryRow.EMPTY_ROW,
+                normalDataFiles(table).asJava
+              )
+              val compactUser = "concurrent-compact"
+              val compactMessage = concurrentTask.doCompact(table, compactUser)
+              val compactCommit = table.newCommit(compactUser)
+              try {
+                compactCommit.commit(util.Collections.singletonList(compactMessage))
+              } finally {
+                compactCommit.close()
+              }
+              val compactedFile = concurrentTask.compactAfter().get(0)
+              assert(table.latestSnapshot().get().commitKind() == CommitKind.COMPACT)
+              assert(compactedFile.fileSource().get() == FileSource.COMPACT)
+              assert(compactedFile.writeCols().asScala == Seq("id", "value"))
+
+              val mergeFile = partialUpdate(
+                table,
+                "SELECT * FROM VALUES (1, 11), (2, 21) AS S(id, value)"
+              )
+              assert(mergeFile.fileSource().get() == FileSource.APPEND)
+            case _ =>
+          }
+        }
+      val messageRewriter: DataEvolutionRewriteExecutor.CommitMessageRewriter =
+        (session, base, latest, messages) => rewriter.rewrite(session, base, latest, messages)
+
+      assertThatThrownBy(
+        () =>
+          DataEvolutionRewriteExecutor.execute(
+            table,
+            taskSnapshot,
+            planner,
+            javaSparkContext,
+            spark,
+            configurer,
+            messageRewriter
+          )).hasMessageContaining("Execute data evolution rewrite failed")
+
+      Assertions.assertThat(attempts.get()).isEqualTo(2)
+      checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 21)))
+    }
+  }
+
   test("Paimon Procedure: compact rebase range lookup handles high cardinality") {
     val ranges = (0 until 100000).map {
       index =>
@@ -2112,7 +2316,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         }
       )
 
-      Assertions.assertThat(attempts.get()).isEqualTo(3)
+      Assertions.assertThat(attempts.get()).isEqualTo(4)
       Assertions.assertThat(firstRetryFiles.nonEmpty).isTrue
       checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 12), Row(2, 20)))
     }
@@ -2208,6 +2412,64 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         Seq(Row(1, "p0", 1L), Row(2, "p1", 2L), Row(4, "p0", 4L))
       )
     }
+  }
+
+  private def createCompactMergeRaceTable(): FileStoreTable = {
+    sql("""
+          |CREATE TABLE T (id INT, value INT, picture BINARY)
+          |TBLPROPERTIES (
+          |  'bucket' = '-1',
+          |  'row-tracking.enabled' = 'true',
+          |  'data-evolution.enabled' = 'true',
+          |  'blob-field' = 'picture',
+          |  'compaction.min.file-num' = '2',
+          |  'commit.max-retries' = '3',
+          |  'commit.min-retry-wait' = '1 ms',
+          |  'commit.max-retry-wait' = '1 ms')
+          |""".stripMargin)
+    sql("""
+          |INSERT INTO T
+          |SELECT /*+ REPARTITION(1) */ id, value, CAST(NULL AS BINARY)
+          |FROM VALUES (1, 10), (2, 20) AS S(id, value)
+          |""".stripMargin)
+    loadTable("T")
+  }
+
+  private def partialUpdate(table: FileStoreTable, sourceQuery: String): DataFileMeta = {
+    val beforeMerge = table.latestSnapshot().get()
+    sql(sourceQuery).createOrReplaceTempView("merge_source")
+    try {
+      sql("""
+            |MERGE INTO T
+            |USING merge_source AS S
+            |ON T.id = S.id
+            |WHEN MATCHED THEN UPDATE SET T.id = S.id, T.value = S.value
+            |""".stripMargin)
+    } finally {
+      spark.catalog.dropTempView("merge_source")
+    }
+    table
+      .newSnapshotReader()
+      .withSnapshot(table.latestSnapshot().get())
+      .readIncrementalDiff(beforeMerge)
+      .splits()
+      .asScala
+      .collect { case split: IncrementalSplit => split }
+      .flatMap(_.afterFiles().asScala)
+      .find(file => !BlobFileFormat.isBlobFile(file.fileName()))
+      .get
+  }
+
+  private def normalDataFiles(table: FileStoreTable): Seq[DataFileMeta] = {
+    table
+      .newSnapshotReader()
+      .read()
+      .dataSplits()
+      .asScala
+      .flatMap(_.dataFiles().asScala)
+      .filterNot(file => BlobFileFormat.isBlobFile(file.fileName()))
+      .sortBy(_.maxSequenceNumber())
+      .toSeq
   }
 
   private def executeDataEvolutionCompaction(

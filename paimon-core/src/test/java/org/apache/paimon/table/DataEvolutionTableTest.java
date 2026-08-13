@@ -32,8 +32,10 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.commit.DataEvolutionRowIdConflictException;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -1204,7 +1206,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                                 commit.commit(staleMessages);
                             }
                         })
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(DataEvolutionRowIdConflictException.class)
                 .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
         assertThat(table.latestSnapshot().get().id()).isEqualTo(concurrentSnapshotId);
         assertThat(readF0AndF2(table)).isEqualTo(Arrays.asList("10|updated-100", "11|updated-101"));
@@ -1646,6 +1648,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         }
 
         assertThat(entries.size()).isEqualTo(1);
+        assertThat(entries.get(0).file().fileSource()).contains(FileSource.COMPACT);
         assertThat(entries.get(0).file().nonNullFirstRowId()).isEqualTo(0);
         assertThat(entries.get(0).file().rowCount()).isEqualTo(500000L);
     }

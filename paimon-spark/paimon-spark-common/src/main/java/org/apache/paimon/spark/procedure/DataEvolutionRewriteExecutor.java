@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
+import org.apache.paimon.operation.commit.DataEvolutionRowIdConflictException;
 import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -162,7 +163,6 @@ final class DataEvolutionRewriteExecutor {
                     Snapshot committedSnapshot =
                             commitWithMergeConflictRetry(
                                     table,
-                                    initialSnapshot,
                                     preparationSnapshot,
                                     compactMessages,
                                     commitUser,
@@ -191,7 +191,6 @@ final class DataEvolutionRewriteExecutor {
     private static Snapshot commitWithMergeConflictRetry(
             FileStoreTable table,
             Snapshot taskSnapshot,
-            Snapshot preparationSnapshot,
             List<CommitMessage> compactMessages,
             String commitUser,
             SparkSession sparkSession,
@@ -212,7 +211,7 @@ final class DataEvolutionRewriteExecutor {
                 throw lastConflict;
             }
 
-            Snapshot attemptSnapshot = preparationSnapshot;
+            Snapshot attemptSnapshot = taskSnapshot;
             List<CommitMessage> attemptMessages = compactMessages;
             List<CommitMessage> retryArtifacts = Collections.emptyList();
             Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
@@ -265,6 +264,9 @@ final class DataEvolutionRewriteExecutor {
             abortMessages.addAll(preparationArtifacts);
             try (TableCommitImpl commit = table.newCommit(commitUser)) {
                 commitConfigurer.configure(commit);
+                if (!retryArtifacts.isEmpty()) {
+                    commit.rowIdCheckConflictForDataEvolutionCompaction(attemptSnapshot.id());
+                }
                 try {
                     commit.commit(preparedMessages);
                 } catch (RuntimeException conflict) {
@@ -313,7 +315,9 @@ final class DataEvolutionRewriteExecutor {
 
     private static boolean isMergeConflict(RuntimeException conflict) {
         return ExceptionUtils.findThrowable(conflict, DataEvolutionRowRangeConflictException.class)
-                .isPresent();
+                        .isPresent()
+                || ExceptionUtils.findThrowable(conflict, DataEvolutionRowIdConflictException.class)
+                        .isPresent();
     }
 
     private static void abortRetryArtifacts(
