@@ -20,6 +20,7 @@ package org.apache.paimon.iceberg.manifest;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -36,6 +37,8 @@ import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.statistics.FullSimpleColStatsCollector;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -194,6 +197,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
             extends SingleFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> {
 
         private final SimpleStatsCollector partitionStatsCollector;
+        private final IcebergPartitionStatsCollector[] partitionStatsCollectors;
         private final long sequenceNumber;
 
         private int addedFilesCount = 0;
@@ -219,7 +223,21 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     serializer::toRow,
                     fileCompression,
                     false);
-            this.partitionStatsCollector = new SimpleStatsCollector(partitionType);
+            this.partitionStatsCollectors =
+                    new IcebergPartitionStatsCollector[partitionType.getFieldCount()];
+            SimpleColStatsCollector.Factory[] statsFactories =
+                    new SimpleColStatsCollector.Factory[partitionType.getFieldCount()];
+            for (int i = 0; i < partitionType.getFieldCount(); i++) {
+                int position = i;
+                statsFactories[i] =
+                        () -> {
+                            IcebergPartitionStatsCollector collector =
+                                    new IcebergPartitionStatsCollector();
+                            partitionStatsCollectors[position] = collector;
+                            return collector;
+                        };
+            }
+            this.partitionStatsCollector = new SimpleStatsCollector(partitionType, statsFactories);
             this.sequenceNumber = sequenceNumber;
             this.content = content;
         }
@@ -257,22 +275,12 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
             for (int i = 0; i < stats.length; i++) {
                 SimpleColStats fieldStats = stats[i];
                 DataType type = partitionType.getTypeAt(i);
-                boolean containsNan = false;
-                switch (type.getTypeRoot()) {
-                    case FLOAT:
-                    case DOUBLE:
-                        containsNan = isNaN(fieldStats.min()) || isNaN(fieldStats.max());
-                        break;
-                    default:
-                        // contains_nan is only meaningful for FLOAT/DOUBLE per the Iceberg spec
-                }
-                // an unknown bound must be omitted, not published as a value
                 Object min = fieldStats.min();
                 Object max = fieldStats.max();
                 partitionSummaries.add(
                         new IcebergPartitionSummary(
                                 Objects.requireNonNull(fieldStats.nullCount()) > 0,
-                                containsNan,
+                                partitionStatsCollectors[i].containsNan(),
                                 min == null ? null : toByteBuffer(type, min).array(),
                                 max == null ? null : toByteBuffer(type, max).array()));
             }
@@ -292,15 +300,24 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     deletedRowsCount,
                     partitionSummaries);
         }
+    }
 
-        private boolean isNaN(@Nullable Object value) {
-            if (value instanceof Float) {
-                return Float.isNaN((Float) value);
+    private static class IcebergPartitionStatsCollector extends FullSimpleColStatsCollector {
+
+        private boolean containsNan;
+
+        @Override
+        public void collect(Object field, Serializer<Object> fieldSerializer) {
+            if ((field instanceof Float && Float.isNaN((Float) field))
+                    || (field instanceof Double && Double.isNaN((Double) field))) {
+                containsNan = true;
+                return;
             }
-            if (value instanceof Double) {
-                return Double.isNaN((Double) value);
-            }
-            return false;
+            super.collect(field, fieldSerializer);
+        }
+
+        private boolean containsNan() {
+            return containsNan;
         }
     }
 }
