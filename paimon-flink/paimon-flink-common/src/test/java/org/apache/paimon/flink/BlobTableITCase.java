@@ -37,10 +37,14 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.RecordedRequest;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.OutputStream;
 import java.net.URI;
@@ -50,6 +54,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1167,12 +1172,118 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testWriteHttpNotFoundWithMissingFileUsesSingleGet() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/missing_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            httpServer.enqueueResponse("", 404);
+
+            tEnv.executeSql(
+                    "CREATE TABLE missing_blob_table (id INT, data STRING, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-missing-file'='true')");
+
+            batchSql(
+                    "INSERT INTO missing_blob_table VALUES"
+                            + " (1, 'missing', sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            List<Row> result = batchSql("SELECT * FROM missing_blob_table");
+            assertThat(result).containsExactly(Row.of(1, "missing", null));
+            assertOnlyFullGetRequests(httpServer, 1);
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
+    public void testPrimaryKeyWriteHttpNotFoundWithMissingFileRetainsPreflight() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/missing_pk_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            httpServer.enqueueResponse("", 404);
+            httpServer.enqueueResponse("", 404);
+
+            tEnv.executeSql(
+                    "CREATE TABLE missing_pk_blob_table ("
+                            + "id INT, picture BYTES, PRIMARY KEY (id) NOT ENFORCED)"
+                            + " WITH ('bucket'='1',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-missing-file'='true')");
+
+            batchSql(
+                    "INSERT INTO missing_pk_blob_table VALUES"
+                            + " (1, sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            assertThat(batchSql("SELECT * FROM missing_pk_blob_table"))
+                    .containsExactly(Row.of(1, null));
+
+            RecordedRequest headRequest = httpServer.takeRequest(1, TimeUnit.SECONDS);
+            assertThat(headRequest).isNotNull();
+            assertThat(headRequest.getMethod()).isEqualTo("HEAD");
+
+            RecordedRequest rangeRequest = httpServer.takeRequest(1, TimeUnit.SECONDS);
+            assertThat(rangeRequest).isNotNull();
+            assertThat(rangeRequest.getMethod()).isEqualTo("GET");
+            assertThat(rangeRequest.getHeader("Range")).isEqualTo("bytes=0-0");
+            assertThat(httpServer.takeRequest(100, TimeUnit.MILLISECONDS)).isNull();
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
+    public void testWriteExistingHttpBlobWithMissingFileUsesSingleGet() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/existing_blob");
+        httpServer.start();
+        try {
+            String blobContent = "hello-http-blob";
+            String httpUrl = httpServer.getBaseUrl();
+            httpServer.enqueueResponse(blobContent, 200);
+
+            tEnv.executeSql(
+                    "CREATE TABLE existing_blob_table (id INT, data STRING, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-missing-file'='true')");
+
+            batchSql(
+                    "INSERT INTO existing_blob_table VALUES"
+                            + " (1, 'existing', sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            batchSql("ALTER TABLE existing_blob_table SET ('blob-as-descriptor'='false')");
+            List<Row> result = batchSql("SELECT * FROM existing_blob_table");
+            assertThat(result)
+                    .containsExactly(
+                            Row.of(
+                                    1,
+                                    "existing",
+                                    blobContent.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            assertOnlyFullGetRequests(httpServer, 1);
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
     public void testWriteHttpBadRequestWritesNullWithMissingFileAndFetchFailure() throws Exception {
         TestHttpWebServer httpServer = new TestHttpWebServer("/combined_bad_request_blob");
         httpServer.start();
         try {
             String httpUrl = httpServer.getBaseUrl();
-            httpServer.enqueueResponse("", 400);
             httpServer.enqueueResponse("", 400);
 
             tEnv.executeSql(
@@ -1195,9 +1306,107 @@ public class BlobTableITCase extends CatalogITCaseBase {
             assertThat(result.get(0).getField(0)).isEqualTo(1);
             assertThat(result.get(0).getField(1)).isEqualTo("bad-request");
             assertThat(result.get(0).getField(2)).isNull();
+            assertOnlyFullGetRequests(httpServer, 1);
         } finally {
             httpServer.stop();
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {429, 503})
+    public void testWriteRetryableHttpStatusUsesOnlyFullGet(int statusCode) throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/retryable_" + statusCode + "_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            MockResponse retryableResponse =
+                    httpServer.generateMockResponse("", statusCode).addHeader("Retry-After", "1");
+            httpServer.enqueueResponse(retryableResponse);
+            String blobContent = "retried-http-blob";
+            httpServer.enqueueResponse(blobContent, 200);
+
+            String tableName = "retryable_" + statusCode + "_blob_table";
+            tEnv.executeSql(
+                    "CREATE TABLE "
+                            + tableName
+                            + " (id INT, data STRING, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-missing-file'='true',"
+                            + " 'blob-write-null-on-fetch-failure'='true')");
+
+            batchSql(
+                    "INSERT INTO "
+                            + tableName
+                            + " VALUES (1, 'retryable', sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            batchSql("ALTER TABLE " + tableName + " SET ('blob-as-descriptor'='false')");
+            List<Row> result = batchSql("SELECT * FROM " + tableName);
+            assertThat(result)
+                    .containsExactly(
+                            Row.of(
+                                    1,
+                                    "retryable",
+                                    blobContent.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            assertOnlyFullGetRequests(httpServer, 2);
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
+    public void testInlineHttpDescriptorRetainsMissingFileCheck() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/missing_inline_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            httpServer.enqueueResponse("", 404);
+            httpServer.enqueueResponse("", 404);
+
+            tEnv.executeSql(
+                    "CREATE TABLE missing_inline_blob_table (id INT, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-descriptor-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-missing-file'='true')");
+
+            batchSql(
+                    "INSERT INTO missing_inline_blob_table VALUES"
+                            + " (1, sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            List<Row> result = batchSql("SELECT * FROM missing_inline_blob_table");
+            assertThat(result).containsExactly(Row.of(1, null));
+
+            RecordedRequest headRequest = httpServer.takeRequest(1, TimeUnit.SECONDS);
+            assertThat(headRequest).isNotNull();
+            assertThat(headRequest.getMethod()).isEqualTo("HEAD");
+
+            RecordedRequest rangeRequest = httpServer.takeRequest(1, TimeUnit.SECONDS);
+            assertThat(rangeRequest).isNotNull();
+            assertThat(rangeRequest.getMethod()).isEqualTo("GET");
+            assertThat(rangeRequest.getHeader("Range")).isEqualTo("bytes=0-0");
+            assertThat(httpServer.takeRequest(100, TimeUnit.MILLISECONDS)).isNull();
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    private static void assertOnlyFullGetRequests(
+            TestHttpWebServer httpServer, int expectedRequestCount) throws Exception {
+        for (int i = 0; i < expectedRequestCount; i++) {
+            RecordedRequest request = httpServer.takeRequest(1, TimeUnit.SECONDS);
+            assertThat(request).isNotNull();
+            assertThat(request.getMethod()).isEqualTo("GET");
+            assertThat(request.getHeader("Range")).isNull();
+        }
+        assertThat(httpServer.takeRequest(100, TimeUnit.MILLISECONDS)).isNull();
     }
 
     @Test
