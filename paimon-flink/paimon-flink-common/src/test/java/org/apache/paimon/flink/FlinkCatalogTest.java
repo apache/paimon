@@ -913,7 +913,9 @@ public class FlinkCatalogTest extends FlinkCatalogTestBase {
                 options.put("incremental-between", "2,5");
             }
 
-            if (isStreaming && mode == CoreOptions.StartupMode.INCREMENTAL) {
+            if (isStreaming
+                    && (mode == CoreOptions.StartupMode.INCREMENTAL
+                            || mode == CoreOptions.StartupMode.LATEST_DELTA)) {
                 continue;
             }
             allOptions.add(options);
