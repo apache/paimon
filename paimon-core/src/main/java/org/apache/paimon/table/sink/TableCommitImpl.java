@@ -189,13 +189,6 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
-    public TableCommitImpl rowIdCheckConflictForDataEvolutionCompaction(
-            @Nullable Long rowIdCheckFromSnapshot) {
-        commit.rowIdCheckConflictForDataEvolutionCompaction(rowIdCheckFromSnapshot);
-        return this;
-    }
-
-    @Override
     public TableCommitImpl withOperation(Snapshot.Operation operation) {
         commit.withOperation(operation);
         return this;

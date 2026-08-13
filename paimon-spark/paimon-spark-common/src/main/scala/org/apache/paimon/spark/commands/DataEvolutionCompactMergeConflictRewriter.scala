@@ -279,21 +279,28 @@ class DataEvolutionCompactMergeConflictRewriter(
           throw new UnsupportedOperationException(
             "Compact MERGE conflict rebase does not support dedicated files.")
         }
-        val target = rewrites
+        val rewrite = rewrites
           .find(
             rewrite =>
               rewrite.target.sameBucket(message.partition(), message.bucket()) &&
                 newFiles.forall(_.nonNullRowIdRange() == rewrite.target.range))
           .getOrElse(throw new IllegalStateException(
             s"Cannot match rebased files $newFiles to a staged compact range."))
+        // The rebased file only materializes the source state. Preserve its sequence range so a
+        // MERGE committed after this rewrite remains newer even if this COMPACT commits last.
+        val sourceFiles = rewrite.target.file +: rewrite.mergeFiles.map(_.file)
+        val minSequenceNumber = sourceFiles.map(_.minSequenceNumber()).min
+        val maxSequenceNumber = sourceFiles.map(_.maxSequenceNumber()).max
+        val rebasedFiles =
+          newFiles.map(_.assignSequenceNumber(minSequenceNumber, maxSequenceNumber))
         new CommitMessageImpl(
           message.partition(),
           message.bucket(),
           message.totalBuckets(),
           DataIncrement.emptyIncrement(),
           new CompactIncrement(
-            target.mergeFiles.map(_.file).asJava,
-            newFiles.asJava,
+            rewrite.mergeFiles.map(_.file).asJava,
+            rebasedFiles.asJava,
             Collections.emptyList())
         )
       case other =>

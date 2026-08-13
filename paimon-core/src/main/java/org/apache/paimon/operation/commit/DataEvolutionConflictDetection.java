@@ -111,13 +111,6 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         setRowIdCheckFromSnapshot(rowIdCheckFromSnapshot, MaterializeDvRowIdConflictCheck.INSTANCE);
     }
 
-    @Override
-    public void setRowIdCheckFromSnapshotForDataEvolutionCompaction(
-            @Nullable Long rowIdCheckFromSnapshot) {
-        setRowIdCheckFromSnapshot(
-                rowIdCheckFromSnapshot, DataEvolutionCompactRowIdConflictCheck.INSTANCE);
-    }
-
     private void setRowIdCheckFromSnapshot(
             @Nullable Long rowIdCheckFromSnapshot,
             RowIdConflictCheckStrategy conflictCheckStrategy) {
@@ -334,11 +327,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
 
     private Optional<RuntimeException> checkRowIdRangeConflicts(
             CommitKind commitKind, Collection<SimpleFileEntry> mergedEntries) {
-        if (rowIdCheckFromSnapshot != null) {
-            if (!rowIdConflictCheckStrategy().checkDeltaRowRanges()) {
-                return Optional.empty();
-            }
-        } else if (commitKind != CommitKind.COMPACT) {
+        if (rowIdCheckFromSnapshot == null && commitKind != CommitKind.COMPACT) {
             return Optional.empty();
         }
 
@@ -441,7 +430,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                 rowIdCheckFromSnapshot);
         for (long i = rowIdCheckFromSnapshot + 1; i <= latestSnapshot.id(); i++) {
             Snapshot snapshot = snapshotManager.snapshot(i);
-            if (!rowIdConflictCheckStrategy().shouldCheckSnapshot(snapshot.commitKind())) {
+            if (snapshot.commitKind() == CommitKind.COMPACT) {
                 continue;
             }
             List<ManifestEntry> changes =
@@ -462,7 +451,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                             snapshot.id(),
                             file);
                     return Optional.of(
-                            new DataEvolutionRowIdConflictException(
+                            new RuntimeException(
                                     ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE));
                 }
             }
@@ -482,10 +471,6 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                 SchemaManager schemaManager, List<ManifestEntry> deltaFiles);
 
         boolean shouldCheckHistoricalEntry(FileKind kind);
-
-        boolean checkDeltaRowRanges();
-
-        boolean shouldCheckSnapshot(CommitKind commitKind);
     }
 
     private static class DataEvolutionDmlRowIdConflictCheck implements RowIdConflictCheckStrategy {
@@ -508,54 +493,6 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
 
         @Override
         public boolean shouldCheckHistoricalEntry(FileKind kind) {
-            return true;
-        }
-
-        @Override
-        public boolean checkDeltaRowRanges() {
-            return true;
-        }
-
-        @Override
-        public boolean shouldCheckSnapshot(CommitKind commitKind) {
-            return commitKind != CommitKind.COMPACT;
-        }
-    }
-
-    private static class DataEvolutionCompactRowIdConflictCheck
-            implements RowIdConflictCheckStrategy {
-
-        private static final DataEvolutionCompactRowIdConflictCheck INSTANCE =
-                new DataEvolutionCompactRowIdConflictCheck();
-
-        @Override
-        public boolean appliesTo(CommitKind commitKind) {
-            return true;
-        }
-
-        @Override
-        public RowIdConflictChecker createChecker(
-                SchemaManager schemaManager, List<ManifestEntry> deltaFiles) {
-            return RowIdColumnConflictChecker.fromDataFiles(
-                    schemaManager,
-                    deltaFiles.stream().map(ManifestEntry::file).collect(Collectors.toList()));
-        }
-
-        @Override
-        public boolean shouldCheckHistoricalEntry(FileKind kind) {
-            return true;
-        }
-
-        @Override
-        public boolean checkDeltaRowRanges() {
-            // A rebased compact commit deliberately contains the full compact output range and
-            // partial-column bridge files for sub-ranges. Only changes committed after the rewrite
-            // snapshot need the row-id guard here.
-            return false;
-        }
-
-        @Override
-        public boolean shouldCheckSnapshot(CommitKind commitKind) {
             return true;
         }
     }
@@ -591,16 +528,6 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         @Override
         public boolean shouldCheckHistoricalEntry(FileKind kind) {
             return kind == FileKind.ADD;
-        }
-
-        @Override
-        public boolean checkDeltaRowRanges() {
-            return true;
-        }
-
-        @Override
-        public boolean shouldCheckSnapshot(CommitKind commitKind) {
-            return commitKind != CommitKind.COMPACT;
         }
     }
 

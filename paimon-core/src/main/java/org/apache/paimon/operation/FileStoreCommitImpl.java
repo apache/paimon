@@ -276,14 +276,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public FileStoreCommit rowIdCheckConflictForDataEvolutionCompaction(
-            @Nullable Long rowIdCheckFromSnapshot) {
-        this.conflictDetection.setRowIdCheckFromSnapshotForDataEvolutionCompaction(
-                rowIdCheckFromSnapshot);
-        return this;
-    }
-
-    @Override
     public FileStoreCommit withOperation(Snapshot.Operation operation) {
         this.operation = operation;
         return this;

@@ -53,7 +53,7 @@ import java.lang.reflect.{InvocationHandler, Method, Proxy}
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference}
 
 import scala.collection.JavaConverters._
 import scala.util.Random
@@ -1933,6 +1933,8 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
       val javaSparkContext = new JavaSparkContext(spark.sparkContext)
       val attempts = new AtomicInteger()
+      val rewriteSnapshotId = new AtomicLong(-1L)
+      val mergeFileAfterRewrite = new AtomicReference[DataFileMeta]()
       partialUpdate(table, "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)")
       val normalFiles = normalDataFiles(table)
       assert(normalFiles.size == 2)
@@ -1962,12 +1964,14 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
               )
               throw new DataEvolutionRowRangeConflictException("Injected MERGE range conflict.")
             case 1 =>
-              // This MERGE lands after the retry file has been rewritten. Without a commit-time
-              // row-id check, the stale retry file gets the later sequence and loses this update.
+              // This MERGE lands after the retry file has been rewritten. The retry file must
+              // preserve its source sequence so this newer update remains the winner.
+              rewriteSnapshotId.set(table.latestSnapshot().get().id())
               val mergeFile = partialUpdate(
                 table,
                 "SELECT * FROM VALUES (1, 11), (2, 21) AS S(id, value)"
               )
+              mergeFileAfterRewrite.set(mergeFile)
               assert(mergeFile.nonNullFirstRowId() == 0L)
               assert(mergeFile.rowCount() == 2L)
             case _ =>
@@ -1986,8 +1990,19 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         messageRewriter
       )
 
-      Assertions.assertThat(attempts.get()).isEqualTo(3)
+      Assertions.assertThat(attempts.get()).isEqualTo(2)
       checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 21)))
+
+      val mergeFile = mergeFileAfterRewrite.get()
+      val bridgeFiles = normalDataFiles(table).filter(
+        file =>
+          file.fileSource().orElse(null) == FileSource.APPEND &&
+            file.fileName() != mergeFile.fileName())
+      assert(bridgeFiles.size == 1, bridgeFiles)
+      val bridgeFile = bridgeFiles.head
+      assert(bridgeFile.maxSequenceNumber() == rewriteSnapshotId.get())
+      assert(bridgeFile.maxSequenceNumber() < mergeFile.maxSequenceNumber())
+      assert(mergeFile.maxSequenceNumber() < table.latestSnapshot().get().id())
     }
   }
 

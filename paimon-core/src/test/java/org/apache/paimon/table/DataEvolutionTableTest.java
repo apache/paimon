@@ -35,7 +35,6 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.operation.commit.DataEvolutionRowIdConflictException;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -1206,7 +1205,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                                 commit.commit(staleMessages);
                             }
                         })
-                .isInstanceOf(DataEvolutionRowIdConflictException.class)
+                .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
         assertThat(table.latestSnapshot().get().id()).isEqualTo(concurrentSnapshotId);
         assertThat(readF0AndF2(table)).isEqualTo(Arrays.asList("10|updated-100", "11|updated-101"));
