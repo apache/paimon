@@ -30,10 +30,12 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
+import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
@@ -43,9 +45,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -56,6 +60,7 @@ import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEnt
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -63,8 +68,9 @@ class ConflictDetectionTest {
 
     @Test
     void testCreateConflictDetectionByTableType() {
-        assertThat(createConflictDetection(null, false, false))
-                .isInstanceOf(AppendConflictDetection.class);
+        ConflictDetection append = createConflictDetection(null, false, false);
+        assertThat(append).isInstanceOf(AppendConflictDetection.class);
+        assertThat(append.keyComparator()).isNull();
         assertThat(createConflictDetection(null, false, true))
                 .isInstanceOf(PrimaryKeyConflictDetection.class);
         assertThat(createConflictDetection(null, true, false))
@@ -72,6 +78,21 @@ class ConflictDetectionTest {
         // Data Evolution takes precedence even if a key comparator is supplied.
         assertThat(createConflictDetection(null, true, true))
                 .isInstanceOf(DataEvolutionConflictDetection.class);
+    }
+
+    @Test
+    void testPrimaryKeyClusteringOverrideSkipsLsmConflictCheck() {
+        ConflictDetection detection = createConflictDetection(null, false, true, true, null);
+
+        assertThat(
+                        detection.checkConflicts(
+                                snapshot(1),
+                                Collections.singletonList(createLevelFileEntry("base", 1)),
+                                Collections.singletonList(createLevelFileEntry("delta", 1)),
+                                Collections.emptyList(),
+                                null,
+                                Snapshot.CommitKind.COMPACT))
+                .isEmpty();
     }
 
     @Test
@@ -107,6 +128,124 @@ class ConflictDetectionTest {
         verify(scanner)
                 .readAllEntriesFromChangedRowRanges(
                         snapshot, changedPartitions, Collections.singletonList(changedRange));
+    }
+
+    @Test
+    void testDataEvolutionCompactSupplementsReferencedDataFiles() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        DataEvolutionConflictDetection detection =
+                (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
+        Snapshot snapshot = snapshot(1);
+        BinaryRow partition = BinaryRow.singleColumn(1);
+        List<BinaryRow> changedPartitions = Collections.singletonList(partition);
+        Range changedRange = new Range(10, 19);
+
+        ManifestEntry added = manifestEntry(ADD, "added", 10L, changedRange);
+        ManifestEntry deleted = manifestEntry(DELETE, "legacy", null, null);
+        SimpleFileEntry rangeBase =
+                createFileEntryWithRowId("range-base", ADD, partition, 0, 10L, 10L);
+        SimpleFileEntry legacyBase = createFileEntry("legacy", ADD);
+        SimpleFileEntry dvBase = createFileEntry("dv-base", ADD);
+        Set<String> referencedFiles = new HashSet<>(Arrays.asList("legacy", "dv-base"));
+        when(scanner.readAllEntriesFromChangedRowRanges(
+                        snapshot, changedPartitions, Collections.singletonList(changedRange)))
+                .thenReturn(Collections.singletonList(rangeBase));
+        when(scanner.readAllEntriesFromDataFiles(snapshot, changedPartitions, referencedFiles))
+                .thenReturn(Arrays.asList(legacyBase, dvBase));
+
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                snapshot,
+                                changedPartitions,
+                                Arrays.asList(added, deleted),
+                                Collections.singletonList(
+                                        createDvIndexEntry(
+                                                "dv", ADD, Collections.singletonList("dv-base"))),
+                                Snapshot.CommitKind.COMPACT,
+                                null,
+                                false))
+                .containsExactly(rangeBase, legacyBase, dvBase);
+        verify(scanner).readAllEntriesFromDataFiles(snapshot, changedPartitions, referencedFiles);
+    }
+
+    @Test
+    void testDataEvolutionCompactWithoutRowRangesReusesRetryScan() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        DataEvolutionConflictDetection detection =
+                (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
+        Snapshot previousSnapshot = snapshot(1);
+        Snapshot latestSnapshot = snapshot(2);
+        List<BinaryRow> changedPartitions = Collections.singletonList(BinaryRow.singleColumn(1));
+        SimpleFileEntry oldBase = createFileEntry("old", ADD);
+        SimpleFileEntry removedBase = createFileEntry("old", DELETE);
+        SimpleFileEntry newBase = createFileEntry("new", ADD);
+        List<SimpleFileEntry> cachedBase = Collections.singletonList(oldBase);
+        CommitFailRetryResult previousAttempt = commitFailRetryResult(previousSnapshot, cachedBase);
+        when(scanner.readIncrementalChanges(previousSnapshot, latestSnapshot, changedPartitions))
+                .thenReturn(Arrays.asList(removedBase, newBase));
+
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                latestSnapshot,
+                                changedPartitions,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Snapshot.CommitKind.COMPACT,
+                                previousAttempt,
+                                false))
+                .containsExactly(newBase);
+        assertThat(cachedBase).containsExactly(oldBase);
+        verify(scanner, never())
+                .readAllEntriesFromChangedPartitions(latestSnapshot, changedPartitions);
+    }
+
+    @Test
+    void testRetryFallsBackWhenCachedScanCannotBeReused() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        ConflictDetection detection = createConflictDetection(scanner, false, false);
+        Snapshot previousSnapshot = snapshot(1);
+        Snapshot latestSnapshot = snapshot(2);
+        List<BinaryRow> changedPartitions = Collections.singletonList(BinaryRow.singleColumn(1));
+        List<SimpleFileEntry> cachedBase =
+                Collections.singletonList(createFileEntry("cached", ADD));
+        List<SimpleFileEntry> expected = Collections.singletonList(createFileEntry("latest", ADD));
+        when(scanner.readAllEntriesFromChangedPartitions(latestSnapshot, changedPartitions))
+                .thenReturn(expected);
+
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                latestSnapshot,
+                                changedPartitions,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Snapshot.CommitKind.APPEND,
+                                commitFailRetryResult(null, cachedBase),
+                                false))
+                .isSameAs(expected);
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                latestSnapshot,
+                                changedPartitions,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Snapshot.CommitKind.APPEND,
+                                commitFailRetryResult(previousSnapshot, null),
+                                false))
+                .isSameAs(expected);
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                latestSnapshot,
+                                changedPartitions,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Snapshot.CommitKind.APPEND,
+                                commitFailRetryResult(previousSnapshot, cachedBase),
+                                true))
+                .isSameAs(expected);
+        verify(scanner, times(3))
+                .readAllEntriesFromChangedPartitions(latestSnapshot, changedPartitions);
+        verify(scanner, never())
+                .readIncrementalChanges(previousSnapshot, latestSnapshot, changedPartitions);
     }
 
     @Test
@@ -550,6 +689,23 @@ class ConflictDetectionTest {
                 null);
     }
 
+    private SimpleFileEntry createLevelFileEntry(String fileName, int level) {
+        return new SimpleFileEntry(
+                ADD,
+                EMPTY_ROW,
+                0,
+                1,
+                level,
+                fileName,
+                Collections.emptyList(),
+                null,
+                EMPTY_ROW,
+                EMPTY_ROW,
+                null,
+                0L,
+                null);
+    }
+
     private SimpleFileEntryWithDV createFileEntryWithDV(
             String fileName, FileKind kind, @Nullable String dvFileName) {
         return new SimpleFileEntryWithDV(createFileEntry(fileName, kind), dvFileName);
@@ -651,7 +807,9 @@ class ConflictDetectionTest {
                         Arrays.asList(
                                 manifestEntry(DELETE, "deleted", 10L, new Range(10, 19)),
                                 manifestEntry(ADD, "added", 30L, new Range(30, 39)),
-                                manifestEntry(DELETE, "dedicated.blob", 50L, new Range(50, 59))),
+                                manifestEntry(DELETE, "dedicated.blob", 50L, new Range(50, 59)),
+                                manifestEntry(
+                                        DELETE, "dedicated.vector.data", 70L, new Range(70, 79))),
                         Snapshot.CommitKind.COMPACT);
         assertThat(checker).isNotNull();
         assertThat(
@@ -666,16 +824,73 @@ class ConflictDetectionTest {
                         checker.conflictsWith(
                                 manifestEntry(ADD, "historical", 55L, new Range(55, 64)).file()))
                 .isFalse();
+        assertThat(
+                        checker.conflictsWith(
+                                manifestEntry(ADD, "historical", 75L, new Range(75, 84)).file()))
+                .isFalse();
 
         detection.setRowIdCheckFromSnapshot(1L);
         assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.APPEND)).isTrue();
         assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.COMPACT)).isTrue();
         assertThat(detection.shouldCheckHistoricalRowIdEntry(FileKind.ADD)).isTrue();
         assertThat(detection.shouldCheckHistoricalRowIdEntry(FileKind.DELETE)).isTrue();
+        assertThat(
+                        detection.createRowIdConflictChecker(
+                                mock(SchemaManager.class),
+                                Collections.singletonList(manifestEntry(ADD, "added", null, null)),
+                                Snapshot.CommitKind.APPEND))
+                .isInstanceOf(RowIdColumnConflictChecker.class);
 
         detection.setRowIdCheckFromSnapshot(null);
         assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.APPEND)).isFalse();
         assertThat(detection.shouldCheckRowIdFromSnapshot(Snapshot.CommitKind.COMPACT)).isFalse();
+    }
+
+    @Test
+    void testMaterializeRowIdCheckSkipsCompactSnapshotsAndHistoricalDeletes() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        SnapshotManager snapshotManager = mock(SnapshotManager.class);
+        DataEvolutionConflictDetection detection =
+                (DataEvolutionConflictDetection)
+                        createConflictDetection(scanner, true, false, false, snapshotManager);
+        detection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(1L);
+
+        Snapshot checkSnapshot = mock(Snapshot.class);
+        Snapshot compactSnapshot = mock(Snapshot.class);
+        Snapshot appendSnapshot = mock(Snapshot.class);
+        Snapshot latestSnapshot = mock(Snapshot.class);
+        when(checkSnapshot.nextRowId()).thenReturn(20L);
+        when(compactSnapshot.commitKind()).thenReturn(Snapshot.CommitKind.COMPACT);
+        when(appendSnapshot.commitKind()).thenReturn(Snapshot.CommitKind.APPEND);
+        when(latestSnapshot.id()).thenReturn(3L);
+        when(latestSnapshot.commitUser()).thenReturn("other-user");
+        when(snapshotManager.snapshot(1)).thenReturn(checkSnapshot);
+        when(snapshotManager.snapshot(2)).thenReturn(compactSnapshot);
+        when(snapshotManager.snapshot(3)).thenReturn(appendSnapshot);
+
+        ManifestEntry historicalDelete =
+                manifestEntry(DELETE, "historical", 10L, new Range(10, 19));
+        ManifestEntry historicalAdd = manifestEntry(ADD, "non-conflicting", 10L, new Range(10, 19));
+        when(scanner.readIncrementalEntries(appendSnapshot, Collections.emptyList()))
+                .thenReturn(Arrays.asList(historicalDelete, historicalAdd));
+        RowIdConflictChecker checker = mock(RowIdConflictChecker.class);
+        when(checker.isEmpty()).thenReturn(false);
+        when(checker.conflictsWith(historicalDelete.file())).thenReturn(true);
+        when(checker.conflictsWith(historicalAdd.file())).thenReturn(false);
+
+        assertThat(
+                        detection.checkConflicts(
+                                latestSnapshot,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                checker,
+                                Snapshot.CommitKind.COMPACT))
+                .isEmpty();
+        verify(scanner, never()).readIncrementalEntries(compactSnapshot, Collections.emptyList());
+        verify(scanner).readIncrementalEntries(appendSnapshot, Collections.emptyList());
+        verify(checker, never()).conflictsWith(historicalDelete.file());
+        verify(checker).conflictsWith(historicalAdd.file());
     }
 
     @Test
@@ -939,8 +1154,13 @@ class ConflictDetectionTest {
                 Collections.singletonList(createFileEntryWithRowId("compacted", ADD, 0L, 4L));
 
         Optional<RuntimeException> result =
-                detection.checkRowIdExistence(
-                        baseEntries, deltaEntries, 14L, Snapshot.CommitKind.COMPACT);
+                detection.checkConflicts(
+                        snapshot(1),
+                        baseEntries,
+                        deltaEntries,
+                        Collections.emptyList(),
+                        null,
+                        Snapshot.CommitKind.COMPACT);
         assertThat(result).isPresent();
         assertThat(result.get()).hasMessageContaining("Row ID existence conflict");
     }
@@ -988,6 +1208,27 @@ class ConflictDetectionTest {
                 .hasMessageContaining("spans multiple data file ranges")
                 .hasMessageContaining("f1")
                 .hasMessageContaining("f2");
+    }
+
+    @Test
+    void testCheckRowIdRangeConflictsRejectsOverlappingNormalFiles() {
+        DataEvolutionConflictDetection detection = createConflictDetection();
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Collections.singletonList(createFileEntryWithRowId("base", ADD, 0L, 5L)),
+                        Collections.singletonList(
+                                createFileEntryWithRowId("compacted", ADD, 2L, 2L)),
+                        Collections.emptyList(),
+                        null,
+                        Snapshot.CommitKind.COMPACT);
+
+        assertThat(exception).isPresent();
+        assertThat(exception.get())
+                .hasMessageContaining("multiple 'MERGE INTO' and 'COMPACT' operations")
+                .hasMessageContaining("base")
+                .hasMessageContaining("compacted");
     }
 
     @Test
@@ -1150,6 +1391,15 @@ class ConflictDetectionTest {
             @Nullable CommitScanner scanner,
             boolean dataEvolutionEnabled,
             boolean primaryKeyTable) {
+        return createConflictDetection(scanner, dataEvolutionEnabled, primaryKeyTable, false, null);
+    }
+
+    private ConflictDetection createConflictDetection(
+            @Nullable CommitScanner scanner,
+            boolean dataEvolutionEnabled,
+            boolean primaryKeyTable,
+            boolean pkClusteringOverride,
+            @Nullable SnapshotManager snapshotManager) {
         return ConflictDetection.create(
                 "test-table",
                 "test-user",
@@ -1159,10 +1409,20 @@ class ConflictDetectionTest {
                 BucketMode.HASH_FIXED,
                 false,
                 dataEvolutionEnabled,
-                false,
+                pkClusteringOverride,
                 null,
-                null,
+                snapshotManager,
                 scanner);
+    }
+
+    private CommitFailRetryResult commitFailRetryResult(
+            @Nullable Snapshot latestSnapshot, @Nullable List<SimpleFileEntry> baseDataFiles) {
+        return (CommitFailRetryResult)
+                RetryCommitResult.forCommitFail(
+                        latestSnapshot,
+                        baseDataFiles,
+                        new RuntimeException("expected test retry"),
+                        null);
     }
 
     private ManifestEntry manifestEntry(
