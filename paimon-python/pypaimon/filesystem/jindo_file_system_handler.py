@@ -22,11 +22,7 @@ from pyarrow import PythonFile
 from pyarrow._fs import FileSystemHandler
 from pyarrow.fs import FileInfo, FileSelector, FileType
 
-# `JindoFileSystemHandler` (the PyArrow FileIO path) only needs `pyjindo.fs`
-# and `pyjindo.util`. The PVFS jindo backend (`create_jindo_oss_filesystem`)
-# additionally needs `pyjindo.ossfs`. Track the two surfaces independently so
-# that a pyjindosdk build without `pyjindo.ossfs` does not silently disable
-# the previously-working PyArrow path.
+# The PyArrow and PVFS paths use separate pyjindo modules.
 try:
     import pyjindo.fs as jfs
     import pyjindo.util as jutil
@@ -63,23 +59,14 @@ def _jindo_config_value(value) -> str:
 
 
 def build_jindo_config(catalog_options: Options):
-    """Build a pyjindo ``Config`` from catalog options.
-
-    Shared by ``JindoFileSystemHandler`` (the PyArrow FileIO path) and
-    ``create_jindo_oss_filesystem`` (the PVFS fsspec path) so both jindo entry
-    points consume exactly the same native filesystem options.
-    """
+    """Build a pyjindo ``Config`` from catalog options."""
     if not JINDO_AVAILABLE:
         raise ImportError("Module pyjindo is not available. Please install pyjindosdk.")
 
-    # Start from an empty config. Loading jindosdk.cfg or Hadoop configuration
-    # here can inject process-level settings (for example credential providers)
-    # which override catalog-scoped REST data tokens.
+    # Use catalog options as the complete configuration source.
     config = jutil.Config()
 
-    # As in Java JindoFileIO, forward every fs.* option instead of maintaining
-    # a fragile allowlist. PyPaimon additionally accepts logger.* so logging can
-    # be configured without loading process-level configuration files.
+    # Forward supported filesystem and logger options.
     for raw_key, value in catalog_options.to_map().items():
         supported_prefix = isinstance(raw_key, str)
         supported_prefix = supported_prefix and raw_key.startswith(
@@ -88,9 +75,7 @@ def build_jindo_config(catalog_options: Options):
             continue
         key = _CASE_SENSITIVE_JINDO_CONFIG_KEYS.get(raw_key.lower(), raw_key)
         if key in _PYPAIMON_ONLY_JINDO_CONFIG_KEYS:
-            # PyPaimon uses fs.oss.impl as the jindo/legacy backend selector.
-            # The Hadoop option with the same name expects a Java class name
-            # and is not a native PyJindo setting.
+            # This option is handled by PyPaimon.
             continue
         config.set(key, _jindo_config_value(value))
 
@@ -116,18 +101,7 @@ def build_jindo_config(catalog_options: Options):
 
 
 def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
-    """Create an fsspec-compatible ``JindoOssFileSystem`` for an OSS bucket.
-
-    ``PaimonVirtualFileSystem`` uses this to back OSS reads/writes with the
-    native JindoSDK instead of ``ossfs``. JindoSDK writes objects via
-    PutObject / multipart upload, so it never issues OSS ``AppendObject`` --
-    the call that fails with ``PositionNotEqualToLength`` (409) on the OSS
-    data-acceleration endpoint when ``ossfs`` flushes a multi-chunk write.
-
-    ``root_uri`` is the bucket root, e.g. ``oss://my-bucket/``; it must carry
-    the bucket so ``JindoOssFileSystem`` can re-attach the ``oss://`` scheme to
-    the bucket-relative paths that ``PaimonVirtualFileSystem`` passes in.
-    """
+    """Create a Jindo OSS filesystem for ``PaimonVirtualFileSystem``."""
     if not (JINDO_AVAILABLE and JINDO_OSSFS_AVAILABLE):
         raise ImportError(
             "pyjindo.ossfs is not available. Please install pyjindosdk>=6.10.4."
@@ -136,14 +110,9 @@ def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
     return jossfs.JindoOssFileSystem(
         uri=root_uri,
         config=build_jindo_config(catalog_options),
-        # PaimonVirtualFileSystem owns directory semantics for the virtual FS;
-        # the backing object-store fs must not auto-create dir-marker objects.
+        # PaimonVirtualFileSystem manages directory semantics.
         auto_mkdir=False,
-        # Bypass fsspec's _Cached metaclass instance cache, so the only
-        # reference to this filesystem -- and to its underlying native jindo
-        # connection -- is the PaimonRealStorage cache in PVFS. On token
-        # refresh PVFS replaces that entry and the native resources can be
-        # released, instead of being pinned forever by fsspec's global cache.
+        # PaimonVirtualFileSystem manages filesystem instances.
         skip_instance_cache=True,
     )
 
