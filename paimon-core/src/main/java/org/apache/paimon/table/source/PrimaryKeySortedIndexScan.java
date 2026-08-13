@@ -54,6 +54,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -274,8 +275,7 @@ public final class PrimaryKeySortedIndexScan {
                                                                         totalRowCount));
                                         sharedReaders.put(indexGroup, reader);
                                     }
-                                    return Collections.singletonList(
-                                            fileLocalReader(file, group.get(), reader));
+                                    return Collections.singletonList(fileLocalReader(file, reader));
                                 });
                 Optional<GlobalIndexResult> result;
                 try {
@@ -300,23 +300,20 @@ public final class PrimaryKeySortedIndexScan {
     }
 
     private static GlobalIndexReader fileLocalReader(
-            FilePlan file, PkSortedIndexGroup group, SharedGlobalIndexReader reader) {
-        List<PrimaryKeyIndexSourceFile> sourceFiles = group.sourceFiles();
-        PrimaryKeyIndexSourceFile target =
-                new PrimaryKeyIndexSourceFile(
-                        file.dataFile().fileName(), file.dataFile().rowCount());
-        int sourceIndex = -1;
-        for (int i = 0; i < sourceFiles.size(); i++) {
-            if (sourceFiles.get(i).equals(target)) {
-                sourceIndex = i;
-                break;
-            }
-        }
+            FilePlan file, SharedGlobalIndexReader reader) {
+        DataFileMeta dataFile = file.dataFile();
+        SourceLocation sourceLocation = reader.sourceLocations.get(dataFile.fileName());
         checkArgument(
-                sourceIndex >= 0,
+                sourceLocation != null,
                 "Data file %s is not covered by its sorted-index source group.",
-                file.dataFile().fileName());
-        return new FileLocalGlobalIndexReader(reader, sourceIndex);
+                dataFile.fileName());
+        checkArgument(
+                dataFile.rowCount() == sourceLocation.rowCount,
+                "Data file %s row count %s does not match sorted-index source row count %s.",
+                dataFile.fileName(),
+                dataFile.rowCount(),
+                sourceLocation.rowCount);
+        return new FileLocalGlobalIndexReader(reader, sourceLocation.sourceIndex);
     }
 
     private static long totalRowCount(List<PrimaryKeyIndexSourceFile> sourceFiles) {
@@ -333,6 +330,17 @@ public final class PrimaryKeySortedIndexScan {
         }
     }
 
+    private static final class SourceLocation {
+
+        private final long rowCount;
+        private final int sourceIndex;
+
+        private SourceLocation(long rowCount, int sourceIndex) {
+            this.rowCount = rowCount;
+            this.sourceIndex = sourceIndex;
+        }
+    }
+
     /** Shares one source-group reader and its group-global query results across source files. */
     private static final class SharedGlobalIndexReader implements GlobalIndexReader {
 
@@ -342,6 +350,7 @@ public final class PrimaryKeySortedIndexScan {
                         CompletableFuture<Optional<GlobalIndexResult>>,
                         CompletableFuture<List<Optional<GlobalIndexResult>>>>
                 localizedResults;
+        private final Map<String, SourceLocation> sourceLocations;
         private final long[] sourceOffsets;
 
         private GlobalIndexReader reader;
@@ -353,10 +362,18 @@ public final class PrimaryKeySortedIndexScan {
             this.readerFactory = readerFactory;
             this.results = new ConcurrentHashMap<>();
             this.localizedResults = new ConcurrentHashMap<>();
+            this.sourceLocations = new HashMap<>();
             this.sourceOffsets = new long[sourceFiles.size() + 1];
             for (int i = 0; i < sourceFiles.size(); i++) {
-                sourceOffsets[i + 1] =
-                        Math.addExact(sourceOffsets[i], sourceFiles.get(i).rowCount());
+                PrimaryKeyIndexSourceFile sourceFile = sourceFiles.get(i);
+                checkArgument(
+                        sourceLocations.put(
+                                        sourceFile.fileName(),
+                                        new SourceLocation(sourceFile.rowCount(), i))
+                                == null,
+                        "Duplicate sorted-index source file %s.",
+                        sourceFile.fileName());
+                sourceOffsets[i + 1] = Math.addExact(sourceOffsets[i], sourceFile.rowCount());
             }
         }
 
