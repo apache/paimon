@@ -95,7 +95,7 @@ public class AvroFileFormat extends FileFormat {
         writer.setCodec(createCodecFactory(compression));
         writer.setFlushOnEveryBlock(false);
         writer.create(schema, new CloseShieldOutputStream(out));
-        return new AvroBlockWriter(writer, out);
+        return new AvroBlockWriter(writer, out, schema);
     }
 
     @Override

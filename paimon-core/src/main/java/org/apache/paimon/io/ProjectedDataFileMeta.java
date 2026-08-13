@@ -230,6 +230,14 @@ public final class ProjectedDataFileMeta implements DataFileMeta {
         return !currentRow().isNullAt(requiredPosition(Fields.FIRST_ROW_ID));
     }
 
+    @Override
+    public long nonNullFirstRowId() {
+        int position = requiredPosition(Fields.FIRST_ROW_ID);
+        InternalRow row = currentRow();
+        checkState(!row.isNullAt(position), "First row id cannot be null.");
+        return row.getLong(position);
+    }
+
     @Nullable
     @Override
     public Long firstRowId() {

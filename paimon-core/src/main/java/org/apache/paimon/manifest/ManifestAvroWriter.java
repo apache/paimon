@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.format.avro.AvroBlockWriter;
@@ -29,6 +30,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
@@ -53,6 +55,8 @@ import java.util.Map;
  * implementation detail of manifest run merging.
  */
 public final class ManifestAvroWriter implements AutoCloseable {
+
+    private static final int MAX_BUFFERED_ENCODED_PARTITIONS = 8_192;
 
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
@@ -114,6 +118,17 @@ public final class ManifestAvroWriter implements AutoCloseable {
         }
     }
 
+    /** Writes an already decoded manifest row while collecting its projected metadata. */
+    public void writeRow(InternalRow row, EncodedEntry metadata) throws IOException {
+        try {
+            currentWriter().writeRow(row, metadata);
+            afterWrite(1, false);
+        } catch (IOException | RuntimeException | Error failure) {
+            abort();
+            throw failure;
+        }
+    }
+
     public void writeEncodedBlock(AvroRawBlock block, EncodedBlock metadata) throws IOException {
         if (metadata.addedFiles < 0 || metadata.deletedFiles < 0) {
             throw new IllegalArgumentException(
@@ -131,6 +146,38 @@ public final class ManifestAvroWriter implements AutoCloseable {
         try {
             currentWriter().writeEncodedBlock(block, metadata);
             afterWrite(metadataRecordCount, true);
+        } catch (IOException | RuntimeException | Error failure) {
+            abort();
+            throw failure;
+        }
+    }
+
+    /** Copies all raw blocks from one manifest and reuses its aggregate metadata. */
+    public void writeEncodedManifest(ManifestAvroReader reader, ManifestFileMeta metadata)
+            throws IOException {
+        if (!reader.rawBlockCopySupported()) {
+            throw new IllegalArgumentException(
+                    "Manifest schema is incompatible with raw block copying.");
+        }
+        try {
+            FileWriter fileWriter = currentWriter();
+            long copiedRecords = 0;
+            while (reader.hasNext()) {
+                ManifestAvroReader.RawBlock block = reader.next();
+                fileWriter.ensureOpen();
+                fileWriter.writer.addEncodedBlock(block.encodedBlock());
+                copiedRecords = Math.addExact(copiedRecords, block.recordCount());
+            }
+            long metadataRecords =
+                    Math.addExact(metadata.numAddedFiles(), metadata.numDeletedFiles());
+            if (copiedRecords != metadataRecords) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Manifest record count mismatch: metadata %s, blocks %s.",
+                                metadataRecords, copiedRecords));
+            }
+            fileWriter.collectStats(metadata);
+            afterWrite(copiedRecords, true);
         } catch (IOException | RuntimeException | Error failure) {
             abort();
             throw failure;
@@ -213,6 +260,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private int bucket;
         private int level;
         private long schemaId;
+        private boolean hasRowId;
         private long firstRowId;
         private long rowCount;
 
@@ -229,7 +277,26 @@ public final class ManifestAvroWriter implements AutoCloseable {
             this.bucket = bucket;
             this.level = level;
             this.schemaId = schemaId;
+            this.hasRowId = true;
             this.firstRowId = firstRowId;
+            this.rowCount = rowCount;
+            return this;
+        }
+
+        public EncodedEntry replaceWithoutRowId(
+                byte kind,
+                BinaryRow partition,
+                int bucket,
+                int level,
+                long schemaId,
+                long rowCount) {
+            this.kind = kind;
+            this.partition = partition;
+            this.bucket = bucket;
+            this.level = level;
+            this.schemaId = schemaId;
+            this.hasRowId = false;
+            this.firstRowId = 0;
             this.rowCount = rowCount;
             return this;
         }
@@ -247,10 +314,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private final int maxLevel;
         private final long minRowId;
         private final long maxRowId;
-        private final @Nullable BinaryRow nullPartition;
-        private final long nullPartitionCount;
-        private final @Nullable BinaryRow minNonNullPartition;
-        private final @Nullable BinaryRow maxNonNullPartition;
+        private final SimpleStats partitionStats;
 
         public EncodedBlock(
                 long addedFiles,
@@ -262,10 +326,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 int maxLevel,
                 long minRowId,
                 long maxRowId,
-                @Nullable BinaryRow nullPartition,
-                long nullPartitionCount,
-                @Nullable BinaryRow minNonNullPartition,
-                @Nullable BinaryRow maxNonNullPartition) {
+                SimpleStats partitionStats) {
             this.addedFiles = addedFiles;
             this.deletedFiles = deletedFiles;
             this.schemaId = schemaId;
@@ -275,10 +336,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             this.maxLevel = maxLevel;
             this.minRowId = minRowId;
             this.maxRowId = maxRowId;
-            this.nullPartition = nullPartition;
-            this.nullPartitionCount = nullPartitionCount;
-            this.minNonNullPartition = minNonNullPartition;
-            this.maxNonNullPartition = maxNonNullPartition;
+            this.partitionStats = partitionStats;
         }
     }
 
@@ -289,6 +347,9 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private final SimpleStatsConverter partitionStatsSerializer;
         private final Map<BinaryRow, long[]> encodedPartitionCounts = new IdentityHashMap<>();
         private final long[] repeatedNullCounts = new long[partitionType.getFieldCount()];
+        private final long[] copiedManifestNullCounts = new long[partitionType.getFieldCount()];
+        private final long[] copiedManifestRepresentativeNullCounts =
+                new long[partitionType.getFieldCount()];
         private @Nullable PositionOutputStream out;
         private @Nullable AvroBlockWriter writer;
         private @Nullable Long outputBytes;
@@ -299,6 +360,8 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private int maxBucket = Integer.MIN_VALUE;
         private int minLevel = Integer.MAX_VALUE;
         private int maxLevel = Integer.MIN_VALUE;
+        private boolean bucketStatsKnown = true;
+        private boolean levelStatsKnown = true;
         private @Nullable RowIdStats rowIdStats = new RowIdStats();
         private boolean closed;
 
@@ -348,20 +411,19 @@ public final class ManifestAvroWriter implements AutoCloseable {
             addEncodedPartition(metadata.partition, 1);
         }
 
+        private void writeRow(InternalRow row, EncodedEntry metadata) throws IOException {
+            ensureOpen();
+            writer.addElement(row);
+            collectStats(metadata);
+            addEncodedPartition(metadata.partition, 1);
+        }
+
         private void writeEncodedBlock(AvroRawBlock block, EncodedBlock metadata)
                 throws IOException {
             ensureOpen();
             writer.addEncodedBlock(block);
             collectStats(metadata);
-            if (metadata.nullPartitionCount > 0) {
-                addEncodedPartition(metadata.nullPartition, metadata.nullPartitionCount);
-            }
-            if (metadata.minNonNullPartition != null) {
-                addEncodedPartition(metadata.minNonNullPartition, 1);
-                if (metadata.maxNonNullPartition != metadata.minNonNullPartition) {
-                    addEncodedPartition(metadata.maxNonNullPartition, 1);
-                }
-            }
+            collectCopiedPartitionStats(metadata.partitionStats);
         }
 
         private void collectStats(ManifestEntry entry) {
@@ -408,7 +470,11 @@ public final class ManifestAvroWriter implements AutoCloseable {
             minLevel = Math.min(minLevel, entry.level);
             maxLevel = Math.max(maxLevel, entry.level);
             if (rowIdStats != null) {
-                rowIdStats.collect(entry.firstRowId, entry.rowCount);
+                if (!entry.hasRowId) {
+                    rowIdStats = null;
+                } else {
+                    rowIdStats.collect(entry.firstRowId, entry.rowCount);
+                }
             }
         }
 
@@ -425,6 +491,55 @@ public final class ManifestAvroWriter implements AutoCloseable {
             }
         }
 
+        private void collectStats(ManifestFileMeta manifest) {
+            numAddedFiles = Math.addExact(numAddedFiles, manifest.numAddedFiles());
+            numDeletedFiles = Math.addExact(numDeletedFiles, manifest.numDeletedFiles());
+            schemaId = Math.max(schemaId, manifest.schemaId());
+            if (manifest.minBucket() == null || manifest.maxBucket() == null) {
+                bucketStatsKnown = false;
+            } else {
+                minBucket = Math.min(minBucket, manifest.minBucket());
+                maxBucket = Math.max(maxBucket, manifest.maxBucket());
+            }
+            if (manifest.minLevel() == null || manifest.maxLevel() == null) {
+                levelStatsKnown = false;
+            } else {
+                minLevel = Math.min(minLevel, manifest.minLevel());
+                maxLevel = Math.max(maxLevel, manifest.maxLevel());
+            }
+            if (rowIdStats != null) {
+                if (manifest.minRowId() == null || manifest.maxRowId() == null) {
+                    rowIdStats = null;
+                } else {
+                    rowIdStats.collectRange(manifest.minRowId(), manifest.maxRowId());
+                }
+            }
+
+            collectCopiedPartitionStats(manifest.partitionStats());
+        }
+
+        private void collectCopiedPartitionStats(SimpleStats partitionStats) {
+            collectCopiedPartitionRepresentative(partitionStats.minValues());
+            if (!partitionStats.maxValues().equals(partitionStats.minValues())) {
+                collectCopiedPartitionRepresentative(partitionStats.maxValues());
+            }
+            for (int field = 0; field < copiedManifestNullCounts.length; field++) {
+                copiedManifestNullCounts[field] =
+                        Math.addExact(
+                                copiedManifestNullCounts[field],
+                                partitionStats.nullCounts().getLong(field));
+            }
+        }
+
+        private void collectCopiedPartitionRepresentative(BinaryRow partition) {
+            partitionStatsCollector.collect(partition);
+            for (int field = 0; field < partition.getFieldCount(); field++) {
+                if (partition.isNullAt(field)) {
+                    copiedManifestRepresentativeNullCounts[field]++;
+                }
+            }
+        }
+
         private void addEncodedPartition(@Nullable BinaryRow partition, long count) {
             if (partition == null || count <= 0) {
                 return;
@@ -432,9 +547,37 @@ public final class ManifestAvroWriter implements AutoCloseable {
             long[] value =
                     encodedPartitionCounts.computeIfAbsent(partition, ignored -> new long[1]);
             value[0] = Math.addExact(value[0], count);
+            if (encodedPartitionCounts.size() >= MAX_BUFFERED_ENCODED_PARTITIONS) {
+                flushEncodedPartitions();
+            }
         }
 
         private SimpleColStats[] partitionStats() {
+            flushEncodedPartitions();
+            SimpleColStats[] stats = partitionStatsCollector.extract();
+            for (int field = 0; field < stats.length; field++) {
+                // The collector sees only the min/max partition representatives of each copied
+                // block or manifest. Add the remaining nulls from its aggregate statistics.
+                long nullCountAdjustment =
+                        Math.addExact(
+                                repeatedNullCounts[field],
+                                Math.subtractExact(
+                                        copiedManifestNullCounts[field],
+                                        copiedManifestRepresentativeNullCounts[field]));
+                if (nullCountAdjustment == 0) {
+                    continue;
+                }
+                SimpleColStats current = stats[field];
+                stats[field] =
+                        new SimpleColStats(
+                                current.min(),
+                                current.max(),
+                                Math.addExact(current.nullCount(), nullCountAdjustment));
+            }
+            return stats;
+        }
+
+        private void flushEncodedPartitions() {
             for (Map.Entry<BinaryRow, long[]> entry : encodedPartitionCounts.entrySet()) {
                 BinaryRow partition = entry.getKey();
                 partitionStatsCollector.collect(partition);
@@ -450,19 +593,6 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 }
             }
             encodedPartitionCounts.clear();
-            SimpleColStats[] stats = partitionStatsCollector.extract();
-            for (int field = 0; field < stats.length; field++) {
-                if (repeatedNullCounts[field] == 0) {
-                    continue;
-                }
-                SimpleColStats current = stats[field];
-                stats[field] =
-                        new SimpleColStats(
-                                current.min(),
-                                current.max(),
-                                Math.addExact(current.nullCount(), repeatedNullCounts[field]));
-            }
-            return stats;
         }
 
         private boolean reachTargetSize(boolean suggestedCheck, long targetSize)
@@ -519,10 +649,10 @@ public final class ManifestAvroWriter implements AutoCloseable {
                     numAddedFiles + numDeletedFiles > 0
                             ? schemaId
                             : schemaManager.latest().get().id(),
-                    minBucket,
-                    maxBucket,
-                    minLevel,
-                    maxLevel,
+                    bucketStatsKnown ? minBucket : null,
+                    bucketStatsKnown ? maxBucket : null,
+                    levelStatsKnown ? minLevel : null,
+                    levelStatsKnown ? maxLevel : null,
                     rowIdStats == null ? null : rowIdStats.minRowId,
                     rowIdStats == null ? null : rowIdStats.maxRowId);
         }

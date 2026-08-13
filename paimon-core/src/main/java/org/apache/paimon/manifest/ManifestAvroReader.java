@@ -74,6 +74,11 @@ public final class ManifestAvroReader implements AutoCloseable {
         return blockReader.hasNextBlock();
     }
 
+    /** Returns whether raw blocks can be copied into a writer for the current manifest schema. */
+    public boolean rawBlockCopySupported() {
+        return rawBlockCopySupported;
+    }
+
     /** Returns the next raw block without decompressing it. */
     public RawBlock next() throws IOException {
         if (!hasNext()) {
@@ -371,6 +376,12 @@ public final class ManifestAvroReader implements AutoCloseable {
 
         public AvroRawBlock encodedBlock() {
             return block;
+        }
+
+        /** Returns an independently owned block which remains valid after this reader advances. */
+        public RawBlock stableCopy() {
+            return new RawBlock(
+                    decoderContext, rawBlockCopySupported, block.stableCopy(), blockOrdinal);
         }
     }
 

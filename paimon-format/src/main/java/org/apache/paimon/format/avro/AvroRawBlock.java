@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.avro.file.DataFileStream;
 import org.apache.avro.file.RawBlock;
 
 import javax.annotation.Nullable;
@@ -48,6 +47,11 @@ public final class AvroRawBlock {
         return block.recordCount();
     }
 
+    /** Returns an independently owned copy which is not reused by the reader. */
+    public AvroRawBlock stableCopy() {
+        return new AvroRawBlock(block.stableCopy());
+    }
+
     /**
      * Lazily decompresses this block, reusing the supplied heap buffer when possible.
      *
@@ -56,9 +60,5 @@ public final class AvroRawBlock {
      */
     public ByteBuffer decompress(@Nullable ByteBuffer reuse) throws IOException {
         return block.decompress(reuse);
-    }
-
-    <D> DataFileStream<D> asStream() throws IOException {
-        return block.asStream();
     }
 }
