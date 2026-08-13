@@ -26,10 +26,12 @@ import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.commands.{DataEvolutionPaimonWriter, PaimonSparkWriter}
+import org.apache.paimon.spark.commands.CompactRowIdRangeIndex
 import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
+import org.apache.paimon.utils.Range
 
 import org.apache.spark.api.java.JavaSparkContext
 import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted}
@@ -45,7 +47,7 @@ import java.lang.reflect.{InvocationHandler, Method, Proxy}
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 
 import scala.collection.JavaConverters._
 import scala.util.Random
@@ -1819,7 +1821,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
               .map(_.nonNullFirstRowId())
               .sorted
             val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
-            val updateRows = sql("SELECT value + 1 AS value, _ROW_ID FROM T WHERE id = 1")
+            val updateRows = sql("SELECT value + 1 AS value, _ROW_ID FROM T")
               .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
               .select("value", "_FIRST_ROW_ID", "_ROW_ID")
             val updateMessages =
@@ -1834,7 +1836,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         }
       )
 
-      checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 20)))
+      checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 21)))
       val ranges = table
         .newSnapshotReader()
         .read()
@@ -1915,6 +1917,204 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       checkAnswer(
         sql("SELECT id, value, extra FROM T ORDER BY id"),
         Seq(Row(1, 11, 99), Row(2, 20, null)))
+    }
+  }
+
+  test("Paimon Procedure: compact rebase range lookup handles high cardinality") {
+    val ranges = (0 until 100000).map {
+      index =>
+        val firstRowId = index.toLong * 3
+        new Range(firstRowId, firstRowId + 1)
+    }
+    val rangeIndex = new CompactRowIdRangeIndex(ranges)
+
+    assert(rangeIndex.firstRowId(0) == Long.box(0))
+    assert(rangeIndex.firstRowId(150001) == Long.box(150000))
+    assert(rangeIndex.firstRowId(299998) == Long.box(299997))
+    assert(rangeIndex.firstRowId(2) == null)
+    assert(rangeIndex.firstRowId(300000) == null)
+  }
+
+  test("Paimon Procedure: rebase later compact planner batch after partial update") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value INT, pt STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'file.format' = 'avro',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'compaction.min.file-num' = '2',
+            |  'snapshot.num-retained.min' = '1',
+            |  'snapshot.num-retained.max' = '1',
+            |  'snapshot.time-retained' = '0 ms',
+            |  'commit.max-retries' = '2',
+            |  'commit.min-retry-wait' = '1 ms',
+            |  'commit.max-retry-wait' = '1 ms')
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 10, 'p0')")
+      sql("INSERT INTO T VALUES (2, 20, 'p0')")
+      sql("INSERT INTO T VALUES (3, 30, 'p1')")
+      sql("INSERT INTO T VALUES (4, 40, 'p1')")
+
+      val table = loadTable("T")
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      val updated = new AtomicBoolean(false)
+
+      CompactProcedure.executeDataEvolutionCompaction(
+        table,
+        relation,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        Int.box(2),
+        _ => {
+          if (updated.compareAndSet(false, true)) {
+            val updateSnapshot = table.latestSnapshot().get()
+            val dataSplits = table
+              .newSnapshotReader()
+              .withSnapshot(updateSnapshot)
+              .read()
+              .splits()
+              .asScala
+              .collect { case split: DataSplit => split }
+              .toSeq
+            val stagedPartitions = dataSplits.filter {
+              split =>
+                val liveFiles = split.dataFiles().asScala.map(_.fileName()).toSet
+                val bucketPath = table
+                  .store()
+                  .pathFactory()
+                  .bucketPath(split.partition(), split.bucket())
+                table
+                  .fileIO()
+                  .listStatus(bucketPath)
+                  .filterNot(_.isDir)
+                  .map(_.getPath.getName)
+                  .exists(name => !liveFiles.contains(name))
+            }
+            Assertions.assertThat(stagedPartitions.size).isEqualTo(1)
+            val stagedPartition = stagedPartitions.head.partition().getString(0).toString
+            val updatePartition = if (stagedPartition == "p0") "p1" else "p0"
+            val updateId = if (updatePartition == "p0") 1 else 3
+            val firstRowIds = dataSplits
+              .flatMap(_.dataFiles().asScala)
+              .map(_.nonNullFirstRowId())
+              .sorted
+            val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+            val updateRows =
+              sql(s"SELECT value + 1 AS value, _ROW_ID FROM T WHERE id = $updateId")
+                .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+                .select("value", "_FIRST_ROW_ID", "_ROW_ID")
+            val updateMessages =
+              DataEvolutionPaimonWriter(table, dataSplits)
+                .writePartialFields(updateRows, Seq("value"))
+
+            val writer = PaimonSparkWriter(table)
+            writer.rowIdCheckConflict(updateSnapshot.id())
+            writer.commit(updateMessages)
+          }
+        }
+      )
+
+      checkAnswer(sql("SELECT sum(value), count(*) FROM T"), Seq(Row(101L, 4L)))
+    }
+  }
+
+  test("Paimon Procedure: abort failed compact rebase files before retry") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value INT)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'file.format' = 'avro',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'compaction.min.file-num' = '2',
+            |  'commit.max-retries' = '3',
+            |  'commit.min-retry-wait' = '1 ms',
+            |  'commit.max-retry-wait' = '1 ms')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 10)")
+      sql("INSERT INTO T VALUES (2, 20)")
+
+      val table = loadTable("T")
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      val attempts = new AtomicInteger()
+      var originalStagedFiles = Set.empty[String]
+      var firstRetryFiles = Set.empty[String]
+
+      CompactProcedure.executeDataEvolutionCompaction(
+        table,
+        relation,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        null,
+        _ => {
+          val attempt = attempts.getAndIncrement()
+          val updateSnapshot = table.latestSnapshot().get()
+          val dataSplits = table
+            .newSnapshotReader()
+            .withSnapshot(updateSnapshot)
+            .read()
+            .splits()
+            .asScala
+            .collect { case split: DataSplit => split }
+            .toSeq
+          val liveFiles =
+            dataSplits.flatMap(_.dataFiles().asScala).map(_.fileName()).toSet
+          val physicalFiles = dataSplits
+            .map(
+              split =>
+                table
+                  .store()
+                  .pathFactory()
+                  .bucketPath(split.partition(), split.bucket()))
+            .distinct
+            .flatMap(table.fileIO().listStatus)
+            .filterNot(_.isDir)
+            .map(_.getPath.getName)
+            .toSet
+          val stagedFiles = physicalFiles -- liveFiles
+          if (attempt == 0) {
+            originalStagedFiles = stagedFiles
+            assert(originalStagedFiles.nonEmpty)
+          } else if (attempt == 1) {
+            firstRetryFiles = stagedFiles -- originalStagedFiles
+            assert(firstRetryFiles.nonEmpty)
+          } else {
+            assert(firstRetryFiles.forall(file => !physicalFiles.contains(file)))
+          }
+
+          if (attempt < 2) {
+            val firstRowIds = dataSplits
+              .flatMap(_.dataFiles().asScala)
+              .map(_.nonNullFirstRowId())
+              .sorted
+            val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+            val updateRows = sql("SELECT value + 1 AS value, _ROW_ID FROM T WHERE id = 1")
+              .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+              .select("value", "_FIRST_ROW_ID", "_ROW_ID")
+            val updateMessages =
+              DataEvolutionPaimonWriter(table, dataSplits)
+                .writePartialFields(updateRows, Seq("value"))
+
+            val writer = PaimonSparkWriter(table)
+            writer.rowIdCheckConflict(updateSnapshot.id())
+            writer.commit(updateMessages)
+          }
+        }
+      )
+
+      Assertions.assertThat(attempts.get()).isEqualTo(3)
+      Assertions.assertThat(firstRetryFiles.nonEmpty).isTrue
+      checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 12), Row(2, 20)))
     }
   }
 

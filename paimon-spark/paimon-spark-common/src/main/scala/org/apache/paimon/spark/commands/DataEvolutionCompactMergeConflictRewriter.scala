@@ -26,6 +26,7 @@ import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.{DataSplit, IncrementalSplit}
+import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.Range
 
@@ -40,6 +41,7 @@ import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import java.util.{Collections, List => JList, Optional => JOptional}
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 
 /** Rebases MERGE-compatible partial-column files onto staged compact output boundaries. */
 class DataEvolutionCompactMergeConflictRewriter(
@@ -69,19 +71,23 @@ class DataEvolutionCompactMergeConflictRewriter(
       return JOptional.empty()
     }
 
-    val targets = messageImpls.flatMap(
-      message =>
-        normalRowIdFiles(message.compactIncrement().compactAfter().asScala)
-          .map(file => CompactTarget(message, file)))
+    val targets = messageImpls
+      .flatMap(
+        message =>
+          normalRowIdFiles(message.compactIncrement().compactAfter().asScala)
+            .map(file => CompactTarget(message, file)))
+      .toSeq
     if (targets.isEmpty) {
+      return JOptional.empty()
+    }
+    val targetIndex = new CompactTargetIndex(targets)
+    if (!targetIndex.valid) {
       return JOptional.empty()
     }
 
     // Snapshot.operation is optional and Python MERGE currently does not persist it. Validate
     // the portable partial-column file contract below instead.
-    val additions = table
-      .newSnapshotReader()
-      .withSnapshot(latestSnapshot)
+    val additions = targetReader(latestSnapshot, targets)
       .readIncrementalDiff(baseSnapshot)
       .splits()
       .asScala
@@ -93,21 +99,32 @@ class DataEvolutionCompactMergeConflictRewriter(
             .asScala
             .map(file => AddedFile(split.partition(), split.bucket(), file)))
 
-    val overlappingAdditions = additions.filter(addition => targets.exists(_.intersects(addition)))
-    if (overlappingAdditions.isEmpty) {
-      return JOptional.empty()
+    val additionsByTarget =
+      mutable.HashMap.empty[CompactTarget, mutable.ArrayBuffer[AddedFile]]
+    additions.foreach {
+      addition =>
+        val intersectingTargets = targetIndex.intersecting(addition)
+        if (intersectingTargets.nonEmpty) {
+          if (
+            !isRegularPartialFile(addition.file) ||
+            intersectingTargets.length != 1 ||
+            !intersectingTargets.head.contains(addition)
+          ) {
+            return JOptional.empty()
+          }
+          additionsByTarget
+            .getOrElseUpdate(intersectingTargets.head, mutable.ArrayBuffer.empty)
+            .append(addition)
+        }
     }
-    if (overlappingAdditions.exists(addition => !isRegularPartialFile(addition.file))) {
-      return JOptional.empty()
-    }
-    if (overlappingAdditions.exists(addition => targets.count(_.contains(addition)) != 1)) {
+    if (additionsByTarget.isEmpty) {
       return JOptional.empty()
     }
 
     val targetRewrites = targets.flatMap {
       target =>
-        val files = overlappingAdditions.filter(target.contains)
-        if (files.nonEmpty && files.exists(file => file.file.nonNullRowIdRange() != target.range)) {
+        val files = additionsByTarget.get(target).map(_.toSeq).getOrElse(Seq.empty)
+        if (files.nonEmpty) {
           val updatedFields = table
             .rowType()
             .getFieldNames
@@ -126,9 +143,7 @@ class DataEvolutionCompactMergeConflictRewriter(
       return JOptional.empty()
     }
 
-    val currentSplits = table
-      .newSnapshotReader()
-      .withSnapshot(latestSnapshot)
+    val currentSplits = targetReader(latestSnapshot, targetRewrites.map(_.target))
       .read()
       .splits()
       .asScala
@@ -146,19 +161,30 @@ class DataEvolutionCompactMergeConflictRewriter(
     JOptional.of((messageImpls ++ rewrittenMessages).map(_.asInstanceOf[CommitMessage]).asJava)
   }
 
+  private def targetReader(snapshot: Snapshot, targets: Seq[CompactTarget]): SnapshotReader = {
+    val partitions = targets.map(_.message.partition()).distinct
+    val buckets = targets.map(_.message.bucket()).toSet
+    val ranges = targets.map(_.range).distinct.sortBy(_.from)
+    table
+      .newSnapshotReader()
+      .withSnapshot(snapshot)
+      .withPartitionFilter(partitions.asJava)
+      .withBucketFilter(bucket => buckets.contains(bucket))
+      .withRowRanges(ranges.asJava)
+  }
+
   private def rewriteFiles(
       sparkSession: SparkSession,
       updatedFields: Seq[String],
       rewrites: Seq[TargetRewrite],
       currentSplits: Seq[DataSplit]): Seq[CommitMessageImpl] = {
+    val targetIndex = new CompactTargetIndex(rewrites.map(_.target))
     val relevantSplits = currentSplits.flatMap {
       split =>
         val filtered = split.filterDataFile(
           file =>
-            isNormalRowIdFile(file) && rewrites.exists(
-              rewrite =>
-                rewrite.target.sameBucket(split.partition(), split.bucket()) &&
-                  rewrite.target.range.hasIntersection(file.nonNullRowIdRange())))
+            isNormalRowIdFile(file) &&
+              targetIndex.intersects(split.partition(), split.bucket(), file.nonNullRowIdRange()))
         if (filtered.isPresent) Some(filtered.get()) else None
     }
 
@@ -177,20 +203,12 @@ class DataEvolutionCompactMergeConflictRewriter(
     val readPlan =
       SparkShimLoader.shim.copyDataSourceV2Relation(relation, relation.table, readOutput)
     val targetRanges = rewrites.map(_.target.range).toArray
-    val rowIdFilter = targetRanges
-      .map(range => col(ROW_ID_NAME).between(range.from, range.to))
-      .reduce(_ or _)
-    val firstRowId = udf(
-      (rowId: Long) =>
-        targetRanges
-          .find(range => range.from <= rowId && rowId <= range.to)
-          .map(_.from)
-          .getOrElse(
-            throw new IllegalArgumentException(s"Row ID $rowId is outside staged compact ranges.")))
+    val rangeIndex = new CompactRowIdRangeIndex(targetRanges)
+    val firstRowId = udf((rowId: Long) => rangeIndex.firstRowId(rowId))
     val rewrittenRows = createDataset(sparkSession, readPlan)
       .select((updatedFields.map(quotedColumn) :+ quotedColumn(ROW_ID_NAME)): _*)
-      .filter(rowIdFilter)
       .withColumn(FIRST_ROW_ID_NAME, firstRowId(quotedColumn(ROW_ID_NAME)))
+      .filter(quotedColumn(FIRST_ROW_ID_NAME).isNotNull)
       .repartition(col(FIRST_ROW_ID_NAME))
       .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
 
@@ -263,12 +281,6 @@ private object DataEvolutionCompactMergeConflictRewriter {
       message.partition() == partition && message.bucket() == bucket
     }
 
-    def intersects(added: AddedFile): Boolean = {
-      sameBucket(added.partition, added.bucket) &&
-      added.file.firstRowId() != null &&
-      range.hasIntersection(added.file.nonNullRowIdRange())
-    }
-
     def contains(added: AddedFile): Boolean = {
       sameBucket(added.partition, added.bucket) && containsRange(added.file.nonNullRowIdRange())
     }
@@ -282,6 +294,66 @@ private object DataEvolutionCompactMergeConflictRewriter {
       target: CompactTarget,
       mergeFiles: Seq[AddedFile],
       updatedFields: Seq[String])
+
+  private case class Bucket(partition: BinaryRow, bucket: Int)
+
+  private class CompactTargetIndex(targets: Seq[CompactTarget]) {
+
+    private val targetsByBucket = targets
+      .groupBy(target => Bucket(target.message.partition(), target.message.bucket()))
+      .map {
+        case (bucket, bucketTargets) =>
+          bucket -> bucketTargets.sortBy(_.range.from).toArray
+      }
+
+    val valid: Boolean = targetsByBucket.values.forall {
+      bucketTargets =>
+        bucketTargets.indices.drop(1).forall {
+          index => !bucketTargets(index - 1).range.hasIntersection(bucketTargets(index).range)
+        }
+    }
+
+    def intersecting(added: AddedFile): Array[CompactTarget] = {
+      if (added.file.firstRowId() == null) {
+        Array.empty
+      } else {
+        intersecting(Bucket(added.partition, added.bucket), added.file.nonNullRowIdRange())
+      }
+    }
+
+    def intersects(partition: BinaryRow, bucket: Int, range: Range): Boolean = {
+      intersecting(Bucket(partition, bucket), range).nonEmpty
+    }
+
+    private def intersecting(bucket: Bucket, range: Range): Array[CompactTarget] = {
+      targetsByBucket.get(bucket) match {
+        case None => Array.empty
+        case Some(bucketTargets) =>
+          val first = firstPossible(bucketTargets, range)
+          val matches = mutable.ArrayBuffer.empty[CompactTarget]
+          var index = first
+          while (index < bucketTargets.length && bucketTargets(index).range.from <= range.to) {
+            matches.append(bucketTargets(index))
+            index += 1
+          }
+          matches.toArray
+      }
+    }
+
+    private def firstPossible(targets: Array[CompactTarget], range: Range): Int = {
+      var low = 0
+      var high = targets.length
+      while (low < high) {
+        val mid = (low + high) >>> 1
+        if (targets(mid).range.to < range.from) {
+          low = mid + 1
+        } else {
+          high = mid
+        }
+      }
+      low
+    }
+  }
 
   private def normalRowIdFiles(files: Iterable[DataFileMeta]): Seq[DataFileMeta] = {
     files.filter(isNormalRowIdFile).toSeq
@@ -300,5 +372,32 @@ private object DataEvolutionCompactMergeConflictRewriter {
 
   private def quotedColumn(name: String) = {
     functions.col("`" + name.replace("`", "``") + "`")
+  }
+}
+
+private[spark] class CompactRowIdRangeIndex(inputRanges: Seq[Range]) extends Serializable {
+
+  private val ranges = inputRanges.sortBy(_.from).toArray
+  require(
+    ranges.indices.drop(1).forall(index => !ranges(index - 1).hasIntersection(ranges(index))),
+    "Staged compact row ID ranges must not overlap.")
+
+  def firstRowId(rowId: Long): java.lang.Long = {
+    var low = 0
+    var high = ranges.length
+    while (low < high) {
+      val mid = (low + high) >>> 1
+      if (ranges(mid).from <= rowId) {
+        low = mid + 1
+      } else {
+        high = mid
+      }
+    }
+    val index = low - 1
+    if (index >= 0 && rowId <= ranges(index).to) {
+      java.lang.Long.valueOf(ranges(index).from)
+    } else {
+      null
+    }
   }
 }
