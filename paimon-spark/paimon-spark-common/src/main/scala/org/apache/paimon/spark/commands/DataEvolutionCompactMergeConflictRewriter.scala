@@ -56,6 +56,7 @@ class DataEvolutionCompactMergeConflictRewriter(
       compactMessages: JList[CommitMessage]): JOptional[JList[CommitMessage]] = {
     if (
       table.coreOptions().deletionVectorsEnabled() ||
+      latestSnapshot.schemaId() != baseSnapshot.schemaId() ||
       latestSnapshot.id() <= baseSnapshot.id()
     ) {
       return JOptional.empty()

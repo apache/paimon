@@ -21,6 +21,7 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
 import org.apache.paimon.fs.Path
+import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
@@ -1843,6 +1844,77 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         .map(file => (file.nonNullFirstRowId(), file.rowCount()))
         .distinct
       assert(ranges == Seq((0L, 2L)), ranges)
+    }
+  }
+
+  test("Paimon Procedure: reject data evolution compact rebase after schema evolution") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value INT)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'file.format' = 'avro',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'compaction.min.file-num' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 10)")
+      sql("INSERT INTO T VALUES (2, 20)")
+
+      val table = loadTable("T")
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      val updated = new AtomicBoolean(false)
+
+      val exception = intercept[RuntimeException] {
+        CompactProcedure.executeDataEvolutionCompaction(
+          table,
+          relation,
+          null,
+          null,
+          new JavaSparkContext(spark.sparkContext),
+          spark,
+          null,
+          _ => {
+            if (updated.compareAndSet(false, true)) {
+              sql("ALTER TABLE T ADD COLUMN extra INT")
+              val evolvedTable = loadTable("T")
+              val updateSnapshot = evolvedTable.latestSnapshot().get()
+              val dataSplits = evolvedTable
+                .newSnapshotReader()
+                .withSnapshot(updateSnapshot)
+                .read()
+                .splits()
+                .asScala
+                .collect { case split: DataSplit => split }
+                .toSeq
+              val firstRowIds = dataSplits
+                .flatMap(_.dataFiles().asScala)
+                .map(_.nonNullFirstRowId())
+                .sorted
+              val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+              val updateRows =
+                sql("SELECT value + 1 AS value, 99 AS extra, _ROW_ID FROM T WHERE id = 1")
+                  .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+                  .select("value", "extra", "_FIRST_ROW_ID", "_ROW_ID")
+              val updateMessages =
+                DataEvolutionPaimonWriter(evolvedTable, dataSplits)
+                  .writePartialFields(updateRows, Seq("value", "extra"))
+
+              val writer = PaimonSparkWriter(evolvedTable)
+              writer.rowIdCheckConflict(updateSnapshot.id())
+              writer.commit(updateMessages)
+            }
+          }
+        )
+      }
+
+      Assertions
+        .assertThat(exception)
+        .hasRootCauseInstanceOf(classOf[DataEvolutionRowRangeConflictException])
+      checkAnswer(
+        sql("SELECT id, value, extra FROM T ORDER BY id"),
+        Seq(Row(1, 11, 99), Row(2, 20, null)))
     }
   }
 
