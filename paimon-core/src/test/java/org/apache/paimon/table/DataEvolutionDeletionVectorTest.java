@@ -81,6 +81,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.errors.ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
@@ -721,6 +722,93 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testStaleMaterializeRejectedAfterConcurrentUpdate() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        commitDeletionVectors(table, DEFAULT_DV_SPECS);
+
+        Snapshot materializeSnapshot = table.latestSnapshot().get();
+        List<CommitMessage> staleMaterializeMessages =
+                prepareMaterializeDeletionVectors(table, materializeSnapshot, null);
+
+        RowType writeType = table.rowType().project(Collections.singletonList("f2"));
+        List<CommitMessage> concurrentUpdateMessages = new ArrayList<>();
+        for (int batch = 0; batch < 3; batch++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite().withWriteType(writeType)) {
+                for (int rowId = batch * 5; rowId < batch * 5 + 5; rowId++) {
+                    write.write(GenericRow.of(BinaryString.fromString("concurrent-" + rowId)));
+                }
+                List<CommitMessage> messages = write.prepareCommit();
+                setFirstRowId(messages, batch * 5L);
+                concurrentUpdateMessages.addAll(messages);
+            }
+        }
+        commit(table, concurrentUpdateMessages);
+
+        List<String> concurrentValues = expectedProjectedStrings("concurrent", FULL_RANGE);
+        assertThat(readProjectedStrings(table.newReadBuilder().withProjection(new int[] {2})))
+                .containsExactlyElementsOf(concurrentValues);
+        long updateSnapshotId = table.latestSnapshot().get().id();
+
+        assertThatThrownBy(
+                        () ->
+                                commitMaterializeDeletionVectors(
+                                        table,
+                                        materializeSnapshot,
+                                        staleMaterializeMessages,
+                                        "test-stale-materialize"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
+
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(updateSnapshotId);
+        assertThat(readProjectedStrings(table.newReadBuilder().withProjection(new int[] {2})))
+                .containsExactlyElementsOf(concurrentValues);
+    }
+
+    @Test
+    public void testStaleMaterializeAllowsNonOverlappingConcurrentUpdate() throws Exception {
+        FileStoreTable table =
+                createPartitionedReassignTable("non_overlapping_materialize_update_table", false);
+        writePartitionRows(table, "a", 0, 1, 2, 3, 4);
+        writePartitionRows(table, "b", 5, 6, 7, 8, 9);
+
+        BinaryRow partitionA = partition(table, "a");
+        BinaryRow partitionB = partition(table, "b");
+        commitDeletionVectors(
+                table, partitionA, Collections.singletonList(new DvSpec(new Range(0, 4), 1)));
+
+        Snapshot materializeSnapshot = table.latestSnapshot().get();
+        List<CommitMessage> staleMaterializeMessages =
+                prepareMaterializeDeletionVectors(table, materializeSnapshot, null);
+
+        writePartialStrings(table, "b", 5L, 5, 6, 7, 8, 9);
+        long updateSnapshotId = table.latestSnapshot().get().id();
+
+        commitMaterializeDeletionVectors(
+                table, materializeSnapshot, staleMaterializeMessages, "test-stale-materialize");
+
+        assertThat(table.latestSnapshot().get().id()).isGreaterThan(updateSnapshotId);
+        assertThat(table.latestSnapshot().get().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(anchorFilesByRange(table, partitionA).keySet())
+                .containsExactly(new Range(10, 13));
+        assertThat(anchorFilesByRange(table, partitionB).keySet()).containsExactly(new Range(5, 9));
+        assertThat(readPartitionedRows(table))
+                .containsExactlyInAnyOrder(
+                        "a|0|base-0",
+                        "a|2|base-2",
+                        "a|3|base-3",
+                        "a|4|base-4",
+                        "b|5|updated-5",
+                        "b|6|updated-6",
+                        "b|7|updated-7",
+                        "b|8|updated-8",
+                        "b|9|updated-9");
+    }
+
+    @Test
     public void testMaterializeKeepsSiblingDeletionVectorsInTouchedIndexFile() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -1133,6 +1221,14 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     private void materializeDeletionVectors(FileStoreTable table, Integer deletionFilesPerBatch)
             throws Exception {
         Snapshot snapshot = table.latestSnapshot().get();
+        List<CommitMessage> commitMessages =
+                prepareMaterializeDeletionVectors(table, snapshot, deletionFilesPerBatch);
+        commitMaterializeDeletionVectors(table, snapshot, commitMessages, "test-materialize-dv");
+    }
+
+    private List<CommitMessage> prepareMaterializeDeletionVectors(
+            FileStoreTable table, Snapshot snapshot, Integer deletionFilesPerBatch)
+            throws Exception {
         DataEvolutionDeletionVectorMaterializeCoordinator coordinator =
                 deletionFilesPerBatch == null
                         ? new DataEvolutionDeletionVectorMaterializeCoordinator(
@@ -1154,7 +1250,16 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         commitMessages.addAll(
                 new DataEvolutionCompactionCommitPreparation(table, snapshot)
                         .prepare(commitMessages));
-        try (TableCommitImpl commit = table.newCommit("test-materialize-dv")) {
+        return commitMessages;
+    }
+
+    private void commitMaterializeDeletionVectors(
+            FileStoreTable table,
+            Snapshot snapshot,
+            List<CommitMessage> commitMessages,
+            String commitUser)
+            throws Exception {
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
             commit.rowIdCheckConflictForMaterializeDvCompaction(snapshot.id())
                     .commit(commitMessages);
         }

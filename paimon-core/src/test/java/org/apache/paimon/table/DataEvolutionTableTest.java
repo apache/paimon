@@ -44,6 +44,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
@@ -71,6 +72,7 @@ import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.errors.ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
@@ -1173,6 +1175,39 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(readF0AndF2(getTableDefault()))
                 .isEqualTo(
                         Arrays.asList("0|base-0", "10|updated-10", "11|updated-11", "20|base-20"));
+    }
+
+    @Test
+    public void testConcurrentSameColumnPartialUpdateConflict() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        long firstRowId = writeFullRows(table, 10, 11);
+        long readSnapshotId = table.latestSnapshot().get().id();
+
+        RowType writeType = table.rowType().project(Collections.singletonList("f2"));
+        BatchWriteBuilderImpl staleBuilder = (BatchWriteBuilderImpl) table.newBatchWriteBuilder();
+        List<CommitMessage> staleMessages;
+        try (BatchTableWrite write = staleBuilder.newWrite().withWriteType(writeType)) {
+            write.write(GenericRow.of(BinaryString.fromString("stale-10")));
+            write.write(GenericRow.of(BinaryString.fromString("stale-11")));
+            staleMessages = write.prepareCommit();
+            setFirstRowId(staleMessages, firstRowId);
+        }
+
+        updateF2(table, firstRowId, 100, 101);
+        long concurrentSnapshotId = table.latestSnapshot().get().id();
+        staleBuilder.rowIdCheckConflict(readSnapshotId);
+
+        assertThatThrownBy(
+                        () -> {
+                            try (BatchTableCommit commit = staleBuilder.newCommit()) {
+                                commit.commit(staleMessages);
+                            }
+                        })
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE);
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(concurrentSnapshotId);
+        assertThat(readF0AndF2(table)).isEqualTo(Arrays.asList("10|updated-100", "11|updated-101"));
     }
 
     @Test
