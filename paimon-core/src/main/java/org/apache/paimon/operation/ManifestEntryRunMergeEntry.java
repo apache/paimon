@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
+import org.apache.paimon.manifest.DeletedRowIdSet;
 import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
@@ -223,14 +224,14 @@ final class ManifestEntryRunMergeEntry {
     static class Filter {
 
         final CompactFileIdentifierSet deletedIdentifiers;
-        final ManifestFileSorter.DeletedRowIdSet deletedRowIds;
+        final DeletedRowIdSet deletedRowIds;
         final boolean useRowIdFilter;
         final ThreadLocal<IdentifierEncoder> identifier =
                 ThreadLocal.withInitial(IdentifierEncoder::new);
 
         Filter(
                 CompactFileIdentifierSet deletedIdentifiers,
-                ManifestFileSorter.DeletedRowIdSet deletedRowIds,
+                DeletedRowIdSet deletedRowIds,
                 boolean useRowIdFilter) {
             this.deletedIdentifiers = deletedIdentifiers;
             this.deletedRowIds = deletedRowIds;
@@ -275,7 +276,7 @@ final class ManifestEntryRunMergeEntry {
 
             Minor(
                     CompactFileIdentifierSet deletedIdentifiers,
-                    ManifestFileSorter.DeletedRowIdSet deletedRowIds,
+                    DeletedRowIdSet deletedRowIds,
                     boolean useRowIdFilter) {
                 super(deletedIdentifiers, deletedRowIds, useRowIdFilter);
             }

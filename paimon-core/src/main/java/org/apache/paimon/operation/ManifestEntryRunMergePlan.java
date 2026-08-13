@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.avro.AvroRawBlock;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
+import org.apache.paimon.manifest.DeletedRowIdSet;
 import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestAvroReader;
@@ -101,7 +102,7 @@ final class ManifestEntryRunMergePlan {
             ManifestFile manifestFile,
             ManifestEntryRunMergeEntry.Filter filter,
             CompactFileIdentifierSet deletedIdentifiers,
-            ManifestFileSorter.DeletedRowIdSet deletedRowIds,
+            DeletedRowIdSet deletedRowIds,
             List<ManifestFileMeta> newFilesForAbort)
             throws Exception {
         List<Cursor> cursors = new ArrayList<>(sources.size());
@@ -171,7 +172,7 @@ final class ManifestEntryRunMergePlan {
             SelectionTree selectionTree,
             ManifestFile manifestFile,
             CompactFileIdentifierSet deletedIdentifiers,
-            ManifestFileSorter.DeletedRowIdSet deletedRowIds)
+            DeletedRowIdSet deletedRowIds)
             throws Exception {
         ManifestAvroWriter addWriter = manifestFile.createAvroWriter();
         ManifestAvroWriter deleteWriter = manifestFile.createAvroWriter();

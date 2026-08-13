@@ -1174,28 +1174,6 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         }
     }
 
-    private static class CountingReadFileIO extends LocalFileIO {
-
-        private final Map<String, AtomicInteger> readCounts = new ConcurrentHashMap<>();
-
-        @Override
-        public SeekableInputStream newInputStream(Path path) throws IOException {
-            readCounts
-                    .computeIfAbsent(path.getName(), ignored -> new AtomicInteger())
-                    .incrementAndGet();
-            return super.newInputStream(path);
-        }
-
-        private int readCount(String fileName) {
-            AtomicInteger count = readCounts.get(fileName);
-            return count == null ? 0 : count.get();
-        }
-
-        private void resetReadCounts() {
-            readCounts.clear();
-        }
-    }
-
     // ==================== Manifest Sort Tests ====================
 
     /**

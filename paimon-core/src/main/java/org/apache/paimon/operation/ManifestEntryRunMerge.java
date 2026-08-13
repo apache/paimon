@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
+import org.apache.paimon.manifest.DeletedRowIdSet;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestAvroReader;
 import org.apache.paimon.manifest.ManifestAvroReader.RawBlock;
@@ -153,7 +154,7 @@ final class ManifestEntryRunMerge {
             ManifestFile manifestFile,
             List<ManifestFileMeta> newFilesForAbort,
             CompactFileIdentifierSet deletedIdentifiers,
-            ManifestFileSorter.DeletedRowIdSet deletedRowIds,
+            DeletedRowIdSet deletedRowIds,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         ManifestEntryRunMergeEntry.Filter filter =
@@ -186,7 +187,7 @@ final class ManifestEntryRunMerge {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         CompactFileIdentifierSet deletedIdentifiers = new CompactFileIdentifierSet();
-        ManifestFileSorter.DeletedRowIdSet deletedRowIds = new ManifestFileSorter.DeletedRowIdSet();
+        DeletedRowIdSet deletedRowIds = new DeletedRowIdSet();
         ManifestEntryRunMergeEntry.Filter.Minor filter =
                 new ManifestEntryRunMergeEntry.Filter.Minor(
                         deletedIdentifiers, deletedRowIds, true);

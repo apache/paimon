@@ -27,6 +27,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
+import org.apache.paimon.manifest.DeletedRowIdSet;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -131,19 +132,17 @@ public class ManifestFileSorter {
          * <p>Value: true if fullCompaction is true and the file overlaps with delete partitions. It
          * means the file needs to eliminate delete entries file
          */
-        final Map<ManifestFileMeta, Boolean> defaultCompactFiles;
         final Map<ManifestFileMeta, Boolean> compactWithoutSort;
 
         ClassifyResult(
                 List<ManifestFileMeta> lsmFiles,
                 CompactFileIdentifierSet deleteEntries,
                 DeletedRowIdSet deletedRowIds,
-                Map<ManifestFileMeta, Boolean> defaultCompactFiles) {
+                Map<ManifestFileMeta, Boolean> compactWithoutSort) {
             this.lsmFiles = lsmFiles;
             this.deleteEntries = deleteEntries;
             this.deletedRowIds = deletedRowIds;
-            this.defaultCompactFiles = defaultCompactFiles;
-            this.compactWithoutSort = defaultCompactFiles;
+            this.compactWithoutSort = compactWithoutSort;
         }
     }
 
@@ -160,128 +159,6 @@ public class ManifestFileSorter {
             this.identifiers = identifiers;
             this.rowIds = rowIds;
             this.partitions = partitions;
-        }
-    }
-
-    /** Primitive set used by RowID full compaction to avoid rebuilding file identifiers. */
-    static final class DeletedRowIdSet {
-
-        private static final long EMPTY = Long.MIN_VALUE;
-        private long[] table = emptyTable(16);
-        private int size;
-        private boolean containsMinValue;
-        private @Nullable long[] sortedRowIds;
-
-        void add(long value) {
-            if (value == EMPTY) {
-                if (!containsMinValue) {
-                    containsMinValue = true;
-                    size++;
-                    sortedRowIds = null;
-                }
-                return;
-            }
-            if ((size + 1) * 2 > table.length) {
-                grow();
-            }
-            int slot = slot(value, table.length);
-            while (table[slot] != EMPTY) {
-                if (table[slot] == value) {
-                    return;
-                }
-                slot = (slot + 1) & (table.length - 1);
-            }
-            table[slot] = value;
-            size++;
-            sortedRowIds = null;
-        }
-
-        boolean contains(long value) {
-            if (value == EMPTY) {
-                return containsMinValue;
-            }
-            int slot = slot(value, table.length);
-            while (table[slot] != EMPTY) {
-                if (table[slot] == value) {
-                    return true;
-                }
-                slot = (slot + 1) & (table.length - 1);
-            }
-            return false;
-        }
-
-        boolean intersects(long minInclusive, long maxInclusive) {
-            if (minInclusive > maxInclusive) {
-                return true;
-            }
-            long[] values = sortedRowIds();
-            int position = java.util.Arrays.binarySearch(values, minInclusive);
-            if (position < 0) {
-                position = -position - 1;
-            }
-            return position < values.length && values[position] <= maxInclusive;
-        }
-
-        private long[] sortedRowIds() {
-            if (sortedRowIds != null) {
-                return sortedRowIds;
-            }
-            long[] values = new long[size];
-            int position = 0;
-            if (containsMinValue) {
-                values[position++] = EMPTY;
-            }
-            for (long value : table) {
-                if (value != EMPTY) {
-                    values[position++] = value;
-                }
-            }
-            if (position != size) {
-                throw new IllegalStateException("Failed to snapshot deleted RowID set.");
-            }
-            java.util.Arrays.sort(values);
-            sortedRowIds = values;
-            return values;
-        }
-
-        void prepareRangeIndex() {
-            // Publish the immutable sorted snapshot before concurrent manifest planning starts.
-            sortedRowIds();
-        }
-
-        void releaseRangeIndex() {
-            sortedRowIds = null;
-        }
-
-        private void grow() {
-            long[] previous = table;
-            if (previous.length >= (1 << 30)) {
-                throw new IllegalStateException("Too many deleted RowIDs in one manifest group.");
-            }
-            table = emptyTable(previous.length << 1);
-            int previousSize = size;
-            size = containsMinValue ? 1 : 0;
-            for (long value : previous) {
-                if (value != EMPTY) {
-                    add(value);
-                }
-            }
-            if (size != previousSize) {
-                throw new IllegalStateException("Failed to grow deleted RowID set.");
-            }
-        }
-
-        private static int slot(long value, int length) {
-            value ^= value >>> 33;
-            value *= 0xff51afd7ed558ccdL;
-            value ^= value >>> 33;
-            return ((int) value) & (length - 1);
-        }
-
-        private static long[] emptyTable(int length) {
-            long[] table = new long[length];
-            java.util.Arrays.fill(table, EMPTY);
-            return table;
         }
     }
 
@@ -633,7 +510,7 @@ public class ManifestFileSorter {
                 externalSortConfig,
                 classification.deleteEntries,
                 classification.deletedRowIds,
-                classification.defaultCompactFiles,
+                classification.compactWithoutSort,
                 levelRuns,
                 pickedRuns);
     }
