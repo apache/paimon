@@ -86,11 +86,16 @@ One row per persisted snapshot.
 | `base_manifest_list`      | STRING NOT NULL |                                |
 | `delta_manifest_list`     | STRING NOT NULL |                                |
 | `changelog_manifest_list` | STRING          |                                |
-| `total_record_count`      | BIGINT          |                                |
-| `delta_record_count`      | BIGINT          |                                |
+| `total_record_count`      | BIGINT          | Unmerged record count of all live data files; not a logical row count |
+| `delta_record_count`      | BIGINT          | Net change of the unmerged record count from added and deleted data files |
 | `changelog_record_count`  | BIGINT          |                                |
 | `watermark`               | BIGINT          |                                |
 | `next_row_id`             | BIGINT          |                                |
+
+Dedicated Format columns are stored in separate data files, and each of those files contributes to
+the snapshot record counts. For example, appending `N` logical rows to a table with one dedicated
+BLOB column increases `delta_record_count` by `2 * N`. Use `COUNT(*)` when you need the logical row
+count.
 
 ### `$schemas`
 
