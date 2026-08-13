@@ -116,7 +116,7 @@ class DataEvolutionCompactMergeConflictRewriter(
           if (updatedFields.isEmpty) {
             return JOptional.empty()
           }
-          Some(TargetRewrite(target, files, updatedFields))
+          Some(TargetRewrite(target, files.toSeq, updatedFields))
         } else {
           None
         }
@@ -139,7 +139,7 @@ class DataEvolutionCompactMergeConflictRewriter(
       .toSeq
       .flatMap {
         case (updatedFields, rewrites) =>
-          rewriteFiles(sparkSession, updatedFields, rewrites, currentSplits)
+          rewriteFiles(sparkSession, updatedFields, rewrites.toSeq, currentSplits)
       }
 
     JOptional.of((messageImpls ++ rewrittenMessages).map(_.asInstanceOf[CommitMessage]).asJava)
