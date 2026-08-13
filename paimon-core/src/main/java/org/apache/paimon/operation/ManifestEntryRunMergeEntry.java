@@ -49,6 +49,7 @@ final class ManifestEntryRunMergeEntry {
         int partitionId;
         int partitionRank;
         byte kind;
+        boolean hasRowId;
         long firstRowId;
         long rangeEnd;
         long reverseSequence;
@@ -67,6 +68,7 @@ final class ManifestEntryRunMergeEntry {
             this.partitionId = partitions.id(entry.partitionBytes());
             this.partitionRank = partitions.rank(partitionId);
             this.kind = entry.kind().toByteValue();
+            this.hasRowId = true;
             this.firstRowId = firstRowId;
             this.rangeEnd = firstRowId + entry.file().rowCount() - 1L;
             this.reverseSequence = Long.MAX_VALUE - entry.file().maxSequenceNumber();
@@ -83,6 +85,7 @@ final class ManifestEntryRunMergeEntry {
             this.partitionId = partitions.id(record.getBinary(ManifestEntryRunMerge.PARTITION));
             this.partitionRank = partitions.rank(partitionId);
             this.kind = record.getByte(ManifestEntryRunMerge.KIND);
+            this.hasRowId = true;
             this.firstRowId = file.getLong(ManifestEntryRunMerge.FIRST_ROW_ID);
             this.rangeEnd = firstRowId + file.getLong(ManifestEntryRunMerge.ROW_COUNT) - 1L;
             this.reverseSequence =
@@ -97,10 +100,21 @@ final class ManifestEntryRunMergeEntry {
             this.fileNameLength = fileNameBytes.length;
         }
 
+        void replaceForCompaction(GenericRow record) {
+            InternalRow file = file(record);
+            this.kind = record.getByte(ManifestEntryRunMerge.KIND);
+            this.hasRowId = !file.isNullAt(ManifestEntryRunMerge.FIRST_ROW_ID);
+            if (hasRowId) {
+                this.firstRowId = file.getLong(ManifestEntryRunMerge.FIRST_ROW_ID);
+                this.rangeEnd = firstRowId + file.getLong(ManifestEntryRunMerge.ROW_COUNT) - 1L;
+            }
+        }
+
         void copyFrom(Key key) {
             this.partitionId = key.partitionId;
             this.partitionRank = key.partitionRank;
             this.kind = key.kind;
+            this.hasRowId = key.hasRowId;
             this.firstRowId = key.firstRowId;
             this.rangeEnd = key.rangeEnd;
             this.reverseSequence = key.reverseSequence;
@@ -139,6 +153,10 @@ final class ManifestEntryRunMergeEntry {
             this.sortKey = sortKey;
         }
 
+        PartitionDictionary() {
+            this.sortKey = null;
+        }
+
         int id(byte[] bytes) {
             return id(bytes, 0, bytes.length);
         }
@@ -173,6 +191,7 @@ final class ManifestEntryRunMergeEntry {
         }
 
         int compareIds(int left, int right) {
+            checkState(sortKey != null, "Partition dictionary has no sort key.");
             return sortKey.comparePartitions(partitions[left], partitions[right]);
         }
 
@@ -205,14 +224,17 @@ final class ManifestEntryRunMergeEntry {
 
         final CompactFileIdentifierSet deletedIdentifiers;
         final ManifestFileSorter.DeletedRowIdSet deletedRowIds;
+        final boolean useRowIdFilter;
         final ThreadLocal<IdentifierEncoder> identifier =
                 ThreadLocal.withInitial(IdentifierEncoder::new);
 
         Filter(
                 CompactFileIdentifierSet deletedIdentifiers,
-                ManifestFileSorter.DeletedRowIdSet deletedRowIds) {
+                ManifestFileSorter.DeletedRowIdSet deletedRowIds,
+                boolean useRowIdFilter) {
             this.deletedIdentifiers = deletedIdentifiers;
             this.deletedRowIds = deletedRowIds;
+            this.useRowIdFilter = useRowIdFilter;
         }
 
         boolean include(ProjectedManifestEntry entry) {
@@ -220,15 +242,7 @@ final class ManifestEntryRunMergeEntry {
         }
 
         boolean include(GenericRow record, Key key) {
-            if (key.kind != FileKind.ADD.toByteValue()) {
-                return false;
-            }
-            if (!deletedRowIds.contains(key.firstRowId)) {
-                return true;
-            }
-
-            ReusableIdentifier reusable = identifier.get().replace(record);
-            return !deletedIdentifiers.contains(reusable);
+            return key.kind == FileKind.ADD.toByteValue() && !isDeleted(record, key);
         }
 
         boolean copyable(GenericRow record, Key key) {
@@ -245,12 +259,25 @@ final class ManifestEntryRunMergeEntry {
             return identifier.get().replace(record);
         }
 
+        boolean isDeleted(GenericRow record, Key key) {
+            // RowID is only a cheap negative filter. The complete identifier remains the
+            // authoritative match, and is also sufficient for manifests which predate RowID.
+            if (useRowIdFilter) {
+                checkState(key.hasRowId, "First row id should not be null.");
+                if (!deletedRowIds.contains(key.firstRowId)) {
+                    return false;
+                }
+            }
+            return deletedIdentifiers.contains(identifier(record));
+        }
+
         static final class Minor extends Filter {
 
             Minor(
                     CompactFileIdentifierSet deletedIdentifiers,
-                    ManifestFileSorter.DeletedRowIdSet deletedRowIds) {
-                super(deletedIdentifiers, deletedRowIds);
+                    ManifestFileSorter.DeletedRowIdSet deletedRowIds,
+                    boolean useRowIdFilter) {
+                super(deletedIdentifiers, deletedRowIds, useRowIdFilter);
             }
 
             @Override
@@ -276,7 +303,10 @@ final class ManifestEntryRunMergeEntry {
                 ReusableIdentifier reusable = identifier(record);
                 synchronized (this) {
                     deletedIdentifiers.add(reusable);
-                    deletedRowIds.add(key.firstRowId);
+                    if (useRowIdFilter) {
+                        checkState(key.hasRowId, "First row id should not be null.");
+                        deletedRowIds.add(key.firstRowId);
+                    }
                 }
             }
 
@@ -285,7 +315,7 @@ final class ManifestEntryRunMergeEntry {
                 // A DELETE preserves the deleted ADD's globally unique first RowID. A range hit may
                 // be a false positive and only disables block copying; a miss proves the block has
                 // no deleted ADD.
-                return !deletedRowIds.intersects(minRowId, maxRowId);
+                return useRowIdFilter && !deletedRowIds.intersects(minRowId, maxRowId);
             }
         }
 

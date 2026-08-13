@@ -72,6 +72,7 @@ public class ManifestFileSorter {
         final boolean fullCompaction;
         final boolean runMergeOptimizeEnabled;
         final ManifestSortKey sortKey;
+        final RowType partitionType;
         final ManifestEntryExternalSort.ExternalSortConfig externalSortConfig;
         final CompactFileIdentifierSet deleteEntries;
         final DeletedRowIdSet deletedRowIds;
@@ -92,6 +93,7 @@ public class ManifestFileSorter {
                 boolean fullCompaction,
                 boolean runMergeOptimizeEnabled,
                 ManifestSortKey sortKey,
+                RowType partitionType,
                 ManifestEntryExternalSort.ExternalSortConfig externalSortConfig,
                 CompactFileIdentifierSet deleteEntries,
                 DeletedRowIdSet deletedRowIds,
@@ -101,6 +103,7 @@ public class ManifestFileSorter {
             this.fullCompaction = fullCompaction;
             this.runMergeOptimizeEnabled = runMergeOptimizeEnabled;
             this.sortKey = sortKey;
+            this.partitionType = partitionType;
             this.externalSortConfig = externalSortConfig;
             this.deleteEntries = deleteEntries;
             this.deletedRowIds = deletedRowIds;
@@ -241,6 +244,11 @@ public class ManifestFileSorter {
             return values;
         }
 
+        void prepareRangeIndex() {
+            // Publish the immutable sorted snapshot before concurrent manifest planning starts.
+            sortedRowIds();
+        }
+
         void releaseRangeIndex() {
             sortedRowIds = null;
         }
@@ -293,7 +301,7 @@ public class ManifestFileSorter {
             @Nullable IOManager ioManager)
             throws Exception {
         String sortPartitionField = options.manifestSortPartitionField();
-        boolean runMergeOptimizeEnabled = options.manifestSortRunMergeOptimizeEnabled();
+        boolean runMergeOptimizeEnabled = options.manifestMergeOptimizeEnabled();
         long suggestedMetaSize = options.manifestTargetSize().getBytes();
         int suggestedMinMetaCount = options.manifestMergeMinCount();
         long fullCompactionThreshold = options.manifestFullCompactionThresholdSize().getBytes();
@@ -621,6 +629,7 @@ public class ManifestFileSorter {
                 fullCompaction,
                 useRunMergeOptimize,
                 sortKey,
+                partitionType,
                 externalSortConfig,
                 classification.deleteEntries,
                 classification.deletedRowIds,
@@ -1264,6 +1273,7 @@ public class ManifestFileSorter {
                     ManifestEntryRunMerge.sortAndWriteFullEntries(
                             section,
                             (RowIdEntrySortKey) ctx.sortKey,
+                            ctx.partitionType,
                             manifestFile,
                             sortNewFiles,
                             ctx.deleteEntries,
@@ -1305,6 +1315,7 @@ public class ManifestFileSorter {
                     ManifestEntryRunMerge.sortAndWriteMinorEntries(
                             section,
                             (RowIdEntrySortKey) ctx.sortKey,
+                            ctx.partitionType,
                             manifestFile,
                             sortNewFiles,
                             manifestReadParallelism);

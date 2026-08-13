@@ -1634,9 +1634,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
     @Test
     public void testDisablingRunMergeOptimizePreservesDataEvolutionRowIdSort() {
-        assertThat(
-                        CoreOptions.fromMap(Collections.emptyMap())
-                                .manifestSortRunMergeOptimizeEnabled())
+        assertThat(CoreOptions.fromMap(Collections.emptyMap()).manifestMergeOptimizeEnabled())
                 .isTrue();
 
         List<ManifestFileMeta> input =
@@ -1650,12 +1648,12 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
-        testOptions.set("manifest-sort.run-merge-optimize.enabled", "false");
+        testOptions.set("manifest.merge-optimize.enabled", "false");
         testOptions.set("data-evolution.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
         CoreOptions coreOptions = CoreOptions.fromMap(testOptions.toMap());
 
-        assertThat(coreOptions.manifestSortRunMergeOptimizeEnabled()).isFalse();
+        assertThat(coreOptions.manifestMergeOptimizeEnabled()).isFalse();
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(input, manifestFile, getPartitionType(), coreOptions);
@@ -2229,9 +2227,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
             List<ManifestFileMeta> input, boolean runMergeOptimizeEnabled) {
         Options options = new Options();
         options.set("manifest-sort.enabled", "true");
-        options.set(
-                "manifest-sort.run-merge-optimize.enabled",
-                Boolean.toString(runMergeOptimizeEnabled));
+        options.set("manifest.merge-optimize.enabled", Boolean.toString(runMergeOptimizeEnabled));
         options.set("data-evolution.enabled", "true");
         options.set("manifest.full-compaction-threshold-size", Long.MAX_VALUE + "B");
         return ManifestFileMerger.merge(

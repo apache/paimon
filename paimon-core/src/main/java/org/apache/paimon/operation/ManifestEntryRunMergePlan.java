@@ -30,7 +30,7 @@ import org.apache.paimon.manifest.ManifestAvroReader;
 import org.apache.paimon.manifest.ManifestAvroReader.RawBlock;
 import org.apache.paimon.manifest.ManifestAvroReader.RowIterator;
 import org.apache.paimon.manifest.ManifestAvroWriter;
-import org.apache.paimon.manifest.ManifestAvroWriter.EncodedBlock;
+import org.apache.paimon.manifest.ManifestAvroWriter.EncodedBlockMeta;
 import org.apache.paimon.manifest.ManifestAvroWriter.EncodedEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -152,12 +152,7 @@ final class ManifestEntryRunMergePlan {
                     continue;
                 }
                 cursor.materializeCurrent();
-                ByteBuffer encodedRecord = cursor.encodedRecord();
-                if (encodedRecord == null) {
-                    writer.write(cursor.current());
-                } else {
-                    writer.writeEncoded(encodedRecord, cursor.metadata());
-                }
+                writeCurrent(writer, cursor);
                 selectionTree.update(winner, cursor.advance());
             }
         } catch (Exception e) {
@@ -233,6 +228,11 @@ final class ManifestEntryRunMergePlan {
     }
 
     private static void writeCurrent(ManifestAvroWriter writer, Cursor cursor) throws Exception {
+        InternalRow decodedRow = cursor.decodedRow();
+        if (decodedRow != null) {
+            writer.writeRow(decodedRow, cursor.metadata());
+            return;
+        }
         ByteBuffer encodedRecord = cursor.encodedRecord();
         if (encodedRecord == null) {
             writer.write(cursor.current());
@@ -355,6 +355,10 @@ final class ManifestEntryRunMergePlan {
         @Nullable
         ByteBuffer encodedRecord();
 
+        default @Nullable InternalRow decodedRow() {
+            return null;
+        }
+
         ReusableIdentifier identifier();
 
         default boolean hasCopyableBlock() {
@@ -369,7 +373,7 @@ final class ManifestEntryRunMergePlan {
             throw new UnsupportedOperationException();
         }
 
-        default EncodedBlock blockMetadata() {
+        default EncodedBlockMeta blockMetadata() {
             throw new UnsupportedOperationException();
         }
 
@@ -386,6 +390,7 @@ final class ManifestEntryRunMergePlan {
     static final class PrimitiveManifestRunCursor implements Cursor {
 
         final ManifestAvroReader reader;
+        final boolean encodedRecordsCompatible;
         final ManifestEntryRunMergeEntry.Filter filter;
         final ManifestEntryRunMergeEntry.PartitionDictionary partitions;
         final ManifestEntryRunMergeEntry.Key key = new ManifestEntryRunMergeEntry.Key();
@@ -401,6 +406,9 @@ final class ManifestEntryRunMergePlan {
         @Nullable RawBlock currentRawBlock;
         @Nullable RowIterator currentRows;
         @Nullable GenericRow currentRow;
+        @Nullable GenericRow currentSourceRow;
+        @Nullable GenericRow compactRow;
+        @Nullable GenericRow compactFile;
         @Nullable ManifestEntryRunMerge.Discovery.BlockInfo currentBlock;
         boolean closed;
 
@@ -413,7 +421,13 @@ final class ManifestEntryRunMergePlan {
                 ManifestEntryRunMergeEntry.Filter filter,
                 ManifestEntryRunMergeEntry.PartitionDictionary partitions)
                 throws Exception {
-            this.reader = manifestFile.scanForRunMerge(meta.fileName(), meta.fileSize());
+            this.reader = manifestFile.scanAvroBlocks(meta.fileName(), meta.fileSize());
+            this.encodedRecordsCompatible = reader.rawBlockCopySupported();
+            if (!encodedRecordsCompatible) {
+                this.compactRow =
+                        new GenericRow(ManifestEntryRunMerge.ENTRY_LAYOUT.getFieldCount());
+                this.compactFile = new GenericRow(ManifestEntryRunMerge.FILE_FIELD_COUNT);
+            }
             this.filter = filter;
             this.partitions = partitions;
             this.blocks = blocks;
@@ -453,7 +467,12 @@ final class ManifestEntryRunMergePlan {
                 checkState(
                         currentRows != null && currentRows.hasNext(),
                         "Manifest block ends before its discovered boundary.");
-                currentRow = currentRows.next();
+                currentSourceRow = currentRows.next();
+                currentRow =
+                        encodedRecordsCompatible
+                                ? currentSourceRow
+                                : ManifestEntryRunMerge.projectEntryLayout(
+                                        currentSourceRow, compactRow, compactFile);
                 decodedRemaining--;
                 key.replace(currentRow, partitions);
                 if (filter.include(currentRow, key)) {
@@ -477,6 +496,7 @@ final class ManifestEntryRunMergePlan {
             current = false;
             currentRows = null;
             currentRow = null;
+            currentSourceRow = null;
             while (blockIndex < blocks.size()) {
                 ManifestEntryRunMerge.Discovery.BlockInfo info = blocks.get(blockIndex);
                 if (info.start >= runEnd) {
@@ -500,7 +520,11 @@ final class ManifestEntryRunMergePlan {
                 long overlapStart = Math.max(runStart, info.start);
                 long overlapEnd = Math.min(runEnd, info.end);
                 long prefix = overlapStart - info.start;
-                currentRows = currentRawBlock.toRows(ManifestEntryRunMerge.ENTRY_LAYOUT);
+                currentRows =
+                        currentRawBlock.toRows(
+                                encodedRecordsCompatible
+                                        ? ManifestEntryRunMerge.ENTRY_LAYOUT
+                                        : ManifestEntry.MANIFEST_ROW_TYPE);
                 for (long i = 0; i < prefix; i++) {
                     checkState(
                             currentRows.hasNext(),
@@ -538,7 +562,12 @@ final class ManifestEntryRunMergePlan {
 
         @Override
         public ByteBuffer encodedRecord() {
-            return current ? currentRows.encodedRecord() : null;
+            return current && encodedRecordsCompatible ? currentRows.encodedRecord() : null;
+        }
+
+        @Override
+        public InternalRow decodedRow() {
+            return current && !encodedRecordsCompatible ? currentSourceRow : null;
         }
 
         @Override
@@ -563,7 +592,7 @@ final class ManifestEntryRunMergePlan {
         }
 
         @Override
-        public EncodedBlock blockMetadata() {
+        public EncodedBlockMeta blockMetadata() {
             return currentBlock.metadata;
         }
 
@@ -584,9 +613,18 @@ final class ManifestEntryRunMergePlan {
             rawBlock = false;
             decodedRemaining = currentBlock.end - currentBlock.start;
             checkState(decodedRemaining > 0, "Raw Avro block is empty.");
-            currentRows = currentRawBlock.toRows(ManifestEntryRunMerge.ENTRY_LAYOUT);
+            currentRows =
+                    currentRawBlock.toRows(
+                            encodedRecordsCompatible
+                                    ? ManifestEntryRunMerge.ENTRY_LAYOUT
+                                    : ManifestEntry.MANIFEST_ROW_TYPE);
             checkState(currentRows.hasNext(), "Manifest block cannot be decompressed.");
-            currentRow = currentRows.next();
+            currentSourceRow = currentRows.next();
+            currentRow =
+                    encodedRecordsCompatible
+                            ? currentSourceRow
+                            : ManifestEntryRunMerge.projectEntryLayout(
+                                    currentSourceRow, compactRow, compactFile);
             decodedRemaining--;
             key.replace(currentRow, partitions);
             checkState(
@@ -615,6 +653,9 @@ final class ManifestEntryRunMergePlan {
             currentRawBlock = null;
             currentRows = null;
             currentRow = null;
+            currentSourceRow = null;
+            compactRow = null;
+            compactFile = null;
             currentBlock = null;
             rawBlock = false;
             key.clear();

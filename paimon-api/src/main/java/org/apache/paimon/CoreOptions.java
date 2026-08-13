@@ -598,15 +598,6 @@ public class CoreOptions implements Serializable {
                                     + " disabled, ordinary manifest compaction uses the legacy"
                                     + " full-entry merger.");
 
-    public static final ConfigOption<Boolean> MANIFEST_SORT_RUN_MERGE_OPTIMIZE_ENABLED =
-            key("manifest-sort.run-merge-optimize.enabled")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Whether to use streaming run merge for RowID-based manifest sorting."
-                                    + " When disabled, the external sorter is used without changing"
-                                    + " the RowID sort semantics.");
-
     public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
             key("partition.default-name")
                     .stringType()
@@ -3086,10 +3077,6 @@ public class CoreOptions implements Serializable {
 
     public boolean manifestMergeOptimizeEnabled() {
         return options.get(MANIFEST_MERGE_OPTIMIZE_ENABLED);
-    }
-
-    public boolean manifestSortRunMergeOptimizeEnabled() {
-        return options.get(MANIFEST_SORT_RUN_MERGE_OPTIMIZE_ENABLED);
     }
 
     public String partitionDefaultName() {

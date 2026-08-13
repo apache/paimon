@@ -18,19 +18,23 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestAvroReader;
 import org.apache.paimon.manifest.ManifestAvroReader.RawBlock;
 import org.apache.paimon.manifest.ManifestAvroReader.RowIterator;
-import org.apache.paimon.manifest.ManifestAvroWriter.EncodedBlock;
+import org.apache.paimon.manifest.ManifestAvroWriter.EncodedBlockMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -43,6 +47,7 @@ import java.util.List;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Streaming merge of the naturally sorted runs in data-evolution manifest files. */
 final class ManifestEntryRunMerge {
@@ -65,9 +70,41 @@ final class ManifestEntryRunMerge {
     static final int EMBEDDED_FILE_INDEX = 7;
     static final int EXTERNAL_PATH = 8;
     static final int FILE_FIELD_COUNT = 9;
+    private static final String[] ENTRY_FILE_FIELD_NAMES = {
+        DataFileMeta.FILE_NAME,
+        DataFileMeta.ROW_COUNT,
+        DataFileMeta.LEVEL,
+        DataFileMeta.SCHEMA_ID,
+        DataFileMeta.FIRST_ROW_ID,
+        DataFileMeta.MAX_SEQUENCE_NUMBER,
+        DataFileMeta.EXTRA_FILES,
+        DataFileMeta.EMBEDDED_FILE_INDEX,
+        DataFileMeta.EXTERNAL_PATH
+    };
+    private static final InternalRow.FieldGetter[] ENTRY_FILE_GETTERS = entryFileGetters();
     static final RowType ENTRY_LAYOUT = entryLayout();
+    private static final int FULL_KIND =
+            ManifestEntry.MANIFEST_ROW_TYPE.getFieldIndex(ManifestEntry.KIND);
+    private static final int FULL_PARTITION =
+            ManifestEntry.MANIFEST_ROW_TYPE.getFieldIndex(ManifestEntry.PARTITION);
+    private static final int FULL_BUCKET =
+            ManifestEntry.MANIFEST_ROW_TYPE.getFieldIndex(ManifestEntry.BUCKET);
+    private static final int FULL_FILE =
+            ManifestEntry.MANIFEST_ROW_TYPE.getFieldIndex(ManifestEntry.FILE);
 
     private ManifestEntryRunMerge() {}
+
+    private static InternalRow.FieldGetter[] entryFileGetters() {
+        InternalRow.FieldGetter[] getters =
+                new InternalRow.FieldGetter[ENTRY_FILE_FIELD_NAMES.length];
+        for (int field = 0; field < getters.length; field++) {
+            int position = DataFileMeta.SCHEMA.getFieldIndex(ENTRY_FILE_FIELD_NAMES[field]);
+            getters[field] =
+                    InternalRow.createFieldGetter(
+                            DataFileMeta.SCHEMA.getTypeAt(position), position);
+        }
+        return getters;
+    }
 
     private static RowType entryLayout() {
         List<DataField> fields = new ArrayList<>();
@@ -91,6 +128,19 @@ final class ManifestEntryRunMerge {
         return new RowType(false, fields);
     }
 
+    static GenericRow projectEntryLayout(
+            GenericRow fullRow, GenericRow reuse, GenericRow reuseFile) {
+        reuse.setField(KIND, fullRow.getByte(FULL_KIND));
+        reuse.setField(PARTITION, fullRow.getBinary(FULL_PARTITION));
+        reuse.setField(BUCKET, fullRow.getInt(FULL_BUCKET));
+        InternalRow fullFile = fullRow.getRow(FULL_FILE, DataFileMeta.SCHEMA.getFieldCount());
+        for (int field = 0; field < ENTRY_FILE_GETTERS.length; field++) {
+            reuseFile.setField(field, ENTRY_FILE_GETTERS[field].getFieldOrNull(fullFile));
+        }
+        reuse.setField(FILE, reuseFile);
+        return reuse;
+    }
+
     /**
      * Returns null when the input is too fragmented for a bounded streaming merge. The caller must
      * fall back to the spillable external sorter in that case.
@@ -99,6 +149,7 @@ final class ManifestEntryRunMerge {
     static List<ManifestFileMeta> sortAndWriteFullEntries(
             List<ManifestFileMeta> section,
             ManifestFileSorter.RowIdEntrySortKey sortKey,
+            RowType partitionType,
             ManifestFile manifestFile,
             List<ManifestFileMeta> newFilesForAbort,
             CompactFileIdentifierSet deletedIdentifiers,
@@ -106,9 +157,15 @@ final class ManifestEntryRunMerge {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         ManifestEntryRunMergeEntry.Filter filter =
-                new ManifestEntryRunMergeEntry.Filter(deletedIdentifiers, deletedRowIds);
+                new ManifestEntryRunMergeEntry.Filter(deletedIdentifiers, deletedRowIds, true);
         ManifestEntryRunMergePlan plan =
-                discoverRuns(section, sortKey, manifestFile, filter, manifestReadParallelism);
+                discoverRuns(
+                        section,
+                        sortKey,
+                        partitionType,
+                        manifestFile,
+                        filter,
+                        manifestReadParallelism);
         if (plan == null) {
             return null;
         }
@@ -123,6 +180,7 @@ final class ManifestEntryRunMerge {
     static Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> sortAndWriteMinorEntries(
             List<ManifestFileMeta> section,
             ManifestFileSorter.RowIdEntrySortKey sortKey,
+            RowType partitionType,
             ManifestFile manifestFile,
             List<ManifestFileMeta> newFilesForAbort,
             @Nullable Integer manifestReadParallelism)
@@ -130,13 +188,19 @@ final class ManifestEntryRunMerge {
         CompactFileIdentifierSet deletedIdentifiers = new CompactFileIdentifierSet();
         ManifestFileSorter.DeletedRowIdSet deletedRowIds = new ManifestFileSorter.DeletedRowIdSet();
         ManifestEntryRunMergeEntry.Filter.Minor filter =
-                new ManifestEntryRunMergeEntry.Filter.Minor(deletedIdentifiers, deletedRowIds);
+                new ManifestEntryRunMergeEntry.Filter.Minor(
+                        deletedIdentifiers, deletedRowIds, true);
         try {
             ManifestEntryRunMergePlan plan;
             try {
                 plan =
                         discoverRuns(
-                                section, sortKey, manifestFile, filter, manifestReadParallelism);
+                                section,
+                                sortKey,
+                                partitionType,
+                                manifestFile,
+                                filter,
+                                manifestReadParallelism);
             } finally {
                 deletedRowIds.releaseRangeIndex();
             }
@@ -159,6 +223,7 @@ final class ManifestEntryRunMerge {
     private static ManifestEntryRunMergePlan discoverRuns(
             List<ManifestFileMeta> section,
             ManifestFileSorter.RowIdEntrySortKey sortKey,
+            RowType partitionType,
             ManifestFile manifestFile,
             ManifestEntryRunMergeEntry.Filter filter,
             @Nullable Integer manifestReadParallelism)
@@ -174,7 +239,7 @@ final class ManifestEntryRunMerge {
                 || manifestReadParallelism <= 1) {
             for (ManifestFileMeta meta : section) {
                 Discovery.DiscoveredManifest manifest =
-                        discoverManifestRuns(meta, manifestFile, partitions, filter);
+                        discoverManifestRuns(meta, manifestFile, partitionType, partitions, filter);
                 if (manifest.requiresExternalSort) {
                     return null;
                 }
@@ -185,7 +250,8 @@ final class ManifestEntryRunMerge {
                     meta -> {
                         try {
                             return Collections.singletonList(
-                                    discoverManifestRuns(meta, manifestFile, partitions, filter));
+                                    discoverManifestRuns(
+                                            meta, manifestFile, partitionType, partitions, filter));
                         } catch (Exception e) {
                             throw new RuntimeException(
                                     "Failed to discover sorted Avro runs in " + meta.fileName(), e);
@@ -229,12 +295,13 @@ final class ManifestEntryRunMerge {
     private static Discovery.DiscoveredManifest discoverManifestRuns(
             ManifestFileMeta meta,
             ManifestFile manifestFile,
+            RowType partitionType,
             ManifestEntryRunMergeEntry.PartitionDictionary partitions,
             ManifestEntryRunMergeEntry.Filter filter)
             throws Exception {
         try (ManifestAvroReader reader =
-                manifestFile.scanForRunMerge(meta.fileName(), meta.fileSize())) {
-            return discoverManifestRuns(meta, reader, partitions, filter);
+                manifestFile.scanAvroBlocks(meta.fileName(), meta.fileSize())) {
+            return discoverManifestRuns(meta, reader, partitionType, partitions, filter);
         } catch (UnsupportedOperationException unsupported) {
             return Discovery.DiscoveredManifest.requiresExternalSort();
         }
@@ -243,9 +310,11 @@ final class ManifestEntryRunMerge {
     private static Discovery.DiscoveredManifest discoverManifestRuns(
             ManifestFileMeta meta,
             ManifestAvroReader reader,
+            RowType partitionType,
             ManifestEntryRunMergeEntry.PartitionDictionary partitions,
             ManifestEntryRunMergeEntry.Filter filter)
             throws Exception {
+        SimpleStatsConverter partitionStatsConverter = new SimpleStatsConverter(partitionType);
         List<ManifestEntryRunMergePlan.Source.ManifestRunSpec> runs = new ArrayList<>();
         List<Discovery.BlockInfo> blocks = new ArrayList<>();
         ManifestEntryRunMergeEntry.Key previous = new ManifestEntryRunMergeEntry.Key();
@@ -272,10 +341,11 @@ final class ManifestEntryRunMerge {
                                     rawBlock.blockOrdinal(),
                                     position,
                                     rawBlock.rawBlockCopySupported(),
-                                    current.stableCopy()));
+                                    current.stableCopy(),
+                                    partitionType));
                 }
                 Discovery.BlockInfo block = blocks.get(blocks.size() - 1);
-                block.collect(row, current, partitions, filter);
+                block.collectForSort(row, current, partitions, filter);
                 boolean inversion =
                         hasPrevious && compareDiscoveryKeys(previous, current, partitions) > 0;
                 if (inversion) {
@@ -300,7 +370,7 @@ final class ManifestEntryRunMerge {
                 position++;
                 if (rows.recordIndex() + 1 == rawBlock.recordCount()) {
                     ManifestEntryRunMergeEntry.Key stableLastKey = current.stableCopy();
-                    block.finish(position, stableLastKey);
+                    block.finishSort(position, stableLastKey, partitionStatsConverter);
                     previous.copyFrom(stableLastKey);
                 } else {
                     previous.copyFrom(current);
@@ -442,11 +512,11 @@ final class ManifestEntryRunMerge {
 
             final long ordinal;
             final long start;
-            final ManifestEntryRunMergeEntry.Key firstKey;
+            final @Nullable ManifestEntryRunMergeEntry.Key firstKey;
             boolean eligible;
             boolean sorted = true;
             long end;
-            ManifestEntryRunMergeEntry.Key lastKey;
+            @Nullable ManifestEntryRunMergeEntry.Key lastKey;
             long addedFiles;
             long deletedFiles;
             long schemaId = Long.MIN_VALUE;
@@ -456,33 +526,65 @@ final class ManifestEntryRunMerge {
             int maxLevel = Integer.MIN_VALUE;
             long minRowId = Long.MAX_VALUE;
             long maxRowId = Long.MIN_VALUE;
-            BinaryRow nullPartition;
+            final boolean singleFieldSortedPartitionStats;
+            @Nullable SimpleStatsCollector partitionStats;
+            final RowType partitionType;
+            @Nullable BinaryRow nullPartition;
             long nullPartitionCount;
-            BinaryRow minNonNullPartition;
-            BinaryRow maxNonNullPartition;
-            EncodedBlock metadata;
+            @Nullable BinaryRow minNonNullPartition;
+            @Nullable BinaryRow maxNonNullPartition;
+            EncodedBlockMeta metadata;
 
             BlockInfo(
                     long ordinal,
                     long start,
                     boolean eligible,
-                    ManifestEntryRunMergeEntry.Key firstKey) {
+                    ManifestEntryRunMergeEntry.Key firstKey,
+                    RowType partitionType) {
                 this.ordinal = ordinal;
                 this.start = start;
                 this.eligible = eligible;
                 this.firstKey = firstKey;
+                this.partitionType = partitionType;
+                this.singleFieldSortedPartitionStats =
+                        eligible && firstKey != null && partitionType.getFieldCount() == 1;
+                this.partitionStats =
+                        eligible && firstKey != null && !singleFieldSortedPartitionStats
+                                ? new SimpleStatsCollector(partitionType)
+                                : null;
             }
 
-            void collect(
+            void collectForSort(
                     GenericRow record,
                     ManifestEntryRunMergeEntry.Key key,
                     ManifestEntryRunMergeEntry.PartitionDictionary partitions,
                     ManifestEntryRunMergeEntry.Filter filter) {
-                BinaryRow partition = partitions.partition(key.partitionId);
-                eligible &= partition.getFieldCount() == 1 && filter.copyable(record, key);
                 if (!eligible) {
                     return;
                 }
+                if (!filter.copyable(record, key)) {
+                    eligible = false;
+                    releasePartitionStats();
+                    return;
+                }
+                collectEntryStats(record, key);
+                BinaryRow partition = partitions.partition(key.partitionId);
+                if (singleFieldSortedPartitionStats) {
+                    if (partition.isNullAt(0)) {
+                        nullPartition = partition;
+                        nullPartitionCount++;
+                    } else {
+                        if (minNonNullPartition == null) {
+                            minNonNullPartition = partition;
+                        }
+                        maxNonNullPartition = partition;
+                    }
+                } else {
+                    partitionStats.collect(partition);
+                }
+            }
+
+            private void collectEntryStats(GenericRow record, ManifestEntryRunMergeEntry.Key key) {
                 InternalRow file = ManifestEntryRunMergeEntry.file(record);
                 if (key.kind == FileKind.ADD.toByteValue()) {
                     addedFiles++;
@@ -498,23 +600,35 @@ final class ManifestEntryRunMerge {
                 maxLevel = Math.max(maxLevel, level);
                 minRowId = Math.min(minRowId, key.firstRowId);
                 maxRowId = Math.max(maxRowId, key.rangeEnd);
-                if (partition.isNullAt(0)) {
-                    nullPartition = partition;
-                    nullPartitionCount++;
-                } else {
-                    if (minNonNullPartition == null) {
-                        minNonNullPartition = partition;
-                    }
-                    maxNonNullPartition = partition;
-                }
             }
 
-            void finish(long end, ManifestEntryRunMergeEntry.Key lastKey) {
+            void finishSort(
+                    long end,
+                    ManifestEntryRunMergeEntry.Key lastKey,
+                    SimpleStatsConverter partitionStatsConverter) {
                 this.end = end;
                 this.lastKey = lastKey;
                 if (eligible && sorted) {
+                    SimpleStats encodedPartitionStats;
+                    if (singleFieldSortedPartitionStats) {
+                        BinaryRow min =
+                                minNonNullPartition == null ? nullPartition : minNonNullPartition;
+                        BinaryRow max =
+                                maxNonNullPartition == null ? nullPartition : maxNonNullPartition;
+                        checkState(min != null && max != null, "Manifest block has no partition.");
+                        encodedPartitionStats =
+                                new SimpleStats(
+                                        min,
+                                        max,
+                                        BinaryArray.fromLongArray(new Long[] {nullPartitionCount}));
+                    } else {
+                        checkState(
+                                partitionStats != null, "Manifest block has no partition stats.");
+                        encodedPartitionStats =
+                                partitionStatsConverter.toBinaryAllMode(partitionStats.extract());
+                    }
                     metadata =
-                            new EncodedBlock(
+                            new EncodedBlockMeta(
                                     addedFiles,
                                     deletedFiles,
                                     schemaId,
@@ -524,11 +638,16 @@ final class ManifestEntryRunMerge {
                                     maxLevel,
                                     minRowId,
                                     maxRowId,
-                                    nullPartition,
-                                    nullPartitionCount,
-                                    minNonNullPartition,
-                                    maxNonNullPartition);
+                                    encodedPartitionStats);
                 }
+                releasePartitionStats();
+            }
+
+            private void releasePartitionStats() {
+                partitionStats = null;
+                nullPartition = null;
+                minNonNullPartition = null;
+                maxNonNullPartition = null;
             }
 
             boolean copyable(long runStart, long runEnd) {
@@ -542,6 +661,7 @@ final class ManifestEntryRunMerge {
             }
 
             void updatePartitionRanks(ManifestEntryRunMergeEntry.PartitionDictionary partitions) {
+                checkState(firstKey != null && lastKey != null, "Manifest block has no sort keys.");
                 firstKey.partitionRank = partitions.rank(firstKey.partitionId);
                 lastKey.partitionRank = partitions.rank(lastKey.partitionId);
             }
