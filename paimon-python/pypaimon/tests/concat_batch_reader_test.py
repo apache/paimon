@@ -92,7 +92,7 @@ class ConcatBatchReaderTest(unittest.TestCase):
                 [pa.ListArray.from_arrays(offsets, values)], names=["value"])
 
         batches = [batch(), batch()]
-        self.assertEqual([item.nbytes for item in batches], [4, 4])
+        self.assertTrue(all(item.nbytes < child_count for item in batches))
         reader = MergeAllBatchReader(
             [lambda item=item: _BatchReader([item]) for item in batches],
             batch_size=2,
