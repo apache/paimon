@@ -29,6 +29,7 @@ import java.util.Map;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 
 /** Tests for {@link SimpleHashBucketAssigner}. */
 public class SimpleHashBucketAssignerTest {
@@ -56,24 +57,19 @@ public class SimpleHashBucketAssignerTest {
 
     @Test
     public void testSecondPartitionAfterTheCapIsExhausted() {
-        // maxBucketId is shared across partitions, so by the time a later partition starts, the
-        // create-a-new-bucket branch is already closed for it and it goes straight to
-        // pickRandomly. Its own first bucket must be in the pool or that call has nothing to
-        // choose from.
         SimpleHashBucketAssigner assigner = new SimpleHashBucketAssigner(1, 0, 100, 4);
 
-        for (int hash = 0; hash < 500; hash++) {
+        for (int hash = 0; hash < 400; hash++) {
             assigner.assign(row(1), hash);
         }
 
         Map<Integer, Integer> rowsPerBucket = new HashMap<>();
-        for (int hash = 0; hash < 300; hash++) {
+        for (int hash = 0; hash < 400; hash++) {
             rowsPerBucket.merge(assigner.assign(row(2), hash), 1, Integer::sum);
         }
 
-        assertThat(rowsPerBucket.keySet()).allMatch(bucket -> bucket >= 0 && bucket < 4);
-        assertThat(rowsPerBucket.values().stream().mapToInt(Integer::intValue).sum())
-                .isEqualTo(300);
+        assertThat(rowsPerBucket)
+                .containsOnly(entry(0, 100), entry(1, 100), entry(2, 100), entry(3, 100));
     }
 
     @Test
