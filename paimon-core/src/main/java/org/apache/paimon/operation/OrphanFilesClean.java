@@ -19,19 +19,27 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.blob.ManagedBlobReachabilityCollector;
+import org.apache.paimon.blob.ManagedBlobReachabilityCollector.Result;
 import org.apache.paimon.blob.ManagedBlobReferenceFile;
+import org.apache.paimon.blob.ManagedBlobReferenceFile.Reference;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
@@ -90,6 +98,12 @@ public abstract class OrphanFilesClean implements Serializable {
 
     protected static final int READ_FILE_RETRY_NUM = 3;
     protected static final int READ_FILE_RETRY_INTERVAL = 5;
+
+    /**
+     * Marker emitted into the used-file name set when a {@code .blobref} sidecar cannot be trusted.
+     * Callers must skip deleting every {@code .managed.blob} pack for the rest of the run.
+     */
+    public static final String SKIP_MANAGED_BLOB_GC = "__paimon_skip_managed_blob_gc__";
 
     protected final FileStoreTable table;
     protected final FileIO fileIO;
@@ -218,11 +232,75 @@ public abstract class OrphanFilesClean implements Serializable {
         cleanFile(filePath);
     }
 
-    protected void cleanFile(Path path) {
-        if (isManagedBlobPack(path)) {
+    /**
+     * Emits data file names, extra files, and managed BLOB packs referenced by {@code entry}. Pack
+     * reachability is collected only from {@link FileKind#ADD} files: {@link FileKind#DELETE}
+     * entries remain in delta manifests after compaction, while snapshot expire may already have
+     * removed their {@code .blobref} sidecars. Treating those as missing would skip all pack GC.
+     *
+     * <p>When a listed {@code .blobref} sidecar of an ADD file is missing or unreadable, {@link
+     * #SKIP_MANAGED_BLOB_GC} is emitted so the caller can abort pack deletion.
+     */
+    protected void emitUsedFiles(
+            ManifestEntry entry, DataFilePathFactory pathFactory, Consumer<String> used) {
+        used.accept(entry.fileName());
+        List<String> extraFiles = entry.file().extraFiles();
+        for (String extra : extraFiles) {
+            used.accept(extra);
+        }
+        if (entry.kind() != FileKind.ADD) {
             return;
         }
+        Result reachability =
+                new ManagedBlobReachabilityCollector(fileIO)
+                        .fromDataFile(pathFactory.toPath(entry), extraFiles);
+        if (reachability.isUnsafe()) {
+            used.accept(SKIP_MANAGED_BLOB_GC);
+            return;
+        }
+        for (Reference reference : reachability.referenced()) {
+            used.accept(reference.relativePath());
+        }
+    }
 
+    /**
+     * Reads {@code manifestName} and emits used files. A missing manifest is treated as unsafe for
+     * managed blob GC: {@link FileNotFoundException} would otherwise look like an empty used set
+     * and allow unreferenced packs to be deleted while live data files are still too new to be
+     * candidates.
+     */
+    protected void emitUsedFiles(
+            String manifestName,
+            ManifestFile manifestFile,
+            DataFilePathFactories pathFactories,
+            Consumer<String> used)
+            throws IOException {
+        List<ManifestEntry> entries =
+                retryReadingFiles(() -> manifestFile.readWithIOException(manifestName), null);
+        if (entries == null) {
+            LOG.warn(
+                    "Manifest {} is missing while collecting used files. Skip managed blob GC this run.",
+                    manifestName);
+            used.accept(SKIP_MANAGED_BLOB_GC);
+            return;
+        }
+        for (ManifestEntry entry : entries) {
+            emitUsedFiles(entry, pathFactories.get(entry.partition(), entry.bucket()), used);
+        }
+    }
+
+    protected static boolean shouldCleanUnused(Path path, Set<String> used) {
+        if (isManagedBlobPack(path) && used.contains(SKIP_MANAGED_BLOB_GC)) {
+            return false;
+        }
+        return !used.contains(path.getName());
+    }
+
+    protected static boolean isManagedBlobPackName(String fileName) {
+        return fileName.endsWith(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
+    }
+
+    protected void cleanFile(Path path) {
         if (!dryRun) {
             try {
                 if (fileIO.isDir(path)) {
@@ -239,8 +317,8 @@ public abstract class OrphanFilesClean implements Serializable {
         }
     }
 
-    protected boolean isManagedBlobPack(Path path) {
-        return path.getName().endsWith(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
+    protected static boolean isManagedBlobPack(Path path) {
+        return isManagedBlobPackName(path.getName());
     }
 
     protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {
@@ -283,28 +361,25 @@ public abstract class OrphanFilesClean implements Serializable {
         if (snapshot.changelogManifestList() != null) {
             usedFileWithFlagConsumer.accept(Pair.of(snapshot.changelogManifestList(), false));
             manifestFileMetas.addAll(
-                    retryReadingFiles(
-                            () ->
-                                    manifestList.readWithIOException(
-                                            snapshot.changelogManifestList()),
-                            emptyList()));
+                    readManifestListOrSkip(
+                            manifestList,
+                            snapshot.changelogManifestList(),
+                            usedFileWithFlagConsumer));
         }
 
         // delta manifest
         if (snapshot.deltaManifestList() != null) {
             usedFileWithFlagConsumer.accept(Pair.of(snapshot.deltaManifestList(), false));
             manifestFileMetas.addAll(
-                    retryReadingFiles(
-                            () -> manifestList.readWithIOException(snapshot.deltaManifestList()),
-                            emptyList()));
+                    readManifestListOrSkip(
+                            manifestList, snapshot.deltaManifestList(), usedFileWithFlagConsumer));
         }
 
         // base manifest
         usedFileWithFlagConsumer.accept(Pair.of(snapshot.baseManifestList(), false));
         manifestFileMetas.addAll(
-                retryReadingFiles(
-                        () -> manifestList.readWithIOException(snapshot.baseManifestList()),
-                        emptyList()));
+                readManifestListOrSkip(
+                        manifestList, snapshot.baseManifestList(), usedFileWithFlagConsumer));
 
         // collect manifests
         for (ManifestFileMeta manifest : manifestFileMetas) {
@@ -328,6 +403,23 @@ public abstract class OrphanFilesClean implements Serializable {
         if (snapshot.statistics() != null) {
             usedFileWithFlagConsumer.accept(Pair.of(snapshot.statistics(), false));
         }
+    }
+
+    private List<ManifestFileMeta> readManifestListOrSkip(
+            ManifestList manifestList,
+            String listFileName,
+            Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer)
+            throws IOException {
+        List<ManifestFileMeta> metas =
+                retryReadingFiles(() -> manifestList.readWithIOException(listFileName), null);
+        if (metas == null) {
+            LOG.warn(
+                    "Manifest list {} is missing while collecting used files. Skip managed blob GC this run.",
+                    listFileName);
+            usedFileWithFlagConsumer.accept(Pair.of(SKIP_MANAGED_BLOB_GC, false));
+            return emptyList();
+        }
+        return metas;
     }
 
     /** List directories that contains data files and manifest files. */

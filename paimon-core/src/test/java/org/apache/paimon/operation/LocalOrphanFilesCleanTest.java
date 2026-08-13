@@ -154,7 +154,7 @@ public class LocalOrphanFilesCleanTest {
     }
 
     @Test
-    public void testKeepManagedBlobPack() throws Exception {
+    public void testDeleteUnreferencedManagedBlobPack() throws Exception {
         commit(Collections.singletonList(TestPojo.next()));
 
         Path part1 = listSubDirs(tablePath, p -> p.getName().contains("=")).get(0);
@@ -171,9 +171,9 @@ public class LocalOrphanFilesCleanTest {
                         table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
         List<Path> deleted = cleaner.clean().getDeletedFilesPath();
 
-        assertThat(fileIO.exists(managedBlob)).isTrue();
+        assertThat(fileIO.exists(managedBlob)).isFalse();
         assertThat(fileIO.exists(ordinaryOrphan)).isFalse();
-        assertThat(deleted).doesNotContain(managedBlob);
+        assertThat(deleted).contains(managedBlob, ordinaryOrphan);
     }
 
     public void normallyRemoving(Path dataPath) throws Throwable {

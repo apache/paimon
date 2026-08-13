@@ -183,9 +183,8 @@ participates in aggregation or retraction, even when its sequence value is older
 the field for both newer and older retract records.
 
 Managed BLOB partial updates externalize each non-null scalar BLOB, array element, or map value into a
-`.managed.blob` pack. Empty collections and collections containing only null values write no payload. BLOB garbage
-collection for orphaned packs is not implemented yet; repeated updates can leave unreachable storage until a future
-collector is available.
+`.managed.blob` pack. Empty collections and collections containing only null values write no payload. Unreachable packs
+from repeated updates are reclaimed by `remove_orphan_files` after they are older than `older_than`.
 
 `blob-view-field` columns store serialized view structs inline. Reads resolve upstream blob bytes through the catalog
 when `blob-view.resolve.enabled` is true (default). Append upstream tables used by `sys.blob_view(...)` must enable
@@ -240,16 +239,23 @@ extra files because more than one retained data file can reference the same pack
 
 ## Garbage Collection
 
-Garbage collection of unreferenced `.managed.blob` packs is not implemented yet. Updates, deletes, compaction, or an
-ambiguous writer failure can therefore leave payload packs that are no longer reachable from current rows.
+Unreferenced `.managed.blob` packs are removed by [`remove_orphan_files`](../flink/procedures#remove_orphan_files)
+(local, Flink, or Spark). The cleaner reads every retained data file's `.blobref` sidecar across snapshots, tags, and
+branches, then deletes packs that are not referenced and older than `older_than` (1 day by default).
 
-The ordinary orphan-file cleaner intentionally preserves all `.managed.blob` files. This fail-safe behavior prevents it
-from deleting a payload that is still reachable from a snapshot, tag, branch, or another retained root, but it also
-means unused BLOB storage can grow until a root-aware BLOB garbage collector is available.
+This cleanup is best-effort. It lists snapshots first and deletes later, without a commit lease. Compaction reuses pack
+bytes and does not refresh pack modification time, so `older_than` does not fence an in-flight compact that later
+commits a new data file pointing at the same pack. Keep a non-zero `older_than`; the one-day default makes this window
+unlikely in ordinary jobs, but it is not a logical guarantee for very old packs, long-running compaction, or
+`older_than` set to now.
 
-A future collector must compute reachability across all retained roots and treat a missing, corrupt, or unsupported
-`.blobref` sidecar as unsafe to delete. An empty, valid sidecar is different from a missing sidecar: it explicitly states
-that the data file references no managed payload pack.
+A missing, corrupt, or unsupported `.blobref` sidecar on a data file that still exists is unsafe: that run skips
+deleting every `.managed.blob` file. ADD entries left in unmerged manifests after snapshot expire, whose data files
+are already gone, are ignored. An empty, valid sidecar is different from a missing sidecar: it explicitly states that
+the data file references no managed payload pack.
+
+Snapshot expiration still deletes only the data file and its `.blobref` extra file. Pack bytes are reclaimed on the
+next orphan-file cleanup after they become unreachable.
 
 ## Reference Metadata
 

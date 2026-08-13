@@ -23,10 +23,10 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
@@ -118,16 +118,13 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         candidateDeletes.removeAll(usedFiles);
         candidateDeletes.stream()
                 .map(candidates::get)
+                .filter(info -> shouldCleanUnused(info.getLeft(), usedFiles))
                 .forEach(
                         deleteFileInfo -> {
                             deletedFilesLenInBytes.addAndGet(deleteFileInfo.getRight());
                             cleanFile(deleteFileInfo.getLeft());
+                            deleteFiles.add(deleteFileInfo.getLeft());
                         });
-        deleteFiles.addAll(
-                candidateDeletes.stream()
-                        .map(candidates::get)
-                        .map(Pair::getLeft)
-                        .collect(Collectors.toList()));
         candidateDeletes.clear();
 
         // clean empty directory
@@ -174,8 +171,10 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
     private Set<String> getUsedFiles(String branch) {
         Set<String> usedFiles = ConcurrentHashMap.newKeySet();
-        ManifestFile manifestFile =
-                table.switchToBranch(branch).store().manifestFileFactory().create();
+        FileStoreTable branchTable = table.switchToBranch(branch);
+        ManifestFile manifestFile = branchTable.store().manifestFileFactory().create();
+        DataFilePathFactories pathFactories =
+                new DataFilePathFactories(branchTable.store().pathFactory());
         try {
             Set<String> manifests = ConcurrentHashMap.newKeySet();
             collectWithoutDataFile(branch, usedFiles::add, manifests::add);
@@ -183,20 +182,16 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                     executor,
                     manifestName -> {
                         try {
-                            retryReadingFiles(
-                                            () -> manifestFile.readWithIOException(manifestName),
-                                            Collections.<ManifestEntry>emptyList())
-                                    .stream()
-                                    .map(ManifestEntry::file)
-                                    .forEach(
-                                            f -> {
-                                                if (candidateDeletes.contains(f.fileName())) {
-                                                    usedFiles.add(f.fileName());
-                                                }
-                                                f.extraFiles().stream()
-                                                        .filter(candidateDeletes::contains)
-                                                        .forEach(usedFiles::add);
-                                            });
+                            emitUsedFiles(
+                                    manifestName,
+                                    manifestFile,
+                                    pathFactories,
+                                    name -> {
+                                        if (SKIP_MANAGED_BLOB_GC.equals(name)
+                                                || candidateDeletes.contains(name)) {
+                                            usedFiles.add(name);
+                                        }
+                                    });
                         } catch (IOException e) {
                             throw new RuntimeException(e);
                         }
@@ -259,7 +254,6 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
             return files.stream()
                     .filter(status -> !status.isDir())
-                    .filter(status -> !isManagedBlobPack(status.getPath()))
                     .filter(this::oldEnough)
                     .map(status -> Pair.of(status.getPath(), status.getLen()))
                     .collect(Collectors.toList());
