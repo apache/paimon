@@ -28,6 +28,8 @@ from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
 from pypaimon.utils.range import Range
 
+_MAX_CONCAT_BYTES = (1 << 31) - 1
+
 
 class _BlobFileState:
 
@@ -82,8 +84,8 @@ class MergeAllBatchReader(RecordBatchReader):
     """
     Read multiple suppliers as one bounded stream.
 
-    Batches are sliced, not concatenated. This preserves 32-bit Arrow offsets
-    when the complete stream contains more than 2 GiB of variable-length data.
+    Small input batches are combined up to ``batch_size`` without allowing one
+    output batch to exceed Arrow's 32-bit offset limit.
     """
 
     def __init__(self, reader_suppliers: List[Callable], batch_size: int = 1024):
@@ -92,19 +94,43 @@ class MergeAllBatchReader(RecordBatchReader):
         self._batch_size = max(1, batch_size)
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
+        batches = []
+        num_rows = 0
+        num_bytes = 0
         while True:
             batch = self._remainder
             self._remainder = None
             if batch is None:
                 batch = self._reader.read_arrow_batch()
             if batch is None:
-                return None
+                break
             if batch.num_rows == 0:
                 continue
-            if batch.num_rows <= self._batch_size:
-                return batch
-            self._remainder = batch.slice(self._batch_size)
-            return batch.slice(0, self._batch_size)
+
+            take = min(batch.num_rows, self._batch_size - num_rows)
+            piece = batch.slice(0, take)
+            if batches and num_bytes + piece.nbytes > _MAX_CONCAT_BYTES:
+                self._remainder = batch
+                break
+
+            batches.append(piece)
+            num_rows += take
+            num_bytes += piece.nbytes
+            if take < batch.num_rows:
+                self._remainder = batch.slice(take)
+            if num_rows == self._batch_size or num_bytes >= _MAX_CONCAT_BYTES:
+                break
+
+        if not batches:
+            return None
+        if len(batches) == 1:
+            return batches[0]
+
+        columns = [
+            pa.concat_arrays([batch.column(i) for batch in batches])
+            for i in range(batches[0].num_columns)
+        ]
+        return pa.RecordBatch.from_arrays(columns, schema=batches[0].schema)
 
     def close(self) -> None:
         self._remainder = None
