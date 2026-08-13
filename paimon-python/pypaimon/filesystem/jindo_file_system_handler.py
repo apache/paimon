@@ -47,7 +47,7 @@ from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 
 
-_JINDO_CONFIG_PREFIX = "fs."
+_JINDO_CONFIG_PREFIXES = ("fs.", "logger.")
 _PYPAIMON_ONLY_JINDO_CONFIG_KEYS = {OssOptions.OSS_IMPL.key()}
 _CASE_SENSITIVE_JINDO_CONFIG_KEYS = {
     OssOptions.OSS_ACCESS_KEY_ID.key().lower(): OssOptions.OSS_ACCESS_KEY_ID.key(),
@@ -72,21 +72,19 @@ def build_jindo_config(catalog_options: Options):
     if not JINDO_AVAILABLE:
         raise ImportError("Module pyjindo is not available. Please install pyjindosdk.")
 
-    # Match pyjindo's native OSS entry points: load jindosdk.cfg from
-    # JINDOSDK_CONF_DIR (and Hadoop configuration when enabled) before
-    # applying catalog-specific overrides. Older pyjindo versions without
-    # read_config retain the previous empty-Config behavior.
-    read_config = getattr(jutil, "read_config", None)
-    config = read_config() if callable(read_config) else jutil.Config()
+    # Start from an empty config. Loading jindosdk.cfg or Hadoop configuration
+    # here can inject process-level settings (for example credential providers)
+    # which override catalog-scoped REST data tokens.
+    config = jutil.Config()
 
-    # Keep this aligned with Java JindoFileIO. Forwarding only known fs.* keys
-    # would silently drop cache, metrics, networking, and future JindoSDK
-    # settings. Non-fs settings such as logger.* are loaded only from
-    # jutil.read_config().
+    # As in Java JindoFileIO, forward every fs.* option instead of maintaining
+    # a fragile allowlist. PyPaimon additionally accepts logger.* so logging can
+    # be configured without loading process-level configuration files.
     for raw_key, value in catalog_options.to_map().items():
-        if (not isinstance(raw_key, str)
-                or not raw_key.startswith(_JINDO_CONFIG_PREFIX)
-                or value is None):
+        supported_prefix = isinstance(raw_key, str)
+        supported_prefix = supported_prefix and raw_key.startswith(
+            _JINDO_CONFIG_PREFIXES)
+        if not supported_prefix or value is None:
             continue
         key = _CASE_SENSITIVE_JINDO_CONFIG_KEYS.get(raw_key.lower(), raw_key)
         if key in _PYPAIMON_ONLY_JINDO_CONFIG_KEYS:
