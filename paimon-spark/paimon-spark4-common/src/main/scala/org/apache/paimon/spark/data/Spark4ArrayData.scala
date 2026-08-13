@@ -21,7 +21,7 @@ package org.apache.paimon.spark.data
 import org.apache.paimon.types.{DataType, GeographyType, GeometryType}
 
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
-import org.apache.spark.unsafe.types.{GeographyVal, GeometryVal, VariantVal}
+import org.apache.spark.unsafe.types.{BinaryView, VariantVal}
 
 class Spark4ArrayData(override val elementType: DataType) extends AbstractSparkArrayData {
 
@@ -30,18 +30,20 @@ class Spark4ArrayData(override val elementType: DataType) extends AbstractSparkA
     new VariantVal(v.value(), v.metadata())
   }
 
-  override def getGeography(ordinal: Int): GeographyVal =
-    SparkShimLoader.shim
-      .toSparkGeography(
-        paimonArray.getBinary(ordinal),
-        elementType.asInstanceOf[GeographyType].getCrs,
-        elementType.asInstanceOf[GeographyType].getAlgorithm.toString)
-      .asInstanceOf[GeographyVal]
-
-  override def getGeometry(ordinal: Int): GeometryVal =
-    SparkShimLoader.shim
-      .toSparkGeometry(
-        paimonArray.getBinary(ordinal),
-        elementType.asInstanceOf[GeometryType].getCrs)
-      .asInstanceOf[GeometryVal]
+  // Spark 4.2 (SPARK-57058) replaced `getGeography` / `getGeometry` on `SpecializedGetters` with a
+  // single `getBinaryView`; the geo value classes `GeographyVal` / `GeometryVal` were removed with
+  // them. Dispatch on the Paimon element type, which is what the pre-4.2 pair of overrides did
+  // implicitly. `paimon-spark-4.1` forks this class to keep the older two overrides.
+  override def getBinaryView(ordinal: Int): BinaryView = elementType match {
+    case g: GeographyType =>
+      SparkShimLoader.shim
+        .toSparkGeography(paimonArray.getBinary(ordinal), g.getCrs, g.getAlgorithm.toString)
+        .asInstanceOf[BinaryView]
+    case g: GeometryType =>
+      SparkShimLoader.shim
+        .toSparkGeometry(paimonArray.getBinary(ordinal), g.getCrs)
+        .asInstanceOf[BinaryView]
+    case other =>
+      throw new UnsupportedOperationException(s"Not a BinaryView-backed Paimon type: $other")
+  }
 }
