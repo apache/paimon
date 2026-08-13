@@ -168,6 +168,15 @@ class ListPartitionsResponse(PagedResponse['Partition']):
 
 
 @dataclass
+class CreatePartitionsResponse(RESTResponse):
+    FIELD_CREATED = "created"
+    FIELD_EXISTED = "existed"
+
+    created: Optional[List[Dict[str, str]]] = json_field(FIELD_CREATED, default=None)
+    existed: Optional[List[Dict[str, str]]] = json_field(FIELD_EXISTED, default=None)
+
+
+@dataclass
 class ListTablesResponse(PagedResponse[str]):
     FIELD_TABLES = "tables"
 

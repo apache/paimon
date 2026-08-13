@@ -193,6 +193,17 @@ class Catalog(ABC):
             "rollback_to is not supported by this catalog."
         )
 
+    def create_partitions(
+            self,
+            identifier: Union[str, Identifier],
+            partitions: List[Dict[str, str]],
+            ignore_if_exists: bool = True,
+    ) -> None:
+        raise NotImplementedError(
+            "create_partitions is not supported by this catalog. "
+            "Use REST catalog for partition creation."
+        )
+
     def drop_partitions(
             self,
             identifier: Union[str, Identifier],

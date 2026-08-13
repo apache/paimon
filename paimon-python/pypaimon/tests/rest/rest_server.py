@@ -31,10 +31,12 @@ if TYPE_CHECKING:
 from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest,
                                       CreateBranchRequest,
                                       CreateDatabaseRequest,
+                                      CreatePartitionsRequest,
                                       CreateTableRequest, CreateTagRequest,
                                       RenameBranchRequest,
                                       RenameTableRequest)
-from pypaimon.api.api_response import (ConfigResponse, GetDatabaseResponse,
+from pypaimon.api.api_response import (ConfigResponse, CreatePartitionsResponse,
+                                       GetDatabaseResponse,
                                        GetFunctionResponse,
                                        GetTableResponse, GetTagResponse,
                                        ListBranchesResponse,
@@ -432,7 +434,7 @@ class RESTCatalogServer:
                     if resource_type == ResourcePaths.TABLES:
                         return self._handle_table_resource(method, path_parts, identifier, data, parameters)
                     elif resource_type == ResourcePaths.PARTITIONS:
-                        return self._table_partitions_handle(method, identifier, parameters)
+                        return self._table_partitions_handle(method, data, identifier, parameters)
                     elif resource_type == ResourcePaths.FUNCTIONS:
                         return self._function_handle(method, data, identifier)
 
@@ -548,7 +550,7 @@ class RESTCatalogServer:
             elif operation == "snapshot":
                 return self._table_snapshot_handle(method, lookup_identifier)
             elif operation == ResourcePaths.PARTITIONS:
-                return self._table_partitions_handle(method, lookup_identifier, parameters)
+                return self._table_partitions_handle(method, data, lookup_identifier, parameters)
             elif operation == ResourcePaths.TAGS:
                 return self._tags_handle(method, data, lookup_identifier, parameters)
             elif operation == ResourcePaths.BRANCHES:
@@ -754,16 +756,47 @@ class RESTCatalogServer:
         return self._mock_response(response, 200)
 
     def _table_partitions_handle(
-            self, method: str, identifier: Identifier, parameters: Dict[str, str]) -> Tuple[str, int]:
-        """Handle table partitions listing"""
-        if method != "GET":
-            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
-
+            self, method: str, data: str, identifier: Identifier,
+            parameters: Dict[str, str]) -> Tuple[str, int]:
+        """Handle the table-scoped partitions collection (POST create / GET list-paged)."""
         if identifier.get_full_name() not in self.table_metadata_store:
             raise TableNotExistException(identifier)
 
+        if method == "POST":
+            request = JSON.from_json(data, CreatePartitionsRequest)
+            store = self.table_partitions_store.setdefault(identifier.get_full_name(), [])
+            existing = {self._partition_spec_key(p.spec) for p in store}
+            seen, created, existed = set(existing), [], []
+            for spec in request.partition_specs or []:
+                key = self._partition_spec_key(spec)
+                if key in seen:
+                    existed.append(spec)
+                    continue
+                seen.add(key)
+                created.append(spec)
+            if existed and not request.ignore_if_exists:
+                return self._mock_response(
+                    ErrorResponse(None, None,
+                                  "Partition already exists: {}".format(existed[0]), 409),
+                    409)
+            store.extend(
+                Partition(spec=dict(spec), record_count=0, file_size_in_bytes=0,
+                          file_count=0, last_file_creation_time=0, total_buckets=-1,
+                          done=False)
+                for spec in created)
+            return self._mock_response(
+                CreatePartitionsResponse(created=created, existed=existed), 200)
+
+        if method != "GET":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
         partitions = self._list_partitions(identifier, parameters)
         return self._generate_final_list_partitions_response(parameters, partitions)
+
+    @staticmethod
+    def _partition_spec_key(spec: Dict[str, str]) -> str:
+        """Order-independent identity for a spec."""
+        return str(sorted((spec or {}).items()))
 
     # ======================= Tag Handlers ====================================
 
