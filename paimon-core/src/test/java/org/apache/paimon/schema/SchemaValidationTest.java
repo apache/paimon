@@ -632,6 +632,22 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testPrimaryKeyManagedBlobAllowsFirstRow() {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payload");
+        options.put(CoreOptions.MERGE_ENGINE.key(), "first-row");
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "none");
+
+        assertThatCode(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                options, singletonList("id"), emptyList())))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     public void testPrimaryKeyBlobRejectsUnsupportedSemantics() {
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET.key(), "1");

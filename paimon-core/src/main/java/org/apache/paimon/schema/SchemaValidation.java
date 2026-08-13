@@ -1432,9 +1432,10 @@ public class SchemaValidation {
 
         checkArgument(
                 options.mergeEngine() == MergeEngine.DEDUPLICATE
-                        || options.mergeEngine() == MergeEngine.PARTIAL_UPDATE,
-                "Primary-key managed BLOB tables only support the deduplicate or "
-                        + "partial-update merge engine.");
+                        || options.mergeEngine() == MergeEngine.PARTIAL_UPDATE
+                        || options.mergeEngine() == MergeEngine.FIRST_ROW,
+                "Primary-key managed BLOB tables only support the deduplicate, "
+                        + "partial-update or first-row merge engine.");
         checkArgument(
                 options.changelogProducer() == ChangelogProducer.NONE,
                 "Primary-key managed BLOB tables only support changelog-producer 'none'.");
