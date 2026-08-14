@@ -48,7 +48,10 @@ import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -795,6 +798,44 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                             1,
                             getPartitionType(),
                             null);
+        } finally {
+            fileIO.stopBlockingManifestReads();
+        }
+
+        assertThat(fileIO.maxConcurrentManifestReads()).isGreaterThanOrEqualTo(2);
+        assertThat(fullCompacted).isPresent();
+        assertThat(readEntries(fullCompacted.get()).stream().map(entry -> entry.file().fileName()))
+                .containsExactlyInAnyOrder("survivor-a", "survivor-b");
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(ints = 2)
+    public void testFullCompactionPrefetchesIdentifierManifestsInParallel(
+            @Nullable Integer parallelism) throws Exception {
+        if (parallelism == null) {
+            assumeTrue(Runtime.getRuntime().availableProcessors() > 1);
+        }
+        CountingReadFileIO fileIO = new CountingReadFileIO();
+        manifestFile = createManifestFile(tempDir.toString(), fileIO);
+        ManifestFileMeta first =
+                makeManifest(makeEntry(true, "deleted", 0), makeEntry(true, "survivor-a", 0));
+        ManifestFileMeta second = makeManifest(makeEntry(true, "survivor-b", 0));
+        ManifestFileMeta delta = makeManifest(makeEntry(false, "deleted", 0));
+
+        fileIO.blockManifestReads(
+                new HashSet<>(Arrays.asList(first.fileName(), second.fileName())));
+        Optional<List<ManifestFileMeta>> fullCompacted;
+        try {
+            fullCompacted =
+                    ManifestFileMerger.tryFullCompaction(
+                            Arrays.asList(first, second, delta),
+                            new ArrayList<>(),
+                            manifestFile,
+                            1,
+                            1,
+                            getPartitionType(),
+                            parallelism);
         } finally {
             fileIO.stopBlockingManifestReads();
         }
