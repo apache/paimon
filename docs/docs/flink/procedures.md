@@ -678,25 +678,6 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
-      <td>migrate_iceberg_table</td>
-      <td>
-         -- Use named argument<br/>
-        CALL sys.migrate_iceberg_table(source_table => 'database_name.table_name', iceberg_options => 'iceberg_options', options => 'paimon_options', parallelism => parallelism);<br/><br/>
-        -- Use indexed argument<br/>
-        CALL sys.migrate_iceberg_table('source_table','iceberg_options', 'options', 'parallelism');
-      </td>
-      <td>
-         To migrate iceberg table to paimon. Arguments:
-            <li>source_table: string type, is used to specify the source iceberg table to migrate, it's required.</li>
-            <li>iceberg_options: string type, is used to specify the configuration of migration, multiple configuration items are separated by commas. it's required.</li>
-            <li>options: string type, is used to specify the additional options for the target paimon table, it's optional.</li>
-            <li>parallelism: integer type, is used to specify the parallelism of the migration job, it's optional.</li>
-      </td>
-      <td>
-         CALL sys.migrate_iceberg_table(source_table => 'iceberg_db.iceberg_tbl',iceberg_options => 'metadata.iceberg.storage=hadoop-catalog,iceberg_warehouse=/path/to/iceberg/warehouse');
-      </td>
-   </tr>
-   <tr>
       <td>expire_snapshots</td>
       <td>
          -- Use named argument<br/>
@@ -813,6 +794,20 @@ All available procedures are listed below.
             <li>tableName: the target table identifier.</li>
       </td>
       <td>CALL sys.repair(`table` => 'test_db.T')</td>
+   </tr>
+    <tr>
+      <td>repair_earliest_snapshot</td>
+      <td>
+         CALL [catalog.]sys.repair_earliest_snapshot(`table` => 'identifier', snapshot_id => snapshotId)
+      </td>
+      <td>
+         Repair the earliest snapshot hint for a table. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>snapshot_id: the snapshot ID to set as the earliest snapshot.</li>
+      </td>
+      <td>
+         CALL sys.repair_earliest_snapshot(`table` => 'default.T', snapshot_id => 10)
+      </td>
    </tr>
     <tr>
       <td>rewrite_file_index</td>
@@ -1232,6 +1227,109 @@ All available procedures are listed below.
             projection => 'id,name,__paimon_search_score',<br/>
             options => 'vector-search.distribute.enabled=true;ivf.nprobe=32',<br/>
             `where` => 'status = ''active''')
+      </td>
+   </tr>
+   <tr>
+      <td>alter_column_default_value</td>
+      <td>
+         CALL [catalog.]sys.alter_column_default_value(`table` => 'identifier', `column` => 'columnName', default_value => 'value')
+      </td>
+      <td>
+         Update a column default value. Arguments:
+            <li>table: the target table identifier.</li>
+            <li>column: the column name; nested columns are separated by dots.</li>
+            <li>default_value: the new default value.</li>
+      </td>
+      <td>
+         CALL sys.alter_column_default_value(`table` => 'default.T', `column` => 'status', default_value => 'active')
+      </td>
+   </tr>
+   <tr>
+      <td>clone</td>
+      <td>
+         CALL [catalog.]sys.clone(database => 'sourceDatabase', `table` => 'sourceTable', target_database => 'targetDatabase', target_table => 'targetTable'[, catalog_conf => 'key=value'][, target_catalog_conf => 'key=value'][, parallelism => parallelism][, `where` => 'predicate'][, included_tables => 'table1,table2'][, excluded_tables => 'table3'][, prefer_file_format => 'parquet'][, clone_from => 'hive-or-paimon'][, meta_only => true][, clone_if_exists => true][, target_table_conf => 'key=value'])
+      </td>
+      <td>
+         Clone a table or a database. Arguments:
+            <li>database and table: source database and optional source table.</li>
+            <li>catalog_conf and target_catalog_conf: source and target catalog options.</li>
+            <li>target_database and target_table: target database and optional target table.</li>
+            <li>clone_from: optional source type, either <code>hive</code> or <code>paimon</code>.</li>
+            <li>parallelism, where, included_tables, excluded_tables, prefer_file_format, meta_only, clone_if_exists and target_table_conf: optional clone controls.</li>
+      </td>
+      <td>
+         CALL sys.clone(database => 'source_db', `table` => 'source_t', target_database => 'target_db', target_table => 'target_t', clone_from => 'hive')
+      </td>
+   </tr>
+   <tr>
+      <td>copy_files</td>
+      <td>
+         CALL [catalog.]sys.copy_files(warehouse => 'sourceWarehouse', database => 'sourceDatabase', `table` => 'sourceTable', catalog_conf => 'key=value', target_warehouse => 'targetWarehouse', target_database => 'targetDatabase', target_table => 'targetTable', target_catalog_conf => 'key=value', parallelism => parallelism)
+      </td>
+      <td>
+         Deprecated. This procedure is supported only by <code>FileSystemCatalog</code> and does not commit a standard catalog snapshot. Do not use it for normal table-copy workflows; use <code>clone</code> instead. It copies files from a source table to a target table. Arguments:
+            <li>warehouse, database, table and catalog_conf: optional source catalog configuration.</li>
+            <li>target_warehouse: the target warehouse. Cannot be empty.</li>
+            <li>target_database, target_table and target_catalog_conf: optional target table and catalog configuration.</li>
+            <li>parallelism: optional copy job parallelism.</li>
+      </td>
+      <td>
+         CALL sys.copy_files(warehouse => 'hdfs:///source', database => 'default', `table` => 'T', target_warehouse => 'hdfs:///target', target_database => 'default', target_table => 'T')
+      </td>
+   </tr>
+   <tr>
+      <td>drop_partition</td>
+      <td>
+         CALL [catalog.]sys.drop_partition('identifier', 'partition1'[, 'partition2', ...])
+      </td>
+      <td>
+         Drop one or more partitions. This procedure is deprecated; use <code>ALTER TABLE DROP PARTITION</code> instead.
+      </td>
+      <td>
+         CALL sys.drop_partition('default.T', 'dt=2024-07-01')
+      </td>
+   </tr>
+   <tr>
+      <td>mark_partition_done</td>
+      <td>
+         CALL [catalog.]sys.mark_partition_done(`table` => 'identifier', partitions => 'partition1;partition2')
+      </td>
+      <td>
+         Mark partitions as done. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>partitions: semicolon-separated partition specs.</li>
+      </td>
+      <td>
+         CALL sys.mark_partition_done(`table` => 'default.T', partitions => 'day=2024-07-01;day=2024-07-02')
+      </td>
+   </tr>
+   <tr>
+      <td>query_service</td>
+      <td>
+         CALL [catalog.]sys.query_service(`table` => 'identifier', parallelism => parallelism)
+      </td>
+      <td>
+         Start a query service for a table. Arguments:
+            <li>table: the target table identifier.</li>
+            <li>parallelism: the query service parallelism.</li>
+      </td>
+      <td>
+         CALL sys.query_service(`table` => 'default.T', parallelism => 4)
+      </td>
+   </tr>
+   <tr>
+      <td>rename_tag</td>
+      <td>
+         CALL [catalog.]sys.rename_tag(`table` => 'identifier', tagName => 'tagName', targetTagName => 'newTagName')
+      </td>
+      <td>
+         Rename a tag. Arguments:
+            <li>table: the target table identifier.</li>
+            <li>tagName: the existing tag name.</li>
+            <li>targetTagName: the new tag name.</li>
+      </td>
+      <td>
+         CALL sys.rename_tag(`table` => 'default.T', tagName => 'tag1', targetTagName => 'tag2')
       </td>
    </tr>
    </tbody>
