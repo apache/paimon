@@ -414,7 +414,7 @@ final class ManifestFileBlockMerger {
                         continue;
                     }
                     for (PlannedBlock block : plan.blocks) {
-                        if (block.compaction.metadata != null) {
+                        if (block.compaction.canCopyEncodedBlock()) {
                             writer.writeEncodedBlock(
                                     block.raw.encodedBlock(), block.compaction.metadata);
                         } else {
@@ -633,7 +633,7 @@ final class ManifestFileBlockMerger {
                                 deletes,
                                 reusableIdentifier,
                                 true);
-                if (block.metadata != null) {
+                if (block.canCopyEncodedBlock()) {
                     writer.writeEncodedBlock(rawBlock.encodedBlock(), block.metadata);
                     continue;
                 }
@@ -866,6 +866,10 @@ final class ManifestFileBlockMerger {
                 metadata = null;
                 unchanged = false;
             }
+        }
+
+        private boolean canCopyEncodedBlock() {
+            return metadata != null;
         }
     }
 
