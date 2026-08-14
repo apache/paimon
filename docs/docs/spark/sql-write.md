@@ -123,33 +123,6 @@ SELECT * FROM my_table;
 */
 ```
 
-#### Dynamic Partition Column Order
-
-By default, positional SQL inserts with dynamic partition columns interpret the query output in the table schema order. For example, `dt` remains in its table position below:
-
-```sql
-CREATE TABLE my_table (
-    id INT,
-    dt STRING,
-    name STRING,
-    hr STRING
-) PARTITIONED BY (dt, hr);
-
-INSERT OVERWRITE my_table PARTITION (dt, hr)
-SELECT 1, '2026-08-14', 'Alice', '10';
-```
-
-To migrate Hive-style SQL whose dynamic partition values are placed after all non-dynamic columns, enable the following Spark session configuration:
-
-```sql
-SET spark.paimon.write.hive-style-dynamic-partition.enabled=true;
-
-INSERT OVERWRITE my_table PARTITION (dt, hr)
-SELECT 1, 'Alice', '2026-08-14', '10';
-```
-
-Enable this option only for positional writes that follow the Hive-style order. It does not affect `INSERT ... BY NAME`.
-
 ## Truncate Table
 
 The `TRUNCATE TABLE` statement removes all the rows from a table or partition(s).
