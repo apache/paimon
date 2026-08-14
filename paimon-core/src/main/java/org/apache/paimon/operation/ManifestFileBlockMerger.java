@@ -377,6 +377,9 @@ final class ManifestFileBlockMerger {
         ReusableIdentifier reusableIdentifier = new ReusableIdentifier();
         boolean hasDeletes = !deletes.isEmpty();
         try {
+            // Row IDs let each manifest inspect DELETE matches independently. Use parallel
+            // planning only when there are multiple workers and manifests to offset the cost of
+            // retaining planned raw blocks before the single ordered writer consumes them.
             if (hasDeletes
                     && deletes.useRowIdFilter()
                     && manifestReadParallelism != null
@@ -428,55 +431,57 @@ final class ManifestFileBlockMerger {
                         }
                     }
                 }
-                writer.close();
-                return writer.result();
-            }
-
-            for (ManifestFileMeta manifest : manifests) {
-                try (ManifestAvroReader reader =
-                        manifestFile.scanAvroBlocks(manifest.fileName(), manifest.fileSize())) {
-                    boolean encodedRecordsCompatible = reader.rawBlockCopySupported();
-                    if (fullCompaction && mustChange != null && !mustChange.test(manifest)) {
-                        boolean rewritten =
-                                rewriteOptionalManifest(
-                                        reader,
-                                        writer,
-                                        partitionType,
-                                        partitionStatsConverter,
-                                        partitions,
-                                        deletes,
-                                        reusableIdentifier,
-                                        matchedEntries,
-                                        emittedDeletes,
-                                        metadata,
-                                        encodedRecordsCompatible);
-                        if (!rewritten) {
-                            checkState(
-                                    unchangedManifests != null,
-                                    "Full compaction requires an unchanged manifest result.");
-                            unchangedManifests.add(manifest);
+            } else {
+                // Otherwise keep the streaming path: add-only manifests already use raw copying,
+                // identifier-only DELETE filtering has no cheap RowID planning path, and a single
+                // worker or manifest provides no concurrency. Processing one manifest at a time
+                // also avoids retaining planned raw blocks unnecessarily.
+                for (ManifestFileMeta manifest : manifests) {
+                    try (ManifestAvroReader reader =
+                            manifestFile.scanAvroBlocks(manifest.fileName(), manifest.fileSize())) {
+                        boolean encodedRecordsCompatible = reader.rawBlockCopySupported();
+                        if (fullCompaction && mustChange != null && !mustChange.test(manifest)) {
+                            boolean rewritten =
+                                    rewriteOptionalManifest(
+                                            reader,
+                                            writer,
+                                            partitionType,
+                                            partitionStatsConverter,
+                                            partitions,
+                                            deletes,
+                                            reusableIdentifier,
+                                            matchedEntries,
+                                            emittedDeletes,
+                                            metadata,
+                                            encodedRecordsCompatible);
+                            if (!rewritten) {
+                                checkState(
+                                        unchangedManifests != null,
+                                        "Full compaction requires an unchanged manifest result.");
+                                unchangedManifests.add(manifest);
+                            }
+                            continue;
                         }
-                        continue;
+                        if (!hasDeletes
+                                && manifest.numDeletedFiles() == 0
+                                && encodedRecordsCompatible) {
+                            writer.writeEncodedManifest(reader, manifest);
+                            continue;
+                        }
+                        writeRemainingBlocks(
+                                reader,
+                                writer,
+                                partitionType,
+                                partitionStatsConverter,
+                                partitions,
+                                deletes,
+                                reusableIdentifier,
+                                fullCompaction,
+                                matchedEntries,
+                                emittedDeletes,
+                                metadata,
+                                encodedRecordsCompatible);
                     }
-                    if (!hasDeletes
-                            && manifest.numDeletedFiles() == 0
-                            && encodedRecordsCompatible) {
-                        writer.writeEncodedManifest(reader, manifest);
-                        continue;
-                    }
-                    writeRemainingBlocks(
-                            reader,
-                            writer,
-                            partitionType,
-                            partitionStatsConverter,
-                            partitions,
-                            deletes,
-                            reusableIdentifier,
-                            fullCompaction,
-                            matchedEntries,
-                            emittedDeletes,
-                            metadata,
-                            encodedRecordsCompatible);
                 }
             }
             writer.close();
