@@ -189,10 +189,9 @@ public class SortedIndexTopoBuilder {
             // 4. Build one topology for all contiguous row ranges
             CoreOptions coreOptions = table.coreOptions();
             ReadBuilder readBuilder = table.newReadBuilder().withReadType(dataReadType);
+            List<String> sortColumns = createSortColumns(buildTaskIdField, indexColumn);
 
             KeySerializer sortKeySerializer = indexScanner.sortKeySerializer().orElse(null);
-            List<String> sortColumns = new ArrayList<>();
-            sortColumns.add(buildTaskIdField);
             RowType sortInputType;
             if (sortKeySerializer != null) {
                 String encodedKeyField = ENCODED_SORT_KEY_FIELD;
@@ -204,10 +203,9 @@ public class SortedIndexTopoBuilder {
                         new DataField(
                                 ENCODED_SORT_KEY_FIELD_ID, encodedKeyField, DataTypes.BYTES()));
                 sortInputType = new RowType(sortReadType.isNullable(), sortInputFields);
-                sortColumns.add(encodedKeyField);
+                sortColumns.set(1, encodedKeyField);
             } else {
                 sortInputType = sortReadType;
-                sortColumns.add(indexColumn);
             }
             int partitionFieldSize = table.partitionKeys().size();
             BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionFieldSize);
@@ -409,6 +407,12 @@ public class SortedIndexTopoBuilder {
 
         long parallelism = Math.max(totalRecords / recordsPerRange, 1);
         return (int) Math.min(parallelism, maxParallelism);
+    }
+
+    static List<String> createSortColumns(String buildTaskIdField, String indexColumn) {
+        // Range shuffle may spread duplicate boundary keys randomly. ROW_ID makes the full sort key
+        // unique while keeping equal index keys adjacent, so output file key ranges stay ordered.
+        return Arrays.asList(buildTaskIdField, indexColumn, SpecialFields.ROW_ID.name());
     }
 
     private static String buildTaskIdFieldName(RowType readType) {
