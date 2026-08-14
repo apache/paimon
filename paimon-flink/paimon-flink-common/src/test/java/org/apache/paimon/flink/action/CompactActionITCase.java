@@ -720,23 +720,11 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         writeData(
                 IntStream.range(0, 40)
-                        .mapToObj(
-                                i ->
-                                        rowData(
-                                                i,
-                                                1,
-                                                0,
-                                                BinaryString.fromString("first")))
+                        .mapToObj(i -> rowData(i, 1, 0, BinaryString.fromString("first")))
                         .toArray(GenericRow[]::new));
         writeData(
                 IntStream.range(40, 80)
-                        .mapToObj(
-                                i ->
-                                        rowData(
-                                                i,
-                                                2,
-                                                0,
-                                                BinaryString.fromString("second")))
+                        .mapToObj(i -> rowData(i, 2, 0, BinaryString.fromString("second")))
                         .toArray(GenericRow[]::new));
 
         CompactAction action =

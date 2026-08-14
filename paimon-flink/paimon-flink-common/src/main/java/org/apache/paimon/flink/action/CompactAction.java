@@ -49,8 +49,8 @@ import org.apache.paimon.table.PostponeUtils.PostponeBucketNumResolver;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
-import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -219,8 +219,7 @@ public class CompactAction extends TableActionBase {
                         .withBucketDistributionStrategy(bucketDistributionStrategy);
 
         sourceBuilder.withPartitionPredicate(getPartitionPredicate());
-        sourceBuilder.withBucketFilter(
-                buckets == null ? null : new SpecifiedBucketFilter(buckets));
+        sourceBuilder.withBucketFilter(buckets == null ? null : new SpecifiedBucketFilter(buckets));
         DataStreamSource<RowData> source =
                 sourceBuilder
                         .withEnv(env)
@@ -395,8 +394,7 @@ public class CompactAction extends TableActionBase {
         return false;
     }
 
-    private static class SpecifiedBucketFilter
-            implements Filter<Integer>, java.io.Serializable {
+    private static class SpecifiedBucketFilter implements Filter<Integer>, java.io.Serializable {
 
         private static final long serialVersionUID = 1L;
 

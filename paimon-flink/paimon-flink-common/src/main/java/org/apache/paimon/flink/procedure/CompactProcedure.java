@@ -65,10 +65,7 @@ public class CompactProcedure extends ProcedureBase {
                         name = "compact_strategy",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
-                @ArgumentHint(
-                        name = "buckets",
-                        type = @DataTypeHint("STRING"),
-                        isOptional = true)
+                @ArgumentHint(name = "buckets", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,

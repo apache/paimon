@@ -479,18 +479,16 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
   test("Paimon Procedure: compact specified bucket ranges") {
     withTable("T") {
-      spark.sql(
-        """
-          |CREATE TABLE T (id INT, value STRING)
-          |TBLPROPERTIES ('primary-key'='id', 'bucket'='4', 'write-only'='true')
-          |""".stripMargin)
+      spark.sql("""
+                  |CREATE TABLE T (id INT, value STRING)
+                  |TBLPROPERTIES ('primary-key'='id', 'bucket'='4', 'write-only'='true')
+                  |""".stripMargin)
 
       val table = loadTable("T")
       spark.sql("INSERT INTO T SELECT id, 'first' FROM range(0, 40)")
       spark.sql("INSERT INTO T SELECT id, 'second' FROM range(40, 80)")
 
-      spark.sql(
-        "CALL sys.compact(table => 'T', compact_strategy => 'full', buckets => '0-1')")
+      spark.sql("CALL sys.compact(table => 'T', compact_strategy => 'full', buckets => '0-1')")
 
       val filesPerBucket = table.newSnapshotReader.read.dataSplits.asScala
         .map(split => split.bucket -> split.dataFiles.size)
@@ -504,11 +502,10 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
   test("Paimon Procedure: reject buckets for dynamic bucket table") {
     withTable("T") {
-      spark.sql(
-        """
-          |CREATE TABLE T (id INT, value STRING)
-          |TBLPROPERTIES ('primary-key'='id', 'bucket'='-1', 'write-only'='true')
-          |""".stripMargin)
+      spark.sql("""
+                  |CREATE TABLE T (id INT, value STRING)
+                  |TBLPROPERTIES ('primary-key'='id', 'bucket'='-1', 'write-only'='true')
+                  |""".stripMargin)
 
       assertThatThrownBy(
         () => spark.sql("CALL sys.compact(table => 'T', buckets => '0')").collect())

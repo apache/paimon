@@ -40,13 +40,11 @@ import java.util.regex.Pattern;
 /** This is a util class for converting string parameter to another format. */
 public class ParameterUtils {
 
-    private static final Pattern INTEGER_RANGE =
-            Pattern.compile("([0-9]+)(?:\\s*-\\s*([0-9]+))?");
+    private static final Pattern INTEGER_RANGE = Pattern.compile("([0-9]+)(?:\\s*-\\s*([0-9]+))?");
 
     public static List<Integer> parseIntegerRanges(String values, int exclusiveUpperBound) {
         Preconditions.checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(values),
-                "Integer ranges must not be empty.");
+                !StringUtils.isNullOrWhitespaceOnly(values), "Integer ranges must not be empty.");
         Preconditions.checkArgument(
                 exclusiveUpperBound > 0, "Exclusive upper bound must be greater than 0.");
         Set<Integer> result = new LinkedHashSet<>();
