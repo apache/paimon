@@ -59,6 +59,11 @@ public class ManagedBlobReachabilityCollector {
      * ignored. A listed sidecar that cannot be trusted marks the result unsafe, unless the data
      * file itself is already gone: unmerged snapshot manifests can still contain {@code ADD}
      * entries that snapshot expire has deleted, and those must not abort pack GC.
+     *
+     * <p>Orphan cleanup resolves sidecars itself and calls {@link #fromSidecar(Path, Path)}, so
+     * this whole-entry variant currently has no production caller. It is retained as the
+     * entry-level reachability oracle for tests and for snapshot expiration, which needs to walk
+     * {@code extraFiles} rather than pre-resolved sidecar paths.
      */
     public Result fromDataFile(Path dataFile, List<String> extraFiles) {
         Result result = Result.empty();
@@ -113,9 +118,31 @@ public class ManagedBlobReachabilityCollector {
      */
     public Result fromSidecar(Path sidecar) {
         try {
-            List<Reference> references = readWithRetry(sidecar);
-            return Result.of(references);
+            return Result.of(readWithRetry(sidecar));
         } catch (IOException e) {
+            LOG.warn(
+                    "Failed to read managed BLOB reference file {}. Skip managed blob GC this run.",
+                    sidecar,
+                    e);
+            return Result.unsafe();
+        }
+    }
+
+    /**
+     * Reads one resolved sidecar while preserving data-file-aware orphan cleanup semantics. An
+     * unreadable sidecar is ignored only when its data file is already gone.
+     */
+    public Result fromSidecar(Path dataFile, Path sidecar) {
+        try {
+            return Result.of(readWithRetry(sidecar));
+        } catch (IOException e) {
+            if (!checkDataFileExists(dataFile)) {
+                LOG.debug(
+                        "Ignore unreadable blobref {} because data file {} is already gone.",
+                        sidecar,
+                        dataFile);
+                return Result.empty();
+            }
             LOG.warn(
                     "Failed to read managed BLOB reference file {}. Skip managed blob GC this run.",
                     sidecar,

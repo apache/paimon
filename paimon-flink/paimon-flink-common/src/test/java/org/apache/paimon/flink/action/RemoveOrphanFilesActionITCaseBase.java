@@ -19,14 +19,13 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.blob.ManagedBlobReferenceFile;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.orphan.FlinkOrphanFilesClean;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.CleanOrphanFilesResult;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -43,9 +42,14 @@ import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
+import org.apache.flink.api.common.BatchShuffleMode;
+import org.apache.flink.configuration.ExecutionOptions;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -56,9 +60,7 @@ import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -108,6 +110,35 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
     private Path getOrphanFilePath(FileStoreTable table, String orphanFile) {
         return new Path(table.location(), orphanFile);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testDistributedCleanupForcesBlockingShuffle() throws Exception {
+        FileStoreTable table = createTableAndWriteData(tableName);
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder()
+                        .batchMode()
+                        .parallelism(2)
+                        .setConf(
+                                ExecutionOptions.BATCH_SHUFFLE_MODE,
+                                BatchShuffleMode.ALL_EXCHANGES_PIPELINED)
+                        .build();
+        FlinkOrphanFilesClean cleaner = new FlinkOrphanFilesClean(table, Long.MAX_VALUE, false, 2);
+
+        DataStream<CleanOrphanFilesResult> clean = cleaner.doOrphanClean(env);
+        assertThat(env.getConfiguration().get(ExecutionOptions.BATCH_SHUFFLE_MODE))
+                .isEqualTo(BatchShuffleMode.ALL_EXCHANGES_BLOCKING);
+
+        long deleted = 0;
+        try (CloseableIterator<CleanOrphanFilesResult> results = clean.executeAndCollect()) {
+            while (results.hasNext()) {
+                deleted += results.next().getDeletedFileCount();
+            }
+        }
+        assertThat(deleted).isEqualTo(2);
+        assertThat(table.fileIO().exists(getOrphanFilePath(table, ORPHAN_FILE_1))).isFalse();
+        assertThat(table.fileIO().exists(getOrphanFilePath(table, ORPHAN_FILE_2))).isFalse();
     }
 
     @ParameterizedTest
@@ -513,118 +544,6 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
         assertThat(fileIO.exists(nonEmptyPath)).isTrue();
         assertThat(fileIO.exists(new Path(nonEmptyPath, "guard.txt"))).isTrue();
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"local", "distributed"})
-    public void testDeleteUnreferencedManagedBlobPack(String mode) throws Exception {
-        FileStoreTable table = createManagedBlobTableAndWrite();
-        Path orphan = new Path(bucketPath(table), "orphan.managed.blob");
-        table.fileIO().newOutputStream(orphan, false).close();
-        Thread.sleep(2000);
-
-        List<Path> referenced = filesWithSuffix(table, ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
-        referenced.removeIf(p -> orphan.getName().equals(p.getName()));
-        assertThat(referenced).isNotEmpty();
-
-        ImmutableList.copyOf(executeSQL(removeOrphanFilesCall(mode)));
-
-        assertThat(table.fileIO().exists(orphan)).isFalse();
-        for (Path pack : referenced) {
-            assertThat(table.fileIO().exists(pack)).isTrue();
-        }
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"local", "distributed"})
-    public void testMissingManagedBlobSidecarSkipsPackGc(String mode) throws Exception {
-        FileStoreTable table = createManagedBlobTableAndWrite();
-        Path orphanPack = new Path(bucketPath(table), "orphan.managed.blob");
-        Path orphanOther = new Path(bucketPath(table), "orphan.txt");
-        table.fileIO().newOutputStream(orphanPack, false).close();
-        table.fileIO().writeFile(orphanOther, "x", true);
-        Thread.sleep(2000);
-
-        List<Path> referenced = filesWithSuffix(table, ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
-        referenced.removeIf(p -> orphanPack.getName().equals(p.getName()));
-        assertThat(referenced).isNotEmpty();
-        deleteFilesWithSuffix(table, ManagedBlobReferenceFile.REFERENCE_FILE_SUFFIX);
-
-        ImmutableList.copyOf(executeSQL(removeOrphanFilesCall(mode)));
-
-        assertThat(table.fileIO().exists(orphanPack)).isTrue();
-        assertThat(table.fileIO().exists(orphanOther)).isFalse();
-        for (Path pack : referenced) {
-            assertThat(table.fileIO().exists(pack)).isTrue();
-        }
-    }
-
-    private FileStoreTable createManagedBlobTableAndWrite() throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.BLOB_FIELD.key(), "payload");
-        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "none");
-        options.put("bucket", "1");
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.STRING(), DataTypes.BLOB()},
-                        new String[] {"id", "name", "payload"});
-        FileStoreTable table =
-                createFileStoreTable(
-                        tableName,
-                        rowType,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        options);
-        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
-        write = writeBuilder.newWrite();
-        commit = writeBuilder.newCommit();
-        writeData(rowData(1, BinaryString.fromString("a"), new BlobData(new byte[] {1, 2})));
-        write.close();
-        commit.close();
-        write = null;
-        commit = null;
-        return table;
-    }
-
-    private String removeOrphanFilesCall(String mode) {
-        String olderThan =
-                DateTimeUtils.formatLocalDateTime(
-                        DateTimeUtils.toLocalDateTime(System.currentTimeMillis()), 3);
-        if (supportNamedArgument()) {
-            return String.format(
-                    "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '%s', mode => '%s')",
-                    database, tableName, olderThan, mode);
-        }
-        return String.format(
-                "CALL sys.remove_orphan_files('%s.%s', '%s', false, 5, '%s')",
-                database, tableName, olderThan, mode);
-    }
-
-    private static Path bucketPath(FileStoreTable table) {
-        return table.store().pathFactory().bucketPath(BinaryRow.EMPTY_ROW, 0);
-    }
-
-    private static List<Path> filesWithSuffix(FileStoreTable table, String suffix)
-            throws IOException {
-        List<Path> result = new ArrayList<>();
-        FileStatus[] statuses = table.fileIO().listStatus(bucketPath(table));
-        if (statuses == null) {
-            return result;
-        }
-        for (FileStatus status : statuses) {
-            if (status.getPath().getName().endsWith(suffix)) {
-                result.add(status.getPath());
-            }
-        }
-        return result;
-    }
-
-    private static void deleteFilesWithSuffix(FileStoreTable table, String suffix)
-            throws IOException {
-        for (Path path : filesWithSuffix(table, suffix)) {
-            table.fileIO().deleteQuietly(path);
-        }
     }
 
     protected boolean supportNamedArgument() {

@@ -25,14 +25,15 @@ import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.BoundedTwoInputOperator;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.operation.CleanOrphanFilesResult;
 import org.apache.paimon.operation.OrphanFilesClean;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 
+import org.apache.flink.api.common.BatchShuffleMode;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -92,6 +93,9 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         flinkConf.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH);
         flinkConf.set(ExecutionOptions.SORT_INPUTS, false);
         flinkConf.set(ExecutionOptions.USE_BATCH_STATE_BACKEND, false);
+        // The used/candidate join below fully consumes its first input before reading the second.
+        // A pipelined shuffle can deadlock that build/probe order, so force blocking exchanges.
+        flinkConf.set(ExecutionOptions.BATCH_SHUFFLE_MODE, BatchShuffleMode.ALL_EXCHANGES_BLOCKING);
         if (parallelism != null) {
             flinkConf.set(CoreOptions.DEFAULT_PARALLELISM, parallelism);
         }
@@ -210,8 +214,6 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                     @Override
                                     public void endInput() throws IOException {
                                         Map<String, ManifestFile> branchManifests = new HashMap<>();
-                                        Map<String, DataFilePathFactories> branchPathFactories =
-                                                new HashMap<>();
                                         for (Tuple2<String, String> tuple2 : manifests) {
                                             ManifestFile manifestFile =
                                                     branchManifests.computeIfAbsent(
@@ -221,22 +223,24 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                                             .store()
                                                                             .manifestFileFactory()
                                                                             .create());
-                                            DataFilePathFactories pathFactories =
-                                                    branchPathFactories.computeIfAbsent(
-                                                            tuple2.f0,
-                                                            key ->
-                                                                    new DataFilePathFactories(
-                                                                            table.switchToBranch(
-                                                                                            key)
-                                                                                    .store()
-                                                                                    .pathFactory()));
-                                            emitUsedFiles(
-                                                    tuple2.f1,
-                                                    manifestFile,
-                                                    pathFactories,
-                                                    file ->
-                                                            output.collect(
-                                                                    new StreamRecord<>(file)));
+                                            retryReadingFiles(
+                                                            () ->
+                                                                    manifestFile
+                                                                            .readWithIOException(
+                                                                                    tuple2.f1),
+                                                            Collections.<ManifestEntry>emptyList())
+                                                    .forEach(
+                                                            f -> {
+                                                                List<String> files =
+                                                                        new ArrayList<>();
+                                                                files.add(f.fileName());
+                                                                files.addAll(f.file().extraFiles());
+                                                                files.forEach(
+                                                                        file ->
+                                                                                output.collect(
+                                                                                        new StreamRecord<>(
+                                                                                                file)));
+                                                            });
                                         }
                                     }
                                 });
@@ -282,7 +286,9 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                         Path dirPath = new Path(dir);
                                         List<FileStatus> files = tryBestListingDirs(dirPath);
                                         for (FileStatus file : files) {
-                                            if (!file.isDir() && oldEnough(file)) {
+                                            if (!file.isDir()
+                                                    && !isManagedBlobPack(file.getPath())
+                                                    && oldEnough(file)) {
                                                 out.collect(
                                                         Tuple2.of(
                                                                 file.getPath().toString(),
@@ -352,15 +358,11 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                 .setParallelism(1)
                 .setMaxParallelism(1);
 
-        final OutputTag<Tuple2<String, Long>> unusedManagedBlobTag =
-                new OutputTag<Tuple2<String, Long>>("unused-managed-blob") {};
-
-        SingleOutputStreamOperator<CleanOrphanFilesResult> deletedNonPacks =
+        DataStream<CleanOrphanFilesResult> deleted =
                 usedFiles
-                        .keyBy(name -> name)
+                        .keyBy(f -> f)
                         .connect(
-                                candidates.keyBy(
-                                        pathAndSize -> new Path(pathAndSize.f0).getName()))
+                                candidates.keyBy(pathAndSize -> new Path(pathAndSize.f0).getName()))
                         .transform(
                                 "join-used-and-candidate-files",
                                 TypeInformation.of(CleanOrphanFilesResult.class),
@@ -414,94 +416,17 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             StreamRecord<Tuple2<String, Long>> element) {
                                         checkState(buildEnd, "Should build ended.");
                                         Tuple2<String, Long> fileInfo = element.getValue();
-                                        Path path = new Path(fileInfo.f0);
-                                        if (used.contains(path.getName())) {
-                                            return;
+                                        String value = fileInfo.f0;
+                                        Path path = new Path(value);
+                                        if (!used.contains(path.getName())) {
+                                            emittedFilesCount++;
+                                            emittedFilesLen += fileInfo.f1;
+                                            cleanFile(path);
+                                            LOG.info("Dry clean: {}", path);
                                         }
-                                        if (isManagedBlobPack(path)) {
-                                            output.collect(
-                                                    unusedManagedBlobTag,
-                                                    new StreamRecord<>(fileInfo));
-                                            return;
-                                        }
-                                        emittedFilesCount++;
-                                        emittedFilesLen += fileInfo.f1;
-                                        cleanFile(path);
-                                        LOG.info("Dry clean: {}", path);
                                     }
                                 });
-
-        DataStream<Boolean> skipManagedBlobGc =
-                usedFiles
-                        .filter(name -> SKIP_MANAGED_BLOB_GC.equals(name))
-                        .map(name -> Boolean.TRUE)
-                        .returns(TypeInformation.of(Boolean.class))
-                        .name("managed-blob-gc-skip-flag");
-
-        DataStream<CleanOrphanFilesResult> deletedPacks =
-                deletedNonPacks
-                        .getSideOutput(unusedManagedBlobTag)
-                        .connect(skipManagedBlobGc.broadcast())
-                        .transform(
-                                "clean-unused-managed-blobs",
-                                TypeInformation.of(CleanOrphanFilesResult.class),
-                                new BoundedTwoInputOperator<
-                                        Tuple2<String, Long>, Boolean, CleanOrphanFilesResult>() {
-
-                                    private boolean skipEnded;
-                                    private boolean skipGc;
-                                    private long emittedFilesCount;
-                                    private long emittedFilesLen;
-
-                                    @Override
-                                    public InputSelection nextSelection() {
-                                        return skipEnded
-                                                ? InputSelection.FIRST
-                                                : InputSelection.SECOND;
-                                    }
-
-                                    @Override
-                                    public void endInput(int inputId) {
-                                        switch (inputId) {
-                                            case 2:
-                                                checkState(!skipEnded, "Should not skip ended.");
-                                                skipEnded = true;
-                                                LOG.info("Managed blob GC skip flag: {}", skipGc);
-                                                break;
-                                            case 1:
-                                                checkState(skipEnded, "Should skip ended.");
-                                                output.collect(
-                                                        new StreamRecord<>(
-                                                                new CleanOrphanFilesResult(
-                                                                        emittedFilesCount,
-                                                                        emittedFilesLen)));
-                                                break;
-                                        }
-                                    }
-
-                                    @Override
-                                    public void processElement1(
-                                            StreamRecord<Tuple2<String, Long>> element) {
-                                        checkState(skipEnded, "Should skip ended.");
-                                        if (skipGc) {
-                                            return;
-                                        }
-                                        Tuple2<String, Long> fileInfo = element.getValue();
-                                        Path path = new Path(fileInfo.f0);
-                                        emittedFilesCount++;
-                                        emittedFilesLen += fileInfo.f1;
-                                        cleanFile(path);
-                                        LOG.info("Dry clean: {}", path);
-                                    }
-
-                                    @Override
-                                    public void processElement2(StreamRecord<Boolean> element) {
-                                        skipGc = true;
-                                    }
-                                });
-
-        DataStream<CleanOrphanFilesResult> deleted =
-                deletedNonPacks.union(deletedPacks).union(branchSnapshotDirDeleted);
+        deleted = deleted.union(branchSnapshotDirDeleted);
 
         return deleted;
     }

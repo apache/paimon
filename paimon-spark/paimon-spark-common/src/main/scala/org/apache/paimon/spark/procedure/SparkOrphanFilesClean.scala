@@ -21,10 +21,10 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.{utils, Snapshot}
 import org.apache.paimon.catalog.{Catalog, Identifier}
 import org.apache.paimon.fs.Path
-import org.apache.paimon.manifest.ManifestFile
+import org.apache.paimon.manifest.{ManifestEntry, ManifestFile}
 import org.apache.paimon.operation.{CleanOrphanFilesResult, OrphanFilesClean}
+import org.apache.paimon.operation.OrphanFilesClean.retryReadingFiles
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.utils.DataFilePathFactories
 import org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX
 import org.apache.paimon.utils.SerializableConsumer
 
@@ -33,6 +33,7 @@ import org.apache.spark.sql.{functions, Dataset, PaimonSparkSession, SparkSessio
 import org.apache.spark.sql.catalyst.SQLConfHelper
 
 import java.util
+import java.util.Collections
 import java.util.concurrent.atomic.AtomicLong
 import java.util.function.Consumer
 
@@ -94,29 +95,20 @@ case class SparkOrphanFilesClean(
       .mapPartitions {
         it =>
           val branchManifests = new util.HashMap[String, ManifestFile]
-          val branchPathFactories = new util.HashMap[String, DataFilePathFactories]
           it.flatMap {
             branchAndManifestFile =>
               val manifestFile = branchManifests.computeIfAbsent(
                 branchAndManifestFile.branch,
                 (key: String) =>
                   specifiedTable.switchToBranch(key).store.manifestFileFactory.create)
-              val pathFactories = branchPathFactories.computeIfAbsent(
-                branchAndManifestFile.branch,
-                (key: String) =>
-                  new DataFilePathFactories(
-                    specifiedTable.switchToBranch(key).store.pathFactory))
 
-              val names = new util.ArrayList[String]()
-              emitUsedFiles(
-                branchAndManifestFile.manifestName,
-                manifestFile,
-                pathFactories,
-                new Consumer[String] {
-                  override def accept(name: String): Unit = names.add(name)
-                }
-              )
-              names.asScala
+              retryReadingFiles(
+                () => manifestFile.readWithIOException(branchAndManifestFile.manifestName),
+                Collections.emptyList[ManifestEntry]
+              ).asScala.flatMap {
+                manifestEntry =>
+                  manifestEntry.fileName() +: manifestEntry.file().extraFiles().asScala
+              }
           }
       }
 
@@ -125,13 +117,6 @@ case class SparkOrphanFilesClean(
       .map(_.manifestName)
       .union(dataFiles)
       .toDF("used_name")
-      .cache()
-
-    val skipManagedBlobGc = usedFiles
-      .filter($"used_name" === OrphanFilesClean.SKIP_MANAGED_BLOB_GC)
-      .limit(1)
-      .collect()
-      .nonEmpty
 
     // find candidate files which can be removed
     val fileDirs = listPaimonFileDirs.asScala.map(_.toString).toSeq
@@ -142,6 +127,7 @@ case class SparkOrphanFilesClean(
         dir =>
           tryBestListingDirs(new Path(dir)).asScala
             .filter(file => !file.isDir())
+            .filter(file => !isManagedBlobPack(file.getPath))
             .filter(oldEnough)
             .map {
               file =>
@@ -152,16 +138,9 @@ case class SparkOrphanFilesClean(
       .toDF("name", "path", "len", "dataDir")
       .repartition(parallelism)
 
-    val unused = candidates.join(usedFiles, $"name" === $"used_name", "left_anti")
-    val toDelete =
-      if (skipManagedBlobGc) {
-        unused.filter(!$"name".endsWith(org.apache.paimon.blob.ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX))
-      } else {
-        unused
-      }
-
     // use left anti to filter files which is not used
-    val deleted = toDelete
+    val deleted = candidates
+      .join(usedFiles, $"name" === $"used_name", "left_anti")
       .repartition($"dataDir")
       .mapPartitions {
         it =>

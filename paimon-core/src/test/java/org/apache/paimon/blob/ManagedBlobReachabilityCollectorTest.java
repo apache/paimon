@@ -70,9 +70,11 @@ class ManagedBlobReachabilityCollectorTest {
         Path dataFile = new Path(tempDir.resolve("data.avro").toUri());
         Path sidecar = ManagedBlobReferenceFile.sidecarPath(dataFile);
         Reference first =
-                new Reference(tempDir.resolve("bucket-0").toUri().toString(), "data-a.managed.blob");
+                new Reference(
+                        tempDir.resolve("bucket-0").toUri().toString(), "data-a.managed.blob");
         Reference second =
-                new Reference(tempDir.resolve("bucket-0").toUri().toString(), "data-b.managed.blob");
+                new Reference(
+                        tempDir.resolve("bucket-0").toUri().toString(), "data-b.managed.blob");
         ManagedBlobReferenceFile.write(fileIO, sidecar, Arrays.asList(first, second));
         ManagedBlobReachabilityCollector collector = new ManagedBlobReachabilityCollector(fileIO);
 
@@ -86,6 +88,33 @@ class ManagedBlobReachabilityCollectorTest {
         assertThat(result.containsPackName("missing.managed.blob")).isFalse();
         assertThat(first.toPath())
                 .isEqualTo(new Path(tempDir.resolve("bucket-0/data-a.managed.blob").toUri()));
+    }
+
+    @Test
+    void testReadSingleSidecar() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path sidecar = new Path(tempDir.resolve("data.avro.blobref").toUri());
+        Reference reference =
+                new Reference(tempDir.resolve("bucket-0").toUri().toString(), "data.managed.blob");
+        ManagedBlobReferenceFile.write(fileIO, sidecar, Collections.singletonList(reference));
+
+        ManagedBlobReachabilityCollector.Result result =
+                new ManagedBlobReachabilityCollector(fileIO).fromSidecar(sidecar);
+
+        assertThat(result.isUnsafe()).isFalse();
+        assertThat(result.referenced()).containsExactly(reference);
+    }
+
+    @Test
+    void testMissingSingleSidecarIsUnsafe() {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path sidecar = new Path(tempDir.resolve("missing.blobref").toUri());
+
+        ManagedBlobReachabilityCollector.Result result =
+                new ManagedBlobReachabilityCollector(fileIO).fromSidecar(sidecar);
+
+        assertThat(result.isUnsafe()).isTrue();
+        assertThat(result.referenced()).isEmpty();
     }
 
     @Test
@@ -109,8 +138,7 @@ class ManagedBlobReachabilityCollectorTest {
         ManagedBlobReachabilityCollector collector = new ManagedBlobReachabilityCollector(fileIO);
 
         ManagedBlobReachabilityCollector.Result result =
-                collector.fromDataFile(
-                        dataFile, Collections.singletonList("expired.avro.blobref"));
+                collector.fromDataFile(dataFile, Collections.singletonList("expired.avro.blobref"));
 
         assertThat(result.isUnsafe()).isFalse();
         assertThat(result.referenced()).isEmpty();
@@ -161,7 +189,8 @@ class ManagedBlobReachabilityCollectorTest {
         Path dataFile = new Path(tempDir.resolve("data.avro").toUri());
         Path sidecar = ManagedBlobReferenceFile.sidecarPath(dataFile);
         Reference referenced =
-                new Reference(tempDir.resolve("bucket-0").toUri().toString(), "data-a.managed.blob");
+                new Reference(
+                        tempDir.resolve("bucket-0").toUri().toString(), "data-a.managed.blob");
         ManagedBlobReferenceFile.write(fileIO, sidecar, Collections.singletonList(referenced));
         ManagedBlobReachabilityCollector collector = new ManagedBlobReachabilityCollector(fileIO);
 
@@ -172,9 +201,10 @@ class ManagedBlobReachabilityCollectorTest {
 
         assertThat(merged.isUnsafe()).isTrue();
         assertThat(merged.referenced()).containsExactly(referenced);
-        assertThat(ManagedBlobReachabilityCollector.Result.empty()
-                        .merge(ManagedBlobReachabilityCollector.Result.unsafe())
-                        .isUnsafe())
+        assertThat(
+                        ManagedBlobReachabilityCollector.Result.empty()
+                                .merge(ManagedBlobReachabilityCollector.Result.unsafe())
+                                .isUnsafe())
                 .isTrue();
     }
 }
