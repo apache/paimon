@@ -129,7 +129,8 @@ public final class ManifestAvroWriter implements AutoCloseable {
         }
     }
 
-    public void writeEncodedBlock(AvroRawBlock block, EncodedBlock metadata) throws IOException {
+    public void writeEncodedBlock(AvroRawBlock block, EncodedBlockMeta metadata)
+            throws IOException {
         if (metadata.addedFiles < 0 || metadata.deletedFiles < 0) {
             throw new IllegalArgumentException(
                     String.format(
@@ -283,7 +284,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             return this;
         }
 
-        public EncodedEntry replaceWithoutRowId(
+        public EncodedEntry replace(
                 byte kind,
                 BinaryRow partition,
                 int bucket,
@@ -303,7 +304,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
     }
 
     /** Aggregate statistics for an encoded Avro block copied without decompression. */
-    public static final class EncodedBlock {
+    public static final class EncodedBlockMeta {
 
         private final long addedFiles;
         private final long deletedFiles;
@@ -316,7 +317,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private final long maxRowId;
         private final SimpleStats partitionStats;
 
-        public EncodedBlock(
+        public EncodedBlockMeta(
                 long addedFiles,
                 long deletedFiles,
                 long schemaId,
@@ -418,7 +419,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             addEncodedPartition(metadata.partition, 1);
         }
 
-        private void writeEncodedBlock(AvroRawBlock block, EncodedBlock metadata)
+        private void writeEncodedBlock(AvroRawBlock block, EncodedBlockMeta metadata)
                 throws IOException {
             ensureOpen();
             writer.addEncodedBlock(block);
@@ -478,16 +479,16 @@ public final class ManifestAvroWriter implements AutoCloseable {
             }
         }
 
-        private void collectStats(EncodedBlock block) {
-            numAddedFiles = Math.addExact(numAddedFiles, block.addedFiles);
-            numDeletedFiles = Math.addExact(numDeletedFiles, block.deletedFiles);
-            schemaId = Math.max(schemaId, block.schemaId);
-            minBucket = Math.min(minBucket, block.minBucket);
-            maxBucket = Math.max(maxBucket, block.maxBucket);
-            minLevel = Math.min(minLevel, block.minLevel);
-            maxLevel = Math.max(maxLevel, block.maxLevel);
+        private void collectStats(EncodedBlockMeta metadata) {
+            numAddedFiles = Math.addExact(numAddedFiles, metadata.addedFiles);
+            numDeletedFiles = Math.addExact(numDeletedFiles, metadata.deletedFiles);
+            schemaId = Math.max(schemaId, metadata.schemaId);
+            minBucket = Math.min(minBucket, metadata.minBucket);
+            maxBucket = Math.max(maxBucket, metadata.maxBucket);
+            minLevel = Math.min(minLevel, metadata.minLevel);
+            maxLevel = Math.max(maxLevel, metadata.maxLevel);
             if (rowIdStats != null) {
-                rowIdStats.collectRange(block.minRowId, block.maxRowId);
+                rowIdStats.collectRange(metadata.minRowId, metadata.maxRowId);
             }
         }
 

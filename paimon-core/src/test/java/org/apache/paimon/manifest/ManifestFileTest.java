@@ -967,7 +967,7 @@ public class ManifestFileTest {
             assertThat(reader.hasNext()).isTrue();
             ManifestAvroReader.RawBlock block = reader.next();
             assertThat(block.recordCount()).isEqualTo(entries.size());
-            writer.writeEncodedBlock(block.encodedBlock(), encodedBlock(sourceMeta));
+            writer.writeEncodedBlock(block.encodedBlock(), encodedBlockMeta(sourceMeta));
             assertThat(reader.hasNext()).isFalse();
         }
         writer.close();
@@ -981,8 +981,8 @@ public class ManifestFileTest {
         assertThat(manifestFile.read(result.fileName())).containsExactlyElementsOf(entries);
     }
 
-    private ManifestAvroWriter.EncodedBlock encodedBlock(ManifestFileMeta meta) {
-        return new ManifestAvroWriter.EncodedBlock(
+    private ManifestAvroWriter.EncodedBlockMeta encodedBlockMeta(ManifestFileMeta meta) {
+        return new ManifestAvroWriter.EncodedBlockMeta(
                 meta.numAddedFiles(),
                 meta.numDeletedFiles(),
                 meta.schemaId(),

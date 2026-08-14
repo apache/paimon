@@ -31,7 +31,7 @@ import org.apache.paimon.manifest.ManifestAvroReader;
 import org.apache.paimon.manifest.ManifestAvroReader.RawBlock;
 import org.apache.paimon.manifest.ManifestAvroReader.RowIterator;
 import org.apache.paimon.manifest.ManifestAvroWriter;
-import org.apache.paimon.manifest.ManifestAvroWriter.EncodedBlock;
+import org.apache.paimon.manifest.ManifestAvroWriter.EncodedBlockMeta;
 import org.apache.paimon.manifest.ManifestAvroWriter.EncodedEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -538,7 +538,7 @@ final class ManifestFileBlockMerger {
             boolean encodedRecordsCompatible)
             throws Exception {
         List<RawBlock> pendingBlocks = new ArrayList<>();
-        List<EncodedBlock> pendingMetadata = new ArrayList<>();
+        List<EncodedBlockMeta> pendingMetadata = new ArrayList<>();
         while (reader.hasNext()) {
             RawBlock rawBlock = reader.next();
             CompactionBlock block =
@@ -558,8 +558,8 @@ final class ManifestFileBlockMerger {
 
             for (int i = 0; i < pendingBlocks.size(); i++) {
                 RawBlock pending = pendingBlocks.get(i);
-                EncodedBlock encodedBlock = pendingMetadata.get(i);
-                if (encodedBlock == null) {
+                EncodedBlockMeta blockMetadata = pendingMetadata.get(i);
+                if (blockMetadata == null) {
                     writeBlockEntries(
                             pending,
                             writer,
@@ -571,7 +571,7 @@ final class ManifestFileBlockMerger {
                             metadata,
                             encodedRecordsCompatible);
                 } else {
-                    writer.writeEncodedBlock(pending.encodedBlock(), encodedBlock);
+                    writer.writeEncodedBlock(pending.encodedBlock(), blockMetadata);
                 }
             }
             writeBlockEntries(
@@ -736,7 +736,7 @@ final class ManifestFileBlockMerger {
                     file.nonNullFirstRowId(),
                     file.rowCount());
         } else {
-            metadata.replaceWithoutRowId(
+            metadata.replace(
                     entry.kind().toByteValue(),
                     partition,
                     entry.bucket(),
@@ -767,7 +767,7 @@ final class ManifestFileBlockMerger {
         private final RowType partitionType;
         private final boolean collectMetadata;
         private @Nullable Map<Integer, Integer> partitionCounts;
-        private @Nullable EncodedBlock metadata;
+        private @Nullable EncodedBlockMeta metadata;
 
         private CompactionBlock(boolean collectMetadata, RowType partitionType) {
             this.unchanged = true;
@@ -840,7 +840,7 @@ final class ManifestFileBlockMerger {
                                 stats[field].min(), stats[field].max(), nullCounts[field]);
             }
             metadata =
-                    new EncodedBlock(
+                    new EncodedBlockMeta(
                             addedFiles,
                             deletedFiles,
                             schemaId,
