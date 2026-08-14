@@ -76,11 +76,12 @@ class RewriteManifestProcedureTest extends PaimonSparkTestBase with StreamTest {
     val result =
       spark.sql("CALL sys.rewrite_manifest(table => 'T')").collectAsList().get(0)
 
-    // rewritten_manifests_count > 0 and added_manifests_count == after - before
+    // rewritten_manifests_count == before (all manifests rewritten without where)
+    // added_manifests_count > 0 (new manifests produced)
     val rewrittenCount = result.getInt(0)
     val addedCount = result.getInt(1)
-    Assertions.assertThat(rewrittenCount).isGreaterThan(0)
-    Assertions.assertThat(addedCount).isEqualTo(rewrittenCount - beforeManifests.toInt)
+    Assertions.assertThat(rewrittenCount).isEqualTo(beforeManifests.toInt)
+    Assertions.assertThat(addedCount).isGreaterThan(0)
 
     // after rewrite all delete entries must be cleaned
     val afterDeleted =
