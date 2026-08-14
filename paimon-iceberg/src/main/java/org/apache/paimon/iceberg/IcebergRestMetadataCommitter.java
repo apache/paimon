@@ -64,6 +64,7 @@ import java.util.stream.Collectors;
 import static org.apache.iceberg.CatalogUtil.ICEBERG_CATALOG_TYPE;
 import static org.apache.iceberg.TableProperties.METADATA_DELETE_AFTER_COMMIT_ENABLED;
 import static org.apache.iceberg.TableProperties.METADATA_PREVIOUS_VERSIONS_MAX;
+import static org.apache.iceberg.TableProperties.RESERVED_PROPERTIES;
 
 /**
  * commit Iceberg metadata to Iceberg's rest catalog, so the table can be visited by Iceberg's rest
@@ -445,6 +446,12 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     // Update Iceberg REST table properties from current IcebergOptions, but only
     // if the values differ from what the REST catalog already has. This avoids
     // emitting a redundant SetProperties update on every commit.
+    //
+    // This also merges in user-supplied custom properties (metadata.iceberg.table-properties.*),
+    // since setProperties() merges into the existing property map rather than replacing it
+    // (see TableMetadata.Builder#setProperties), so these persist across the create, recreate,
+    // and steady-state update paths that all route through this method via
+    // updatesForCorrectBase().
     private void updateProperties(TableMetadata.Builder update) {
         String desiredMax = String.valueOf(icebergOptions.previousVersionsMax());
         String desiredDeleteAfter = String.valueOf(icebergOptions.deleteAfterCommitEnabled());
@@ -455,12 +462,41 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                         || !desiredDeleteAfter.equals(
                                 current.get(METADATA_DELETE_AFTER_COMMIT_ENABLED));
 
+        Map<String, String> customProperties = customTableProperties();
+        for (Map.Entry<String, String> entry : customProperties.entrySet()) {
+            if (!entry.getValue().equals(current.get(entry.getKey()))) {
+                changed = true;
+                break;
+            }
+        }
+
         if (changed) {
             Map<String, String> properties = new HashMap<>();
             properties.put(METADATA_PREVIOUS_VERSIONS_MAX, desiredMax);
             properties.put(METADATA_DELETE_AFTER_COMMIT_ENABLED, desiredDeleteAfter);
+            properties.putAll(customProperties);
             update.setProperties(properties);
         }
+    }
+
+    // Custom table properties requested via metadata.iceberg.table-properties.<key>, with
+    // Iceberg-reserved keys filtered out (Iceberg's TableMetadata rejects them outright).
+    private Map<String, String> customTableProperties() {
+        Map<String, String> customProperties = icebergOptions.icebergTableProperties();
+        Map<String, String> filtered = new HashMap<>();
+        customProperties.forEach(
+                (key, value) -> {
+                    if (RESERVED_PROPERTIES.contains(key)) {
+                        LOG.warn(
+                                "Ignoring custom Iceberg table property '{}' for table {}: "
+                                        + "it collides with an Iceberg-reserved property.",
+                                key,
+                                icebergTableIdentifier);
+                    } else {
+                        filtered.put(key, value);
+                    }
+                });
+        return filtered;
     }
 
     // -------------------------------------------------------------------------------------
