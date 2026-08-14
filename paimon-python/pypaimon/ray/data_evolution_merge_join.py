@@ -503,6 +503,7 @@ def distributed_update_apply(
     precomputed_info_ref = ray.put(files_info)
 
     frid_col = "_FIRST_ROW_ID"
+    sentinel_row_id = -1
     captured_sorted = sorted_first_row_ids
     captured_sorted_arr = np.asarray(captured_sorted, dtype=np.int64)
     valid_ranges = planner.valid_row_id_ranges
@@ -544,10 +545,27 @@ def distributed_update_apply(
     map_kwargs = _map_kwargs(ray_remote_args)
     with_frid = update_ds.map_batches(_assign_frid, **map_kwargs)
 
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    target_pa = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    update_schema = build_update_schema(target_pa, cols, row_id_name)
+    # Ray drops the schema of an empty shuffle input. A negative row id keeps
+    # the group-by schema and is removed before writing.
+    sentinel = pa.Table.from_arrays(
+        [pa.array([sentinel_row_id], type=pa.int64())]
+        + [pa.nulls(1, type=update_schema.field(col).type) for col in cols],
+        schema=update_schema,
+    ).append_column(
+        frid_col, pa.array([captured_sorted[0]], type=pa.int64())
+    )
+    with_frid = with_frid.union(ray.data.from_arrow(sentinel))
+
     captured_table = table
     captured_cols = cols
 
     def _apply_group(group: pa.Table) -> pa.Table:
+        group = group.filter(
+            pc.not_equal(group.column(row_id_name), sentinel_row_id)
+        )
         if group.num_rows == 0:
             return pa.Table.from_pydict({
                 "msgs_blob": pa.array([], type=pa.binary()),
