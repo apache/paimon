@@ -151,6 +151,44 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
+    public void trimWithTrimString() {
+        assertThat(fromString("xyzaxyz").trim(fromString("xyz"))).isEqualTo(fromString("a"));
+        assertThat(fromString("zyxaxyz").trim(fromString("xyz"))).isEqualTo(fromString("a"));
+        assertThat(fromString("xyzaxyz").trimLeft(fromString("xyz"))).isEqualTo(fromString("axyz"));
+        assertThat(fromString("xyzaxyz").trimRight(fromString("xyz")))
+                .isEqualTo(fromString("xyza"));
+
+        // nothing to trim
+        assertThat(fromString("abc").trim(fromString("xyz"))).isEqualTo(fromString("abc"));
+        assertThat(fromString("abc").trim(EMPTY_UTF8)).isEqualTo(fromString("abc"));
+
+        // everything trimmed away, and the empty source
+        assertThat(fromString("xyx").trim(fromString("xyz"))).isEqualTo(EMPTY_UTF8);
+        assertThat(fromString("").trim(fromString("x"))).isEqualTo(EMPTY_UTF8);
+
+        assertThat(fromString("abc").trim(null)).isNull();
+        assertThat(fromString("abc").trimLeft(null)).isNull();
+        assertThat(fromString("abc").trimRight(null)).isNull();
+    }
+
+    @TestTemplate
+    public void trimComparesWholeCharacters() {
+        // a multi-byte character must not be matched by one of its bytes: these two share
+        // their leading UTF-8 bytes, and 中 shares its first byte with 丁
+        assertThat(fromString("。x。").trim(fromString("、"))).isEqualTo(fromString("。x。"));
+        assertThat(fromString("中x中").trim(fromString("丁"))).isEqualTo(fromString("中x中"));
+        assertThat(fromString("中x中").trim(fromString("中"))).isEqualTo(fromString("x"));
+
+        // 4-byte characters, trimmed from either end
+        assertThat(fromString("😁x😁").trim(fromString("😀"))).isEqualTo(fromString("😁x😁"));
+        assertThat(fromString("😁x😁").trim(fromString("😁"))).isEqualTo(fromString("x"));
+        assertThat(fromString("x𐈀").trimRight(fromString("😀"))).isEqualTo(fromString("x𐈀"));
+
+        // a trim set holding characters of different byte lengths
+        assertThat(fromString("a中b").trim(fromString("ab中"))).isEqualTo(EMPTY_UTF8);
+    }
+
+    @TestTemplate
     public void compareTo() {
         assertThat(fromString("   ").compareTo(blankString(3))).isEqualTo(0);
         assertThat(fromString("").compareTo(fromString("a"))).isLessThan(0);

@@ -19,7 +19,6 @@
 package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.utils.StringUtils;
 
 import java.util.List;
 
@@ -31,6 +30,9 @@ public class TrimTransform extends StringTransform {
     private static final long serialVersionUID = 1L;
 
     public static final String NAME = "TRIM";
+
+    /** The one-input form trims spaces only, not every whitespace character. */
+    private static final BinaryString SPACE = BinaryString.fromString(" ");
 
     private final Flag trimFlag;
 
@@ -50,22 +52,21 @@ public class TrimTransform extends StringTransform {
         if (inputs.get(0) == null) {
             return null;
         }
-        String sourceString = inputs.get(0).toString();
-        String charsToTrim = " ";
+        BinaryString sourceString = inputs.get(0);
+        BinaryString charsToTrim = SPACE;
         if (inputs.size() == 2) {
             if (inputs.get(1) == null) {
-                // StringUtils.ltrim/rtrim treat a null charsToTrim as a null result
                 return null;
             }
-            charsToTrim = inputs.get(1).toString();
+            charsToTrim = inputs.get(1);
         }
         switch (trimFlag) {
             case BOTH:
-                return BinaryString.fromString(StringUtils.trim(sourceString, charsToTrim));
+                return sourceString.trim(charsToTrim);
             case LEADING:
-                return BinaryString.fromString(StringUtils.ltrim(sourceString, charsToTrim));
+                return sourceString.trimLeft(charsToTrim);
             case TRAILING:
-                return BinaryString.fromString(StringUtils.rtrim(sourceString, charsToTrim));
+                return sourceString.trimRight(charsToTrim);
             default:
                 throw new IllegalArgumentException("Invalid trim way " + trimFlag.name());
         }

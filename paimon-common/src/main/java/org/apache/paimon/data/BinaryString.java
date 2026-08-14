@@ -410,6 +410,56 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
         }
     }
 
+    /**
+     * Returns a string whose value is this string, with any leading character contained in {@code
+     * trimString} removed. Characters are compared whole, so a multi-byte character is never
+     * matched by one of its bytes.
+     *
+     * @param trimString the set of characters to remove, or {@code null} for a {@code null} result.
+     */
+    public BinaryString trimLeft(BinaryString trimString) {
+        if (trimString == null) {
+            return null;
+        }
+        int start = 0;
+        while (start < sizeInBytes) {
+            int charBytes = numBytesForFirstByte(byteAt(start));
+            if (!trimString.contains(fromAddress(segments, offset + start, charBytes))) {
+                break;
+            }
+            start += charBytes;
+        }
+        return start >= sizeInBytes ? EMPTY_UTF8 : copyBinaryString(start, sizeInBytes - 1);
+    }
+
+    /** Trailing counterpart of {@link #trimLeft(BinaryString)}. */
+    public BinaryString trimRight(BinaryString trimString) {
+        if (trimString == null) {
+            return null;
+        }
+        int end = sizeInBytes;
+        while (end > 0) {
+            // walk back over the 10xxxxxx continuation bytes to the start of the last character
+            int charStart = end - 1;
+            while (charStart > 0 && (byteAt(charStart) & 0xC0) == 0x80) {
+                charStart--;
+            }
+            if (!trimString.contains(fromAddress(segments, offset + charStart, end - charStart))) {
+                break;
+            }
+            end = charStart;
+        }
+        return end == 0 ? EMPTY_UTF8 : copyBinaryString(0, end - 1);
+    }
+
+    /** Both-sides counterpart of {@link #trimLeft(BinaryString)}. */
+    public BinaryString trim(BinaryString trimString) {
+        if (trimString == null) {
+            return null;
+        }
+        return trimLeft(trimString).trimRight(trimString);
+    }
+
     private BinaryString trimMultiSegs() {
         int s = 0;
         int e = this.sizeInBytes - 1;
