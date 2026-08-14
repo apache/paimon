@@ -75,6 +75,15 @@ public class PrimaryKeyFullTextBucketSearch {
             String column,
             String query,
             int limit) {
+        return searchRankingsAsync(split, deletionVectors, column, query, limit).join();
+    }
+
+    public CompletableFuture<List<List<PrimaryKeySearchPosition>>> searchRankingsAsync(
+            PrimaryKeyFullTextSearchSplit split,
+            Map<String, DeletionVector> deletionVectors,
+            String column,
+            String query,
+            int limit) {
         checkArgument(limit > 0, "Full-text search limit must be positive: %s.", limit);
         DataSplit dataSplit = split.dataSplit();
         Map<String, DataFileMeta> files = new HashMap<>();
@@ -130,11 +139,15 @@ public class PrimaryKeyFullTextBucketSearch {
             requests.add(new PayloadRequest(sourceRanges, totalRowCount, include, future));
         }
 
-        CompletableFuture.allOf(
+        return CompletableFuture.allOf(
                         requests.stream()
                                 .map(request -> request.future)
                                 .toArray(CompletableFuture[]::new))
-                .join();
+                .thenApply(ignored -> collectRankings(dataSplit, requests));
+    }
+
+    private static List<List<PrimaryKeySearchPosition>> collectRankings(
+            DataSplit dataSplit, List<PayloadRequest> requests) {
         List<List<PrimaryKeySearchPosition>> localRankings = new ArrayList<>(requests.size());
         for (PayloadRequest request : requests) {
             Optional<ScoredGlobalIndexResult> result = request.future.join();

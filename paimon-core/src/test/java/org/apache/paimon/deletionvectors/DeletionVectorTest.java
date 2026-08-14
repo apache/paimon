@@ -60,6 +60,24 @@ public class DeletionVectorTest {
     }
 
     @Test
+    public void testApplyDeletionFileRecordIteratorSkip() throws Exception {
+        DeletionVector deletionVector = new BitmapDeletionVector();
+        deletionVector.checkedDelete(1);
+        deletionVector.checkedDelete(3);
+
+        ApplyDeletionFileRecordIterator iterator =
+                new ApplyDeletionFileRecordIterator(
+                        new TestingFileRecordIterator(5), deletionVector::isDeleted);
+
+        assertThat(iterator.skip()).isTrue();
+        assertThat(iterator.returnedPosition()).isZero();
+        assertThat(iterator.skip()).isTrue();
+        assertThat(iterator.returnedPosition()).isEqualTo(2L);
+        assertThat(iterator.next().getInt(0)).isEqualTo(4);
+        assertThat(iterator.skip()).isFalse();
+    }
+
+    @Test
     public void testApplyDeletionVectorReaderUsesOffsetAwareJudger() throws Exception {
         DeletionVector deletionVector = new BitmapDeletionVector();
         deletionVector.checkedDelete(12);
@@ -224,6 +242,15 @@ public class DeletionVectorTest {
             }
             returnedPosition = nextPosition++;
             return GenericRow.of(returnedPosition);
+        }
+
+        @Override
+        public boolean skip() {
+            if (nextPosition >= rows) {
+                return false;
+            }
+            returnedPosition = nextPosition++;
+            return true;
         }
 
         @Override

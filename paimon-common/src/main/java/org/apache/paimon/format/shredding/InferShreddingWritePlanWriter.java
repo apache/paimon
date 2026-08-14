@@ -26,12 +26,10 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.utils.InternalRowUtils;
 
-import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 
 /** Buffers initial rows, infers a per-file shredding write plan, and writes physical rows. */
@@ -43,7 +41,6 @@ public class InferShreddingWritePlanWriter implements BundleFormatWriter {
     private final String compression;
 
     private final List<InternalRow> bufferedRows;
-    private final List<BundleRecords> bufferedBundles;
 
     @Nullable private FormatWriter actualWriter;
     private boolean planFinalized = false;
@@ -59,7 +56,6 @@ public class InferShreddingWritePlanWriter implements BundleFormatWriter {
         this.out = out;
         this.compression = compression;
         this.bufferedRows = new ArrayList<>();
-        this.bufferedBundles = new ArrayList<>();
     }
 
     @Override
@@ -80,14 +76,8 @@ public class InferShreddingWritePlanWriter implements BundleFormatWriter {
     @Override
     public void writeBundle(BundleRecords bundle) throws IOException {
         if (!planFinalized) {
-            final List<InternalRow> rows = new ArrayList<>();
             for (InternalRow row : bundle) {
-                rows.add(InternalRowUtils.copyInternalRow(row, writePlanFactory.logicalRowType()));
-            }
-            bufferedBundles.add(new CopiedBundleRecords(rows));
-            totalBufferedRowCount += bundle.rowCount();
-            if (totalBufferedRowCount >= writePlanFactory.inferBufferRowCount()) {
-                finalizePlanAndFlush();
+                addElement(row);
             }
             return;
         }
@@ -123,57 +113,15 @@ public class InferShreddingWritePlanWriter implements BundleFormatWriter {
     }
 
     private void finalizePlanAndFlush() throws IOException {
-        ShreddingWritePlan writePlan = writePlanFactory.createWritePlan(collectAllRows());
+        ShreddingWritePlan writePlan = writePlanFactory.createWritePlan(bufferedRows);
         actualWriter =
                 ShreddingWritePlanWriterFactory.createWriterWithPlan(
                         writerFactory, writePlanFactory, out, compression, writePlan);
         planFinalized = true;
 
-        if (!bufferedBundles.isEmpty()) {
-            BundleFormatWriter bundleWriter = (BundleFormatWriter) actualWriter;
-            for (BundleRecords bundle : bufferedBundles) {
-                bundleWriter.writeBundle(bundle);
-            }
-            bufferedBundles.clear();
-        } else {
-            for (InternalRow row : bufferedRows) {
-                actualWriter.addElement(row);
-            }
-            bufferedRows.clear();
+        for (InternalRow row : bufferedRows) {
+            actualWriter.addElement(row);
         }
-    }
-
-    private List<InternalRow> collectAllRows() {
-        if (bufferedBundles.isEmpty()) {
-            return bufferedRows;
-        }
-
-        List<InternalRow> allRows = new ArrayList<>();
-        for (BundleRecords bundle : bufferedBundles) {
-            for (InternalRow row : bundle) {
-                allRows.add(row);
-            }
-        }
-        return allRows;
-    }
-
-    private static class CopiedBundleRecords implements BundleRecords {
-
-        private final List<InternalRow> rows;
-
-        private CopiedBundleRecords(List<InternalRow> rows) {
-            this.rows = rows;
-        }
-
-        @Override
-        @Nonnull
-        public Iterator<InternalRow> iterator() {
-            return rows.iterator();
-        }
-
-        @Override
-        public long rowCount() {
-            return rows.size();
-        }
+        bufferedRows.clear();
     }
 }

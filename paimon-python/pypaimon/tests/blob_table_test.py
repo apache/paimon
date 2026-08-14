@@ -1471,7 +1471,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                     [],
                     [('last', b'blob-4')],
                     [('descriptor', source_descriptor.serialize())],
-                    [('duplicate', b'first'), ('duplicate', b'last')],
+                    [('first', b'first'), ('last', b'last')],
                 ],
                 type=map_blob_type,
             ),
@@ -1497,7 +1497,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 3: {},
                 4: {'last': b'blob-4'},
                 5: {'descriptor': descriptor_body},
-                6: {'duplicate': b'last'},
+                6: {'first': b'first', 'last': b'last'},
             },
         )
 
@@ -1576,7 +1576,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 3: {},
                 4: {'last': b'blob-4'},
                 5: {'descriptor': descriptor_body},
-                6: {'duplicate': b'last'},
+                6: {'first': b'first', 'last': b'last'},
             },
         )
 

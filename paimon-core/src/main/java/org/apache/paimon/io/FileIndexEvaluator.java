@@ -72,7 +72,7 @@ public class FileIndexEvaluator {
             if (!isNullOrEmpty(dataFilter)) {
                 Predicate filter = PredicateBuilder.and(dataFilter.toArray(new Predicate[0]));
                 result = predicate.evaluate(filter);
-                result.and(selection);
+                result = result.and(selection);
             } else if (topN != null) {
                 // 1. TopN cannot work with filter, because a filter may not completely filter out
                 // all records, any unfiltered records can affect the calculation results of TopN

@@ -100,6 +100,25 @@ public class ForceSingleBatchReader implements RecordReader<InternalRow> {
         }
 
         @Override
+        public boolean skip() throws IOException {
+            while (true) {
+                if (currentBatch == null) {
+                    currentBatch = reader.readBatch();
+                    if (currentBatch == null) {
+                        return false;
+                    }
+                }
+
+                if (currentBatch.skip()) {
+                    return true;
+                }
+
+                currentBatch.releaseBatch();
+                currentBatch = null;
+            }
+        }
+
+        @Override
         public void releaseBatch() {
             if (currentBatch != null) {
                 currentBatch.releaseBatch();

@@ -40,6 +40,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.SnapshotManager;
@@ -586,6 +587,33 @@ public class SchemaManagerTest {
                 .hasMessage(
                         "The type %s in partition field %s is unsupported",
                         MapType.class.getSimpleName(), "f0");
+    }
+
+    @Test
+    public void testVariantKeyType() {
+        final RowType variantType =
+                RowType.of(new VariantType(), new BigIntType(), new VarCharType());
+
+        final Schema variantPrimaryKeySchema =
+                new Schema(variantType.getFields(), partitionKeys, primaryKeys, options, "");
+        assertThatThrownBy(() -> manager.createTable(variantPrimaryKeySchema))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "The type %s in primary key field %s is unsupported",
+                        VariantType.class.getSimpleName(), "f0");
+
+        final Schema variantPartitionSchema =
+                new Schema(
+                        variantType.getFields(),
+                        partitionKeys,
+                        Collections.emptyList(),
+                        options,
+                        "");
+        assertThatThrownBy(() -> manager.createTable(variantPartitionSchema))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "The type %s in partition field %s is unsupported",
+                        VariantType.class.getSimpleName(), "f0");
     }
 
     @Test

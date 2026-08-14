@@ -313,6 +313,7 @@ public final class PostponeMergeReadBuilder implements Serializable {
         }
         CoreOptions.StartupMode startupMode = table.coreOptions().startupMode();
         if (startupMode == CoreOptions.StartupMode.INCREMENTAL
+                || startupMode == CoreOptions.StartupMode.LATEST_DELTA
                 || startupMode == CoreOptions.StartupMode.FROM_FILE_CREATION_TIME
                 || startupMode == CoreOptions.StartupMode.FROM_CREATION_TIMESTAMP) {
             throw new UnsupportedOperationException(

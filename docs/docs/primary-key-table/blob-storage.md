@@ -115,7 +115,7 @@ Primary-key managed BLOB storage has the following requirements:
 | Item | Requirement |
 |------|-------------|
 | Managed BLOB declaration | `BLOB`, `ARRAY<BLOB>`, and `MAP<K, BLOB>` use `blob-field`; `blob-descriptor-field` remains inline |
-| Merge engine | `deduplicate` or `partial-update` |
+| Merge engine | `deduplicate`, `partial-update`, or `first-row` |
 | Changelog producer | `none` only |
 | Key usage | A managed BLOB column cannot be a primary, partition, bucket, or sequence key |
 | External data paths | `data-file.external-paths` is not supported |
@@ -190,6 +190,37 @@ collector is available.
 `blob-view-field` columns store serialized view structs inline. Reads resolve upstream blob bytes through the catalog
 when `blob-view.resolve.enabled` is true (default). Append upstream tables used by `sys.blob_view(...)` must enable
 `row-tracking.enabled` and `data-evolution.enabled`.
+
+### First-row with BLOB fields
+
+Primary-key tables may use `merge-engine=first-row` with managed `blob-field` (`BLOB`, `ARRAY<BLOB>`, or
+`MAP<K, BLOB>`):
+
+| Mode | First-row | Changelog | Notes |
+|------|-----------|-----------|-------|
+| `blob-field` (managed scalar, array, or map) | Supported | `changelog-producer=none` only | Keeps the first non-retract row and its managed payload |
+
+For managed BLOB columns, set `changelog-producer=none`. `first-row` normally also supports the `lookup` changelog
+producer, but managed BLOB storage requires `none`.
+
+`first-row` keeps the earliest surviving row for the same primary key. Later updates to the same key therefore do not
+replace an existing managed BLOB payload. This differs from `deduplicate`, which keeps the latest row.
+
+By default, `first-row` does not accept `DELETE` or `UPDATE_BEFORE` records. Configure `ignore-delete=true` if your
+pipeline may emit them.
+
+```sql
+CREATE TABLE training_chunks (
+    id BIGINT,
+    name STRING,
+    chunk BYTES COMMENT '__BLOB_FIELD; raw training block',
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'merge-engine' = 'first-row',
+    'changelog-producer' = 'none',
+    'blob-field' = 'chunk'
+);
+```
 
 ## Managed BLOB Update, Delete, and Compaction
 

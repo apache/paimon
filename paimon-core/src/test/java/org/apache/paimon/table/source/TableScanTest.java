@@ -497,6 +497,21 @@ public class TableScanTest extends ScannerTestBase {
     }
 
     @Test
+    public void testPostponeMergeRejectsLatestDelta() {
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.BUCKET.key(), "-2");
+        dynamicOptions.put(CoreOptions.POSTPONE_MERGE_ON_READ.key(), "true");
+        dynamicOptions.put(CoreOptions.SCAN_MODE.key(), "latest-delta");
+        FileStoreTable latestDeltaTable = table.copy(dynamicOptions);
+
+        assertThatThrownBy(
+                        () -> PostponeMergeReadBuilder.createSnapshotBound(latestDeltaTable, null))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("requires a full snapshot scan")
+                .hasMessageContaining("latest-delta");
+    }
+
+    @Test
     public void testPostponeMergePlanAndRead() throws Exception {
         StreamTableWrite realWrite = table.newWrite(commitUser);
         StreamTableCommit realCommit = table.newCommit(commitUser);

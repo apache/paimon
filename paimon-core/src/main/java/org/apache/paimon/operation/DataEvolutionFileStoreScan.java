@@ -47,7 +47,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -56,7 +55,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
-import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -64,6 +62,8 @@ import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
+import static org.apache.paimon.utils.InternalRowUtils.compare;
+import static org.apache.paimon.utils.InternalRowUtils.get;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
@@ -266,6 +266,21 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             Function<Long, TableSchema> scanTableSchema,
             List<ManifestEntry> metas,
             EvolutionStatsCache evolutionStatsCache) {
+        long groupStart =
+                metas.stream()
+                        .map(ManifestEntry::file)
+                        .map(DataFileMeta::nonNullRowIdRange)
+                        .mapToLong(range -> range.from)
+                        .min()
+                        .orElseThrow(() -> new IllegalArgumentException("Empty evolution group."));
+        long groupEnd =
+                metas.stream()
+                        .map(ManifestEntry::file)
+                        .map(DataFileMeta::nonNullRowIdRange)
+                        .mapToLong(range -> range.to)
+                        .max()
+                        .orElseThrow(() -> new IllegalArgumentException("Empty evolution group."));
+        long groupRowCount = groupEnd - groupStart + 1;
         Set<Integer> excludedFileFieldIds =
                 metas.stream()
                         .filter(
@@ -279,14 +294,11 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                                                 .map(DataField::id))
                         .collect(Collectors.toSet());
         // exclude blob and vector-store files, useless for predicate eval
-        metas =
+        List<ManifestEntry> normalMetas =
                 metas.stream()
                         .filter(entry -> !isBlobFile(entry.file().fileName()))
                         .filter(entry -> !isVectorStoreFile(entry.file().fileName()))
                         .collect(Collectors.toList());
-
-        ToLongFunction<ManifestEntry> maxSeqFunc = e -> e.file().maxSequenceNumber();
-        metas.sort(Comparator.comparingLong(maxSeqFunc).reversed());
 
         int[] allFields = schema.fields().stream().mapToInt(DataField::id).toArray();
         DataType[] targetTypes =
@@ -294,77 +306,108 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         int fieldsCount = schema.fields().size();
         int[] rowOffsets = new int[fieldsCount];
         int[] fieldOffsets = new int[fieldsCount];
+        long[] latestSequences = new long[fieldsCount];
+        boolean[] tiedLatestProviders = new boolean[fieldsCount];
         Arrays.fill(rowOffsets, -1);
         Arrays.fill(fieldOffsets, -1);
-        Set<Integer> typeMismatchedFieldIds = new HashSet<>();
+        Arrays.fill(latestSequences, Long.MIN_VALUE);
 
-        InternalRow[] min = new InternalRow[metas.size()];
-        InternalRow[] max = new InternalRow[metas.size()];
-        BinaryArray[] nullCounts = new BinaryArray[metas.size()];
+        InternalRow[] min = new InternalRow[normalMetas.size()];
+        InternalRow[] max = new InternalRow[normalMetas.size()];
+        BinaryArray[] nullCounts = new BinaryArray[normalMetas.size()];
+        EvolutionStatsCache.ProjectedFileSchema[] projectedSchemas =
+                new EvolutionStatsCache.ProjectedFileSchema[normalMetas.size()];
 
-        for (int i = 0; i < metas.size(); i++) {
-            SimpleStats stats = metas.get(i).file().valueStats();
+        for (int i = 0; i < normalMetas.size(); i++) {
+            DataFileMeta file = normalMetas.get(i).file();
+            SimpleStats stats = file.valueStats();
             min[i] = stats.minValues();
             max[i] = stats.maxValues();
             nullCounts[i] = stats.nullCounts();
-        }
-
-        int unresolvedFields = fieldsCount;
-        for (int i = 0; i < metas.size(); i++) {
-            DataFileMeta fileMeta = metas.get(i).file();
-            EvolutionStatsCache.ProjectedFileSchema projectedFileSchema =
-                    evolutionStatsCache.get(scanTableSchema, fileMeta);
-
+            EvolutionStatsCache.ProjectedFileSchema projected =
+                    evolutionStatsCache.get(scanTableSchema, file);
+            projectedSchemas[i] = projected;
             for (int j = 0; j < fieldsCount; j++) {
-                if (rowOffsets[j] != -1) {
+                if (projected.fieldStats(allFields[j]) == null) {
                     continue;
                 }
-                int targetFieldId = allFields[j];
-                EvolutionStatsCache.FileFieldStats fileFieldStats =
-                        projectedFileSchema.fieldStats(targetFieldId);
-                if (fileFieldStats == null) {
-                    continue;
+                long sequence = file.maxSequenceNumber();
+                if (sequence > latestSequences[j]) {
+                    latestSequences[j] = sequence;
+                    rowOffsets[j] = i;
+                    tiedLatestProviders[j] = false;
+                } else if (sequence == latestSequences[j]) {
+                    tiedLatestProviders[j] = true;
                 }
-                if (!fileFieldStats.hasStats()) {
-                    rowOffsets[j] = -2;
-                    unresolvedFields--;
-                    continue;
-                }
-                DataType fileType = fileFieldStats.type();
-                if (!fileType.equalsIgnoreFieldId(targetTypes[j])) {
-                    typeMismatchedFieldIds.add(targetFieldId);
-                    continue;
-                }
-                rowOffsets[j] = i;
-                fieldOffsets[j] = fileFieldStats.index();
-                unresolvedFields--;
-            }
-            if (unresolvedFields == 0) {
-                break;
             }
         }
 
-        long groupRowCount = metas.get(0).file().rowCount();
         for (int j = 0; j < fieldsCount; j++) {
-            if (rowOffsets[j] == -1
-                    && (excludedFileFieldIds.contains(allFields[j])
-                            || typeMismatchedFieldIds.contains(allFields[j]))) {
-                rowOffsets[j] = -2;
+            if (rowOffsets[j] == -1) {
+                if (excludedFileFieldIds.contains(allFields[j])) {
+                    rowOffsets[j] = -2;
+                }
+                continue;
             }
+            int provider = rowOffsets[j];
+            DataFileMeta file = normalMetas.get(provider).file();
+            EvolutionStatsCache.FileFieldStats fileStats =
+                    projectedSchemas[provider].fieldStats(allFields[j]);
+            Range fileRange = file.nonNullRowIdRange();
+            if (tiedLatestProviders[j]
+                    || !fileStats.hasStats()
+                    || !fileStats.type().equalsIgnoreFieldId(targetTypes[j])
+                    || fileRange.from != groupStart
+                    || fileRange.to != groupEnd) {
+                rowOffsets[j] = -2;
+                continue;
+            }
+            int fieldOffset = fileStats.index();
+            if (!isValidStats(file.valueStats(), fieldOffset, targetTypes[j], groupRowCount)) {
+                rowOffsets[j] = -2;
+                continue;
+            }
+            fieldOffsets[j] = fieldOffset;
         }
-        DataEvolutionRow finalMin = new DataEvolutionRow(metas.size(), rowOffsets, fieldOffsets);
-        DataEvolutionRow finalMax = new DataEvolutionRow(metas.size(), rowOffsets, fieldOffsets);
+        DataEvolutionRow finalMin =
+                new DataEvolutionRow(normalMetas.size(), rowOffsets, fieldOffsets);
+        DataEvolutionRow finalMax =
+                new DataEvolutionRow(normalMetas.size(), rowOffsets, fieldOffsets);
         // For null-count specifically, a field absent from every file in the group means every
         // logical row is null for that field — encode as groupRowCount so stats predicates can
         // prune non-null comparisons (e.g. `extra2 = 'x'`) instead of falling back to
         // "unknown stats -> keep" in LeafPredicate.test.
         DataEvolutionArray finalNullCounts =
-                new DataEvolutionArray(metas.size(), rowOffsets, fieldOffsets, groupRowCount);
+                new DataEvolutionArray(normalMetas.size(), rowOffsets, fieldOffsets, groupRowCount);
 
         finalMin.setRows(min);
         finalMax.setRows(max);
         finalNullCounts.setRows(nullCounts);
         return new EvolutionStats(groupRowCount, finalMin, finalMax, finalNullCounts);
+    }
+
+    private static boolean isValidStats(
+            SimpleStats stats, int fieldOffset, DataType type, long rowCount) {
+        try {
+            Object min = get(stats.minValues(), fieldOffset, type);
+            Object max = get(stats.maxValues(), fieldOffset, type);
+            BinaryArray nullCounts = stats.nullCounts();
+            Long nullCount =
+                    nullCounts.isNullAt(fieldOffset) ? null : nullCounts.getLong(fieldOffset);
+            if (nullCount != null && (nullCount < 0 || nullCount > rowCount)) {
+                return false;
+            }
+            if ((min == null) != (max == null)) {
+                return false;
+            }
+            if (min == null) {
+                return true;
+            }
+            return (nullCount == null || nullCount != rowCount)
+                    && compare(min, max, type.getTypeRoot()) <= 0;
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /** Note: Keep this thread-safe. */

@@ -71,6 +71,8 @@ import static org.apache.iceberg.TableProperties.METADATA_PREVIOUS_VERSIONS_MAX;
  */
 public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
+    private static final String PAIMON_COMMIT_IDENTITY = "paimon-commit-identity";
+
     private static final Logger LOG = LoggerFactory.getLogger(IcebergRestMetadataCommitter.class);
 
     private static final String REST_CATALOG_NAME = "rest-catalog";
@@ -160,6 +162,23 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
                 TableMetadata metadata = ((BaseTable) icebergTable).operations().current();
 
+                org.apache.iceberg.Snapshot catalogCurrent = metadata.currentSnapshot();
+                org.apache.iceberg.Snapshot newCurrent = newMetadata.currentSnapshot();
+                if (catalogCurrent != null
+                        && newCurrent != null
+                        && catalogCurrent.snapshotId() == newCurrent.snapshotId()
+                        && java.util.Objects.equals(
+                                catalogCurrent.summary().get(PAIMON_COMMIT_IDENTITY),
+                                newCurrent.summary().get(PAIMON_COMMIT_IDENTITY))) {
+                    // an idempotent retry: the catalog is already at this snapshot; rebuilding
+                    // through updatesForIncorrectBase would drop and recreate the table
+                    LOG.info(
+                            "Iceberg table {} is already at snapshot {}, nothing to commit.",
+                            icebergTableIdentifier,
+                            newCurrent.snapshotId());
+                    return;
+                }
+
                 if (metadata.currentSnapshot() == null) {
                     // Table exists in the REST catalog but has no snapshots yet. This happens
                     // when a previous createTable() or recreateTable() succeeded but the
@@ -229,19 +248,16 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
         } else {
             // add new schema if needed
-            Preconditions.checkArgument(
-                    newMetadata.currentSchemaId() >= schemaId,
-                    "the new metadata has correct base, but the schemaId(%s) in iceberg table "
-                            + "is greater than currentSchemaId(%s) in new metadata.",
-                    schemaId,
-                    newMetadata.currentSchemaId());
-            if (newMetadata.currentSchemaId() != schemaId) {
+            if (newMetadata.currentSchemaId() > schemaId) {
                 addAndSetCurrentSchema(
                         newMetadata.schemas().stream()
                                 .filter(schema -> schema.schemaId() > schemaId)
                                 .collect(Collectors.toList()),
                         newMetadata.currentSchemaId(),
                         updateBuilder);
+            } else if (newMetadata.currentSchemaId() < schemaId) {
+                // a rollback moved the current schema back; only the pointer moves
+                updateBuilder.setCurrentSchema(newMetadata.currentSchemaId());
             }
 
             // add snapshot
@@ -468,6 +484,21 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             return false;
         }
 
+        // the same numeric id can belong to a rolled-back timeline; extending from it would
+        // keep the abandoned history in the catalog
+        IcebergSnapshot baseCurrent = baseIcebergMetadata.currentSnapshot();
+        if (baseCurrent != null
+                && currentMetadata.currentSnapshot().snapshotId() == baseCurrent.snapshotId()) {
+            String catalogIdentity =
+                    currentMetadata.currentSnapshot().summary().get(PAIMON_COMMIT_IDENTITY);
+            String baseIdentity = baseCurrent.summary().get(PAIMON_COMMIT_IDENTITY);
+            if (catalogIdentity != null
+                    && baseIdentity != null
+                    && !catalogIdentity.equals(baseIdentity)) {
+                return false;
+            }
+        }
+
         // if the iceberg table is existed, check whether the current metadata of the table is the
         // base of the new table metadata, we use current snapshot id to check.
         // Note: callers must ensure currentMetadata.currentSnapshot() is non-null before calling
@@ -603,7 +634,15 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                                             snapshot.sequenceNumber(),
                                             snapshot.snapshotId(),
                                             snapshot.parentSnapshotId(),
-                                            snapshot.timestampMs(),
+                                            // a slow rebuild must not trip Iceberg's
+                                            // one-minute update-timestamp window
+                                            snapshot.snapshotId()
+                                                            == newIcebergMetadata
+                                                                    .currentSnapshotId()
+                                                    ? Math.max(
+                                                            snapshot.timestampMs(),
+                                                            System.currentTimeMillis() - 59_000L)
+                                                    : snapshot.timestampMs(),
                                             snapshot.summary(),
                                             snapshot.manifestList(),
                                             remappedSchemaId,

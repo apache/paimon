@@ -19,7 +19,10 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.ProjectedDataFileMeta;
+import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
@@ -41,6 +44,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Entry representing a file. */
@@ -178,6 +182,111 @@ public interface FileEntry {
         }
     }
 
+    /**
+     * Reusable byte encoding of a binary manifest entry's {@link Identifier} fields.
+     *
+     * <p>The encoded identifier is the prefix of {@link #bytes()} ending at {@link #length()}. It
+     * is valid until the next call to {@link #replace(ProjectedManifestEntry)}, {@link
+     * #replaceWithPartition(ProjectedManifestEntry)}, or {@link #release()} and must not be
+     * modified by callers.
+     *
+     * <p>{@link #replace(ProjectedManifestEntry)} omits the partition so callers can represent it
+     * with a compact dictionary id. {@link #replaceWithPartition(ProjectedManifestEntry)} includes
+     * the serialized partition and represents the complete base {@link Identifier}.
+     */
+    final class ReusableIdentifier {
+
+        private byte[] bytes = new byte[256];
+        private int length;
+
+        public ReusableIdentifier replace(ProjectedManifestEntry entry) {
+            checkArgument(entry != null, "Binary manifest entry cannot be null.");
+            length = 0;
+            return appendEntryFields(entry);
+        }
+
+        /** Replaces this encoding with the entry's partition and identity fields. */
+        public ReusableIdentifier replaceWithPartition(ProjectedManifestEntry entry) {
+            checkArgument(entry != null, "Binary manifest entry cannot be null.");
+            length = 0;
+            putBytes(entry.partitionBytes());
+            return appendEntryFields(entry);
+        }
+
+        private ReusableIdentifier appendEntryFields(ProjectedManifestEntry entry) {
+            putInt(entry.bucket());
+            ProjectedDataFileMeta file = entry.file();
+            putInt(file.level());
+            putString(file.fileNameBinary());
+
+            int extraFileCount = file.extraFileCount();
+            putInt(extraFileCount);
+            for (int i = 0; i < extraFileCount; i++) {
+                putString(file.extraFile(i));
+            }
+
+            if (!file.hasEmbeddedIndex()) {
+                putInt(-1);
+            } else {
+                putBytes(file.embeddedIndex());
+            }
+            if (!file.hasExternalPath()) {
+                putInt(-1);
+            } else {
+                putString(file.externalPathBinary());
+            }
+            return this;
+        }
+
+        public byte[] bytes() {
+            return bytes;
+        }
+
+        public int length() {
+            return length;
+        }
+
+        public void release() {
+            bytes = new byte[0];
+            length = 0;
+        }
+
+        private void putString(BinaryString value) {
+            checkState(value != null, "Manifest string field cannot be null.");
+            int valueLength = value.getSizeInBytes();
+            putInt(valueLength);
+            ensureCapacity(valueLength);
+            MemorySegmentUtils.copyToBytes(
+                    value.getSegments(), value.getOffset(), bytes, length, valueLength);
+            length += valueLength;
+        }
+
+        private void putBytes(byte[] value) {
+            checkState(value != null, "Manifest binary field cannot be null.");
+            putInt(value.length);
+            ensureCapacity(value.length);
+            System.arraycopy(value, 0, bytes, length, value.length);
+            length += value.length;
+        }
+
+        private void putInt(int value) {
+            ensureCapacity(Integer.BYTES);
+            bytes[length++] = (byte) (value >>> 24);
+            bytes[length++] = (byte) (value >>> 16);
+            bytes[length++] = (byte) (value >>> 8);
+            bytes[length++] = (byte) value;
+        }
+
+        private void ensureCapacity(int additional) {
+            int required = Math.addExact(length, additional);
+            if (required <= bytes.length) {
+                return;
+            }
+            int grown = Math.max(required, bytes.length + (bytes.length >>> 1));
+            bytes = Arrays.copyOf(bytes, grown);
+        }
+    }
+
     static <T extends FileEntry> Collection<T> mergeEntries(Iterable<T> entries) {
         LinkedHashMap<Identifier, T> map = new LinkedHashMap<>();
         mergeEntries(entries, map);
@@ -247,13 +356,12 @@ public interface FileEntry {
                 manifest -> {
                     List<Identifier> identifiers =
                             new ArrayList<>((int) Math.min(manifest.numDeletedFiles(), 1 << 20));
-                    try (CloseableIterator<BinaryManifestEntry> entries =
+                    try (CloseableIterator<ProjectedManifestEntry> entries =
                             manifestFile.scan(
                                     manifest.fileName(),
-                                    manifest.fileSize(),
-                                    BinaryManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                                    ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
                         while (entries.hasNext()) {
-                            BinaryManifestEntry entry = entries.next();
+                            ProjectedManifestEntry entry = entries.next();
                             if (entry.isDelete()) {
                                 identifiers.add(entry.identifier());
                             }

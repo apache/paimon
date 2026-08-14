@@ -72,6 +72,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
           finalWriteOptions,
           orCreate = orCreate) :: Nil
       } else {
+        checkNonAtomicSelfReference(catalog, ident, query)
         SparkShimLoader.shim.createReplaceTableAsSelectExec(
           catalog,
           ident,

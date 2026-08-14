@@ -52,6 +52,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,6 +60,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link BlobFallbackRecordReader}. */
 public class BlobFallbackRecordReaderTest {
@@ -161,6 +163,142 @@ public class BlobFallbackRecordReaderTest {
 
         assertThat(rows.rowIds).containsExactly(0L, 1L, 2L, 3L, 4L);
         assertThat(rows.sequenceNumbers).containsExactly(2L, 1L, 2L, 1L, 1L);
+    }
+
+    @Test
+    public void testBlobFallbackRecordReaderSkipsStaleRecords() throws Exception {
+        DataFileMeta newFile = blobFile("new-file", 0, 3, 2);
+        DataFileMeta oldFile = blobFile("old-file", 0, 3, 1);
+        Map<String, ReadCounts> counts = new HashMap<>();
+
+        ReadResult rows =
+                ReadResult.read(
+                        new BlobFallbackRecordReader(
+                                Arrays.asList(newFile, oldFile),
+                                file ->
+                                        oneRowPerBatchReader(
+                                                file,
+                                                fileRows(file, null),
+                                                counts.computeIfAbsent(
+                                                        file.fileName(),
+                                                        ignored -> new ReadCounts())),
+                                (reader, range) -> reader,
+                                null,
+                                READ_ROW_TYPE,
+                                BLOB_INDEX));
+
+        assertThat(rows.sequenceNumbers).containsExactly(2L, 2L, 2L);
+        assertThat(counts.get(newFile.fileName()).nextCount).isEqualTo(3);
+        assertThat(counts.get(newFile.fileName()).skipCount).isZero();
+        assertThat(counts.get(oldFile.fileName()).nextCount).isZero();
+        assertThat(counts.get(oldFile.fileName()).skipCount).isEqualTo(3);
+    }
+
+    @Test
+    public void testBlobFallbackRecordReaderReadsOldRecordForPlaceholder() throws Exception {
+        DataFileMeta newFile = blobFile("new-file", 0, 3, 2);
+        DataFileMeta oldFile = blobFile("old-file", 0, 3, 1);
+        Map<String, ReadCounts> counts = new HashMap<>();
+
+        ReadResult rows =
+                ReadResult.read(
+                        new BlobFallbackRecordReader(
+                                Arrays.asList(newFile, oldFile),
+                                file ->
+                                        oneRowPerBatchReader(
+                                                file,
+                                                fileRows(file, null, placeholderRows(newFile, 1)),
+                                                counts.computeIfAbsent(
+                                                        file.fileName(),
+                                                        ignored -> new ReadCounts())),
+                                (reader, range) -> reader,
+                                null,
+                                READ_ROW_TYPE,
+                                BLOB_INDEX));
+
+        assertThat(rows.sequenceNumbers).containsExactly(2L, 1L, 2L);
+        assertThat(counts.get(oldFile.fileName()).nextCount).isOne();
+        assertThat(counts.get(oldFile.fileName()).skipCount).isEqualTo(2);
+    }
+
+    @Test
+    public void testBlobFallbackRecordReaderDoesNotFallbackOnNull() throws Exception {
+        DataFileMeta newFile = blobFile("new-file", 0, 3, 2);
+        DataFileMeta oldFile = blobFile("old-file", 0, 3, 1);
+        List<InternalRow> newRows = fileRows(newFile, null);
+        ((GenericRow) newRows.get(1)).setField(BLOB_INDEX, null);
+        Map<String, ReadCounts> counts = new HashMap<>();
+
+        ReadResult rows =
+                ReadResult.read(
+                        new BlobFallbackRecordReader(
+                                Arrays.asList(newFile, oldFile),
+                                file ->
+                                        oneRowPerBatchReader(
+                                                file,
+                                                file == newFile ? newRows : fileRows(file, null),
+                                                counts.computeIfAbsent(
+                                                        file.fileName(),
+                                                        ignored -> new ReadCounts())),
+                                (reader, range) -> reader,
+                                null,
+                                READ_ROW_TYPE,
+                                BLOB_INDEX));
+
+        assertThat(rows.nullBlobRowIds).containsExactly(1L);
+        assertThat(rows.nullBlobSequenceNumbers).containsExactly(2L);
+        assertThat(counts.get(oldFile.fileName()).nextCount).isZero();
+        assertThat(counts.get(oldFile.fileName()).skipCount).isEqualTo(3);
+    }
+
+    @Test
+    public void testBlobFallbackRecordReaderFailsIfOldGroupEndsEarly() {
+        DataFileMeta newFile = blobFile("new-file", 0, 3, 2);
+        DataFileMeta oldFile = blobFile("old-file", 0, 3, 1);
+        List<InternalRow> oldRows = fileRows(oldFile, null).subList(0, 2);
+
+        assertThatThrownBy(
+                        () ->
+                                ReadResult.read(
+                                        new BlobFallbackRecordReader(
+                                                Arrays.asList(newFile, oldFile),
+                                                file ->
+                                                        oneRowPerBatchReader(
+                                                                file,
+                                                                file == oldFile
+                                                                        ? oldRows
+                                                                        : fileRows(file, null)),
+                                                (reader, range) -> reader,
+                                                null,
+                                                READ_ROW_TYPE,
+                                                BLOB_INDEX)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("same number of records");
+    }
+
+    @Test
+    public void testBlobFallbackRecordReaderFailsIfOldGroupHasExtraRecord() {
+        DataFileMeta newFile = blobFile("new-file", 0, 3, 2);
+        DataFileMeta oldFile = blobFile("old-file", 0, 3, 1);
+        List<InternalRow> newRows = fileRows(newFile, null).subList(0, 2);
+
+        assertThatThrownBy(
+                        () ->
+                                ReadResult.read(
+                                        new BlobFallbackRecordReader(
+                                                Arrays.asList(newFile, oldFile),
+                                                file ->
+                                                        oneRowPerBatchReader(
+                                                                file,
+                                                                file == newFile
+                                                                        ? newRows
+                                                                        : fileRows(file, null)),
+                                                (reader, range) -> reader,
+                                                null,
+                                                READ_ROW_TYPE,
+                                                BLOB_INDEX)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("same number of records");
     }
 
     @Test
@@ -577,6 +715,11 @@ public class BlobFallbackRecordReaderTest {
 
     private static FileRecordReader<InternalRow> oneRowPerBatchReader(
             DataFileMeta file, List<InternalRow> rows) {
+        return oneRowPerBatchReader(file, rows, new ReadCounts());
+    }
+
+    private static FileRecordReader<InternalRow> oneRowPerBatchReader(
+            DataFileMeta file, List<InternalRow> rows, ReadCounts counts) {
         return new FileRecordReader<InternalRow>() {
 
             int index;
@@ -609,7 +752,19 @@ public class BlobFallbackRecordReaderTest {
                         }
                         returned = true;
                         returnedPosition = row.getLong(1) - file.nonNullFirstRowId();
+                        counts.nextCount++;
                         return row;
+                    }
+
+                    @Override
+                    public boolean skip() {
+                        if (returned) {
+                            return false;
+                        }
+                        returned = true;
+                        returnedPosition = row.getLong(1) - file.nonNullFirstRowId();
+                        counts.skipCount++;
+                        return true;
                     }
 
                     @Override
@@ -620,6 +775,11 @@ public class BlobFallbackRecordReaderTest {
             @Override
             public void close() {}
         };
+    }
+
+    private static class ReadCounts {
+        private int nextCount;
+        private int skipCount;
     }
 
     private static class ReadResult {

@@ -386,6 +386,57 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: self-referencing RTAS on a partitioned table keeps the table") {
+    assume(gteqSpark3_4)
+    withTable("q") {
+      sql("CREATE TABLE q (id INT, dt STRING) USING paimon PARTITIONED BY (dt)")
+      sql("INSERT INTO q VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+
+      val location = loadTable("q").location()
+      val fileIO = loadTable("q").fileIO()
+
+      val e = intercept[RuntimeException] {
+        sql("REPLACE TABLE q AS SELECT * FROM q WHERE dt = 'a'")
+      }
+      val messages = Iterator
+        .iterate(e: Throwable)(_.getCause)
+        .takeWhile(_ != null)
+        .map(t => String.valueOf(t.getMessage))
+        .mkString(" | ")
+      Assertions.assertTrue(messages.contains("Cannot replace table"), messages)
+
+      Assertions.assertTrue(sql("SHOW TABLES").collect().exists(_.getString(1) == "q"))
+      Assertions.assertTrue(fileIO.exists(location))
+      checkAnswer(
+        sql("SELECT * FROM q ORDER BY id"),
+        Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
+    }
+  }
+
+  test("Paimon DDL: self-referencing RTAS restating partitioning replaces in place") {
+    assume(gteqSpark3_4)
+    withTable("q") {
+      sql("CREATE TABLE q (id INT, dt STRING) USING paimon PARTITIONED BY (dt)")
+      sql("INSERT INTO q VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+
+      sql("REPLACE TABLE q PARTITIONED BY (dt) AS SELECT * FROM q WHERE dt = 'a'")
+
+      checkAnswer(sql("SELECT * FROM q"), Row(1, "a") :: Nil)
+    }
+  }
+
+  test("Paimon DDL: self-referencing RTAS on an unpartitioned table replaces in place") {
+    assume(gteqSpark3_4)
+    withTable("q2") {
+      sql("CREATE TABLE q2 (id INT, dt STRING) USING paimon")
+      sql("INSERT INTO q2 VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+
+      sql("REPLACE TABLE q2 AS SELECT * FROM q2 WHERE dt = 'a'")
+
+      checkAnswer(sql("SELECT * FROM q2"), Row(1, "a") :: Nil)
+    }
+  }
+
   test("Paimon DDL: CREATE OR REPLACE TABLE AS SELECT supports incompatible schema") {
     assume(gteqSpark3_4)
     withTable("t") {

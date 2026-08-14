@@ -36,9 +36,11 @@ import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -121,6 +123,43 @@ public final class FileIndexFormat {
 
     public static Reader createReader(SeekableInputStream inputStream, RowType fileRowType) {
         return new Reader(inputStream, fileRowType);
+    }
+
+    /** Creates a reader for accessing header metadata without reading index payloads. */
+    public static Reader createMetadataReader(SeekableInputStream inputStream) {
+        return new Reader(inputStream, RowType.builder().build());
+    }
+
+    /** Metadata of one column index stored in a file index container. */
+    public static class FileIndexMeta {
+
+        private final String columnName;
+        private final String indexType;
+        private final int sizeInBytes;
+        private final boolean empty;
+
+        private FileIndexMeta(String columnName, String indexType, int sizeInBytes, boolean empty) {
+            this.columnName = columnName;
+            this.indexType = indexType;
+            this.sizeInBytes = sizeInBytes;
+            this.empty = empty;
+        }
+
+        public String columnName() {
+            return columnName;
+        }
+
+        public String indexType() {
+            return indexType;
+        }
+
+        public int sizeInBytes() {
+            return sizeInBytes;
+        }
+
+        public boolean empty() {
+            return empty;
+        }
     }
 
     /** Writer for file index file. */
@@ -299,6 +338,25 @@ public final class FileIndexFormat {
                                                                     entry.getValue()))
                                             .collect(Collectors.toSet()))
                     .orElse(Collections.emptySet());
+        }
+
+        /** Returns the index metadata parsed from the header without reading index payloads. */
+        public List<FileIndexMeta> indexMetas() {
+            List<FileIndexMeta> metas = new ArrayList<>();
+            for (Map.Entry<String, Map<String, Pair<Integer, Integer>>> columnEntry :
+                    header.entrySet()) {
+                for (Map.Entry<String, Pair<Integer, Integer>> indexEntry :
+                        columnEntry.getValue().entrySet()) {
+                    Pair<Integer, Integer> startAndLength = indexEntry.getValue();
+                    metas.add(
+                            new FileIndexMeta(
+                                    columnEntry.getKey(),
+                                    indexEntry.getKey(),
+                                    startAndLength.getRight(),
+                                    startAndLength.getLeft() == EMPTY_INDEX_FLAG));
+                }
+            }
+            return Collections.unmodifiableList(metas);
         }
 
         private FileIndexReader getFileIndexReader(

@@ -177,6 +177,19 @@ class CreateTagRequest(RESTRequest):
     time_retained: Optional[str] = json_field(FIELD_TIME_RETAINED, default=None)
 
 
+@dataclass
+class CreatePartitionsRequest(RESTRequest):
+    FIELD_PARTITION_SPECS = "partitionSpecs"
+    FIELD_IGNORE_IF_EXISTS = "ignoreIfExists"
+
+    partition_specs: List[Dict[str, str]] = json_field(FIELD_PARTITION_SPECS)
+    ignore_if_exists: Optional[bool] = json_field(FIELD_IGNORE_IF_EXISTS, default=True)
+
+    def __post_init__(self):
+        if self.ignore_if_exists is None:
+            self.ignore_if_exists = True
+
+
 # Branch CRUD wire DTOs. Mirrors Java requests in
 # paimon-api/.../rest/requests/.
 @dataclass

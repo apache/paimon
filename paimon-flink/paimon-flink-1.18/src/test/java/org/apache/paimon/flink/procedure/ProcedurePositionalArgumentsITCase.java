@@ -19,25 +19,21 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.CatalogITCaseBase;
-import org.apache.paimon.privilege.NoPrivilegeException;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.function.Executable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Ensure that the legacy multiply overloaded CALL with positional arguments can be invoked. */
 public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
@@ -81,163 +77,6 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
 
         assertThatCode(() -> sql("CALL sys.compact_database('default')"))
                 .doesNotThrowAnyException();
-    }
-
-    @Test
-    public void testUserPrivileges() throws Exception {
-        sql(
-                String.format(
-                        "CREATE CATALOG mycat WITH (\n"
-                                + "  'type' = 'paimon',\n"
-                                + "  'warehouse' = '%s'\n"
-                                + ")",
-                        path));
-        sql("USE CATALOG mycat");
-        sql("CREATE DATABASE mydb");
-        sql("CREATE DATABASE mydb2");
-        sql(
-                "CREATE TABLE mydb.T1 (\n"
-                        + "  k INT,\n"
-                        + "  v INT,\n"
-                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
-                        + ")");
-        sql("INSERT INTO mydb.T1 VALUES (1, 10), (2, 20), (3, 30)");
-        sql("CALL sys.init_file_based_privilege('root-passwd')");
-
-        sql(
-                String.format(
-                        "CREATE CATALOG anonymouscat WITH (\n"
-                                + "  'type' = 'paimon',\n"
-                                + "  'warehouse' = '%s'\n"
-                                + ")",
-                        path));
-
-        sql("USE CATALOG anonymouscat");
-        assertNoPrivilege(() -> sql("INSERT INTO mydb.T1 VALUES (1, 11), (2, 21)"));
-        assertNoPrivilege(() -> collect("SELECT * FROM mydb.T1 ORDER BY k"));
-
-        sql(
-                String.format(
-                        "CREATE CATALOG rootcat WITH (\n"
-                                + "  'type' = 'paimon',\n"
-                                + "  'warehouse' = '%s',\n"
-                                + "  'user' = 'root',\n"
-                                + "  'password' = 'root-passwd'\n"
-                                + ")",
-                        path));
-        sql("USE CATALOG rootcat");
-        sql(
-                "CREATE TABLE mydb2.T2 (\n"
-                        + "  k INT,\n"
-                        + "  v INT,\n"
-                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
-                        + ")");
-        sql("INSERT INTO mydb2.T2 VALUES (100, 1000), (200, 2000), (300, 3000)");
-        sql("CALL sys.create_privileged_user('test', 'test-passwd')");
-        sql("CALL sys.grant_privilege_to_user('test', 'CREATE_TABLE', 'mydb')");
-        sql("CALL sys.grant_privilege_to_user('test', 'SELECT', 'mydb')");
-        sql("CALL sys.grant_privilege_to_user('test', 'INSERT', 'mydb')");
-
-        sql(
-                String.format(
-                        "CREATE CATALOG testcat WITH (\n"
-                                + "  'type' = 'paimon',\n"
-                                + "  'warehouse' = '%s',\n"
-                                + "  'user' = 'test',\n"
-                                + "  'password' = 'test-passwd'\n"
-                                + ")",
-                        path));
-        sql("USE CATALOG testcat");
-        sql("INSERT INTO mydb.T1 VALUES (1, 12), (2, 22)");
-        assertThat(collect("SELECT * FROM mydb.T1 ORDER BY k"))
-                .isEqualTo(Arrays.asList(Row.of(1, 12), Row.of(2, 22), Row.of(3, 30)));
-        sql("CREATE TABLE mydb.S1 ( a INT, b INT )");
-        sql("INSERT INTO mydb.S1 VALUES (1, 100), (2, 200), (3, 300)");
-        assertThat(collect("SELECT * FROM mydb.S1 ORDER BY a"))
-                .isEqualTo(Arrays.asList(Row.of(1, 100), Row.of(2, 200), Row.of(3, 300)));
-        assertNoPrivilege(() -> sql("DROP TABLE mydb.T1"));
-        assertNoPrivilege(() -> sql("ALTER TABLE mydb.T1 RENAME TO mydb.T2"));
-        assertNoPrivilege(() -> sql("DROP TABLE mydb.S1"));
-        assertNoPrivilege(() -> sql("ALTER TABLE mydb.S1 RENAME TO mydb.S2"));
-        assertNoPrivilege(() -> sql("CREATE DATABASE anotherdb"));
-        assertNoPrivilege(() -> sql("DROP DATABASE mydb CASCADE"));
-        assertNoPrivilege(() -> sql("CALL sys.create_privileged_user('test2', 'test2-passwd')"));
-
-        sql("USE CATALOG rootcat");
-        sql("CALL sys.create_privileged_user('test2', 'test2-passwd')");
-        sql("CALL sys.grant_privilege_to_user('test2', 'SELECT', 'mydb2')");
-        sql("CALL sys.grant_privilege_to_user('test2', 'INSERT', 'mydb', 'T1')");
-        sql("CALL sys.grant_privilege_to_user('test2', 'SELECT', 'mydb', 'S1')");
-        sql("CALL sys.grant_privilege_to_user('test2', 'CREATE_DATABASE')");
-
-        sql(
-                String.format(
-                        "CREATE CATALOG test2cat WITH (\n"
-                                + "  'type' = 'paimon',\n"
-                                + "  'warehouse' = '%s',\n"
-                                + "  'user' = 'test2',\n"
-                                + "  'password' = 'test2-passwd'\n"
-                                + ")",
-                        path));
-        sql("USE CATALOG test2cat");
-        sql("INSERT INTO mydb.T1 VALUES (1, 13), (2, 23)");
-        assertNoPrivilege(() -> collect("SELECT * FROM mydb.T1 ORDER BY k"));
-        assertNoPrivilege(() -> sql("CREATE TABLE mydb.S2 ( a INT, b INT )"));
-        assertNoPrivilege(() -> sql("INSERT INTO mydb.S1 VALUES (1, 100), (2, 200), (3, 300)"));
-        assertThat(collect("SELECT * FROM mydb.S1 ORDER BY a"))
-                .isEqualTo(Arrays.asList(Row.of(1, 100), Row.of(2, 200), Row.of(3, 300)));
-        assertNoPrivilege(
-                () -> sql("INSERT INTO mydb2.T2 VALUES (100, 1001), (200, 2001), (300, 3001)"));
-        assertThat(collect("SELECT * FROM mydb2.T2 ORDER BY k"))
-                .isEqualTo(Arrays.asList(Row.of(100, 1000), Row.of(200, 2000), Row.of(300, 3000)));
-        sql("CREATE DATABASE anotherdb");
-        assertNoPrivilege(() -> sql("DROP TABLE mydb.T1"));
-        assertNoPrivilege(() -> sql("ALTER TABLE mydb.T1 RENAME TO mydb.T2"));
-        assertNoPrivilege(() -> sql("DROP TABLE mydb.S1"));
-        assertNoPrivilege(() -> sql("ALTER TABLE mydb.S1 RENAME TO mydb.S2"));
-        assertNoPrivilege(() -> sql("DROP DATABASE mydb CASCADE"));
-        assertNoPrivilege(() -> sql("CALL sys.create_privileged_user('test3', 'test3-passwd')"));
-
-        sql("USE CATALOG rootcat");
-        assertThat(collect("SELECT * FROM mydb.T1 ORDER BY k"))
-                .isEqualTo(Arrays.asList(Row.of(1, 13), Row.of(2, 23), Row.of(3, 30)));
-        sql("CALL sys.revoke_privilege_from_user('test2', 'SELECT')");
-        sql("CALL sys.drop_privileged_user('test')");
-
-        sql("USE CATALOG testcat");
-        Exception e =
-                assertThrows(Exception.class, () -> collect("SELECT * FROM mydb.T1 ORDER BY k"));
-        assertThat(e).hasRootCauseMessage("User test not found, or password incorrect.");
-
-        sql("USE CATALOG test2cat");
-        assertNoPrivilege(() -> collect("SELECT * FROM mydb.S1 ORDER BY a"));
-        assertNoPrivilege(() -> collect("SELECT * FROM mydb2.T2 ORDER BY k"));
-        sql("INSERT INTO mydb.T1 VALUES (1, 14), (2, 24)");
-
-        sql("USE CATALOG rootcat");
-        assertThat(collect("SELECT * FROM mydb.T1 ORDER BY k"))
-                .isEqualTo(Arrays.asList(Row.of(1, 14), Row.of(2, 24), Row.of(3, 30)));
-        sql("DROP DATABASE mydb CASCADE");
-        sql("DROP DATABASE mydb2 CASCADE");
-    }
-
-    private List<Row> collect(String sql) throws Exception {
-        List<Row> result = new ArrayList<>();
-        try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
-            while (it.hasNext()) {
-                result.add(it.next());
-            }
-        }
-        return result;
-    }
-
-    private void assertNoPrivilege(Executable executable) {
-        Exception e = assertThrows(Exception.class, executable);
-        if (e.getCause() != null) {
-            assertThat(e).hasRootCauseInstanceOf(NoPrivilegeException.class);
-        } else {
-            assertThat(e).isInstanceOf(NoPrivilegeException.class);
-        }
     }
 
     @Test

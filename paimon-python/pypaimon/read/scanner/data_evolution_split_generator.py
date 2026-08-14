@@ -39,11 +39,13 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         open_file_cost: int,
         deletion_files_map=None,
         row_ranges: Optional[List] = None,
-        score_getter=None
+        score_getter=None,
+        group_stats_filter=None,
     ):
         super().__init__(table, target_split_size, open_file_cost, deletion_files_map)
         self.row_ranges = row_ranges
         self.score_getter = score_getter
+        self.group_stats_filter = group_stats_filter
 
     def create_splits(self, file_entries: List[ManifestEntry]) -> List[Split]:
         """
@@ -85,6 +87,15 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
             # Split files by firstRowId for data evolution
             split_by_row_id = self._split_by_row_id(data_files)
+            if self.group_stats_filter is not None:
+                split_by_row_id = [
+                    group for group in split_by_row_id
+                    if self.group_stats_filter.may_match(group)
+                ]
+                split_by_row_id = [
+                    [file.copy_without_stats() for file in group]
+                    for group in split_by_row_id
+                ]
 
             # Pack the split groups for optimal split sizes
             packed_files = self._pack_for_ordered(

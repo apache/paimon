@@ -277,10 +277,33 @@ public class ArrowUtils {
         return ArrowCStruct.of(array, schema);
     }
 
+    /** Releases Arrow C Data callbacks that have not already been consumed by native code. */
+    public static void releaseCDataIfNeeded(ArrowArray array, ArrowSchema schema) {
+        try {
+            if (array.snapshot().release != 0) {
+                array.release();
+            }
+        } finally {
+            if (schema.snapshot().release != 0) {
+                schema.release();
+            }
+        }
+    }
+
     public static byte[] serializeToIpc(VectorSchemaRoot vsr) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         serializeToIpc(vsr, out);
         return out.toByteArray();
+    }
+
+    /**
+     * Returns whether the schema root contains at least one vector and all top-level and nested
+     * vectors share the root allocator of the supplied allocator.
+     */
+    public static boolean hasSameRootAllocator(
+            VectorSchemaRoot vectorSchemaRoot, BufferAllocator allocator) {
+        List<FieldVector> vectors = vectorSchemaRoot.getFieldVectors();
+        return !vectors.isEmpty() && allVectorsShareRootWith(vectors, allocator.getRoot());
     }
 
     public static void serializeToIpc(VectorSchemaRoot vsr, OutputStream out) {
@@ -315,5 +338,16 @@ public class ArrowUtils {
         } else {
             return instant.getEpochSecond() * 1_000_000_000 + instant.getNano();
         }
+    }
+
+    private static boolean allVectorsShareRootWith(
+            List<FieldVector> vectors, BufferAllocator expectedRoot) {
+        for (FieldVector vector : vectors) {
+            if (vector.getAllocator().getRoot() != expectedRoot
+                    || !allVectorsShareRootWith(vector.getChildrenFromFields(), expectedRoot)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

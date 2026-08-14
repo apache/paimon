@@ -43,6 +43,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -93,6 +94,53 @@ public class BlobFileFormatTest {
     @Test
     public void testReadBlobInlineBytes() throws IOException {
         innerTest(false);
+    }
+
+    @Test
+    public void testSkipDoesNotReadBlobPayload() throws IOException {
+        BlobFileFormat format =
+                new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+            writer.addElement(GenericRow.of(new BlobData("first".getBytes())));
+            writer.addElement(GenericRow.of(new BlobData("second".getBytes())));
+            writer.addElement(GenericRow.of(new BlobData("third".getBytes())));
+            writer.close();
+        }
+
+        RoaringBitmap32 selection = new RoaringBitmap32();
+        selection.add(0);
+        selection.add(1);
+        selection.add(2);
+        TrackingLocalFileIO trackingFileIO = new TrackingLocalFileIO();
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(
+                        trackingFileIO, file, trackingFileIO.getFileSize(file), selection);
+
+        try (FileRecordReader<InternalRow> reader = readerFactory.createReader(context)) {
+            TrackingSeekableInputStream stream = trackingFileIO.lastInputStream;
+            FileRecordIterator<InternalRow> iterator = reader.readBatch();
+
+            int readCount = stream.readCount;
+            int seekCount = stream.seekCount;
+            assertThat(iterator.skip()).isTrue();
+            assertThat(iterator.returnedPosition()).isZero();
+            assertThat(stream.readCount).isEqualTo(readCount);
+            assertThat(stream.seekCount).isEqualTo(seekCount);
+
+            assertThat(iterator.next().getBlob(0).toData()).isEqualTo("second".getBytes());
+            assertThat(iterator.returnedPosition()).isOne();
+
+            readCount = stream.readCount;
+            seekCount = stream.seekCount;
+            assertThat(iterator.skip()).isTrue();
+            assertThat(iterator.returnedPosition()).isEqualTo(2L);
+            assertThat(stream.readCount).isEqualTo(readCount);
+            assertThat(stream.seekCount).isEqualTo(seekCount);
+            assertThat(iterator.skip()).isFalse();
+        }
     }
 
     @Test
@@ -442,47 +490,54 @@ public class BlobFileFormatTest {
     }
 
     @Test
-    public void testDuplicateMapBlobKeyLastWinsInline() throws IOException {
-        assertDuplicateMapBlobKeyLastWins(
+    public void testRejectDuplicateBinaryMapBlobKeyOnWrite() throws IOException {
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.BYTES(), DataTypes.BLOB()));
+        Map<Object, Object> entries = new LinkedHashMap<>();
+        entries.put(new byte[] {1}, new BlobData("first".getBytes()));
+        entries.put(new byte[] {1}, new BlobData("second".getBytes()));
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer =
+                    new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE)
+                            .createWriterFactory(rowType)
+                            .create(out, null);
+            assertThatThrownBy(() -> writer.addElement(GenericRow.of(new GenericMap(entries))))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("MAP<X, BLOB> keys must be unique.");
+            writer.close();
+        }
+    }
+
+    @Test
+    public void testRejectDuplicateMapBlobKeyInline() throws IOException {
+        assertDuplicateMapBlobKeyRejected(
                 false,
                 DataTypes.STRING(),
                 BinaryString.fromString("a"),
                 BinaryString.fromString("b"),
-                BinaryString.fromString("a"),
                 (byte) 'a');
     }
 
     @Test
-    public void testDuplicateMapBlobKeyLastWinsAsDescriptor() throws IOException {
-        assertDuplicateMapBlobKeyLastWins(
+    public void testRejectDuplicateMapBlobKeyAsDescriptor() throws IOException {
+        assertDuplicateMapBlobKeyRejected(
                 true,
                 DataTypes.STRING(),
                 BinaryString.fromString("a"),
                 BinaryString.fromString("b"),
-                BinaryString.fromString("a"),
                 (byte) 'a');
     }
 
     @Test
-    public void testDuplicateBinaryMapBlobKeyLastWinsInline() throws IOException {
-        assertDuplicateMapBlobKeyLastWins(
-                false,
-                DataTypes.BINARY(1),
-                new byte[] {1},
-                new byte[] {2},
-                new byte[] {1},
-                (byte) 1);
+    public void testRejectDuplicateBinaryMapBlobKeyInline() throws IOException {
+        assertDuplicateMapBlobKeyRejected(
+                false, DataTypes.BINARY(1), new byte[] {1}, new byte[] {2}, (byte) 1);
     }
 
     @Test
-    public void testDuplicateBinaryMapBlobKeyLastWinsAsDescriptor() throws IOException {
-        assertDuplicateMapBlobKeyLastWins(
-                true,
-                DataTypes.BINARY(1),
-                new byte[] {1},
-                new byte[] {2},
-                new byte[] {1},
-                (byte) 1);
+    public void testRejectDuplicateBinaryMapBlobKeyAsDescriptor() throws IOException {
+        assertDuplicateMapBlobKeyRejected(
+                true, DataTypes.BINARY(1), new byte[] {1}, new byte[] {2}, (byte) 1);
     }
 
     @Test
@@ -564,12 +619,11 @@ public class BlobFileFormatTest {
         assertThat(genericMap.keyArray().getBinary(0)).isEqualTo(new byte[] {1});
     }
 
-    private void assertDuplicateMapBlobKeyLastWins(
+    private void assertDuplicateMapBlobKeyRejected(
             boolean blobAsDescriptor,
             DataType keyType,
             Object firstKey,
             Object secondKey,
-            Object lookupKey,
             byte duplicateKeyByte)
             throws IOException {
         Map<Object, Object> entries = new LinkedHashMap<>();
@@ -599,19 +653,15 @@ public class BlobFileFormatTest {
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
-        List<InternalRow> rows = new ArrayList<>();
-        try (FileRecordReader<InternalRow> reader = readerFactory.createReader(context)) {
-            reader.forEachRemaining(rows::add);
-        }
-
-        assertThat(rows).hasSize(1);
-        GenericMap result = (GenericMap) rows.get(0).getMap(0);
-        assertThat(result.size()).isOne();
-        assertThat(result.contains(lookupKey)).isTrue();
-        assertMapBlob(result.get(lookupKey), blobAsDescriptor, "second".getBytes());
-        if (lookupKey instanceof byte[]) {
-            assertThat(result.keyArray().getBinary(0)).isEqualTo(lookupKey);
-        }
+        assertThatThrownBy(
+                        () -> {
+                            try (FileRecordReader<InternalRow> reader =
+                                    readerFactory.createReader(context)) {
+                                reader.forEachRemaining(ignored -> {});
+                            }
+                        })
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Invalid MAP<X, BLOB> payload: duplicate key.");
     }
 
     @Test
@@ -1129,6 +1179,8 @@ public class BlobFileFormatTest {
 
         private final SeekableInputStream delegate;
         private int closeCount;
+        private int readCount;
+        private int seekCount;
 
         private TrackingSeekableInputStream(SeekableInputStream delegate) {
             this.delegate = delegate;
@@ -1136,6 +1188,7 @@ public class BlobFileFormatTest {
 
         @Override
         public void seek(long desired) throws IOException {
+            seekCount++;
             delegate.seek(desired);
         }
 
@@ -1146,12 +1199,20 @@ public class BlobFileFormatTest {
 
         @Override
         public int read() throws IOException {
-            return delegate.read();
+            int value = delegate.read();
+            if (value >= 0) {
+                readCount++;
+            }
+            return value;
         }
 
         @Override
         public int read(byte[] bytes, int offset, int length) throws IOException {
-            return delegate.read(bytes, offset, length);
+            int read = delegate.read(bytes, offset, length);
+            if (read > 0) {
+                readCount += read;
+            }
+            return read;
         }
 
         @Override

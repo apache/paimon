@@ -25,7 +25,6 @@ import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -150,18 +149,12 @@ public class SortedGlobalIndexScanner implements Serializable {
         List<Range> rangesToBuild = new ArrayList<>(unindexedRowRanges(snapshot, currentIndexes));
         List<IndexManifestEntry> deletedIndexEntries = Collections.emptyList();
         if (detectDataFileChange()) {
-            List<ManifestEntry> dataEntries =
-                    table.store()
-                            .newScan()
-                            .withSnapshot(snapshot)
-                            .withPartitionFilter(partitionPredicate)
-                            .dropStats()
-                            .plan()
-                            .files();
+            // Scans data manifests through reusable binary views without materializing entries.
             deletedIndexEntries =
                     DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
-                            table.schemaManager(),
-                            dataEntries,
+                            table,
+                            snapshot,
+                            partitionPredicate,
                             currentIndexes,
                             Collections.singletonList(indexField));
             for (IndexManifestEntry entry : deletedIndexEntries) {

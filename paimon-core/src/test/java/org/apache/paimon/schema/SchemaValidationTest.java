@@ -134,6 +134,37 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testLatestDeltaOnlyAcceptsScanMode() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.LATEST_DELTA.toString());
+        assertThatNoException().isThrownBy(() -> validateTableSchemaExec(options));
+
+        Map<String, String> incompatibleOptions = new HashMap<>();
+        incompatibleOptions.put(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), "1");
+        incompatibleOptions.put(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(), "1");
+        incompatibleOptions.put(CoreOptions.SCAN_CREATION_TIME_MILLIS.key(), "1");
+        incompatibleOptions.put(CoreOptions.SCAN_TIMESTAMP.key(), "2026-08-10 00:00:00");
+        incompatibleOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
+        incompatibleOptions.put(CoreOptions.SCAN_TAG_NAME.key(), "tag1");
+        incompatibleOptions.put(CoreOptions.SCAN_WATERMARK.key(), "1");
+        incompatibleOptions.put(CoreOptions.SCAN_VERSION.key(), "1");
+        incompatibleOptions.put(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(), "1,2");
+        incompatibleOptions.put(CoreOptions.INCREMENTAL_BETWEEN.key(), "1,2");
+        incompatibleOptions.put(CoreOptions.INCREMENTAL_TO_AUTO_TAG.key(), "tag1");
+        incompatibleOptions.put(CoreOptions.INCREMENTAL_BETWEEN_SCAN_MODE.key(), "delta");
+        incompatibleOptions.put(CoreOptions.INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT.key(), "true");
+
+        incompatibleOptions.forEach(
+                (key, value) -> {
+                    Map<String, String> invalidOptions = new HashMap<>(options);
+                    invalidOptions.put(key, value);
+                    assertThatThrownBy(() -> validateTableSchemaExec(invalidOptions))
+                            .hasMessageContaining(
+                                    key + " must be null when you use latest-delta for scan.mode");
+                });
+    }
+
+    @Test
     public void testTargetFileRowNumMustBePositive() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), "0");
@@ -629,6 +660,22 @@ class SchemaValidationTest {
                 new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
 
         assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyManagedBlobAllowsFirstRow() {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payload");
+        options.put(CoreOptions.MERGE_ENGINE.key(), "first-row");
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "none");
+
+        assertThatCode(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                options, singletonList("id"), emptyList())))
+                .doesNotThrowAnyException();
     }
 
     @Test

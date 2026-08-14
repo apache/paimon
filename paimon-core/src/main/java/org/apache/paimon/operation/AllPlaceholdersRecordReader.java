@@ -143,12 +143,21 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
         @Nullable
         @Override
         public InternalRow next() {
+            return advance() ? placeholderRow(returnedRowId) : null;
+        }
+
+        @Override
+        public boolean skip() {
+            return advance();
+        }
+
+        private boolean advance() {
             while (rangeIndex < selectedRanges.size()) {
                 Range range = selectedRanges.get(rangeIndex);
                 if (nextRowId <= range.to) {
                     returnedRowId = nextRowId;
                     nextRowId++;
-                    return placeholderRow(returnedRowId);
+                    return true;
                 }
 
                 rangeIndex++;
@@ -156,7 +165,7 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
                     nextRowId = selectedRanges.get(rangeIndex).from;
                 }
             }
-            return null;
+            return false;
         }
 
         @Override

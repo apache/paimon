@@ -336,7 +336,8 @@ class SplitRead(ABC):
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor,
                                              batch_size=batch_size,
                                              row_indices=row_indices,
-                                             blob_parallelism=blob_parallelism)
+                                             blob_parallelism=blob_parallelism,
+                                             file_size=file.file_size)
         elif file_format == CoreOptions.FILE_FORMAT_LANCE:
             if has_nested:
                 raise NotImplementedError(
@@ -1460,6 +1461,7 @@ class DataEvolutionSplitRead(SplitRead):
             batch_size=self.table.options.read_batch_size(),
             row_indices=row_indices,
             blob_parallelism=blob_parallelism,
+            file_size=file.file_size,
         )
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:

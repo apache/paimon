@@ -195,6 +195,45 @@ public class FileRecordIteratorTest {
     }
 
     @Test
+    public void testSelectionSkip() throws IOException {
+        FileRecordIterator<Long> iterator = createIterator(Arrays.asList(0L, 1L, 2L, 3L, 4L, 5L));
+
+        RoaringBitmap32 selection = new RoaringBitmap32();
+        selection.add(1);
+        selection.add(3);
+        selection.add(5);
+
+        FileRecordIterator<Long> selected = iterator.selection(selection);
+        assertThat(selected.skip()).isTrue();
+        assertThat(selected.returnedPosition()).isEqualTo(1L);
+        assertThat(selected.next()).isEqualTo(3L);
+        assertThat(selected.returnedPosition()).isEqualTo(3L);
+        assertThat(selected.skip()).isTrue();
+        assertThat(selected.returnedPosition()).isEqualTo(5L);
+        assertThat(selected.skip()).isFalse();
+    }
+
+    @Test
+    public void testTransformSkipDoesNotApplyFunction() throws IOException {
+        int[] transformCount = {0};
+        FileRecordIterator<String> transformed =
+                createIterator(Arrays.asList(1L, 2L, 3L))
+                        .transform(
+                                value -> {
+                                    transformCount[0]++;
+                                    return value.toString();
+                                });
+
+        assertThat(transformed.skip()).isTrue();
+        assertThat(transformCount[0]).isZero();
+        assertThat(transformed.next()).isEqualTo("2");
+        assertThat(transformCount[0]).isOne();
+        assertThat(transformed.skip()).isTrue();
+        assertThat(transformCount[0]).isOne();
+        assertThat(transformed.skip()).isFalse();
+    }
+
+    @Test
     public void testSelectionFilePathPreserved() {
         List<Long> values = Arrays.asList(0L, 1L, 2L);
         FileRecordIterator<Long> iterator = createIterator(values);
@@ -229,6 +268,15 @@ public class FileRecordIteratorTest {
                     return null;
                 }
                 return values.get(position);
+            }
+
+            @Override
+            public boolean skip() {
+                if (position + 1 >= values.size()) {
+                    return false;
+                }
+                position++;
+                return true;
             }
 
             @Override

@@ -67,7 +67,7 @@ public class ManifestEntrySerializer extends ObjectSerializer<ManifestEntry> {
         return fromDataRow(new OffsetRow(row.getFieldCount() - 1, 1).replace(row));
     }
 
-    private void checkFormatIdentifier(int formatIdentifier) {
+    static void checkFormatIdentifier(int formatIdentifier) {
         if (formatIdentifier != FORMAT_IDENTIFIER) {
             if (formatIdentifier == 1) {
                 throw new IllegalArgumentException(

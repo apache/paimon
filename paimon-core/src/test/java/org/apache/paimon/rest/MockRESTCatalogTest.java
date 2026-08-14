@@ -64,8 +64,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.File;
 import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -153,25 +155,32 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     void testDlfStSTokenPathAuth() throws Exception {
         String uri = "https://cn-hangzhou-vpc.dlf.aliyuncs.com";
         String region = "cn-hangzhou";
-        String tokenPath = dataPath + UUID.randomUUID();
-        generateTokenAndWriteToFile(tokenPath);
-        DLFTokenLoader tokenLoader =
-                DLFTokenLoaderFactory.createDLFTokenLoader(
-                        "local_file",
-                        new Options(
-                                ImmutableMap.of(
-                                        RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath)));
-        DLFToken dlfToken = tokenLoader.loadToken();
-        this.authProvider = new TestDLFAuthProvider(dlfToken, uri, region);
-        this.authMap =
-                ImmutableMap.of(
-                        RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.DLF.identifier(),
-                        RESTCatalogOptions.DLF_REGION.key(), region,
-                        RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath);
-        RESTCatalog restCatalog = initCatalog(false);
-        testDlfAuth(restCatalog);
-        File file = new File(tokenPath);
-        file.delete();
+        java.nio.file.Path tokenFile =
+                Paths.get(URI.create(dataPath)).resolve(UUID.randomUUID().toString());
+        String tokenPath = tokenFile.toString();
+        try {
+            generateTokenAndWriteToFile(tokenPath);
+            DLFTokenLoader tokenLoader =
+                    DLFTokenLoaderFactory.createDLFTokenLoader(
+                            "local_file",
+                            new Options(
+                                    ImmutableMap.of(
+                                            RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath)));
+            DLFToken dlfToken = tokenLoader.loadToken();
+            this.authProvider = new TestDLFAuthProvider(dlfToken, uri, region);
+            this.authMap =
+                    ImmutableMap.of(
+                            RESTCatalogOptions.TOKEN_PROVIDER.key(),
+                            AuthProviderEnum.DLF.identifier(),
+                            RESTCatalogOptions.DLF_REGION.key(),
+                            region,
+                            RESTCatalogOptions.DLF_TOKEN_PATH.key(),
+                            tokenPath);
+            RESTCatalog restCatalog = initCatalog(false);
+            testDlfAuth(restCatalog);
+        } finally {
+            Files.deleteIfExists(tokenFile);
+        }
     }
 
     @Test

@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.AppendFileStoreWrite;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -43,6 +44,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compacts normal structured files of a data evolution table. */
@@ -52,6 +54,7 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
 
     public DataEvolutionNormalCompactTask(BinaryRow partition, List<DataFileMeta> files) {
         super(partition, files);
+        checkContiguousRowRange(files);
     }
 
     @Override
@@ -96,6 +99,7 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
                 store.newDataEvolutionRead().withReadType(readWriteType).createReader(dataSplit);
         AppendFileStoreWrite storeWrite = (AppendFileStoreWrite) store.newWrite(commitUser);
         storeWrite.withWriteType(readWriteType);
+        storeWrite.withFileSource(FileSource.COMPACT);
         RecordWriter<InternalRow> writer = storeWrite.createWriter(partition, 0);
 
         reader.forEachRemaining(
