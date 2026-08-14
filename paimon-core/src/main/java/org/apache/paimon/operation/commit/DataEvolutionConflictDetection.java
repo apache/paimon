@@ -591,6 +591,12 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             List<SimpleFileEntry> deltaEntries,
             @Nullable Long nextRowId,
             CommitKind commitKind) {
+        Optional<RuntimeException> exception =
+                checkDeletedFileRowIdExistence(baseEntries, deltaEntries);
+        if (exception.isPresent()) {
+            return exception;
+        }
+
         List<SimpleFileEntry> existingDataFiles =
                 baseEntries.stream()
                         .filter(
@@ -603,6 +609,42 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             return checkCompactRowIdExistence(existingDataFiles, deltaEntries);
         }
         return checkNonCompactRowIdExistence(existingDataFiles, deltaEntries, nextRowId);
+    }
+
+    private Optional<RuntimeException> checkDeletedFileRowIdExistence(
+            List<SimpleFileEntry> baseEntries, List<SimpleFileEntry> deltaEntries) {
+        // FileEntry.Identifier deliberately excludes RowID metadata because reassignment does not
+        // create a new physical data file. Reject a DELETE planned before reassignment by comparing
+        // it with the current ADD before identifier-based manifest merging cancels the two entries.
+        Map<FileEntry.Identifier, SimpleFileEntry> deletedFiles = new HashMap<>();
+        for (SimpleFileEntry entry : deltaEntries) {
+            if (entry.kind() == FileKind.DELETE) {
+                deletedFiles.put(entry.identifier(), entry);
+            }
+        }
+        if (deletedFiles.isEmpty()) {
+            return Optional.empty();
+        }
+
+        for (SimpleFileEntry current : baseEntries) {
+            if (current.kind() != FileKind.ADD) {
+                continue;
+            }
+            SimpleFileEntry deleted = deletedFiles.get(current.identifier());
+            if (deleted != null
+                    && (!Objects.equals(current.firstRowId(), deleted.firstRowId())
+                            || current.rowCount() != deleted.rowCount())) {
+                return Optional.of(
+                        new RowIdExistenceConflictException(
+                                deleted.fileName(),
+                                deleted.firstRowId(),
+                                deleted.rowCount(),
+                                current.firstRowId(),
+                                current.rowCount(),
+                                deleted.bucket()));
+            }
+        }
+        return Optional.empty();
     }
 
     /**

@@ -1095,6 +1095,74 @@ class ConflictDetectionTest {
     }
 
     @Test
+    void testCheckRowIdExistenceRejectsStaleDeleteAfterReassign() {
+        DataEvolutionConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries =
+                Collections.singletonList(createFileEntryWithRowId("f1", ADD, 100L, 10L));
+        List<SimpleFileEntry> deltaEntries =
+                Collections.singletonList(createFileEntryWithRowId("f1", DELETE, 0L, 10L));
+
+        Optional<RuntimeException> result =
+                detection.checkConflicts(
+                        snapshot(1),
+                        baseEntries,
+                        deltaEntries,
+                        Collections.emptyList(),
+                        null,
+                        Snapshot.CommitKind.APPEND);
+
+        assertThat(result).isPresent();
+        assertThat(result.get())
+                .isInstanceOf(RowIdExistenceConflictException.class)
+                .hasMessageContaining("DELETE for file 'f1'")
+                .hasMessageContaining("firstRowId=0, rowCount=10")
+                .hasMessageContaining("firstRowId=100, rowCount=10");
+    }
+
+    @Test
+    void testCheckRowIdExistenceRejectsStaleDeleteWithDifferentRowCount() {
+        DataEvolutionConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries =
+                Collections.singletonList(createFileEntryWithRowId("f1", ADD, 0L, 20L));
+        List<SimpleFileEntry> deltaEntries =
+                Collections.singletonList(createFileEntryWithRowId("f1", DELETE, 0L, 10L));
+
+        Optional<RuntimeException> result =
+                detection.checkConflicts(
+                        snapshot(1),
+                        baseEntries,
+                        deltaEntries,
+                        Collections.emptyList(),
+                        null,
+                        Snapshot.CommitKind.APPEND);
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).isInstanceOf(RowIdExistenceConflictException.class);
+    }
+
+    @Test
+    void testCheckRowIdExistenceAllowsDeleteWithCurrentAssignment() {
+        DataEvolutionConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries =
+                Collections.singletonList(createFileEntryWithRowId("f1", ADD, 100L, 10L));
+        List<SimpleFileEntry> deltaEntries =
+                Collections.singletonList(createFileEntryWithRowId("f1", DELETE, 100L, 10L));
+
+        assertThat(
+                        detection.checkConflicts(
+                                snapshot(1),
+                                baseEntries,
+                                deltaEntries,
+                                Collections.emptyList(),
+                                null,
+                                Snapshot.CommitKind.APPEND))
+                .isEmpty();
+    }
+
+    @Test
     void testCheckRowIdExistenceSkipsWhenNextRowIdNull() {
         DataEvolutionConflictDetection detection = createConflictDetection();
 
