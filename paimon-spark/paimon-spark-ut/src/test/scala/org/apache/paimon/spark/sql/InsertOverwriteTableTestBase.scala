@@ -811,6 +811,38 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Insert: table dynamic partition order survives UNION output aliases") {
+    if (gteqSpark3_4) {
+      withSparkSQLConf(
+        "spark.sql.sources.partitionOverwriteMode" -> "dynamic",
+        "spark.paimon.write.use-v2-write" -> "true",
+        "spark.paimon.sql.dynamic-partition-column-order" -> "table"
+      ) {
+        withTable("dynamic_union") {
+          sql("""
+                |CREATE TABLE dynamic_union (
+                |  ds STRING,
+                |  part STRING,
+                |  uid STRING,
+                |  value STRING
+                |) PARTITIONED BY (ds, part)
+                |""".stripMargin)
+
+          sql("""
+                |INSERT OVERWRITE dynamic_union PARTITION (ds, part)
+                |SELECT '2026-08-10' AS ds, 'p1' AS part, 'u1' AS uid, 'v1' AS detail_ratio
+                |UNION ALL
+                |SELECT '2026-08-10' AS ds, 'p2' AS part, 'u2' AS uid, 'v2' AS value
+                |""".stripMargin)
+
+          checkAnswer(
+            sql("SELECT ds, part, uid, value FROM dynamic_union ORDER BY part"),
+            Seq(Row("2026-08-10", "p1", "u1", "v1"), Row("2026-08-10", "p2", "u2", "v2")))
+        }
+      }
+    }
+  }
+
   test("Paimon Insert: dynamic insert into table with partition columns contain primary key") {
     withSparkSQLConf("spark.sql.shuffle.partitions" -> "10") {
       withTable("pk_pt") {

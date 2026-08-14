@@ -19,11 +19,13 @@
 package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.options.Options
+import org.apache.paimon.spark.SparkConnectorOptions.DynamicPartitionColumnOrder
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.plans.logical.{PaimonDropPartitions, PaimonHiveDynamicPartitionQuery}
 import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, SchemaEvolutionHelper}
+import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{PaimonUtils, SparkSession}
@@ -111,19 +113,40 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     val query = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
     hiveDynamicPartitionColumns(v2WriteCommand.query) match {
       case Some(dynamicPartitionColumns) if !v2WriteCommand.isByName =>
+        val configuredColumnOrder = OptionUtils.dynamicPartitionColumnOrder()
+        val columnOrder = configuredColumnOrder match {
+          case DynamicPartitionColumnOrder.AUTO
+              if dynamicPartitionColumnsUseTableOrder(query, table, dynamicPartitionColumns) =>
+            DynamicPartitionColumnOrder.TABLE
+          case order => order
+        }
         resolveDynamicPartitionWrite(
           query,
           table,
-          hiveStyleDynamicPartitionOutput(table, dynamicPartitionColumns),
+          columnOrder,
+          hiveStyleDynamicPartitionOutput(query, table, dynamicPartitionColumns),
           options,
           mergeSchemaEnabled)
       case _ =>
         v2WriteCommand match {
           case o: OverwritePartitionsDynamic if !o.isByName =>
+            val hiveStyleCandidate = hiveStyleDynamicPartitionOutput(query, table)
+            val configuredColumnOrder =
+              if (hiveStyleCandidate.isDefined) {
+                OptionUtils.dynamicPartitionColumnOrder()
+              } else {
+                DynamicPartitionColumnOrder.AUTO
+              }
+            val hiveStyleOutput = configuredColumnOrder match {
+              case DynamicPartitionColumnOrder.TABLE => None
+              case DynamicPartitionColumnOrder.HIVE | DynamicPartitionColumnOrder.AUTO =>
+                hiveStyleCandidate
+            }
             resolveDynamicPartitionWrite(
               query,
               table,
-              hiveStyleDynamicPartitionOutput(query, table),
+              configuredColumnOrder,
+              hiveStyleOutput,
               options,
               mergeSchemaEnabled)
           case _ =>
@@ -153,13 +176,17 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
   private def resolveDynamicPartitionWrite(
       query: LogicalPlan,
       table: DataSourceV2Relation,
+      columnOrder: DynamicPartitionColumnOrder,
       hiveStyleOutput: Option[Seq[Attribute]],
       options: Options,
       mergeSchemaEnabled: Boolean): LogicalPlan = {
     hiveStyleOutput match {
       case Some(hiveStyleOutput)
-          if !sameOutputNames(query.output, table.output) &&
-            !sameOutputNames(hiveStyleOutput, table.output) =>
+          if (columnOrder == DynamicPartitionColumnOrder.HIVE &&
+            !sameOutputNames(query.output, table.output)) ||
+            (columnOrder == DynamicPartitionColumnOrder.AUTO &&
+              !sameOutputNames(query.output, table.output) &&
+              !sameOutputNames(hiveStyleOutput, table.output)) =>
         val hiveStyleQuery =
           resolveWriteOutput(query, table.name, hiveStyleOutput, byName = false, mergeSchemaEnabled)
         resolveWriteOutput(
@@ -214,12 +241,31 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       table: DataSourceV2Relation): Option[Seq[Attribute]] = {
     val dynamicPartitionColumns =
       table.table.asInstanceOf[SparkTable].getTable.partitionKeys().asScala.toSeq
-    hiveStyleDynamicPartitionOutput(table, dynamicPartitionColumns).filter {
+    hiveStyleDynamicPartitionOutput(query, table, dynamicPartitionColumns).filter {
       hiveStyleOutput => sameOutputNames(query.output, hiveStyleOutput)
     }
   }
 
+  private def dynamicPartitionColumnsUseTableOrder(
+      query: LogicalPlan,
+      table: DataSourceV2Relation,
+      dynamicPartitionColumns: Seq[String]): Boolean = {
+    if (query.output.size != table.output.size) {
+      false
+    } else {
+      val dynamicPartitionAttrs = table.output.zipWithIndex.filter {
+        case (attr, _) =>
+          dynamicPartitionColumns.exists(partition => conf.resolver(attr.name, partition))
+      }
+      dynamicPartitionAttrs.size == dynamicPartitionColumns.size &&
+      dynamicPartitionAttrs.forall {
+        case (attr, index) => conf.resolver(query.output(index).name, attr.name)
+      }
+    }
+  }
+
   private def hiveStyleDynamicPartitionOutput(
+      query: LogicalPlan,
       table: DataSourceV2Relation,
       dynamicPartitionColumns: Seq[String]): Option[Seq[Attribute]] = {
     val partitionKeys = table.table.asInstanceOf[SparkTable].getTable.partitionKeys().asScala.toSeq
@@ -238,7 +284,23 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       }
       val hiveStyleOutput = dataAttrs ++ dynamicPartitionAttrs
       if (dynamicPartitionAttrs.size == dynamicPartitionColumns.size) {
-        Some(hiveStyleOutput)
+        val staticPartitionAttrsByIndex = table.output.zipWithIndex.collect {
+          case (attr, index)
+              if partitionKeys.exists(partition => conf.resolver(attr.name, partition)) &&
+                !dynamicPartitionColumns.exists(partition => conf.resolver(attr.name, partition)) &&
+                query.output
+                  .lift(index)
+                  .exists(queryAttr => conf.resolver(queryAttr.name, attr.name)) =>
+            index -> attr
+        }.toMap
+        val staticPartitionAttrs = staticPartitionAttrsByIndex.values.toSeq
+        val remainingAttrs = hiveStyleOutput.filterNot {
+          attr =>
+            staticPartitionAttrs.exists(staticAttr => conf.resolver(attr.name, staticAttr.name))
+        }.iterator
+        Some(table.output.indices.map {
+          index => staticPartitionAttrsByIndex.getOrElse(index, remainingAttrs.next())
+        })
       } else {
         None
       }

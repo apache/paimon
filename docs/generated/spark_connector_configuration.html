@@ -87,6 +87,12 @@ under the License.
             <td>Whether to adjust the target split size based on pruned (projected) columns. If enabled, split size estimation uses only the columns actually being read.</td>
         </tr>
         <tr>
+            <td><h5>sql.dynamic-partition-column-order</h5></td>
+            <td style="word-wrap: break-word;">AUTO</td>
+            <td><p>Enum</p></td>
+            <td>Controls how non-BY-NAME Spark SQL dynamic partition writes interpret partition columns. TABLE uses table schema order, HIVE expects dynamic partition columns at the end when they are declared in a PARTITION clause or when a dynamic overwrite query matches that Hive-style output, and AUTO preserves compatible table and Hive order detection.<br /><br />Possible values:<ul><li>"AUTO"</li><li>"TABLE"</li><li>"HIVE"</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>vector-search.lateral-join.parallelism</h5></td>
             <td style="word-wrap: break-word;">16</td>
             <td>Integer</td>
