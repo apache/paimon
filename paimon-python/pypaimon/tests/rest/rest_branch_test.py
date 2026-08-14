@@ -17,6 +17,9 @@
 
 import unittest
 
+import pyarrow as pa
+
+from pypaimon import Schema
 from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 BranchNotExistException,
                                                 TableNotExistException)
@@ -35,6 +38,21 @@ class RESTCatalogBranchCRUDTest(RESTBaseTest):
         # The base test creates ``default.test_reader_iterator`` and commits a
         # snapshot in setUp.
         return Identifier.from_string("default.test_reader_iterator")
+
+    @staticmethod
+    def _write(table, data):
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        try:
+            writer.write_arrow(data)
+            builder.new_commit().commit(writer.prepare_commit())
+        finally:
+            writer.close()
+
+    @staticmethod
+    def _read(table):
+        builder = table.new_read_builder()
+        return builder.new_read().to_arrow(builder.new_scan().plan().splits())
 
     def test_create_branch_table_not_exist(self):
         with self.assertRaises(TableNotExistException):
@@ -64,6 +82,52 @@ class RESTCatalogBranchCRUDTest(RESTBaseTest):
 
         self.assertEqual(table.current_branch(), "b1")
         self.assertEqual(table.schema_manager.branch, "b1")
+
+    def test_write_blob_to_data_evolution_branch(self):
+        schema = pa.schema([
+            ("id", pa.int64()),
+            ("payload", pa.large_binary()),
+        ])
+        identifier = Identifier.from_string("default.test_de_blob_branch")
+        self.rest_catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(
+                schema,
+                options={
+                    "data-evolution.enabled": "true",
+                    "row-tracking.enabled": "true",
+                    "blob-field": "payload",
+                },
+            ),
+            False,
+        )
+        main = self.rest_catalog.get_table(identifier)
+        self._write(main, pa.table({
+            "id": [1],
+            "payload": pa.array([b"main"], pa.large_binary()),
+        }, schema=schema))
+        self.assertEqual(
+            self._read(main).to_pydict(),
+            {"id": [1], "payload": [b"main"]},
+        )
+        self.rest_catalog.create_branch(identifier, "b1")
+
+        branch_identifier = Identifier(
+            identifier.get_database_name(), identifier.get_table_name(), branch="b1")
+        branch = self.rest_catalog.get_table(branch_identifier)
+        self._write(branch, pa.table({
+            "id": [2],
+            "payload": pa.array([b"branch"], pa.large_binary()),
+        }, schema=schema))
+
+        self.assertEqual(
+            self._read(main).to_pydict(),
+            {"id": [1], "payload": [b"main"]},
+        )
+        self.assertEqual(
+            self._read(branch).to_pydict(),
+            {"id": [2], "payload": [b"branch"]},
+        )
 
     def test_create_branch_duplicate_raises(self):
         identifier = self._identifier()
