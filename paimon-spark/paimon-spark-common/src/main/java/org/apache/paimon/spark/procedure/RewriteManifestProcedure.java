@@ -146,29 +146,29 @@ public class RewriteManifestProcedure extends BaseProcedure {
         }
 
         // 2. filter manifests by the optional where clause (partition-stats pruning)
+        List<ManifestFileMeta> manifestsToRewrite = currentManifests;
         PartitionPredicate partitionPredicate = resolvePartitionPredicate(tableIdent, table, where);
         if (partitionPredicate != null) {
-            currentManifests = filterManifests(currentManifests, partitionPredicate);
-            if (currentManifests.isEmpty()) {
+            manifestsToRewrite = filterManifests(manifestsToRewrite, partitionPredicate);
+            if (manifestsToRewrite.isEmpty()) {
                 return new InternalRow[] {newInternalRow(0, 0)};
             }
         }
 
         // 3. globally sort manifest entries and write them back as new manifest files
-        List<ManifestFileMeta> newManifests = rewriteManifests(fileStoreTable, currentManifests);
+        List<ManifestFileMeta> newManifests = rewriteManifests(fileStoreTable, manifestsToRewrite);
 
         // 4. commit the rewritten manifests (optimistic concurrency with retry)
         try (BatchTableCommit commit = fileStoreTable.newBatchWriteBuilder().newCommit()) {
-            commit.replaceManifests(currentManifests, newManifests);
+            commit.replaceManifests(manifestsToRewrite, newManifests);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
 
-        // rewritten_manifests_count: total manifests produced by the rewrite
-        // added_manifests_count: net change in manifest count vs before rewrite (may be negative
-        //   when the rewrite also consolidates small manifest files)
-        int rewrittenCount = newManifests.size();
-        int addedCount = newManifests.size() - currentManifests.size();
+        // rewritten_manifests_count: number of manifests that were rewritten (input)
+        // added_manifests_count: number of new manifests produced by the rewrite (output)
+        int rewrittenCount = manifestsToRewrite.size();
+        int addedCount = newManifests.size();
         return new InternalRow[] {newInternalRow(rewrittenCount, addedCount)};
     }
 
