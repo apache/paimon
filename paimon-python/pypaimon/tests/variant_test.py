@@ -370,16 +370,29 @@ class TestGenericVariantContainer(unittest.TestCase):
         self.assertEqual(gv.to_python(), value)
 
     def test_from_python_timestamp_ntz(self):
-        value = datetime.datetime(2024, 1, 15, 12, 30, 45, 123456)
-        gv = GenericVariant.from_python(value)
-        self.assertEqual(gv.to_python(), value)
+        cases = [
+            datetime.datetime(2024, 1, 15, 12, 30, 45, 123456),
+            datetime.datetime(1600, 6, 15, 12, 30, 45, 123456),
+            datetime.datetime(1900, 1, 1, 0, 0, 0, 654321),
+            datetime.datetime(2500, 12, 31, 23, 59, 59, 111111),
+            datetime.datetime(5000, 3, 3, 3, 3, 3, 222222),
+            datetime.datetime(9998, 7, 8, 12, 34, 56, 654321),
+        ]
+        for value in cases:
+            gv = GenericVariant.from_python(value)
+            self.assertEqual(gv.to_python(), value)
 
     def test_from_python_timestamp_ltz(self):
-        value = datetime.datetime(
-            2024, 1, 15, 12, 30, 45, 123456, tzinfo=datetime.timezone.utc
-        )
-        gv = GenericVariant.from_python(value)
-        self.assertEqual(gv.to_python(), value)
+        cases = [
+            datetime.datetime(2024, 1, 15, 12, 30, 45, 123456, tzinfo=datetime.timezone.utc),
+            datetime.datetime(
+                1600, 6, 15, 12, 30, 45, 123456, tzinfo=datetime.timezone(datetime.timedelta(hours=8))),
+            datetime.datetime(
+                9998, 7, 8, 12, 34, 56, 654321, tzinfo=datetime.timezone(datetime.timedelta(hours=8))),
+        ]
+        for value in cases:
+            gv = GenericVariant.from_python(value)
+            self.assertEqual(gv.to_python(), value)
 
     def test_from_python_nested_datetime(self):
         obj = {'created_at': datetime.datetime(2024, 1, 15, 12, 0)}

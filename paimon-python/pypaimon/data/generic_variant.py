@@ -41,6 +41,7 @@ Inspection helpers (for debugging/testing):
     v.metadata()  – raw metadata bytes
 """
 
+import calendar
 import datetime
 import decimal as _decimal
 import enum
@@ -457,17 +458,24 @@ class _GenericVariantBuilder:
         elif isinstance(obj, _uuid.UUID):
             self.append_uuid(obj)
         elif isinstance(obj, datetime.datetime):
+            micros = self._datetime_to_micros(obj)
             if obj.tzinfo is not None:
-                micros = int((obj - _EPOCH_DT_UTC).total_seconds() * 1_000_000)
                 self.append_timestamp(micros)
             else:
-                micros = int((obj - _EPOCH_DT_NTZ).total_seconds() * 1_000_000)
                 self.append_timestamp_ntz(micros)
         elif isinstance(obj, datetime.date):
             days = (obj - _EPOCH_DATE).days
             self.append_date(days)
         else:
             raise TypeError(f'Unsupported Python type for variant encoding: {type(obj).__name__}')
+
+    @staticmethod
+    def _datetime_to_micros(dt):
+        """Convert a datetime to microseconds since epoch using pure integer arithmetic. """
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(datetime.timezone.utc)
+        seconds = calendar.timegm(dt.timetuple())
+        return seconds * 1_000_000 + dt.microsecond
 
     def _try_decimal_or_double(self, d):
         try:
