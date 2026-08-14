@@ -57,6 +57,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -90,6 +91,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -110,7 +112,16 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  * Compact procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.compact(table => 'tableId', [partitions => 'p1=0,p2=0;p1=0,p2=1'], [order_strategy => 'xxx'], [order_by => 'xxx'], [where => 'p1>0'])
+ *  CALL sys.compact(
+ *      table => 'tableId',
+ *      [partitions => 'p1=0,p2=0;p1=0,p2=1'],
+ *      [order_strategy => 'xxx'],
+ *      [order_by => 'xxx'],
+ *      [where => 'p1>0'],
+ *      [buckets => '0-99,200-299'])
+ *
+ *  -- Buckets support a single id, comma-separated ids, and closed ranges.
+ *  CALL sys.compact(table => 'tableId', compact_strategy => 'full', buckets => '0-99,200-299')
  * </code></pre>
  */
 public class CompactProcedure extends BaseProcedure {
@@ -127,6 +138,7 @@ public class CompactProcedure extends BaseProcedure {
                 ProcedureParameter.optional("where", StringType),
                 ProcedureParameter.optional("options", StringType),
                 ProcedureParameter.optional("partition_idle_time", StringType),
+                ProcedureParameter.optional("buckets", StringType),
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -166,6 +178,7 @@ public class CompactProcedure extends BaseProcedure {
         String options = args.isNullAt(6) ? null : args.getString(6);
         Duration partitionIdleTime =
                 blank(args, 7) ? null : TimeUtils.parseDuration(args.getString(7));
+        String buckets = blank(args, 8) ? null : args.getString(8);
         if (OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
                     "order_strategy \"none\" cannot work with order_by columns.");
@@ -233,7 +246,8 @@ public class CompactProcedure extends BaseProcedure {
                                             sortColumns,
                                             relation,
                                             partitionPredicate,
-                                            partitionIdleTime));
+                                            partitionIdleTime,
+                                            buckets));
                     return new InternalRow[] {internalRow};
                 });
     }
@@ -254,9 +268,26 @@ public class CompactProcedure extends BaseProcedure {
             List<String> sortColumns,
             DataSourceV2Relation relation,
             @Nullable PartitionPredicate partitionPredicate,
-            @Nullable Duration partitionIdleTime) {
+            @Nullable Duration partitionIdleTime,
+            @Nullable String buckets) {
         BucketMode bucketMode = table.bucketMode();
         OrderType orderType = OrderType.of(sortType);
+        final Set<Integer> bucketSet;
+        if (buckets == null) {
+            bucketSet = null;
+        } else {
+            checkArgument(
+                    bucketMode == BucketMode.HASH_FIXED,
+                    "Specifying buckets is only supported for fixed-bucket tables, but the table bucket mode is %s.",
+                    bucketMode);
+            checkArgument(
+                    orderType == OrderType.NONE,
+                    "Specifying buckets is not supported for sort compact.");
+            bucketSet =
+                    new HashSet<>(
+                            ParameterUtils.parseIntegerRanges(
+                                    buckets, table.coreOptions().bucket()));
+        }
 
         boolean clusterIncrementalEnabled = table.coreOptions().clusteringIncrementalEnabled();
         if (compactStrategy == null) {
@@ -288,6 +319,7 @@ public class CompactProcedure extends BaseProcedure {
                             fullCompact,
                             partitionPredicate,
                             partitionIdleTime,
+                            bucketSet,
                             javaSparkContext);
                     break;
                 case BUCKET_UNAWARE:
@@ -337,6 +369,7 @@ public class CompactProcedure extends BaseProcedure {
             boolean fullCompact,
             @Nullable PartitionPredicate partitionPredicate,
             @Nullable Duration partitionIdleTime,
+            @Nullable Set<Integer> bucketSet,
             JavaSparkContext javaSparkContext) {
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (partitionPredicate != null) {
@@ -350,6 +383,7 @@ public class CompactProcedure extends BaseProcedure {
                 snapshotReader.bucketEntries().stream()
                         .map(entry -> Pair.of(entry.partition(), entry.bucket()))
                         .distinct()
+                        .filter(pair -> bucketSet == null || bucketSet.contains(pair.getRight()))
                         .filter(
                                 pair ->
                                         !filterByPartitionIdleTime

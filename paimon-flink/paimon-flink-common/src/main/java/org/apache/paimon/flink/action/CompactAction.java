@@ -47,7 +47,9 @@ import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.PostponeUtils.CompactBucket;
 import org.apache.paimon.table.PostponeUtils.PostponeBucketNumResolver;
 import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -65,6 +67,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -84,6 +87,9 @@ public class CompactAction extends TableActionBase {
     @Nullable protected Duration partitionIdleTime = null;
 
     @Nullable protected Boolean fullCompaction;
+
+    private String bucketsExpression;
+    private Set<Integer> buckets;
 
     public CompactAction(
             String database,
@@ -127,6 +133,12 @@ public class CompactAction extends TableActionBase {
         return this;
     }
 
+    public CompactAction withBucketsExpression(String bucketsExpression) {
+        this.buckets = null;
+        this.bucketsExpression = bucketsExpression;
+        return this;
+    }
+
     @Override
     public void build() throws Exception {
         buildImpl();
@@ -137,6 +149,7 @@ public class CompactAction extends TableActionBase {
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         FileStoreTable fileStoreTable = (FileStoreTable) table;
+        resolveBuckets(fileStoreTable);
         PartitionPredicate partitionPredicate = getPartitionPredicate();
         if (fileStoreTable.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
             buildForPostponeBucketCompaction(env, fileStoreTable, isStreaming);
@@ -206,6 +219,8 @@ public class CompactAction extends TableActionBase {
                         .withBucketDistributionStrategy(bucketDistributionStrategy);
 
         sourceBuilder.withPartitionPredicate(getPartitionPredicate());
+        sourceBuilder.withBucketFilter(
+                buckets == null ? null : new SpecifiedBucketFilter(buckets));
         DataStreamSource<RowData> source =
                 sourceBuilder
                         .withEnv(env)
@@ -238,6 +253,25 @@ public class CompactAction extends TableActionBase {
     protected PartitionPredicate getPartitionPredicate() throws Exception {
         return ActionPartitionPredicate.create(
                 (FileStoreTable) table, partitions, whereSql, "compaction");
+    }
+
+    protected boolean bucketsSpecified() {
+        return bucketsExpression != null;
+    }
+
+    private void resolveBuckets(FileStoreTable table) {
+        if (!bucketsSpecified()) {
+            buckets = null;
+            return;
+        }
+        checkArgument(
+                table.bucketMode() == BucketMode.HASH_FIXED,
+                "Specifying buckets is only supported for fixed-bucket tables, but the table bucket mode is %s.",
+                table.bucketMode());
+        buckets =
+                new HashSet<>(
+                        ParameterUtils.parseIntegerRanges(
+                                bucketsExpression, table.coreOptions().bucket()));
     }
 
     protected boolean buildForPostponeBucketCompaction(
@@ -359,6 +393,23 @@ public class CompactAction extends TableActionBase {
             return true;
         }
         return false;
+    }
+
+    private static class SpecifiedBucketFilter
+            implements Filter<Integer>, java.io.Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Set<Integer> buckets;
+
+        private SpecifiedBucketFilter(Set<Integer> buckets) {
+            this.buckets = buckets;
+        }
+
+        @Override
+        public boolean test(Integer bucket) {
+            return buckets.contains(bucket);
+        }
     }
 
     private static class CompactBucketChannelComputer implements ChannelComputer<CompactBucket> {

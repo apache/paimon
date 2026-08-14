@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.fs.Path;
@@ -73,6 +74,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.utils.CommonTestUtils.waitUtil;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -702,6 +704,68 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         assertThat(compactAction.table.options().get(FlinkConnectorOptions.SCAN_PARALLELISM.key()))
                 .isEqualTo("6");
+    }
+
+    @Test
+    public void testCompactSpecifiedBucketRangesFromAction() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(CoreOptions.BUCKET.key(), "4");
+        FileStoreTable table =
+                prepareTable(
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        writeData(
+                IntStream.range(0, 40)
+                        .mapToObj(
+                                i ->
+                                        rowData(
+                                                i,
+                                                1,
+                                                0,
+                                                BinaryString.fromString("first")))
+                        .toArray(GenericRow[]::new));
+        writeData(
+                IntStream.range(40, 80)
+                        .mapToObj(
+                                i ->
+                                        rowData(
+                                                i,
+                                                2,
+                                                0,
+                                                BinaryString.fromString("second")))
+                        .toArray(GenericRow[]::new));
+
+        CompactAction action =
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--compact_strategy",
+                        "full",
+                        "--buckets",
+                        "0-1");
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        action.withStreamExecutionEnvironment(env).build();
+        env.execute();
+
+        Map<Integer, Integer> filesPerBucket =
+                table.newSnapshotReader().read().dataSplits().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        DataSplit::bucket, split -> split.dataFiles().size()));
+        assertThat(filesPerBucket.get(0)).isEqualTo(1);
+        assertThat(filesPerBucket.get(1)).isEqualTo(1);
+        assertThat(filesPerBucket.get(2)).isEqualTo(2);
+        assertThat(filesPerBucket.get(3)).isEqualTo(2);
     }
 
     @Test
