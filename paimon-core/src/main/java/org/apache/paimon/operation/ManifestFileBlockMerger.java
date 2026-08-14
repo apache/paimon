@@ -274,8 +274,7 @@ final class ManifestFileBlockMerger {
         }
 
         CollectedDeletes result = new CollectedDeletes(collectRowIds);
-        if (manifestReadParallelism == null
-                || manifestReadParallelism <= 1
+        if ((manifestReadParallelism != null && manifestReadParallelism <= 1)
                 || manifestsWithDeletes.size() <= 1) {
             for (ManifestFileMeta manifest : manifestsWithDeletes) {
                 CollectedDeletes deletes =
@@ -382,8 +381,7 @@ final class ManifestFileBlockMerger {
             // retaining planned raw blocks before the single ordered writer consumes them.
             if (hasDeletes
                     && deletes.useRowIdFilter()
-                    && manifestReadParallelism != null
-                    && manifestReadParallelism > 1
+                    && (manifestReadParallelism == null || manifestReadParallelism > 1)
                     && manifests.size() > 1) {
                 // Keep decompression and primitive entry inspection parallel. The batched executor
                 // bounds retained raw blocks to at most one manifest per planning thread, while the

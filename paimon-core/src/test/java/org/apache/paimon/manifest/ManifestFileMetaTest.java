@@ -27,6 +27,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.ManifestFileMerger;
@@ -64,13 +65,17 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Tests for {@link ManifestFileMeta}. */
 public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
@@ -730,6 +735,77 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
+    public void testFullCompactionCollectsDeletesWithDefaultParallelism() throws Exception {
+        assumeTrue(Runtime.getRuntime().availableProcessors() > 1);
+        CountingReadFileIO fileIO = new CountingReadFileIO();
+        manifestFile = createManifestFile(tempDir.toString(), fileIO);
+        ManifestFileMeta base =
+                makeManifest(
+                        makeRowIdEntry(true, "deleted-a", 0, 0, 5),
+                        makeRowIdEntry(true, "deleted-b", 0, 10, 5),
+                        makeRowIdEntry(true, "survivor", 0, 20, 5));
+        ManifestFileMeta firstDelete = makeManifest(makeRowIdEntry(false, "deleted-a", 0, 0, 5));
+        ManifestFileMeta secondDelete = makeManifest(makeRowIdEntry(false, "deleted-b", 0, 10, 5));
+
+        fileIO.blockManifestReads(
+                new HashSet<>(Arrays.asList(firstDelete.fileName(), secondDelete.fileName())));
+        Optional<List<ManifestFileMeta>> fullCompacted;
+        try {
+            fullCompacted =
+                    ManifestFileMerger.tryFullCompaction(
+                            Arrays.asList(base, firstDelete, secondDelete),
+                            new ArrayList<>(),
+                            manifestFile,
+                            Long.MAX_VALUE,
+                            1,
+                            getPartitionType(),
+                            null);
+        } finally {
+            fileIO.stopBlockingManifestReads();
+        }
+
+        assertThat(fileIO.maxConcurrentManifestReads()).isGreaterThanOrEqualTo(2);
+        assertThat(fullCompacted).isPresent();
+        assertThat(readEntries(fullCompacted.get()).stream().map(entry -> entry.file().fileName()))
+                .containsExactly("survivor");
+    }
+
+    @Test
+    public void testFullCompactionPlansRowIdManifestsWithDefaultParallelism() throws Exception {
+        assumeTrue(Runtime.getRuntime().availableProcessors() > 1);
+        CountingReadFileIO fileIO = new CountingReadFileIO();
+        manifestFile = createManifestFile(tempDir.toString(), fileIO);
+        ManifestFileMeta first =
+                makeManifest(
+                        makeRowIdEntry(true, "deleted", 0, 0, 5),
+                        makeRowIdEntry(true, "survivor-a", 0, 10, 5));
+        ManifestFileMeta second = makeManifest(makeRowIdEntry(true, "survivor-b", 0, 20, 5));
+        ManifestFileMeta delta = makeManifest(makeRowIdEntry(false, "deleted", 0, 0, 5));
+
+        fileIO.blockManifestReads(
+                new HashSet<>(Arrays.asList(first.fileName(), second.fileName())));
+        Optional<List<ManifestFileMeta>> fullCompacted;
+        try {
+            fullCompacted =
+                    ManifestFileMerger.tryFullCompaction(
+                            Arrays.asList(first, second, delta),
+                            new ArrayList<>(),
+                            manifestFile,
+                            Long.MAX_VALUE,
+                            1,
+                            getPartitionType(),
+                            null);
+        } finally {
+            fileIO.stopBlockingManifestReads();
+        }
+
+        assertThat(fileIO.maxConcurrentManifestReads()).isGreaterThanOrEqualTo(2);
+        assertThat(fullCompacted).isPresent();
+        assertThat(readEntries(fullCompacted.get()).stream().map(entry -> entry.file().fileName()))
+                .containsExactlyInAnyOrder("survivor-a", "survivor-b");
+    }
+
+    @Test
     public void testFullCompactionReadsDeleteCandidateOnce() throws Exception {
         CountingReadFileIO fileIO = new CountingReadFileIO();
         manifestFile = createManifestFile(tempDir.toString(), fileIO);
@@ -957,13 +1033,23 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     private static class CountingReadFileIO extends LocalFileIO {
 
         private final Map<String, AtomicInteger> readCounts = new ConcurrentHashMap<>();
+        private final AtomicInteger activeManifestReads = new AtomicInteger();
+        private final AtomicInteger maxConcurrentManifestReads = new AtomicInteger();
+        private final CountDownLatch readersReady = new CountDownLatch(2);
+        private final CountDownLatch releaseReaders = new CountDownLatch(1);
+        private final AtomicBoolean blockManifestReads = new AtomicBoolean();
+        private volatile Set<String> blockedManifests = Collections.emptySet();
 
         @Override
         public SeekableInputStream newInputStream(Path path) throws IOException {
             readCounts
                     .computeIfAbsent(path.getName(), ignored -> new AtomicInteger())
                     .incrementAndGet();
-            return super.newInputStream(path);
+            SeekableInputStream input = super.newInputStream(path);
+            if (!blockManifestReads.get() || !blockedManifests.contains(path.getName())) {
+                return input;
+            }
+            return new BlockingSeekableInputStream(input);
         }
 
         private int readCount(String fileName) {
@@ -973,6 +1059,76 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         private void resetReadCounts() {
             readCounts.clear();
+        }
+
+        private void blockManifestReads(Set<String> manifests) {
+            blockedManifests = new HashSet<>(manifests);
+            blockManifestReads.set(true);
+        }
+
+        private void stopBlockingManifestReads() {
+            blockManifestReads.set(false);
+            releaseReaders.countDown();
+        }
+
+        private int maxConcurrentManifestReads() {
+            return maxConcurrentManifestReads.get();
+        }
+
+        private class BlockingSeekableInputStream extends SeekableInputStreamWrapper {
+
+            private boolean entered;
+            private boolean closed;
+
+            private BlockingSeekableInputStream(SeekableInputStream inputStream) {
+                super(inputStream);
+            }
+
+            @Override
+            public int read() throws IOException {
+                beforeFirstRead();
+                return super.read();
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) throws IOException {
+                beforeFirstRead();
+                return super.read(b, off, len);
+            }
+
+            @Override
+            public void close() throws IOException {
+                try {
+                    super.close();
+                } finally {
+                    if (entered && !closed) {
+                        activeManifestReads.decrementAndGet();
+                    }
+                    closed = true;
+                }
+            }
+
+            private void beforeFirstRead() throws IOException {
+                if (entered) {
+                    return;
+                }
+
+                entered = true;
+                int activeReads = activeManifestReads.incrementAndGet();
+                maxConcurrentManifestReads.accumulateAndGet(activeReads, Math::max);
+                readersReady.countDown();
+                if (readersReady.getCount() == 0) {
+                    releaseReaders.countDown();
+                }
+                try {
+                    if (!releaseReaders.await(3, TimeUnit.SECONDS)) {
+                        throw new IOException("Manifest reads were not parallelized.");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException(e);
+                }
+            }
         }
     }
 
