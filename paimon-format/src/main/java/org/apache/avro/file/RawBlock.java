@@ -66,7 +66,7 @@ public final class RawBlock {
         ByteBuffer source = block.getAsByteBuffer().duplicate();
         ByteBuffer copy = ByteBuffer.allocate(source.remaining());
         copy.put(source);
-        ((java.nio.Buffer) copy).flip();
+        copy.flip();
         DataFileStream.DataBlock copiedBlock =
                 new DataFileStream.DataBlock(copy, block.getNumEntries());
         copiedBlock.setFlushOnWrite(block.isFlushOnWrite());
@@ -112,8 +112,8 @@ public final class RawBlock {
                         size += read;
                     }
                 }
-                ((java.nio.Buffer) target).position(0);
-                ((java.nio.Buffer) target).limit(size);
+                target.position(0);
+                target.limit(size);
                 decompressedBuffer = target.duplicate();
             } else {
                 decompressedBuffer = codec.decompress(block.getAsByteBuffer().duplicate());
