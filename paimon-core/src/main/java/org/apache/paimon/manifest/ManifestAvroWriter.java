@@ -488,7 +488,11 @@ public final class ManifestAvroWriter implements AutoCloseable {
             minLevel = Math.min(minLevel, metadata.minLevel);
             maxLevel = Math.max(maxLevel, metadata.maxLevel);
             if (rowIdStats != null) {
-                rowIdStats.collectRange(metadata.minRowId, metadata.maxRowId);
+                if (metadata.minRowId < 0 || metadata.maxRowId < 0) {
+                    rowIdStats = null;
+                } else {
+                    rowIdStats.collectRange(metadata.minRowId, metadata.maxRowId);
+                }
             }
         }
 

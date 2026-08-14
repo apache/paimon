@@ -811,8 +811,8 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     @ParameterizedTest
     @NullSource
     @ValueSource(ints = 2)
-    public void testFullCompactionPrefetchesIdentifierManifestsInParallel(
-            @Nullable Integer parallelism) throws Exception {
+    public void testFullCompactionPlansIdentifierManifestsInParallel(@Nullable Integer parallelism)
+            throws Exception {
         if (parallelism == null) {
             assumeTrue(Runtime.getRuntime().availableProcessors() > 1);
         }

@@ -375,14 +375,13 @@ final class ManifestFileBlockMerger {
         EncodedEntry metadata = new EncodedEntry();
         ReusableIdentifier reusableIdentifier = new ReusableIdentifier();
         boolean hasDeletes = !deletes.isEmpty();
-        boolean parallelRead =
-                manifests.size() > 1
-                        && (manifestReadParallelism == null || manifestReadParallelism > 1);
         try {
-            // Row IDs let each manifest inspect DELETE matches independently. Use parallel
-            // planning only when there are multiple workers and manifests to offset the cost of
-            // retaining planned raw blocks before the single ordered writer consumes them.
-            if (hasDeletes && deletes.useRowIdFilter() && parallelRead) {
+            // DELETE lookups are immutable, and every planning worker owns its lookup scratch and
+            // block statistics. Plan manifests in parallel while the single ordered writer keeps
+            // matched ADD and emitted DELETE state on this thread.
+            if (hasDeletes
+                    && (manifestReadParallelism == null || manifestReadParallelism > 1)
+                    && manifests.size() > 1) {
                 // Keep decompression and primitive entry inspection parallel. The batched executor
                 // bounds retained raw blocks to at most one manifest per planning thread, while the
                 // single writer still emits manifests in input order.
@@ -429,63 +428,10 @@ final class ManifestFileBlockMerger {
                         }
                     }
                 }
-            } else if (hasDeletes && parallelRead) {
-                // Identifier filtering is order-sensitive and cannot run in planning threads.
-                // Prefetch only stable compressed blocks in parallel, then decode, filter and
-                // write them on this thread in manifest order. The batched executor bounds the
-                // retained blocks to at most one manifest per reading thread.
-                Function<ManifestFileMeta, List<PrefetchedManifest>> prefetcher =
-                        manifest -> {
-                            try {
-                                return Collections.singletonList(
-                                        prefetchManifest(manifest, manifestFile));
-                            } catch (Exception e) {
-                                throw new RuntimeException(
-                                        "Failed to prefetch manifest " + manifest.fileName(), e);
-                            }
-                        };
-                for (PrefetchedManifest prefetched :
-                        sequentialBatchedExecute(prefetcher, manifests, manifestReadParallelism)) {
-                    if (fullCompaction
-                            && mustChange != null
-                            && !mustChange.test(prefetched.manifest)) {
-                        boolean rewritten =
-                                rewriteOptionalPrefetchedManifest(
-                                        prefetched,
-                                        writer,
-                                        partitionType,
-                                        partitionStatsConverter,
-                                        partitions,
-                                        deletes,
-                                        reusableIdentifier,
-                                        matchedEntries,
-                                        emittedDeletes,
-                                        metadata);
-                        if (!rewritten) {
-                            checkState(
-                                    unchangedManifests != null,
-                                    "Full compaction requires an unchanged manifest result.");
-                            unchangedManifests.add(prefetched.manifest);
-                        }
-                        continue;
-                    }
-                    for (RawBlock rawBlock : prefetched.blocks) {
-                        writeBlockEntries(
-                                rawBlock,
-                                writer,
-                                deletes,
-                                reusableIdentifier,
-                                fullCompaction,
-                                matchedEntries,
-                                emittedDeletes,
-                                metadata,
-                                prefetched.encodedRecordsCompatible);
-                    }
-                }
             } else {
-                // Keep add-only compaction on the streaming raw-copy path because prefetching adds
-                // synchronization without useful work to overlap. Explicit single-thread reads
-                // and a single manifest also stream directly to avoid retaining raw blocks.
+                // Otherwise keep the streaming path: add-only manifests already use raw copying,
+                // and a single worker or manifest provides no concurrency. Processing one manifest
+                // at a time also avoids retaining planned raw blocks unnecessarily.
                 for (ManifestFileMeta manifest : manifests) {
                     try (ManifestAvroReader reader =
                             manifestFile.scanAvroBlocks(manifest.fileName(), manifest.fileSize())) {
@@ -543,19 +489,6 @@ final class ManifestFileBlockMerger {
             reusableIdentifier.release();
             matchedEntries.release();
             emittedDeletes.release();
-        }
-    }
-
-    private static PrefetchedManifest prefetchManifest(
-            ManifestFileMeta manifest, ManifestFile manifestFile) throws Exception {
-        try (ManifestAvroReader reader =
-                manifestFile.scanAvroBlocks(manifest.fileName(), manifest.fileSize())) {
-            boolean encodedRecordsCompatible = reader.rawBlockCopySupported();
-            List<RawBlock> blocks = new ArrayList<>();
-            while (reader.hasNext()) {
-                blocks.add(reader.next().stableCopy());
-            }
-            return new PrefetchedManifest(manifest, encodedRecordsCompatible, blocks);
         }
     }
 
@@ -670,53 +603,6 @@ final class ManifestFileBlockMerger {
         return false;
     }
 
-    private static boolean rewriteOptionalPrefetchedManifest(
-            PrefetchedManifest prefetched,
-            ManifestAvroWriter writer,
-            RowType partitionType,
-            SimpleStatsConverter partitionStatsConverter,
-            PartitionDictionary partitions,
-            CollectedDeletes deletes,
-            ReusableIdentifier reusableIdentifier,
-            CompactFileIdentifierSet matchedEntries,
-            CompactFileIdentifierSet emittedDeletes,
-            EncodedEntry metadata)
-            throws Exception {
-        boolean unchanged = true;
-        for (RawBlock rawBlock : prefetched.blocks) {
-            CompactionBlock block =
-                    inspectBlock(
-                            rawBlock,
-                            partitionType,
-                            partitionStatsConverter,
-                            partitions,
-                            deletes,
-                            reusableIdentifier,
-                            prefetched.encodedRecordsCompatible);
-            if (!block.unchanged) {
-                unchanged = false;
-                break;
-            }
-        }
-        if (unchanged) {
-            return false;
-        }
-
-        for (RawBlock rawBlock : prefetched.blocks) {
-            writeBlockEntries(
-                    rawBlock,
-                    writer,
-                    deletes,
-                    reusableIdentifier,
-                    true,
-                    matchedEntries,
-                    emittedDeletes,
-                    metadata,
-                    prefetched.encodedRecordsCompatible);
-        }
-        return true;
-    }
-
     private static void writeRemainingBlocks(
             ManifestAvroReader reader,
             ManifestAvroWriter writer,
@@ -733,7 +619,7 @@ final class ManifestFileBlockMerger {
             throws Exception {
         while (reader.hasNext()) {
             RawBlock rawBlock = reader.next();
-            if (encodedRecordsCompatible && deletes.useRowIdFilter()) {
+            if (encodedRecordsCompatible) {
                 CompactionBlock block =
                         inspectBlock(
                                 rawBlock,
@@ -772,7 +658,7 @@ final class ManifestFileBlockMerger {
             boolean encodedRecordsCompatible)
             throws Exception {
         boolean deferDeletedAddCheck = encodedRecordsCompatible && deletes.useRowIdFilter();
-        CompactionBlock block = new CompactionBlock(deferDeletedAddCheck, partitionType);
+        CompactionBlock block = new CompactionBlock(encodedRecordsCompatible, partitionType);
         RowIterator rows =
                 rawBlock.toRows(ProjectedManifestEntry.ENTRY_LAYOUT_PROJECTION.projectedType());
         ProjectedManifestEntry entry = ProjectedManifestEntry.ENTRY_LAYOUT_PROJECTION.createEntry();
@@ -879,6 +765,7 @@ final class ManifestFileBlockMerger {
         private int maxLevel = Integer.MIN_VALUE;
         private long minRowId = Long.MAX_VALUE;
         private long maxRowId = Long.MIN_VALUE;
+        private boolean hasRowIds = true;
         private final RowType partitionType;
         private final boolean collectMetadata;
         private @Nullable Map<Integer, Integer> partitionCounts;
@@ -923,9 +810,15 @@ final class ManifestFileBlockMerger {
             int level = file.level();
             minLevel = Math.min(minLevel, level);
             maxLevel = Math.max(maxLevel, level);
-            long firstRowId = file.nonNullFirstRowId();
-            minRowId = Math.min(minRowId, firstRowId);
-            maxRowId = Math.max(maxRowId, firstRowId + file.rowCount() - 1L);
+            if (hasRowIds) {
+                if (file.hasFirstRowId()) {
+                    long firstRowId = file.nonNullFirstRowId();
+                    minRowId = Math.min(minRowId, firstRowId);
+                    maxRowId = Math.max(maxRowId, firstRowId + file.rowCount() - 1L);
+                } else {
+                    hasRowIds = false;
+                }
+            }
             partitionCounts.merge(partitions.id(entry.partitionBytes()), 1, Integer::sum);
             return true;
         }
@@ -963,16 +856,18 @@ final class ManifestFileBlockMerger {
                             maxBucket,
                             minLevel,
                             maxLevel,
-                            minRowId,
-                            maxRowId,
+                            hasRowIds ? minRowId : -1,
+                            hasRowIds ? maxRowId : -1,
                             partitionStatsConverter.toBinaryAllMode(stats));
             partitionCounts = null;
         }
 
         private void finishFiltering(CollectedDeletes deletes, boolean deferDeletedAddCheck) {
-            if (deferDeletedAddCheck
-                    && metadata != null
-                    && deletes.intersectsRowIds(minRowId, maxRowId)) {
+            if (deferDeletedAddCheck && metadata != null) {
+                checkState(hasRowIds, "RowID filtering requires block RowID statistics.");
+                if (!deletes.intersectsRowIds(minRowId, maxRowId)) {
+                    return;
+                }
                 metadata = null;
                 unchanged = false;
             }
@@ -1016,22 +911,6 @@ final class ManifestFileBlockMerger {
                 }
             }
             return true;
-        }
-    }
-
-    private static final class PrefetchedManifest {
-
-        private final ManifestFileMeta manifest;
-        private final boolean encodedRecordsCompatible;
-        private final List<RawBlock> blocks;
-
-        private PrefetchedManifest(
-                ManifestFileMeta manifest,
-                boolean encodedRecordsCompatible,
-                List<RawBlock> blocks) {
-            this.manifest = manifest;
-            this.encodedRecordsCompatible = encodedRecordsCompatible;
-            this.blocks = blocks;
         }
     }
 }

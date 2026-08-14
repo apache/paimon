@@ -125,6 +125,29 @@ public class ManifestFileTest {
     }
 
     @Test
+    void testWriteEncodedBlockWithoutRowIds() throws Exception {
+        List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta sourceMeta = writeSingleManifest(manifestFile, entries);
+        assertThat(sourceMeta.minRowId()).isNull();
+        assertThat(sourceMeta.maxRowId()).isNull();
+
+        ManifestAvroWriter writer = manifestFile.createAvroWriter();
+        try (ManifestAvroReader reader = openManifestReader(sourceMeta)) {
+            assertThat(reader.hasNext()).isTrue();
+            ManifestAvroReader.RawBlock block = reader.next();
+            writer.writeEncodedBlock(block.encodedBlock(), encodedBlockMeta(sourceMeta));
+            assertThat(reader.hasNext()).isFalse();
+        }
+        writer.close();
+
+        ManifestFileMeta result = writer.result().get(0);
+        assertThat(result.minRowId()).isNull();
+        assertThat(result.maxRowId()).isNull();
+        assertThat(manifestFile.read(result.fileName())).containsExactlyElementsOf(entries);
+    }
+
+    @Test
     void testWriteEncodedRecords() throws Exception {
         ManifestEntry source = gen.next();
         List<ManifestEntry> entries =
@@ -990,8 +1013,8 @@ public class ManifestFileTest {
                 meta.maxBucket(),
                 meta.minLevel(),
                 meta.maxLevel(),
-                meta.minRowId(),
-                meta.maxRowId(),
+                meta.minRowId() == null ? -1 : meta.minRowId(),
+                meta.maxRowId() == null ? -1 : meta.maxRowId(),
                 meta.partitionStats());
     }
 
