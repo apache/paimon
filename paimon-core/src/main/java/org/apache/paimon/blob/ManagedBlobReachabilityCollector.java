@@ -124,6 +124,29 @@ public class ManagedBlobReachabilityCollector {
         }
     }
 
+    /**
+     * Reads one resolved sidecar while preserving data-file-aware orphan cleanup semantics. An
+     * unreadable sidecar is ignored only when its data file is already gone.
+     */
+    public Result fromSidecar(Path dataFile, Path sidecar) {
+        try {
+            return Result.of(readWithRetry(sidecar));
+        } catch (IOException e) {
+            if (!checkDataFileExists(dataFile)) {
+                LOG.debug(
+                        "Ignore unreadable blobref {} because data file {} is already gone.",
+                        sidecar,
+                        dataFile);
+                return Result.empty();
+            }
+            LOG.warn(
+                    "Failed to read managed BLOB reference file {}. Skip managed blob GC this run.",
+                    sidecar,
+                    e);
+            return Result.unsafe();
+        }
+    }
+
     private List<Reference> readWithRetry(Path sidecar) throws IOException {
         IOException caught = null;
         for (int retry = 0; retry < READ_RETRY_NUM; retry++) {

@@ -300,6 +300,7 @@ This section introduce all available spark procedures about paimon.
             <li>dry_run: when true, view only orphan files, don't actually remove files. Default is false.</li>
             <li>parallelism: The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.</li>
             <li>mode: The mode of remove orphan clean procedure (local or distributed) . By default is distributed.</li>
+            <li>Note: this procedure does not delete primary-key <code>.managed.blob</code> packs. Use <code>remove_orphan_blobs</code>.</li>
       </td>
       <td>
           CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
@@ -307,6 +308,24 @@ This section introduce all available spark procedures about paimon.
           CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
           CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true, parallelism => 5)<br/><br/>
           CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true, parallelism => 5, mode => 'local')
+      </td>
+    </tr>
+    <tr>
+      <td>remove_orphan_blobs</td>
+      <td>
+         To remove unreferenced primary-key <code>.managed.blob</code> packs. Arguments:
+            <li>table: the target table identifier. Cannot be empty, you can use database_name.* to clean whole database.</li>
+            <li>older_than: an absolute timestamp cutoff. Only packs whose modification time is earlier than this timestamp are candidates. The default cutoff is 1 day before the procedure starts.</li>
+            <li>dry_run: when true, calculate the candidate file count and total bytes without deleting files. The procedure returns aggregate counts, not individual pack paths. Default is false.</li>
+            <li>parallelism: per-table distributed task parallelism, or the per-table file-operation thread limit in local mode. For <code>database_name.*</code>, total concurrency can exceed this value because tables may run concurrently. Distributed mode defaults to the larger of Spark's default parallelism and <code>spark.sql.shuffle.partitions</code>; local mode defaults to the number of processors available to the Java virtual machine.</li>
+            <li>mode: The mode of remove orphan blob procedure (local or distributed). By default is distributed.</li>
+      </td>
+      <td>
+          CALL sys.remove_orphan_blobs(table => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
+          CALL sys.remove_orphan_blobs(table => 'default.*', older_than => '2023-10-31 12:00:00')<br/><br/>
+          CALL sys.remove_orphan_blobs(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
+          CALL sys.remove_orphan_blobs(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => 5)<br/><br/>
+          CALL sys.remove_orphan_blobs(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => 5, mode => 'local')
       </td>
     </tr>
     <tr>
