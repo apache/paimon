@@ -19,6 +19,8 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.sink.FixedBucketSink;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.source.ContinuousFileStoreSource;
@@ -32,11 +34,14 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.FailingFileIO;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -224,6 +229,47 @@ public class FileStoreITCase extends AbstractTestBase {
         // assert
         Row[] expected = new Row[] {Row.of(5, "p2", 1), Row.of(0, "p1", 2), Row.of(3, "p2", 5)};
         assertThat(results).containsExactlyInAnyOrder(expected);
+    }
+
+    @TestTemplate
+    public void testFileSizeSplitWeightModeForBoundedSource() throws Exception {
+        assumeTrue(isBatch);
+
+        FileStoreTable table = buildFileStoreTable(new int[0], new int[0]);
+        writeSingleRecordFile(table, 1, repeat("a", 8), 1);
+        writeSingleRecordFile(table, 2, repeat("b", 8), 2);
+        writeSingleRecordFile(table, 3, repeat("c", 32 * 1024), 3);
+        writeSingleRecordFile(table, 4, repeat("d", 32 * 1024), 4);
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 B");
+        options.put(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "1 B");
+        options.put(FlinkConnectorOptions.SCAN_PARALLELISM.key(), "2");
+        options.put(
+                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE.key(),
+                FlinkConnectorOptions.SplitWeightMode.FILE_SIZE.toString());
+        table = table.copy(options);
+
+        List<Row> results =
+                executeAndCollectRow(
+                        new FlinkSourceBuilder(table)
+                                .sourceBounded(true)
+                                .env(env)
+                                .build()
+                                .map(new SubtaskAndPayloadSize())
+                                .setParallelism(2));
+
+        Map<Integer, Integer> largePayloadSubtasks = new HashMap<>();
+        for (Row row : results) {
+            int subtask = (int) row.getField(0);
+            int payloadSize = (int) row.getField(2);
+            if (payloadSize > 1024) {
+                largePayloadSubtasks.put((int) row.getField(1), subtask);
+            }
+        }
+
+        assertThat(largePayloadSubtasks).hasSize(2);
+        assertThat(largePayloadSubtasks.values()).containsExactlyInAnyOrder(0, 1);
     }
 
     @TestTemplate
@@ -460,6 +506,32 @@ public class FileStoreITCase extends AbstractTestBase {
         new FlinkSinkBuilder(table).forRowData(source).build();
         env.execute();
         assertThat(iterator.collect(expected.length)).containsExactlyInAnyOrder(expected);
+    }
+
+    private static void writeSingleRecordFile(FileStoreTable table, int v, String p, int k)
+            throws Exception {
+        try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
+                BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            write.write(GenericRow.of(v, BinaryString.fromString(p), k));
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    private static String repeat(String value, int count) {
+        char[] chars = new char[count];
+        Arrays.fill(chars, value.charAt(0));
+        return new String(chars);
+    }
+
+    private static class SubtaskAndPayloadSize extends RichMapFunction<RowData, Row> {
+
+        @Override
+        public Row map(RowData value) {
+            return Row.of(
+                    getRuntimeContext().getIndexOfThisSubtask(),
+                    value.getInt(0),
+                    value.getString(1).toString().length());
+        }
     }
 
     public FileStoreTable buildFileStoreTable(int[] partitions, int[] primaryKey) throws Exception {
