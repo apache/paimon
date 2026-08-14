@@ -110,6 +110,10 @@ object OptionUtils extends SQLConfHelper with Logging {
     getOptionString(SparkConnectorOptions.MERGE_SCHEMA).toBoolean
   }
 
+  def hiveStyleDynamicPartitionEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.HIVE_STYLE_DYNAMIC_PARTITION_ENABLED).toBoolean
+  }
+
   def writeMergeSchemaExplicitCastEnabled(): Boolean = {
     getOptionString(SparkConnectorOptions.EXPLICIT_CAST).toBoolean
   }
