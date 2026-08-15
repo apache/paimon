@@ -398,11 +398,74 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                 .setParallelism(1)
                 .setMaxParallelism(1);
 
-        DataStream<CleanOrphanFilesResult> deleted =
+        DataStream<String> missingManifestSignals =
                 usedFiles
+                        .filter(MISSING_MANIFEST_SENTINEL::equals)
+                        .name("missing-manifest-signals");
+        DataStream<String> normalUsedFiles =
+                usedFiles
+                        .filter(file -> !MISSING_MANIFEST_SENTINEL.equals(file))
+                        .name("normal-used-files");
+
+        DataStream<Tuple2<String, Long>> candidatesAfterGlobalAbort =
+                missingManifestSignals
+                        .broadcast()
+                        .connect(candidates)
+                        .transform(
+                                "abort-candidates-on-missing-manifest",
+                                candidates.getType(),
+                                new BoundedTwoInputOperator<
+                                        String, Tuple2<String, Long>, Tuple2<String, Long>>() {
+
+                                    private boolean signalEnd;
+                                    private boolean abortDeletion;
+
+                                    @Override
+                                    public InputSelection nextSelection() {
+                                        return signalEnd
+                                                ? InputSelection.SECOND
+                                                : InputSelection.FIRST;
+                                    }
+
+                                    @Override
+                                    public void endInput(int inputId) {
+                                        if (inputId == 1) {
+                                            checkState(!signalEnd, "Signal input already ended.");
+                                            signalEnd = true;
+                                            if (abortDeletion) {
+                                                LOG.warn(
+                                                        "Detected missing manifest, aborting clean globally.");
+                                            }
+                                        } else {
+                                            checkState(signalEnd, "Signal input should end first.");
+                                        }
+                                    }
+
+                                    @Override
+                                    public void processElement1(StreamRecord<String> element) {
+                                        checkState(
+                                                MISSING_MANIFEST_SENTINEL.equals(
+                                                        element.getValue()),
+                                                "Unexpected global abort signal.");
+                                        abortDeletion = true;
+                                    }
+
+                                    @Override
+                                    public void processElement2(
+                                            StreamRecord<Tuple2<String, Long>> element) {
+                                        checkState(signalEnd, "Signal input should end first.");
+                                        if (!abortDeletion) {
+                                            output.collect(element);
+                                        }
+                                    }
+                                });
+
+        DataStream<CleanOrphanFilesResult> deleted =
+                normalUsedFiles
                         .keyBy(f -> f)
                         .connect(
-                                candidates.keyBy(pathAndSize -> new Path(pathAndSize.f0).getName()))
+                                candidatesAfterGlobalAbort.keyBy(
+                                        pathAndSize -> new Path(pathAndSize.f0).getName()))
                         .transform(
                                 "join-used-and-candidate-files",
                                 TypeInformation.of(CleanOrphanFilesResult.class),
@@ -412,8 +475,6 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                     private boolean buildEnd;
                                     private long emittedFilesCount;
                                     private long emittedFilesLen;
-
-                                    private boolean abortDeletion;
 
                                     private final Set<String> used = new HashSet<>();
 
@@ -431,10 +492,6 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                 checkState(!buildEnd, "Should not build ended.");
                                                 LOG.info("Finish build phase.");
                                                 buildEnd = true;
-                                                if (abortDeletion) {
-                                                    LOG.warn(
-                                                            "Detected missing manifest, aborting clean.");
-                                                }
                                                 break;
                                             case 2:
                                                 checkState(buildEnd, "Should build ended.");
@@ -454,21 +511,13 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
                                     @Override
                                     public void processElement1(StreamRecord<String> element) {
-                                        String value = element.getValue();
-                                        if (MISSING_MANIFEST_SENTINEL.equals(value)) {
-                                            abortDeletion = true;
-                                            return;
-                                        }
-                                        used.add(value);
+                                        used.add(element.getValue());
                                     }
 
                                     @Override
                                     public void processElement2(
                                             StreamRecord<Tuple2<String, Long>> element) {
                                         checkState(buildEnd, "Should build ended.");
-                                        if (abortDeletion) {
-                                            return;
-                                        }
                                         Tuple2<String, Long> fileInfo = element.getValue();
                                         String value = fileInfo.f0;
                                         Path path = new Path(value);
