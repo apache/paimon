@@ -98,6 +98,8 @@ table_commit.close()
 You can use `update_by_predicate` for SQL-like `UPDATE ... SET ... WHERE ...`
 operations. The `Predicate` identifies rows to update. Assignment values may
 be literals or callables receiving the matched rows as a `pyarrow.Table`.
+Callables require a predicate and explicit `read_columns`; matched rows are
+materialized before the callback, so use a selective predicate.
 When global indexes are available, `update_by_predicate` discovers matching
 `_ROW_ID` values with `scalar-index.search-mode=full` on the configured
 point-in-time scan snapshot or, if none is configured, the latest snapshot.
@@ -144,6 +146,7 @@ messages = table_update.update_by_predicate(
         'age': lambda rows: pa.compute.add(rows['age'], 1),
         'name': 'Updated',
     },
+    read_columns=['age'],
 )
 
 commit = write_builder.new_commit()
@@ -631,7 +634,7 @@ The API mapping is:
 | --- | --- |
 | `write.prepare_commit()` | `write.prepare_commit(commit_identifier)` |
 | `update.update_by_arrow_with_row_id(table)` | `update.update_by_arrow_with_row_id(table, commit_identifier)` |
-| `update.update_by_predicate(predicate, assignments)` | `update.update_by_predicate(predicate, assignments, commit_identifier)` |
+| `update.update_by_predicate(predicate, assignments, read_columns=...)` | `update.update_by_predicate(predicate, assignments, commit_identifier, read_columns=...)` |
 | `update.delete_by_predicate(predicate)` | `update.delete_by_predicate(predicate, commit_identifier)` |
 | `update.delete_by_row_id(row_ids)` | `update.delete_by_row_id(row_ids, commit_identifier)` |
 | `update.upsert_by_arrow_with_key(table, keys)` | `update.upsert_by_arrow_with_key(table, keys, commit_identifier)` |

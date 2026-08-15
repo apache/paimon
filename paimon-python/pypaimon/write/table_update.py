@@ -225,20 +225,27 @@ class TableUpdate:
             predicate: Optional[Predicate],
             assignments: Mapping[str, Any],
             commit_identifier: int,
+            read_columns: Optional[Sequence[str]] = None,
     ) -> List[CommitMessage]:
         """Shared implementation for SQL-like ``UPDATE ... WHERE ...``.
 
         ``predicate`` identifies the target rows. Assignment values may be
         literals or callables receiving the matched rows as an Arrow table.
         """
-        self._validate_predicate_update(assignments)
+        has_callable = any(callable(value) for value in assignments.values())
+        self._validate_predicate_update(
+            predicate, assignments, read_columns, has_callable
+        )
 
         scan_table = self._matched_update_scan_table()
         read_builder = scan_table.new_read_builder()
         if predicate is not None:
             read_builder.with_filter(predicate)
-        if predicate is not None or any(
-                callable(value) for value in assignments.values()):
+        if has_callable:
+            projection = list(dict.fromkeys(read_columns or []))
+            projection.append(SpecialFields.ROW_ID.name)
+            read_builder.with_projection(projection)
+        elif predicate is not None:
             read_builder.with_projection(
                 list(scan_table.field_names) + [SpecialFields.ROW_ID.name]
             )
@@ -292,7 +299,13 @@ class TableUpdate:
 
         return self.table.copy(dynamic_options)
 
-    def _validate_predicate_update(self, assignments: Mapping[str, Any]):
+    def _validate_predicate_update(
+            self,
+            predicate: Optional[Predicate],
+            assignments: Mapping[str, Any],
+            read_columns: Optional[Sequence[str]],
+            has_callable: bool,
+    ):
         if not self.table.options.data_evolution_enabled():
             raise ValueError(
                 "update_by_predicate requires "
@@ -305,6 +318,20 @@ class TableUpdate:
             )
         if not assignments:
             raise ValueError("assignments must not be empty.")
+        if has_callable:
+            if predicate is None:
+                raise ValueError(
+                    "Callable assignments require a predicate."
+                )
+            if not read_columns:
+                raise ValueError(
+                    "Callable assignments require read_columns."
+                )
+            for col in read_columns:
+                if col not in self.table.field_names:
+                    raise ValueError(
+                        f"Read column {col} is not in table schema."
+                    )
 
         partition_keys = set(self.table.partition_keys)
         for col in assignments:
@@ -531,10 +558,14 @@ class BatchTableUpdate(TableUpdate):
             self,
             predicate: Optional[Predicate],
             assignments: Mapping[str, Any],
+            read_columns: Optional[Sequence[str]] = None,
     ) -> List[CommitMessage]:
         """Update rows using literal or Arrow callable assignments."""
         return self._update_by_predicate(
-            predicate, assignments, BATCH_COMMIT_IDENTIFIER
+            predicate,
+            assignments,
+            BATCH_COMMIT_IDENTIFIER,
+            read_columns,
         )
 
     def delete_by_predicate(
@@ -606,11 +637,12 @@ class StreamTableUpdate(TableUpdate):
             predicate: Optional[Predicate],
             assignments: Mapping[str, Any],
             commit_identifier: int,
+            read_columns: Optional[Sequence[str]] = None,
     ) -> List[CommitMessage]:
         """Update rows using literal or Arrow callable assignments,
         tagging the produced commit messages with ``commit_identifier``."""
         return self._update_by_predicate(
-            predicate, assignments, commit_identifier
+            predicate, assignments, commit_identifier, read_columns
         )
 
     def delete_by_predicate(

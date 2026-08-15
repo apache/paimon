@@ -54,7 +54,8 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         raise NotImplementedError
 
     def _apply_update_by_predicate(
-            self, table_update, predicate, assignments, cid):
+            self, table_update, predicate, assignments, cid,
+            read_columns=None):
         raise NotImplementedError
 
     def _apply_delete_by_predicate(self, table_update, predicate, cid):
@@ -138,7 +139,8 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         tc.close()
         return msgs
 
-    def _do_update_by_predicate(self, table, predicate, assignments):
+    def _do_update_by_predicate(
+            self, table, predicate, assignments, read_columns=None):
         wb = self._make_write_builder(table)
         tu = wb.new_update()
         cid = self._next_commit_id()
@@ -147,6 +149,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             predicate,
             assignments,
             cid,
+            read_columns,
         )
         tc = wb.new_commit()
         self._apply_commit(tc, msgs, cid)
@@ -286,13 +289,21 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
     def test_update_by_predicate_accepts_callable_assignments(self):
         table = self._create_seeded_table()
         pb = table.new_read_builder().new_predicate_builder()
+
+        def increment_age(rows):
+            self.assertEqual(
+                ['age', 'city', '_ROW_ID'], rows.column_names
+            )
+            return pa.compute.add(rows['age'], 1)
+
         self._do_update_by_predicate(
             table,
             pb.greater_or_equal('age', 35),
             {
-                'age': lambda rows: pa.compute.add(rows['age'], 1),
+                'age': increment_age,
                 'city': lambda rows: pa.compute.utf8_upper(rows['city']),
             },
+            read_columns=['age', 'city'],
         )
 
         result = self._read_all(table)
@@ -310,7 +321,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             {
                 'age': pa.scalar(7, type=pa.int64()),
                 'city': None,
-                'name': lambda rows: pa.compute.utf8_upper(rows['name']),
+                'name': 'UPDATED',
             },
         )
 
@@ -319,9 +330,31 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self.assertEqual([None, None, None, None, None],
                          result['city'].to_pylist())
         self.assertEqual(
-            ['ALICE', 'BOB', 'CHARLIE', 'DAVID', 'EVE'],
+            ['UPDATED'] * 5,
             result['name'].to_pylist(),
         )
+
+    def test_update_by_predicate_rejects_unbounded_callable(self):
+        table = self._create_seeded_table()
+        with self.assertRaisesRegex(
+                ValueError, "Callable assignments require a predicate"):
+            self._do_update_by_predicate(
+                table,
+                None,
+                {'age': lambda rows: rows['age']},
+                read_columns=['age'],
+            )
+
+    def test_update_by_predicate_requires_callable_read_columns(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        with self.assertRaisesRegex(
+                ValueError, "Callable assignments require read_columns"):
+            self._do_update_by_predicate(
+                table,
+                pb.equal('id', 1),
+                {'age': lambda rows: rows['age']},
+            )
 
     def test_update_by_predicate_rejects_assignment_array_length_mismatch(self):
         table = self._create_seeded_table()
@@ -1285,8 +1318,11 @@ class _BatchModeMixin(BatchModeMixin):
         return table_update.update_by_arrow_with_row_id(data)
 
     def _apply_update_by_predicate(
-            self, table_update, predicate, assignments, cid):
-        return table_update.update_by_predicate(predicate, assignments)
+            self, table_update, predicate, assignments, cid,
+            read_columns=None):
+        return table_update.update_by_predicate(
+            predicate, assignments, read_columns
+        )
 
     def _apply_delete_by_predicate(self, table_update, predicate, cid):
         return table_update.delete_by_predicate(predicate)
@@ -1300,11 +1336,13 @@ class _StreamModeMixin(StreamModeMixin):
         return table_update.update_by_arrow_with_row_id(data, cid)
 
     def _apply_update_by_predicate(
-            self, table_update, predicate, assignments, cid):
+            self, table_update, predicate, assignments, cid,
+            read_columns=None):
         return table_update.update_by_predicate(
             predicate,
             assignments,
             cid,
+            read_columns,
         )
 
     def _apply_delete_by_predicate(self, table_update, predicate, cid):
@@ -1338,6 +1376,7 @@ class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestC
         messages = update.update_by_predicate(
             pb.equal('id', 1),
             {'age': increment_age},
+            read_columns=['age'],
         )
         commit = wb.new_commit()
         with self.assertRaisesRegex(RuntimeError, "multiple 'MERGE INTO'"):
