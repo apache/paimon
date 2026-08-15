@@ -20,10 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.SimpleStatsCollector;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
 import org.apache.paimon.manifest.DeletedRowIdSet;
 import org.apache.paimon.manifest.FileKind;
@@ -31,12 +28,13 @@ import org.apache.paimon.manifest.ManifestAvroReader;
 import org.apache.paimon.manifest.ManifestAvroReader.RawBlock;
 import org.apache.paimon.manifest.ManifestAvroReader.RowIterator;
 import org.apache.paimon.manifest.ManifestAvroWriter.EncodedBlockMeta;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.PartitionDictionary;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
+import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
@@ -57,90 +55,8 @@ final class ManifestEntryRunMerge {
     private static final long MAX_IN_MEMORY_FRAGMENTED_ENTRIES = 25_000L;
     private static final int MAX_STREAM_CURSORS = 128;
     private static final int MAX_STREAM_READ_AMPLIFICATION = 8;
-    static final int KIND = 0;
-    static final int PARTITION = 1;
-    static final int BUCKET = 2;
-    static final int FILE = 3;
-    static final int FILE_NAME = 0;
-    static final int ROW_COUNT = 1;
-    static final int LEVEL = 2;
-    static final int SCHEMA_ID = 3;
-    static final int FIRST_ROW_ID = 4;
-    static final int MAX_SEQUENCE_NUMBER = 5;
-    static final int EXTRA_FILES = 6;
-    static final int EMBEDDED_FILE_INDEX = 7;
-    static final int EXTERNAL_PATH = 8;
-    static final int FILE_FIELD_COUNT = 9;
-    private static final String[] ENTRY_FILE_FIELD_NAMES = {
-        DataFileMeta.FILE_NAME,
-        DataFileMeta.ROW_COUNT,
-        DataFileMeta.LEVEL,
-        DataFileMeta.SCHEMA_ID,
-        DataFileMeta.FIRST_ROW_ID,
-        DataFileMeta.MAX_SEQUENCE_NUMBER,
-        DataFileMeta.EXTRA_FILES,
-        DataFileMeta.EMBEDDED_FILE_INDEX,
-        DataFileMeta.EXTERNAL_PATH
-    };
-    private static final InternalRow.FieldGetter[] ENTRY_FILE_GETTERS = entryFileGetters();
-    static final RowType ENTRY_LAYOUT = entryLayout();
-    private static final int FULL_KIND =
-            ManifestEntry.MANIFEST_ROW_TYPE.getFieldIndex(ManifestEntry.KIND);
-    private static final int FULL_PARTITION =
-            ManifestEntry.MANIFEST_ROW_TYPE.getFieldIndex(ManifestEntry.PARTITION);
-    private static final int FULL_BUCKET =
-            ManifestEntry.MANIFEST_ROW_TYPE.getFieldIndex(ManifestEntry.BUCKET);
-    private static final int FULL_FILE =
-            ManifestEntry.MANIFEST_ROW_TYPE.getFieldIndex(ManifestEntry.FILE);
 
     private ManifestEntryRunMerge() {}
-
-    private static InternalRow.FieldGetter[] entryFileGetters() {
-        InternalRow.FieldGetter[] getters =
-                new InternalRow.FieldGetter[ENTRY_FILE_FIELD_NAMES.length];
-        for (int field = 0; field < getters.length; field++) {
-            int position = DataFileMeta.SCHEMA.getFieldIndex(ENTRY_FILE_FIELD_NAMES[field]);
-            getters[field] =
-                    InternalRow.createFieldGetter(
-                            DataFileMeta.SCHEMA.getTypeAt(position), position);
-        }
-        return getters;
-    }
-
-    private static RowType entryLayout() {
-        List<DataField> fields = new ArrayList<>();
-        fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.KIND));
-        fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.PARTITION));
-        fields.add(ManifestEntry.MANIFEST_ROW_TYPE.getField(ManifestEntry.BUCKET));
-        fields.add(
-                ManifestEntry.MANIFEST_ROW_TYPE
-                        .getField(ManifestEntry.FILE)
-                        .newType(
-                                DataFileMeta.SCHEMA.project(
-                                        DataFileMeta.FILE_NAME,
-                                        DataFileMeta.ROW_COUNT,
-                                        DataFileMeta.LEVEL,
-                                        DataFileMeta.SCHEMA_ID,
-                                        DataFileMeta.FIRST_ROW_ID,
-                                        DataFileMeta.MAX_SEQUENCE_NUMBER,
-                                        DataFileMeta.EXTRA_FILES,
-                                        DataFileMeta.EMBEDDED_FILE_INDEX,
-                                        DataFileMeta.EXTERNAL_PATH)));
-        return new RowType(false, fields);
-    }
-
-    static GenericRow projectEntryLayout(
-            GenericRow fullRow, GenericRow reuse, GenericRow reuseFile) {
-        reuse.setField(KIND, fullRow.getByte(FULL_KIND));
-        reuse.setField(PARTITION, fullRow.getBinary(FULL_PARTITION));
-        reuse.setField(BUCKET, fullRow.getInt(FULL_BUCKET));
-        InternalRow fullFile = fullRow.getRow(FULL_FILE, DataFileMeta.SCHEMA.getFieldCount());
-        for (int field = 0; field < ENTRY_FILE_GETTERS.length; field++) {
-            reuseFile.setField(field, ENTRY_FILE_GETTERS[field].getFieldOrNull(fullFile));
-        }
-        reuse.setField(FILE, reuseFile);
-        return reuse;
-    }
 
     /**
      * Returns null when the input is too fragmented for a bounded streaming merge. The caller must
@@ -234,8 +150,7 @@ final class ManifestEntryRunMerge {
             int maxNumFileHandles,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
-        ManifestEntryRunMergeEntry.PartitionDictionary partitions =
-                new ManifestEntryRunMergeEntry.PartitionDictionary(sortKey);
+        PartitionDictionary partitions = new PartitionDictionary(sortKey::comparePartitions);
         List<ManifestEntryRunMergePlan.Source.Spec> sources = new ArrayList<>();
         int streamCursorCount = 0;
         long inMemoryEntries = 0;
@@ -243,36 +158,56 @@ final class ManifestEntryRunMerge {
         if (section.size() <= 1
                 || (manifestReadParallelism != null && manifestReadParallelism <= 1)) {
             for (ManifestFileMeta meta : section) {
+                ManifestEntryRunMergeEntry.Filter discoveryFilter = filter.forDiscovery();
                 Discovery.DiscoveredManifest manifest =
-                        discoverManifestRuns(meta, manifestFile, partitionType, partitions, filter);
+                        discoverManifestRuns(
+                                meta, manifestFile, partitionType, partitions, discoveryFilter);
                 if (manifest.requiresExternalSort) {
                     return null;
                 }
+                filter.combine(discoveryFilter);
                 discovered.add(manifest);
             }
         } else {
-            Function<ManifestFileMeta, List<Discovery.DiscoveredManifest>> reader =
-                    meta -> {
-                        try {
-                            return Collections.singletonList(
-                                    discoverManifestRuns(
-                                            meta, manifestFile, partitionType, partitions, filter));
-                        } catch (Exception e) {
-                            throw new RuntimeException(
-                                    "Failed to discover sorted Avro runs in " + meta.fileName(), e);
-                        }
-                    };
-            for (Discovery.DiscoveredManifest manifest :
+            Function<
+                            ManifestFileMeta,
+                            List<
+                                    Pair<
+                                            Discovery.DiscoveredManifest,
+                                            ManifestEntryRunMergeEntry.Filter>>>
+                    reader =
+                            meta -> {
+                                try {
+                                    ManifestEntryRunMergeEntry.Filter discoveryFilter =
+                                            filter.forDiscovery();
+                                    return Collections.singletonList(
+                                            Pair.of(
+                                                    discoverManifestRuns(
+                                                            meta,
+                                                            manifestFile,
+                                                            partitionType,
+                                                            partitions,
+                                                            discoveryFilter),
+                                                    discoveryFilter));
+                                } catch (Exception e) {
+                                    throw new RuntimeException(
+                                            "Failed to discover sorted Avro runs in "
+                                                    + meta.fileName(),
+                                            e);
+                                }
+                            };
+            for (Pair<Discovery.DiscoveredManifest, ManifestEntryRunMergeEntry.Filter> scan :
                     sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
-                discovered.add(manifest);
+                if (scan.getLeft().requiresExternalSort) {
+                    return null;
+                }
+                filter.combine(scan.getRight());
+                discovered.add(scan.getLeft());
             }
         }
         for (int manifestIndex = 0; manifestIndex < section.size(); manifestIndex++) {
             ManifestFileMeta meta = section.get(manifestIndex);
             Discovery.DiscoveredManifest manifest = discovered.get(manifestIndex);
-            if (manifest.requiresExternalSort) {
-                return null;
-            }
             if (manifest.fragmented) {
                 long entryCount = meta.numAddedFiles() + meta.numDeletedFiles();
                 inMemoryEntries += entryCount;
@@ -301,7 +236,7 @@ final class ManifestEntryRunMerge {
             ManifestFileMeta meta,
             ManifestFile manifestFile,
             RowType partitionType,
-            ManifestEntryRunMergeEntry.PartitionDictionary partitions,
+            PartitionDictionary partitions,
             ManifestEntryRunMergeEntry.Filter filter)
             throws Exception {
         try (ManifestAvroReader reader =
@@ -309,6 +244,8 @@ final class ManifestEntryRunMerge {
             return discoverManifestRuns(meta, reader, partitionType, partitions, filter);
         } catch (UnsupportedOperationException unsupported) {
             return Discovery.DiscoveredManifest.requiresExternalSort();
+        } finally {
+            filter.releaseIdentifier();
         }
     }
 
@@ -316,7 +253,7 @@ final class ManifestEntryRunMerge {
             ManifestFileMeta meta,
             ManifestAvroReader reader,
             RowType partitionType,
-            ManifestEntryRunMergeEntry.PartitionDictionary partitions,
+            PartitionDictionary partitions,
             ManifestEntryRunMergeEntry.Filter filter)
             throws Exception {
         SimpleStatsConverter partitionStatsConverter = new SimpleStatsConverter(partitionType);
@@ -329,13 +266,15 @@ final class ManifestEntryRunMerge {
         long position = 0;
         long entryCount = meta.numAddedFiles() + meta.numDeletedFiles();
         boolean fragmented = false;
+        ProjectedManifestEntry entry = ProjectedManifestEntry.ENTRY_LAYOUT_PROJECTION.createEntry();
         while (reader.hasNext()) {
             RawBlock rawBlock = reader.next();
-            RowIterator rows = rawBlock.toRows(ENTRY_LAYOUT);
+            RowIterator rows =
+                    rawBlock.toRows(ProjectedManifestEntry.ENTRY_LAYOUT_PROJECTION.projectedType());
             while (rows.hasNext()) {
-                GenericRow row = rows.next();
-                current.replace(row, partitions);
-                filter.observe(row, current);
+                entry.replace(rows.next());
+                current.replace(entry, partitions);
+                filter.observe(entry, current);
                 if (fragmented) {
                     position++;
                     continue;
@@ -350,7 +289,7 @@ final class ManifestEntryRunMerge {
                                     partitionType));
                 }
                 Discovery.BlockInfo block = blocks.get(blocks.size() - 1);
-                block.collectForSort(row, current, partitions, filter);
+                block.collectForSort(entry, current, partitions, filter);
                 boolean inversion =
                         hasPrevious && compareDiscoveryKeys(previous, current, partitions) > 0;
                 if (inversion) {
@@ -415,7 +354,7 @@ final class ManifestEntryRunMerge {
     private static int compareDiscoveryKeys(
             ManifestEntryRunMergeEntry.Key left,
             ManifestEntryRunMergeEntry.Key right,
-            ManifestEntryRunMergeEntry.PartitionDictionary partitions) {
+            PartitionDictionary partitions) {
         return compareRemainingKeys(
                 left, right, partitions.compareIds(left.partitionId, right.partitionId));
     }
@@ -452,8 +391,12 @@ final class ManifestEntryRunMerge {
             ManifestEntryRunMergeEntry.Key left, ManifestEntryRunMergeEntry.Key right) {
         int minLength = Math.min(left.fileNameLength, right.fileNameLength);
         for (int i = 0; i < minLength; i++) {
-            int leftByte = left.fileNameBytes[left.fileNameOffset + i] & 0xFF;
-            int rightByte = right.fileNameBytes[right.fileNameOffset + i] & 0xFF;
+            int leftByte =
+                    MemorySegmentUtils.getByte(left.fileNameSegments, left.fileNameOffset + i)
+                            & 0xFF;
+            int rightByte =
+                    MemorySegmentUtils.getByte(right.fileNameSegments, right.fileNameOffset + i)
+                            & 0xFF;
             if (leftByte != rightByte) {
                 return leftByte - rightByte;
             }
@@ -500,7 +443,7 @@ final class ManifestEntryRunMerge {
                         Collections.emptyList(), Collections.emptyList(), false, true);
             }
 
-            void updatePartitionRanks(ManifestEntryRunMergeEntry.PartitionDictionary partitions) {
+            void updatePartitionRanks(PartitionDictionary partitions) {
                 for (BlockInfo block : blocks) {
                     block.updatePartitionRanks(partitions);
                 }
@@ -560,19 +503,19 @@ final class ManifestEntryRunMerge {
             }
 
             void collectForSort(
-                    GenericRow record,
+                    ProjectedManifestEntry entry,
                     ManifestEntryRunMergeEntry.Key key,
-                    ManifestEntryRunMergeEntry.PartitionDictionary partitions,
+                    PartitionDictionary partitions,
                     ManifestEntryRunMergeEntry.Filter filter) {
                 if (!eligible) {
                     return;
                 }
-                if (!filter.copyable(record, key)) {
+                if (!filter.copyable(entry, key)) {
                     eligible = false;
                     releasePartitionStats();
                     return;
                 }
-                collectEntryStats(record, key);
+                collectEntryStats(entry, key);
                 BinaryRow partition = partitions.partition(key.partitionId);
                 if (singleFieldSortedPartitionStats) {
                     if (partition.isNullAt(0)) {
@@ -589,18 +532,18 @@ final class ManifestEntryRunMerge {
                 }
             }
 
-            private void collectEntryStats(GenericRow record, ManifestEntryRunMergeEntry.Key key) {
-                InternalRow file = ManifestEntryRunMergeEntry.file(record);
+            private void collectEntryStats(
+                    ProjectedManifestEntry entry, ManifestEntryRunMergeEntry.Key key) {
                 if (key.kind == FileKind.ADD.toByteValue()) {
                     addedFiles++;
                 } else {
                     deletedFiles++;
                 }
-                schemaId = Math.max(schemaId, file.getLong(SCHEMA_ID));
-                int bucket = record.getInt(BUCKET);
+                schemaId = Math.max(schemaId, entry.file().schemaId());
+                int bucket = entry.bucket();
                 minBucket = Math.min(minBucket, bucket);
                 maxBucket = Math.max(maxBucket, bucket);
-                int level = file.getInt(LEVEL);
+                int level = entry.file().level();
                 minLevel = Math.min(minLevel, level);
                 maxLevel = Math.max(maxLevel, level);
                 minRowId = Math.min(minRowId, key.firstRowId);
@@ -665,7 +608,7 @@ final class ManifestEntryRunMerge {
                 }
             }
 
-            void updatePartitionRanks(ManifestEntryRunMergeEntry.PartitionDictionary partitions) {
+            void updatePartitionRanks(PartitionDictionary partitions) {
                 checkState(firstKey != null && lastKey != null, "Manifest block has no sort keys.");
                 firstKey.partitionRank = partitions.rank(firstKey.partitionId);
                 lastKey.partitionRank = partitions.rank(lastKey.partitionId);

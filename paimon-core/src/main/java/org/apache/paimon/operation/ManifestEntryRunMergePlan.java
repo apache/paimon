@@ -36,6 +36,7 @@ import org.apache.paimon.manifest.ManifestAvroWriter.EncodedEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.PartitionDictionary;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Pair;
@@ -53,10 +54,9 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 final class ManifestEntryRunMergePlan {
 
     final List<Source.Spec> sources;
-    final ManifestEntryRunMergeEntry.PartitionDictionary partitions;
+    final PartitionDictionary partitions;
 
-    ManifestEntryRunMergePlan(
-            List<Source.Spec> sources, ManifestEntryRunMergeEntry.PartitionDictionary partitions) {
+    ManifestEntryRunMergePlan(List<Source.Spec> sources, PartitionDictionary partitions) {
         this.sources = sources;
         this.partitions = partitions;
     }
@@ -271,7 +271,7 @@ final class ManifestEntryRunMergePlan {
                     ManifestFile manifestFile,
                     ManifestFileSorter.RowIdEntrySortKey sortKey,
                     ManifestEntryRunMergeEntry.Filter filter,
-                    ManifestEntryRunMergeEntry.PartitionDictionary partitions)
+                    PartitionDictionary partitions)
                     throws Exception;
         }
 
@@ -312,7 +312,7 @@ final class ManifestEntryRunMergePlan {
                     ManifestFile manifestFile,
                     ManifestFileSorter.RowIdEntrySortKey sortKey,
                     ManifestEntryRunMergeEntry.Filter filter,
-                    ManifestEntryRunMergeEntry.PartitionDictionary partitions)
+                    PartitionDictionary partitions)
                     throws Exception {
                 return new PrimitiveManifestRunCursor(
                         manifestFile, meta, start, end, blocks, filter, partitions);
@@ -332,7 +332,7 @@ final class ManifestEntryRunMergePlan {
                     ManifestFile manifestFile,
                     ManifestFileSorter.RowIdEntrySortKey sortKey,
                     ManifestEntryRunMergeEntry.Filter filter,
-                    ManifestEntryRunMergeEntry.PartitionDictionary partitions)
+                    PartitionDictionary partitions)
                     throws Exception {
                 return new InMemoryManifestCursor(manifestFile, meta, sortKey, filter, partitions);
             }
@@ -393,9 +393,13 @@ final class ManifestEntryRunMergePlan {
         final ManifestAvroReader reader;
         final boolean encodedRecordsCompatible;
         final ManifestEntryRunMergeEntry.Filter filter;
-        final ManifestEntryRunMergeEntry.PartitionDictionary partitions;
+        final PartitionDictionary partitions;
         final ManifestEntryRunMergeEntry.Key key = new ManifestEntryRunMergeEntry.Key();
         final EncodedEntry metadata = new EncodedEntry();
+        final ProjectedManifestEntry projectedEntry =
+                ProjectedManifestEntry.ENTRY_LAYOUT_PROJECTION.createEntry();
+        final ProjectedManifestEntry fullEntry =
+                ProjectedManifestEntry.fullProjection().createEntry();
         final List<ManifestEntryRunMerge.Discovery.BlockInfo> blocks;
         final long runStart;
         final long runEnd;
@@ -406,10 +410,8 @@ final class ManifestEntryRunMergePlan {
         boolean current;
         @Nullable RawBlock currentRawBlock;
         @Nullable RowIterator currentRows;
-        @Nullable GenericRow currentRow;
         @Nullable GenericRow currentSourceRow;
-        @Nullable GenericRow compactRow;
-        @Nullable GenericRow compactFile;
+        @Nullable ProjectedManifestEntry currentEntry;
         @Nullable ManifestEntryRunMerge.Discovery.BlockInfo currentBlock;
         boolean closed;
 
@@ -420,15 +422,10 @@ final class ManifestEntryRunMergePlan {
                 long end,
                 List<ManifestEntryRunMerge.Discovery.BlockInfo> blocks,
                 ManifestEntryRunMergeEntry.Filter filter,
-                ManifestEntryRunMergeEntry.PartitionDictionary partitions)
+                PartitionDictionary partitions)
                 throws Exception {
             this.reader = manifestFile.scanAvroBlocks(meta.fileName(), meta.fileSize());
             this.encodedRecordsCompatible = reader.rawBlockCopySupported();
-            if (!encodedRecordsCompatible) {
-                this.compactRow =
-                        new GenericRow(ManifestEntryRunMerge.ENTRY_LAYOUT.getFieldCount());
-                this.compactFile = new GenericRow(ManifestEntryRunMerge.FILE_FIELD_COUNT);
-            }
             this.filter = filter;
             this.partitions = partitions;
             this.blocks = blocks;
@@ -469,24 +466,22 @@ final class ManifestEntryRunMergePlan {
                         currentRows != null && currentRows.hasNext(),
                         "Manifest block ends before its discovered boundary.");
                 currentSourceRow = currentRows.next();
-                currentRow =
+                currentEntry =
                         encodedRecordsCompatible
-                                ? currentSourceRow
-                                : ManifestEntryRunMerge.projectEntryLayout(
-                                        currentSourceRow, compactRow, compactFile);
+                                ? projectedEntry.replace(currentSourceRow)
+                                : fullEntry.replace(currentSourceRow);
                 decodedRemaining--;
-                key.replace(currentRow, partitions);
-                if (filter.include(currentRow, key)) {
+                key.replace(currentEntry, partitions);
+                if (filter.include(currentEntry, key)) {
                     current = true;
-                    InternalRow file = ManifestEntryRunMergeEntry.file(currentRow);
                     metadata.replace(
                             key.kind,
                             partitions.partition(key.partitionId),
-                            currentRow.getInt(ManifestEntryRunMerge.BUCKET),
-                            file.getInt(ManifestEntryRunMerge.LEVEL),
-                            file.getLong(ManifestEntryRunMerge.SCHEMA_ID),
+                            currentEntry.bucket(),
+                            currentEntry.file().level(),
+                            currentEntry.file().schemaId(),
                             key.firstRowId,
-                            file.getLong(ManifestEntryRunMerge.ROW_COUNT));
+                            currentEntry.file().rowCount());
                     return true;
                 }
             }
@@ -496,8 +491,8 @@ final class ManifestEntryRunMergePlan {
             rawBlock = false;
             current = false;
             currentRows = null;
-            currentRow = null;
             currentSourceRow = null;
+            currentEntry = null;
             while (blockIndex < blocks.size()) {
                 ManifestEntryRunMerge.Discovery.BlockInfo info = blocks.get(blockIndex);
                 if (info.start >= runEnd) {
@@ -524,7 +519,8 @@ final class ManifestEntryRunMergePlan {
                 currentRows =
                         currentRawBlock.toRows(
                                 encodedRecordsCompatible
-                                        ? ManifestEntryRunMerge.ENTRY_LAYOUT
+                                        ? ProjectedManifestEntry.ENTRY_LAYOUT_PROJECTION
+                                                .projectedType()
                                         : ManifestEntry.MANIFEST_ROW_TYPE);
                 for (long i = 0; i < prefix; i++) {
                     checkState(
@@ -548,7 +544,7 @@ final class ManifestEntryRunMergePlan {
 
         @Override
         public ProjectedManifestEntry current() {
-            return null;
+            return current ? currentEntry : null;
         }
 
         @Override
@@ -574,7 +570,7 @@ final class ManifestEntryRunMergePlan {
         @Override
         public ReusableIdentifier identifier() {
             checkState(current, "Manifest entry has not been materialized.");
-            return filter.identifier(currentRow);
+            return filter.identifier(currentEntry);
         }
 
         @Override
@@ -617,30 +613,28 @@ final class ManifestEntryRunMergePlan {
             currentRows =
                     currentRawBlock.toRows(
                             encodedRecordsCompatible
-                                    ? ManifestEntryRunMerge.ENTRY_LAYOUT
+                                    ? ProjectedManifestEntry.ENTRY_LAYOUT_PROJECTION.projectedType()
                                     : ManifestEntry.MANIFEST_ROW_TYPE);
             checkState(currentRows.hasNext(), "Manifest block cannot be decompressed.");
             currentSourceRow = currentRows.next();
-            currentRow =
+            currentEntry =
                     encodedRecordsCompatible
-                            ? currentSourceRow
-                            : ManifestEntryRunMerge.projectEntryLayout(
-                                    currentSourceRow, compactRow, compactFile);
+                            ? projectedEntry.replace(currentSourceRow)
+                            : fullEntry.replace(currentSourceRow);
             decodedRemaining--;
-            key.replace(currentRow, partitions);
+            key.replace(currentEntry, partitions);
             checkState(
-                    filter.include(currentRow, key),
+                    filter.include(currentEntry, key),
                     "Copyable manifest block contains a filtered entry.");
             current = true;
-            InternalRow file = ManifestEntryRunMergeEntry.file(currentRow);
             metadata.replace(
                     key.kind,
                     partitions.partition(key.partitionId),
-                    currentRow.getInt(ManifestEntryRunMerge.BUCKET),
-                    file.getInt(ManifestEntryRunMerge.LEVEL),
-                    file.getLong(ManifestEntryRunMerge.SCHEMA_ID),
+                    currentEntry.bucket(),
+                    currentEntry.file().level(),
+                    currentEntry.file().schemaId(),
                     key.firstRowId,
-                    file.getLong(ManifestEntryRunMerge.ROW_COUNT));
+                    currentEntry.file().rowCount());
             blockIndex++;
         }
 
@@ -653,10 +647,10 @@ final class ManifestEntryRunMergePlan {
             current = false;
             currentRawBlock = null;
             currentRows = null;
-            currentRow = null;
             currentSourceRow = null;
-            compactRow = null;
-            compactFile = null;
+            currentEntry = null;
+            projectedEntry.clear();
+            fullEntry.clear();
             currentBlock = null;
             rawBlock = false;
             key.clear();
@@ -677,7 +671,7 @@ final class ManifestEntryRunMergePlan {
                 ManifestFileMeta meta,
                 ManifestFileSorter.RowIdEntrySortKey sortKey,
                 ManifestEntryRunMergeEntry.Filter filter,
-                ManifestEntryRunMergeEntry.PartitionDictionary partitions)
+                PartitionDictionary partitions)
                 throws Exception {
             long entryCount = meta.numAddedFiles() + meta.numDeletedFiles();
             this.entries = new ArrayList<>((int) entryCount);

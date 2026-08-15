@@ -18,25 +18,15 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
 import org.apache.paimon.manifest.DeletedRowIdSet;
 import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.PartitionDictionary;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
+import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
-import org.apache.paimon.utils.ByteArrayKey;
-import org.apache.paimon.utils.ByteArrayLookupKey;
-import org.apache.paimon.utils.SerializationUtils;
-
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -50,13 +40,14 @@ final class ManifestEntryRunMergeEntry {
         int partitionId;
         int partitionRank;
         byte kind;
-        boolean hasRowId;
         long firstRowId;
         long rangeEnd;
         long reverseSequence;
-        byte[] fileNameBytes;
+        MemorySegment[] fileNameSegments;
         int fileNameOffset;
         int fileNameLength;
+        byte[] ownedFileNameBytes;
+        MemorySegment[] ownedFileNameSegments;
 
         static Key viewOf(ProjectedManifestEntry entry, PartitionDictionary partitions) {
             Key key = new Key();
@@ -69,155 +60,52 @@ final class ManifestEntryRunMergeEntry {
             this.partitionId = partitions.id(entry.partitionBytes());
             this.partitionRank = partitions.rank(partitionId);
             this.kind = entry.kind().toByteValue();
-            this.hasRowId = true;
             this.firstRowId = firstRowId;
             this.rangeEnd = firstRowId + entry.file().rowCount() - 1L;
             this.reverseSequence = Long.MAX_VALUE - entry.file().maxSequenceNumber();
-            this.fileNameBytes = entry.file().fileNameBinary().toBytes();
-            this.fileNameOffset = 0;
-            this.fileNameLength = fileNameBytes.length;
-        }
-
-        void replace(GenericRow record, PartitionDictionary partitions) {
-            InternalRow file = file(record);
-            checkState(
-                    !file.isNullAt(ManifestEntryRunMerge.FIRST_ROW_ID),
-                    "First row id should not be null.");
-            this.partitionId = partitions.id(record.getBinary(ManifestEntryRunMerge.PARTITION));
-            this.partitionRank = partitions.rank(partitionId);
-            this.kind = record.getByte(ManifestEntryRunMerge.KIND);
-            this.hasRowId = true;
-            this.firstRowId = file.getLong(ManifestEntryRunMerge.FIRST_ROW_ID);
-            this.rangeEnd = firstRowId + file.getLong(ManifestEntryRunMerge.ROW_COUNT) - 1L;
-            this.reverseSequence =
-                    Long.MAX_VALUE - file.getLong(ManifestEntryRunMerge.MAX_SEQUENCE_NUMBER);
-            BinaryString fileName = file.getString(ManifestEntryRunMerge.FILE_NAME);
-            this.fileNameBytes =
-                    MemorySegmentUtils.copyToBytes(
-                            fileName.getSegments(),
-                            fileName.getOffset(),
-                            fileName.getSizeInBytes());
-            this.fileNameOffset = 0;
-            this.fileNameLength = fileNameBytes.length;
-        }
-
-        void replaceForCompaction(GenericRow record) {
-            InternalRow file = file(record);
-            this.kind = record.getByte(ManifestEntryRunMerge.KIND);
-            this.hasRowId = !file.isNullAt(ManifestEntryRunMerge.FIRST_ROW_ID);
-            if (hasRowId) {
-                this.firstRowId = file.getLong(ManifestEntryRunMerge.FIRST_ROW_ID);
-                this.rangeEnd = firstRowId + file.getLong(ManifestEntryRunMerge.ROW_COUNT) - 1L;
-            }
+            BinaryString fileName = entry.file().fileNameBinary();
+            this.fileNameSegments = fileName.getSegments();
+            this.fileNameOffset = fileName.getOffset();
+            this.fileNameLength = fileName.getSizeInBytes();
         }
 
         void copyFrom(Key key) {
             this.partitionId = key.partitionId;
             this.partitionRank = key.partitionRank;
             this.kind = key.kind;
-            this.hasRowId = key.hasRowId;
             this.firstRowId = key.firstRowId;
             this.rangeEnd = key.rangeEnd;
             this.reverseSequence = key.reverseSequence;
-            this.fileNameBytes = key.fileNameBytes;
-            this.fileNameOffset = key.fileNameOffset;
+            ensureFileNameCapacity(key.fileNameLength);
+            MemorySegmentUtils.copyToBytes(
+                    key.fileNameSegments,
+                    key.fileNameOffset,
+                    ownedFileNameBytes,
+                    0,
+                    key.fileNameLength);
+            this.fileNameSegments = ownedFileNameSegments;
+            this.fileNameOffset = 0;
             this.fileNameLength = key.fileNameLength;
         }
 
         Key stableCopy() {
             Key copy = new Key();
             copy.copyFrom(this);
-            copy.fileNameBytes =
-                    Arrays.copyOfRange(
-                            fileNameBytes, fileNameOffset, fileNameOffset + fileNameLength);
-            copy.fileNameOffset = 0;
             return copy;
         }
 
+        private void ensureFileNameCapacity(int length) {
+            if (ownedFileNameBytes == null || ownedFileNameBytes.length < length) {
+                ownedFileNameBytes = new byte[length];
+                ownedFileNameSegments =
+                        new MemorySegment[] {MemorySegment.wrap(ownedFileNameBytes)};
+            }
+        }
+
         void clear() {
-            fileNameBytes = null;
-        }
-    }
-
-    /** Interns variable-width partition bytes once and assigns comparator-compatible ranks. */
-    static final class PartitionDictionary {
-
-        final ManifestFileSorter.RowIdEntrySortKey sortKey;
-        final Map<ByteArrayKey, Integer> ids = new ConcurrentHashMap<>();
-        final ThreadLocal<ByteArrayLookupKey> lookup =
-                ThreadLocal.withInitial(ByteArrayLookupKey::new);
-        volatile BinaryRow[] partitions = new BinaryRow[16];
-        int partitionCount;
-        int[] ranks;
-
-        PartitionDictionary(ManifestFileSorter.RowIdEntrySortKey sortKey) {
-            this.sortKey = sortKey;
-        }
-
-        PartitionDictionary() {
-            this.sortKey = null;
-        }
-
-        int id(byte[] bytes) {
-            return id(bytes, 0, bytes.length);
-        }
-
-        int id(byte[] bytes, int offset, int length) {
-            ByteArrayLookupKey lookupKey = lookup.get();
-            lookupKey.reset(bytes, offset, length);
-            try {
-                Integer existing = ids.get(lookupKey);
-                if (existing != null) {
-                    return existing;
-                }
-                synchronized (this) {
-                    existing = ids.get(lookupKey);
-                    if (existing != null) {
-                        return existing;
-                    }
-                    checkState(ranks == null, "Full manifest scan found an unknown partition.");
-                    byte[] canonical = Arrays.copyOfRange(bytes, offset, offset + length);
-                    int id = partitionCount;
-                    if (id == partitions.length) {
-                        partitions = Arrays.copyOf(partitions, partitions.length << 1);
-                    }
-                    partitions[id] = SerializationUtils.deserializeBinaryRow(canonical);
-                    ids.put(new ByteArrayKey(canonical), id);
-                    partitionCount = id + 1;
-                    return id;
-                }
-            } finally {
-                lookupKey.clear();
-            }
-        }
-
-        int compareIds(int left, int right) {
-            checkState(sortKey != null, "Partition dictionary has no sort key.");
-            return sortKey.comparePartitions(partitions[left], partitions[right]);
-        }
-
-        void finish() {
-            List<Integer> order = new ArrayList<>(partitionCount);
-            for (int id = 0; id < partitionCount; id++) {
-                order.add(id);
-            }
-            order.sort((left, right) -> compareIds(left, right));
-            ranks = new int[partitionCount];
-            int rank = 0;
-            for (int position = 0; position < order.size(); position++) {
-                if (position > 0 && compareIds(order.get(position - 1), order.get(position)) != 0) {
-                    rank++;
-                }
-                ranks[order.get(position)] = rank;
-            }
-        }
-
-        int rank(int id) {
-            return ranks == null ? 0 : ranks[id];
-        }
-
-        BinaryRow partition(int id) {
-            return partitions[id];
+            fileNameSegments = null;
+            ownedFileNameBytes = null;
+            ownedFileNameSegments = null;
         }
     }
 
@@ -226,8 +114,8 @@ final class ManifestEntryRunMergeEntry {
         final CompactFileIdentifierSet deletedIdentifiers;
         final DeletedRowIdSet deletedRowIds;
         final boolean useRowIdFilter;
-        final ThreadLocal<IdentifierEncoder> identifier =
-                ThreadLocal.withInitial(IdentifierEncoder::new);
+        final ThreadLocal<ReusableIdentifier> identifier =
+                ThreadLocal.withInitial(ReusableIdentifier::new);
 
         Filter(
                 CompactFileIdentifierSet deletedIdentifiers,
@@ -239,37 +127,50 @@ final class ManifestEntryRunMergeEntry {
         }
 
         boolean include(ProjectedManifestEntry entry) {
-            return entry.isAdd() && !deletedIdentifiers.contains(entry);
+            return entry.isAdd() && !deletedIdentifiers.contains(identifier(entry));
         }
 
-        boolean include(GenericRow record, Key key) {
-            return key.kind == FileKind.ADD.toByteValue() && !isDeleted(record, key);
+        boolean include(ProjectedManifestEntry entry, Key key) {
+            return key.kind == FileKind.ADD.toByteValue() && !isDeleted(entry, key);
         }
 
-        boolean copyable(GenericRow record, Key key) {
-            return include(record, key);
+        boolean copyable(ProjectedManifestEntry entry, Key key) {
+            return include(entry, key);
         }
 
-        void observe(GenericRow record, Key key) {}
+        void observe(ProjectedManifestEntry entry, Key key) {}
 
         boolean copyableAfterDiscovery(long minRowId, long maxRowId) {
             return true;
         }
 
-        ReusableIdentifier identifier(GenericRow record) {
-            return identifier.get().replace(record);
+        Filter forDiscovery() {
+            return this;
         }
 
-        boolean isDeleted(GenericRow record, Key key) {
+        void combine(Filter other) {
+            checkState(other == this, "Immutable manifest filter cannot collect local DELETEs.");
+        }
+
+        ReusableIdentifier identifier(ProjectedManifestEntry entry) {
+            return identifier.get().replaceWithPartition(entry);
+        }
+
+        void releaseIdentifier() {
+            ReusableIdentifier reusableIdentifier = identifier.get();
+            reusableIdentifier.release();
+            identifier.remove();
+        }
+
+        boolean isDeleted(ProjectedManifestEntry entry, Key key) {
             // RowID is only a cheap negative filter. The complete identifier remains the
             // authoritative match, and is also sufficient for manifests which predate RowID.
             if (useRowIdFilter) {
-                checkState(key.hasRowId, "First row id should not be null.");
                 if (!deletedRowIds.contains(key.firstRowId)) {
                     return false;
                 }
             }
-            return deletedIdentifiers.contains(identifier(record));
+            return deletedIdentifiers.contains(identifier(entry));
         }
 
         static final class Minor extends Filter {
@@ -287,28 +188,40 @@ final class ManifestEntryRunMergeEntry {
             }
 
             @Override
-            boolean include(GenericRow record, Key key) {
+            boolean include(ProjectedManifestEntry entry, Key key) {
                 return true;
             }
 
             @Override
-            boolean copyable(GenericRow record, Key key) {
+            boolean copyable(ProjectedManifestEntry entry, Key key) {
                 return key.kind == FileKind.ADD.toByteValue();
             }
 
             @Override
-            void observe(GenericRow record, Key key) {
+            void observe(ProjectedManifestEntry entry, Key key) {
                 if (key.kind != FileKind.DELETE.toByteValue()) {
                     return;
                 }
-                ReusableIdentifier reusable = identifier(record);
-                synchronized (this) {
-                    deletedIdentifiers.add(reusable);
-                    if (useRowIdFilter) {
-                        checkState(key.hasRowId, "First row id should not be null.");
-                        deletedRowIds.add(key.firstRowId);
-                    }
+                ReusableIdentifier reusable = identifier(entry);
+                deletedIdentifiers.add(reusable);
+                if (useRowIdFilter) {
+                    deletedRowIds.add(key.firstRowId);
                 }
+            }
+
+            @Override
+            Filter forDiscovery() {
+                return new Minor(
+                        new CompactFileIdentifierSet(), new DeletedRowIdSet(), useRowIdFilter);
+            }
+
+            @Override
+            void combine(Filter other) {
+                checkState(other instanceof Minor, "Cannot combine incompatible manifest filters.");
+                deletedIdentifiers.addAll(other.deletedIdentifiers);
+                deletedRowIds.addAll(other.deletedRowIds);
+                other.deletedIdentifiers.release();
+                other.deletedRowIds.releaseRangeIndex();
             }
 
             @Override
@@ -319,21 +232,5 @@ final class ManifestEntryRunMergeEntry {
                 return useRowIdFilter && !deletedRowIds.intersects(minRowId, maxRowId);
             }
         }
-
-        private static final class IdentifierEncoder {
-
-            final ProjectedManifestEntry entry =
-                    ProjectedManifestEntry.Projection.create(ManifestEntryRunMerge.ENTRY_LAYOUT)
-                            .createEntry();
-            final ReusableIdentifier identifier = new ReusableIdentifier();
-
-            ReusableIdentifier replace(GenericRow record) {
-                return identifier.replaceWithPartition(entry.replace(record));
-            }
-        }
-    }
-
-    static InternalRow file(GenericRow record) {
-        return record.getRow(ManifestEntryRunMerge.FILE, ManifestEntryRunMerge.FILE_FIELD_COUNT);
     }
 }
