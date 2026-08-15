@@ -228,10 +228,8 @@ class TableUpdate:
     ) -> List[CommitMessage]:
         """Shared implementation for SQL-like ``UPDATE ... WHERE ...``.
 
-        ``predicate`` identifies the target rows. ``assignments`` maps target
-        column names to literal values. The method reads matching ``_ROW_ID``
-        values, builds an Arrow update table, then delegates to the existing
-        row-id update path.
+        ``predicate`` identifies the target rows. Assignment values may be
+        literals or callables receiving the matched rows as an Arrow table.
         """
         self._validate_predicate_update(assignments)
 
@@ -239,6 +237,8 @@ class TableUpdate:
         read_builder = scan_table.new_read_builder()
         if predicate is not None:
             read_builder.with_filter(predicate)
+        if predicate is not None or any(
+                callable(value) for value in assignments.values()):
             read_builder.with_projection(
                 list(scan_table.field_names) + [SpecialFields.ROW_ID.name]
             )
@@ -252,9 +252,8 @@ class TableUpdate:
             return []
 
         update_table = self._build_predicate_update_table(
-            matched[SpecialFields.ROW_ID.name],
             assignments,
-            matched.num_rows,
+            matched,
         )
         return TableUpdateByRowId(
             self.table, self.commit_user, commit_identifier,
@@ -313,19 +312,22 @@ class TableUpdate:
 
     def _build_predicate_update_table(
             self,
-            row_ids,
             assignments: Mapping[str, Any],
-            row_count: int,
+            matched: pa.Table,
     ) -> pa.Table:
         table_schema = PyarrowFieldParser.from_paimon_schema(
             self.table.table_schema.fields
         )
-        arrays = [row_ids]
+        arrays = [matched[SpecialFields.ROW_ID.name]]
         fields = [pa.field(SpecialFields.ROW_ID.name, pa.int64())]
         for col, value in assignments.items():
+            if callable(value):
+                value = value(matched)
             target_field = table_schema.field(col)
             arrays.append(
-                self._assignment_to_array(value, target_field.type, row_count)
+                self._assignment_to_array(
+                    value, target_field.type, matched.num_rows
+                )
             )
             fields.append(target_field)
         return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
@@ -524,7 +526,7 @@ class BatchTableUpdate(TableUpdate):
             predicate: Optional[Predicate],
             assignments: Mapping[str, Any],
     ) -> List[CommitMessage]:
-        """Update rows matching ``predicate`` with literal assignments."""
+        """Update rows using literal or Arrow callable assignments."""
         return self._update_by_predicate(
             predicate, assignments, BATCH_COMMIT_IDENTIFIER
         )
@@ -599,7 +601,7 @@ class StreamTableUpdate(TableUpdate):
             assignments: Mapping[str, Any],
             commit_identifier: int,
     ) -> List[CommitMessage]:
-        """Update rows matching ``predicate`` with literal assignments,
+        """Update rows using literal or Arrow callable assignments,
         tagging the produced commit messages with ``commit_identifier``."""
         return self._update_by_predicate(
             predicate, assignments, commit_identifier

@@ -67,27 +67,6 @@ def update_by_row_id(
 
     Returns ``{"num_updated": <rows>}``.
     """
-    return _update_by_row_id(
-        target,
-        source,
-        catalog_options,
-        update_cols=update_cols,
-        num_partitions=num_partitions,
-        ray_remote_args=ray_remote_args,
-    )
-
-
-def _update_by_row_id(
-    target,
-    source,
-    catalog_options,
-    *,
-    update_cols,
-    num_partitions=None,
-    ray_remote_args=None,
-    source_schema=None,
-    base_snapshot_id=None,
-):
     from pypaimon.catalog.catalog_factory import CatalogFactory
     from pypaimon.schema.data_types import PyarrowFieldParser
     from pypaimon.table.special_fields import SpecialFields
@@ -99,9 +78,34 @@ def _update_by_row_id(
     num_partitions = _resolve_num_partitions(num_partitions)
 
     table = CatalogFactory.create(catalog_options).get_table(target)
-    _validate_update_target(table, target, update_cols)
+    if not table.options.data_evolution_enabled():
+        raise ValueError(
+            f"update_by_row_id requires 'data-evolution.enabled'='true' on '{target}'.")
+    if not table.options.row_tracking_enabled():
+        raise ValueError(
+            f"update_by_row_id requires 'row-tracking.enabled'='true' on '{target}'.")
+    if table.options.deletion_vectors_enabled():
+        # A DV-deleted row still lives in its data file, so row-id ranges can't tell it
+        # apart without reading the target; refuse rather than update a deleted row.
+        raise ValueError(
+            f"update_by_row_id does not support deletion-vectors-enabled tables yet: "
+            f"'{target}'.")
 
     rid = SpecialFields.ROW_ID.name
+    blob_cols = _blob_col_names(table)
+    partition_keys = set(table.partition_keys or [])
+    for col in update_cols:
+        if col not in table.field_names:
+            raise ValueError(f"update column {col!r} is not in target '{target}'.")
+        if col in blob_cols:
+            # Update writes plain data files; blob deltas are a separate path.
+            raise ValueError(f"update_by_row_id cannot update blob column {col!r}.")
+        if col in partition_keys:
+            # In-place rewrite can't move a row across partitions.
+            raise ValueError(
+                f"update_by_row_id cannot update partition column {col!r}; "
+                "cross-partition row movement is not supported.")
+
     if isinstance(source, str):
         # A table's system _ROW_ID is its own, independent of the target's, so a
         # table-name source can't address target rows. Require in-memory data that
@@ -110,15 +114,11 @@ def _update_by_row_id(
             "update_by_row_id does not accept a table-name source; pass a ray.data."
             f"Dataset / pyarrow.Table / pandas.DataFrame carrying the target {rid}.")
     source_ds = _normalize_source(source, catalog_options)
-    if source_schema is None:
-        source_schema = source_ds.schema()
-    if source_schema is not None:
-        src_cols = set(source_schema.names)
-        missing = [c for c in [rid] + update_cols if c not in src_cols]
-        if missing:
-            raise ValueError(
-                f"source is missing columns {missing}; "
-                f"it must carry {rid} and {update_cols}.")
+    src_cols = set(source_ds.schema().names)
+    missing = [c for c in [rid] + update_cols if c not in src_cols]
+    if missing:
+        raise ValueError(
+            f"source is missing columns {missing}; it must carry {rid} and {update_cols}.")
 
     # Cast to the on-disk schema (int64 _ROW_ID + target column types) so the writer
     # gets exactly the target types regardless of the source's arrow types.
@@ -130,18 +130,7 @@ def _update_by_row_id(
 
     update_ds = source_ds.map_batches(_project_cast, batch_format="pyarrow")
 
-    snapshot_manager = table.snapshot_manager()
-    base = (
-        snapshot_manager.get_latest_snapshot()
-        if base_snapshot_id is None
-        else snapshot_manager.get_snapshot_by_id(base_snapshot_id)
-    )
-    if base_snapshot_id is not None and base is None:
-        raise RuntimeError(
-            "Update base snapshot {} no longer exists.".format(
-                base_snapshot_id
-            )
-        )
+    base = table.snapshot_manager().get_latest_snapshot()
     # Without deletion vectors (rejected above), total_record_count is the live row
     # count, so 0 means the target is empty (never written, or emptied by overwrite).
     if base is None or base.total_record_count == 0:
@@ -164,36 +153,6 @@ def _update_by_row_id(
     if msgs:
         _commit_update_messages(table, msgs)
     return {"num_updated": num_updated}
-
-
-def _validate_update_target(
-        table, target, update_cols, operation="update_by_row_id") -> None:
-    if not table.options.data_evolution_enabled():
-        raise ValueError(
-            f"{operation} requires 'data-evolution.enabled'='true' on '{target}'.")
-    if not table.options.row_tracking_enabled():
-        raise ValueError(
-            f"{operation} requires 'row-tracking.enabled'='true' on '{target}'.")
-    if table.options.deletion_vectors_enabled():
-        # A DV-deleted row still lives in its data file, so row-id ranges can't tell it
-        # apart without reading the target; refuse rather than update a deleted row.
-        raise ValueError(
-            f"{operation} does not support deletion-vectors-enabled tables yet: "
-            f"'{target}'.")
-
-    blob_cols = _blob_col_names(table)
-    partition_keys = set(table.partition_keys or [])
-    for col in update_cols:
-        if col not in table.field_names:
-            raise ValueError(f"update column {col!r} is not in target '{target}'.")
-        if col in blob_cols:
-            # Update writes plain data files; blob deltas are a separate path.
-            raise ValueError(f"{operation} cannot update blob column {col!r}.")
-        if col in partition_keys:
-            # In-place rewrite can't move a row across partitions.
-            raise ValueError(
-                f"{operation} cannot update partition column {col!r}; "
-                "cross-partition row movement is not supported.")
 
 
 def _commit_update_messages(table, commit_messages) -> None:

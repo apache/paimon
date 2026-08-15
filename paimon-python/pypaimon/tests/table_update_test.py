@@ -283,12 +283,35 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             rows,
         )
 
+    def test_update_by_predicate_accepts_callable_assignments(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        self._do_update_by_predicate(
+            table,
+            pb.greater_or_equal('age', 35),
+            {
+                'age': lambda rows: pa.compute.add(rows['age'], 1),
+                'city': lambda rows: pa.compute.utf8_upper(rows['city']),
+            },
+        )
+
+        result = self._read_all(table)
+        self.assertEqual([25, 30, 36, 41, 46], result['age'].to_pylist())
+        self.assertEqual(
+            ['NYC', 'LA', 'CHICAGO', 'HOUSTON', 'PHOENIX'],
+            result['city'].to_pylist(),
+        )
+
     def test_update_by_predicate_updates_all_rows_when_predicate_is_none(self):
         table = self._create_seeded_table()
         self._do_update_by_predicate(
             table,
             None,
-            {'age': pa.scalar(7, type=pa.int64()), 'city': None},
+            {
+                'age': pa.scalar(7, type=pa.int64()),
+                'city': None,
+                'name': lambda rows: pa.compute.utf8_upper(rows['name']),
+            },
         )
 
         result = self._read_all(table)
@@ -296,7 +319,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self.assertEqual([None, None, None, None, None],
                          result['city'].to_pylist())
         self.assertEqual(
-            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            ['ALICE', 'BOB', 'CHARLIE', 'DAVID', 'EVE'],
             result['name'].to_pylist(),
         )
 

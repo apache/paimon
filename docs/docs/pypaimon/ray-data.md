@@ -638,59 +638,6 @@ ds = read_by_row_id(
   action, not read here. A lazy source missing `row_id_col` raises when the read runs
   (a materialized source raises up front).
 
-## Update By Predicate
-
-`update_by_predicate` applies a vectorized Arrow transform to matching rows and
-commits file-group-aligned batches. The application supplies the predicate,
-columns, transform, and target rows per commit; it does not handle row ids or
-physical files.
-
-```python
-import pyarrow as pa
-import pyarrow.compute as pc
-
-from pypaimon import CatalogFactory
-from pypaimon.data import variant_get, variant_replace
-from pypaimon.ray import update_by_predicate
-
-target = "database_name.topics"
-options = {"warehouse": "/path/to/warehouse"}
-table = CatalogFactory.create(options).get_table(target)
-pb = table.new_read_builder().new_predicate_builder()
-predicate = pb.or_predicates([
-    pb.is_null("topic_schema"),
-    pb.not_equal("topic_schema", "imu-v2"),
-])
-
-
-def fix_payload(batch):
-    payload = batch["payload"]
-    value = variant_get(payload, "$.angular_velocity.y", pa.float64())
-    return pa.table({
-        "payload": variant_replace(payload, {
-            "$.angular_velocity.y": pc.negate(value),
-        }),
-        "topic_schema": ["imu-v2"] * len(batch),
-    })
-
-
-metrics = update_by_predicate(
-    target,
-    predicate,
-    fix_payload,
-    options,
-    read_columns=["payload"],
-    update_cols=["payload", "topic_schema"],
-    rows_per_commit=10_000_000,
-    batch_size=4096,
-)
-```
-
-`read_columns` must also be present in `update_cols`, so concurrent changes to
-transform inputs use the existing row-id update conflict detection. Completed
-batches remain visible after a later failure. Use an idempotent transform or a
-predicate such as the version check above so retry skips completed rows.
-
 ## Process Row Id Ranges
 
 `process_row_id_ranges` plans the latest snapshot into logical file groups and
