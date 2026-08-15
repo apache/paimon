@@ -887,12 +887,11 @@ class RESTCatalogServer:
             if request.branch in store:
                 raise BranchAlreadyExistException(request.branch)
 
-            if request.from_tag is None:
-                snapshot = (
-                    self._get_file_table(identifier)
-                    .snapshot_manager()
-                    .get_latest_snapshot()
-                )
+            if request.from_tag is not None:
+                tags = self.tag_store.get(identifier.get_full_name(), {})
+                if request.from_tag not in tags:
+                    raise TagNotExistException(request.from_tag)
+                snapshot = tags[request.from_tag].snapshot
                 if snapshot is not None:
                     self._write_snapshot_files(
                         identifier, snapshot, None, request.branch)

@@ -22,7 +22,8 @@ import pyarrow as pa
 from pypaimon import Schema
 from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 BranchNotExistException,
-                                                TableNotExistException)
+                                                TableNotExistException,
+                                                TagNotExistException)
 from pypaimon.common.identifier import Identifier
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
@@ -68,6 +69,14 @@ class RESTCatalogBranchCRUDTest(RESTBaseTest):
         identifier = self._identifier()
         self.rest_catalog.create_branch(identifier, "b1")
         self.assertEqual(self.rest_catalog.list_branches(identifier), ["b1"])
+        branch = self.rest_catalog.get_table(Identifier(
+            identifier.get_database_name(), identifier.get_table_name(), branch="b1"))
+        self.assertEqual(self._read(branch).num_rows, 0)
+
+    def test_create_branch_from_missing_tag_raises(self):
+        with self.assertRaises(TagNotExistException):
+            self.rest_catalog.create_branch(
+                self._identifier(), "b1", tag_name="missing")
 
     def test_branch_table_uses_branch_schema_manager(self):
         identifier = self._identifier()
@@ -110,7 +119,8 @@ class RESTCatalogBranchCRUDTest(RESTBaseTest):
             self._read(main).to_pydict(),
             {"id": [1], "payload": [b"main"]},
         )
-        self.rest_catalog.create_branch(identifier, "b1")
+        self.rest_catalog.create_tag(identifier, "base")
+        self.rest_catalog.create_branch(identifier, "b1", tag_name="base")
 
         branch_identifier = Identifier(
             identifier.get_database_name(), identifier.get_table_name(), branch="b1")
