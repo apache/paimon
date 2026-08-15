@@ -246,7 +246,8 @@ class TableUpdate:
             read_builder.with_projection([SpecialFields.ROW_ID.name])
 
         scan = read_builder.new_scan()
-        splits = scan.plan_for_write().splits()
+        plan = scan.plan_for_write()
+        splits = plan.splits()
         matched = read_builder.new_read().to_arrow(splits)
         if matched.num_rows == 0:
             return []
@@ -255,8 +256,13 @@ class TableUpdate:
             assignments,
             matched,
         )
+        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        files_info = TableUpdateByRowId._files_info_from_splits(
+            snapshot_id, splits
+        )
         return TableUpdateByRowId(
             self.table, self.commit_user, commit_identifier,
+            _precomputed_files_info=files_info,
         ).update_columns(update_table, list(assignments.keys()))
 
     def _matched_update_scan_table(self):

@@ -1321,6 +1321,32 @@ class _StreamModeMixin(StreamModeMixin):
 class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestCase):
     """All shared update tests under batch (``BatchWriteBuilder``) semantics."""
 
+    def test_callable_predicate_update_conflicts_with_concurrent_update(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        wb = self._make_write_builder(table)
+        update = wb.new_update()
+
+        def increment_age(rows):
+            self.assertEqual([25], rows['age'].to_pylist())
+            self._do_update(table, pa.Table.from_pydict({
+                '_ROW_ID': pa.array([0], type=pa.int64()),
+                'age': pa.array([100], type=pa.int32()),
+            }), ['age'])
+            return pa.compute.add(rows['age'], 1)
+
+        messages = update.update_by_predicate(
+            pb.equal('id', 1),
+            {'age': increment_age},
+        )
+        commit = wb.new_commit()
+        with self.assertRaisesRegex(RuntimeError, "multiple 'MERGE INTO'"):
+            commit.commit(messages)
+        commit.close()
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([100, 30, 35, 40, 45], result['age'].to_pylist())
+
     def test_update_by_row_id_aborts_files_after_prepare_commit_failure(self):
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
