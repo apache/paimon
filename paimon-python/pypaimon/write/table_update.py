@@ -233,6 +233,7 @@ class TableUpdate:
         literals or callables receiving the matched rows as an Arrow table.
         """
         has_callable = any(callable(value) for value in assignments.values())
+        read_columns = tuple(read_columns or ())
         self._validate_predicate_update(
             predicate, assignments, read_columns, has_callable
         )
@@ -242,7 +243,7 @@ class TableUpdate:
         if predicate is not None:
             read_builder.with_filter(predicate)
         if has_callable:
-            projection = list(dict.fromkeys(read_columns or []))
+            projection = list(dict.fromkeys(read_columns))
             projection.append(SpecialFields.ROW_ID.name)
             read_builder.with_projection(projection)
         elif predicate is not None:
@@ -273,7 +274,7 @@ class TableUpdate:
         ).update_columns(update_table, list(assignments.keys()))
         if has_callable:
             conflict_cols = list(dict.fromkeys(
-                list(assignments.keys()) + list(read_columns or [])
+                list(assignments.keys()) + list(read_columns)
             ))
             for message in messages:
                 message.conflict_cols = conflict_cols

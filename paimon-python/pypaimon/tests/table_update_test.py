@@ -1393,11 +1393,18 @@ class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestC
             read_columns=['id'],
         )
         second_wb = self._make_write_builder(table)
+        second_read_columns = ['name']
+
+        def derive_id(rows):
+            second_read_columns.clear()
+            return pa.compute.utf8_length(rows['name'])
+
         second_messages = second_wb.new_update().update_by_predicate(
             pb.equal('id', 1),
-            {'id': lambda rows: pa.compute.utf8_length(rows['name'])},
-            read_columns=['name'],
+            {'id': derive_id},
+            read_columns=second_read_columns,
         )
+        self.assertEqual([], second_read_columns)
 
         first_commit = first_wb.new_commit()
         first_commit.commit(first_messages)
