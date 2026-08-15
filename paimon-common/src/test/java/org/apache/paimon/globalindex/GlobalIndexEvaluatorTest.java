@@ -102,6 +102,33 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testEvaluateAsyncDoesNotWaitForReaderResult() {
+        RowType rowType = rowType();
+        CompletableFuture<Optional<GlobalIndexResult>> readerResult = new CompletableFuture<>();
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        new StubGlobalIndexReader(null) {
+                                            @Override
+                                            public CompletableFuture<Optional<GlobalIndexResult>>
+                                                    visitEqual(FieldRef fieldRef, Object literal) {
+                                                return readerResult;
+                                            }
+                                        }));
+        Predicate predicate = new PredicateBuilder(rowType).equal(0, 42);
+
+        CompletableFuture<Optional<GlobalIndexResult>> result = evaluator.evaluateAsync(predicate);
+
+        assertThat(result.isDone()).isFalse();
+        readerResult.complete(Optional.of(resultOf(1, 2, 3)));
+        assertThat(result.join()).isPresent();
+        assertBitmapContainsExactly(result.join().get().results(), 1L, 2L, 3L);
+        evaluator.close();
+    }
+
+    @Test
     void testTopNUsesAggregatedReaderAndReusesPredicateCache() {
         RowType rowType = rowType();
         AtomicInteger readersCreated = new AtomicInteger();

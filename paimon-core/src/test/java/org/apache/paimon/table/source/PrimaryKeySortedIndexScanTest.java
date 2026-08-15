@@ -54,6 +54,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -68,6 +73,86 @@ import static org.mockito.Mockito.when;
 
 /** Tests source-backed BTree and Bitmap planning in file-local row-position space. */
 class PrimaryKeySortedIndexScanTest {
+
+    @Test
+    void testStartsIndependentGroupsBeforeWaitingForResults() throws Exception {
+        DataSplit firstSplit = dataSplit(11, 0, dataFile("data-1", 4));
+        DataSplit secondSplit = dataSplit(11, 1, dataFile("data-2", 4));
+        PrimaryKeyIndexDefinition definition =
+                definition(
+                        7,
+                        BTreeGlobalIndexerFactory.IDENTIFIER,
+                        PrimaryKeyIndexDefinition.Family.BTREE);
+        PrimaryKeySortedIndexScan.Plan plan =
+                PrimaryKeySortedIndexScan.plan(
+                        11,
+                        Arrays.asList(firstSplit, secondSplit),
+                        Collections.singletonList(definition),
+                        Arrays.asList(
+                                payloadEntry(0, payload("btree-0", "data-1", 4, "btree", 7, 4)),
+                                payloadEntry(1, payload("btree-1", "data-2", 4, "btree", 7, 4))));
+        assertThat(plan.files()).hasSize(2);
+        assertThat(plan.files()).allSatisfy(file -> assertThat(file.group(7)).isPresent());
+
+        RowType rowType = RowType.of(new DataField(7, "f7", DataTypes.INT()));
+        Predicate predicate = new PredicateBuilder(rowType).equal(0, 42);
+        CompletableFuture<Optional<GlobalIndexResult>> firstResult = new CompletableFuture<>();
+        CompletableFuture<Optional<GlobalIndexResult>> secondResult = new CompletableFuture<>();
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        GlobalIndexReader firstReader = mock(GlobalIndexReader.class);
+        when(firstReader.visitEqual(any(), eq(42)))
+                .thenAnswer(
+                        ignored -> {
+                            firstStarted.countDown();
+                            return firstResult;
+                        });
+        GlobalIndexReader secondReader = mock(GlobalIndexReader.class);
+        when(secondReader.visitEqual(any(), eq(42)))
+                .thenAnswer(
+                        ignored -> {
+                            secondStarted.countDown();
+                            return secondResult;
+                        });
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            Future<PrimaryKeySortedIndexScan.EvaluatedPlan> evaluated =
+                    executor.submit(
+                            () ->
+                                    PrimaryKeySortedIndexScan.evaluate(
+                                            plan,
+                                            rowType,
+                                            predicate,
+                                            Collections.singletonList(definition),
+                                            (file,
+                                                    ignoredDefinition,
+                                                    ignoredPayloads,
+                                                    ignoredTotalRowCount) ->
+                                                    file.dataFile().fileName().equals("data-1")
+                                                            ? firstReader
+                                                            : secondReader));
+
+            assertThat(firstStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            boolean secondStartedBeforeFirstCompleted = secondStarted.await(1, TimeUnit.SECONDS);
+            firstResult.complete(Optional.of(GlobalIndexResult.createEmpty()));
+            assertThat(secondStarted.await(5, TimeUnit.SECONDS))
+                    .as("the second index group should eventually start")
+                    .isTrue();
+            secondResult.complete(Optional.of(GlobalIndexResult.createEmpty()));
+            assertThat(evaluated.get(5, TimeUnit.SECONDS).files()).hasSize(2);
+            verify(firstReader).close();
+            verify(secondReader).close();
+
+            assertThat(secondStartedBeforeFirstCompleted)
+                    .as("the second index group should start before the first result completes")
+                    .isTrue();
+        } finally {
+            firstResult.completeExceptionally(new RuntimeException("Test cleanup."));
+            secondResult.completeExceptionally(new RuntimeException("Test cleanup."));
+            executor.shutdownNow();
+        }
+    }
 
     @Test
     void testPayloadStateIsBuiltOncePerBucketAndDefinition() {
