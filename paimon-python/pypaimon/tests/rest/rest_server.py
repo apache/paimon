@@ -548,7 +548,8 @@ class RESTCatalogServer:
             elif operation == "rollback":
                 return self._table_rollback_handle(method, data, lookup_identifier)
             elif operation == "snapshot":
-                return self._table_snapshot_handle(method, lookup_identifier)
+                return self._table_snapshot_handle(
+                    method, lookup_identifier, branch_part)
             elif operation == ResourcePaths.PARTITIONS:
                 return self._table_partitions_handle(method, data, lookup_identifier, parameters)
             elif operation == ResourcePaths.TAGS:
@@ -882,14 +883,18 @@ class RESTCatalogServer:
 
         if method == "POST":
             request = JSON.from_json(data, CreateBranchRequest)
-            # Mock simplification: ``from_tag`` existence is NOT validated here.
-            # The real Java REST server checks against TagManager and returns
-            # 404+TAG when the tag is missing. pypaimon's mock doesn't track
-            # tag-to-branch dependencies; a TODO for full validation lives
-            # with the Tag CRUD work in #7746.
             store = self.branch_store.setdefault(identifier.get_full_name(), set())
             if request.branch in store:
                 raise BranchAlreadyExistException(request.branch)
+
+            if request.from_tag is not None:
+                tags = self.tag_store.get(identifier.get_full_name(), {})
+                if request.from_tag not in tags:
+                    raise TagNotExistException(request.from_tag)
+                snapshot = tags[request.from_tag].snapshot
+                if snapshot is not None:
+                    self._write_snapshot_files(
+                        identifier, snapshot, None, request.branch)
             store.add(request.branch)
             return self._mock_response("", 200)
 
@@ -1115,7 +1120,7 @@ class RESTCatalogServer:
                     ErrorResponse("SNAPSHOT", None, "Snapshot is required for commit operation", 400), 400
                 )
 
-            table = self._get_file_table(identifier)
+            table = self._get_file_table(identifier, branch)
             current_snapshot = table.snapshot_manager().get_latest_snapshot()
             current_snapshot_uuid = (
                 current_snapshot.uuid if current_snapshot else None
@@ -1126,7 +1131,9 @@ class RESTCatalogServer:
                 )
 
             # Write snapshot to file system
-            self._write_snapshot_files(identifier, commit_request.snapshot, commit_request.statistics)
+            self._write_snapshot_files(
+                identifier, commit_request.snapshot,
+                commit_request.statistics, branch)
 
             self.logger.info(f"Successfully committed snapshot for table {identifier.get_full_name()}, "
                              f"branch: {branch or 'main'}")
@@ -1220,7 +1227,8 @@ class RESTCatalogServer:
         table.rollback_to(tag_name)
         return self._mock_response("", 200)
 
-    def _table_snapshot_handle(self, method: str, identifier: Identifier) -> Tuple[str, int]:
+    def _table_snapshot_handle(self, method: str, identifier: Identifier,
+                               branch: str = None) -> Tuple[str, int]:
         """Handle table snapshot operations.
 
         Args:
@@ -1246,7 +1254,7 @@ class RESTCatalogServer:
             return self._mock_response(response, 404)
 
         # Get the table and snapshot manager to retrieve snapshot
-        table = self._get_file_table(identifier)
+        table = self._get_file_table(identifier, branch)
         snapshot_manager = table.snapshot_manager()
 
         # Get latest snapshot
@@ -1273,7 +1281,7 @@ class RESTCatalogServer:
         response = GetTableSnapshotResponse(table_snapshot)
         return self._mock_response(response, 200)
 
-    def _get_file_table(self, identifier: Identifier):
+    def _get_file_table(self, identifier: Identifier, branch: str = None):
         """Construct a FileStoreTable from the metadata store.
 
         loads the schema from the metadata store, builds a CatalogEnvironment
@@ -1294,23 +1302,32 @@ class RESTCatalogServer:
             f'file://{self.data_path}/{self.warehouse}/'
             f'{identifier.get_database_name()}/{identifier.get_object_name()}')
 
+        table_identifier = Identifier.create(
+            identifier.get_database_name(), identifier.get_table_name(), branch=branch)
         catalog_env = CatalogEnvironment(
-            identifier=identifier,
+            identifier=table_identifier,
             uuid=table_metadata.uuid,
             catalog_loader=None,
             supports_version_management=False
         )
 
         file_io = FileIO.get(table_path, Options({}))
-        return FileStoreTable(file_io, identifier, table_path, table_schema, catalog_env)
+        return FileStoreTable(
+            file_io, table_identifier, table_path, table_schema, catalog_env)
 
-    def _write_snapshot_files(self, identifier: Identifier, snapshot, statistics):
+    def _write_snapshot_files(self, identifier: Identifier, snapshot, statistics,
+                              branch: str = None):
         """Write snapshot and related files to the file system"""
         import os
 
         # Construct table path: {warehouse}/{database}/{table}
-        table_path = os.path.join(self.data_path, self.warehouse, identifier.get_database_name(),
-                                  identifier.get_object_name())
+        from pypaimon.branch.branch_manager import BranchManager
+
+        table_path = os.path.join(
+            self.data_path, self.warehouse, identifier.get_database_name(),
+            identifier.get_object_name())
+        table_path = BranchManager.branch_path(
+            table_path, BranchManager.normalize_branch(branch))
 
         # Create directory structure
         snapshot_dir = os.path.join(table_path, "snapshot")
