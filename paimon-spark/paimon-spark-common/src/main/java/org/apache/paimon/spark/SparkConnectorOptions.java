@@ -82,6 +82,16 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE.");
 
+    public static final ConfigOption<Boolean> HIVE_STYLE_DYNAMIC_PARTITION_ENABLED =
+            key("write.hive-style-dynamic-partition.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, positional SQL inserts with explicit dynamic partitions "
+                                    + "use Hive's column order, with non-dynamic columns followed by "
+                                    + "dynamic partition columns. If false, the query output follows "
+                                    + "the table schema order.");
+
     public static final ConfigOption<Integer> DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_MAX_ATTEMPTS =
             key("write.data-evolution.update-conflict-retry.max-attempts")
                     .intType()
