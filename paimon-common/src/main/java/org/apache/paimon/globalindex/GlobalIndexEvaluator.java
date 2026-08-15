@@ -69,10 +69,18 @@ public class GlobalIndexEvaluator implements Closeable {
     }
 
     public Optional<GlobalIndexResult> evaluate(@Nullable Predicate predicate) {
+        return await(evaluateAsync(predicate));
+    }
+
+    /**
+     * Evaluate the predicate asynchronously. Keep this evaluator open until the future completes.
+     */
+    public CompletableFuture<Optional<GlobalIndexResult>> evaluateAsync(
+            @Nullable Predicate predicate) {
         if (predicate == null) {
-            return Optional.empty();
+            return CompletableFuture.completedFuture(Optional.empty());
         }
-        return await(visitAsync(predicate)).map(Evaluation::result);
+        return visitAsync(predicate).thenApply(result -> result.map(Evaluation::result));
     }
 
     /** Evaluate the predicate and return the fields whose supported indexes contributed. */

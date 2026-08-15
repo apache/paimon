@@ -42,6 +42,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FutureUtils;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.Pair;
@@ -65,6 +66,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
@@ -246,6 +248,8 @@ public final class PrimaryKeySortedIndexScan {
         }
 
         Map<PkSortedIndexGroup, SharedGlobalIndexReader> sharedReaders = new IdentityHashMap<>();
+        List<GlobalIndexEvaluator> evaluators = new ArrayList<>();
+        List<CompletableFuture<Optional<GlobalIndexResult>>> resultFutures = new ArrayList<>();
         List<EvaluatedFile> files = new ArrayList<>();
         try {
             for (FilePlan file : plan.files()) {
@@ -277,9 +281,20 @@ public final class PrimaryKeySortedIndexScan {
                                     }
                                     return Collections.singletonList(fileLocalReader(file, reader));
                                 });
+                evaluators.add(evaluator);
+                try {
+                    resultFutures.add(evaluator.evaluateAsync(predicate));
+                } catch (RuntimeException e) {
+                    rethrowIfInterrupted(e);
+                    resultFutures.add(FutureUtils.completedExceptionally(e));
+                }
+            }
+
+            for (int i = 0; i < plan.files().size(); i++) {
+                FilePlan file = plan.files().get(i);
                 Optional<GlobalIndexResult> result;
                 try {
-                    result = evaluator.evaluate(predicate);
+                    result = awaitEvaluation(resultFutures.get(i));
                 } catch (RuntimeException e) {
                     rethrowIfInterrupted(e);
                     LOG.warn(
@@ -288,15 +303,32 @@ public final class PrimaryKeySortedIndexScan {
                             file.dataFile().fileName(),
                             e);
                     result = Optional.empty();
-                } finally {
-                    evaluator.close();
                 }
                 files.add(new EvaluatedFile(file, result));
             }
         } finally {
+            IOUtils.closeAllQuietly(evaluators);
             IOUtils.closeAllQuietly(sharedReaders.values());
         }
         return new EvaluatedPlan(plan.snapshotId(), files);
+    }
+
+    private static Optional<GlobalIndexResult> awaitEvaluation(
+            CompletableFuture<Optional<GlobalIndexResult>> future) {
+        try {
+            return future.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted during index evaluation", e);
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof RuntimeException) {
+                throw (RuntimeException) e.getCause();
+            }
+            if (e.getCause() instanceof Error) {
+                throw (Error) e.getCause();
+            }
+            throw new RuntimeException(e.getCause());
+        }
     }
 
     private static GlobalIndexReader fileLocalReader(
