@@ -49,14 +49,16 @@ final class ManifestEntryRunMergeEntry {
         MemorySegment[] ownedFileNameSegments;
 
         static Key viewOf(
-                ProjectedManifestEntry entry, ManifestEntryRunMergePartitionDictionary partitions) {
+                ProjectedManifestEntry entry,
+                ManifestEntryRunMerge.PartitionDictionary partitions) {
             Key key = new Key();
             key.replace(entry, partitions);
             return key;
         }
 
         void replace(
-                ProjectedManifestEntry entry, ManifestEntryRunMergePartitionDictionary partitions) {
+                ProjectedManifestEntry entry,
+                ManifestEntryRunMerge.PartitionDictionary partitions) {
             long firstRowId = entry.file().nonNullFirstRowId();
             this.partitionId = partitions.id(entry.partitionBytes());
             this.partitionRank = partitions.rank(partitionId);

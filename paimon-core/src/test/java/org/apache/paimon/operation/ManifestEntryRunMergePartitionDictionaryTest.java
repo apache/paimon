@@ -34,13 +34,13 @@ import java.util.concurrent.Future;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link ManifestEntryRunMergePartitionDictionary}. */
+/** Tests for {@link ManifestEntryRunMerge.PartitionDictionary}. */
 class ManifestEntryRunMergePartitionDictionaryTest {
 
     @Test
     void testComparatorEqualPartitionsKeepDistinctIds() {
-        ManifestEntryRunMergePartitionDictionary dictionary =
-                new ManifestEntryRunMergePartitionDictionary((left, right) -> 0);
+        ManifestEntryRunMerge.PartitionDictionary dictionary =
+                new ManifestEntryRunMerge.PartitionDictionary((left, right) -> 0);
         int first = dictionary.id(partitionBytes(1));
         int second = dictionary.id(partitionBytes(2));
 
@@ -54,8 +54,8 @@ class ManifestEntryRunMergePartitionDictionaryTest {
 
     @Test
     void testConcurrentCollectionAndRanks() throws Exception {
-        ManifestEntryRunMergePartitionDictionary dictionary =
-                new ManifestEntryRunMergePartitionDictionary(
+        ManifestEntryRunMerge.PartitionDictionary dictionary =
+                new ManifestEntryRunMerge.PartitionDictionary(
                         (left, right) -> Integer.compare(left.getInt(0), right.getInt(0)));
         Map<Integer, Integer> ids = new ConcurrentHashMap<>();
         ExecutorService executor = Executors.newFixedThreadPool(8);

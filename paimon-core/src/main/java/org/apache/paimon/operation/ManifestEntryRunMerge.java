@@ -35,13 +35,20 @@ import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ByteArrayKey;
+import org.apache.paimon.utils.ByteArrayLookupKey;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SerializationUtils;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
@@ -149,8 +156,7 @@ final class ManifestEntryRunMerge {
             int maxNumFileHandles,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
-        ManifestEntryRunMergePartitionDictionary partitions =
-                new ManifestEntryRunMergePartitionDictionary(sortKey::comparePartitions);
+        PartitionDictionary partitions = new PartitionDictionary(sortKey::comparePartitions);
         List<ManifestEntryRunMergePlan.Source.Spec> sources = new ArrayList<>();
         int streamCursorCount = 0;
         long inMemoryEntries = 0;
@@ -236,7 +242,7 @@ final class ManifestEntryRunMerge {
             ManifestFileMeta meta,
             ManifestFile manifestFile,
             RowType partitionType,
-            ManifestEntryRunMergePartitionDictionary partitions,
+            PartitionDictionary partitions,
             ManifestEntryRunMergeEntry.Filter filter)
             throws Exception {
         try (ManifestAvroReader reader =
@@ -253,7 +259,7 @@ final class ManifestEntryRunMerge {
             ManifestFileMeta meta,
             ManifestAvroReader reader,
             RowType partitionType,
-            ManifestEntryRunMergePartitionDictionary partitions,
+            PartitionDictionary partitions,
             ManifestEntryRunMergeEntry.Filter filter)
             throws Exception {
         SimpleStatsConverter partitionStatsConverter = new SimpleStatsConverter(partitionType);
@@ -354,7 +360,7 @@ final class ManifestEntryRunMerge {
     private static int compareDiscoveryKeys(
             ManifestEntryRunMergeEntry.Key left,
             ManifestEntryRunMergeEntry.Key right,
-            ManifestEntryRunMergePartitionDictionary partitions) {
+            PartitionDictionary partitions) {
         return compareRemainingKeys(
                 left, right, partitions.compareIds(left.partitionId, right.partitionId));
     }
@@ -443,7 +449,7 @@ final class ManifestEntryRunMerge {
                         Collections.emptyList(), Collections.emptyList(), false, true);
             }
 
-            void updatePartitionRanks(ManifestEntryRunMergePartitionDictionary partitions) {
+            void updatePartitionRanks(PartitionDictionary partitions) {
                 for (BlockInfo block : blocks) {
                     block.updatePartitionRanks(partitions);
                 }
@@ -505,7 +511,7 @@ final class ManifestEntryRunMerge {
             void collectForSort(
                     ProjectedManifestEntry entry,
                     ManifestEntryRunMergeEntry.Key key,
-                    ManifestEntryRunMergePartitionDictionary partitions,
+                    PartitionDictionary partitions,
                     ManifestEntryRunMergeEntry.Filter filter) {
                 if (!eligible) {
                     return;
@@ -608,11 +614,84 @@ final class ManifestEntryRunMerge {
                 }
             }
 
-            void updatePartitionRanks(ManifestEntryRunMergePartitionDictionary partitions) {
+            void updatePartitionRanks(PartitionDictionary partitions) {
                 checkState(firstKey != null && lastKey != null, "Manifest block has no sort keys.");
                 firstKey.partitionRank = partitions.rank(firstKey.partitionId);
                 lastKey.partitionRank = partitions.rank(lastKey.partitionId);
             }
+        }
+    }
+
+    /** Concurrent partition dictionary and ordering used only by manifest run merge. */
+    static final class PartitionDictionary {
+
+        private final Comparator<BinaryRow> comparator;
+        private final Map<ByteArrayKey, Integer> ids = new ConcurrentHashMap<>();
+        private final ThreadLocal<ByteArrayLookupKey> lookup =
+                ThreadLocal.withInitial(ByteArrayLookupKey::new);
+        private volatile BinaryRow[] partitions = new BinaryRow[16];
+        private int partitionCount;
+        private int[] ranks;
+
+        PartitionDictionary(Comparator<BinaryRow> comparator) {
+            this.comparator = comparator;
+        }
+
+        int id(byte[] bytes) {
+            ByteArrayLookupKey lookupKey = lookup.get();
+            lookupKey.reset(bytes);
+            try {
+                Integer existing = ids.get(lookupKey);
+                if (existing != null) {
+                    return existing;
+                }
+                synchronized (this) {
+                    existing = ids.get(lookupKey);
+                    if (existing != null) {
+                        return existing;
+                    }
+                    checkState(ranks == null, "Manifest scan found an unknown partition.");
+                    byte[] canonical = Arrays.copyOf(bytes, bytes.length);
+                    int id = partitionCount;
+                    if (id == partitions.length) {
+                        partitions = Arrays.copyOf(partitions, partitions.length << 1);
+                    }
+                    partitions[id] = SerializationUtils.deserializeBinaryRow(canonical);
+                    ids.put(new ByteArrayKey(canonical), id);
+                    partitionCount = id + 1;
+                    return id;
+                }
+            } finally {
+                lookupKey.clear();
+            }
+        }
+
+        void finish() {
+            List<Integer> order = new ArrayList<>(partitionCount);
+            for (int id = 0; id < partitionCount; id++) {
+                order.add(id);
+            }
+            order.sort((left, right) -> compareIds(left, right));
+            ranks = new int[partitionCount];
+            int rank = 0;
+            for (int position = 0; position < order.size(); position++) {
+                if (position > 0 && compareIds(order.get(position - 1), order.get(position)) != 0) {
+                    rank++;
+                }
+                ranks[order.get(position)] = rank;
+            }
+        }
+
+        int compareIds(int left, int right) {
+            return comparator.compare(partitions[left], partitions[right]);
+        }
+
+        int rank(int id) {
+            return ranks == null ? 0 : ranks[id];
+        }
+
+        BinaryRow partition(int id) {
+            return partitions[id];
         }
     }
 }
