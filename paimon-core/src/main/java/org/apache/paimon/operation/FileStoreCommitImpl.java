@@ -1589,16 +1589,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 manifestList.readDataManifests(latestSnapshot);
         List<ManifestFileMeta> mergeAfterManifests;
 
-        // the fist trial: use a copied options with forced full compaction settings
-        Options compactOptions = Options.fromMap(options.toMap());
-        compactOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 1);
-        compactOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
         mergeAfterManifests =
                 ManifestFileMerger.merge(
                         mergeBeforeManifests,
                         manifestFile,
                         partitionType,
-                        new CoreOptions(compactOptions),
+                        manifestCompactionOptions(options, mergeBeforeManifests, partitionType),
                         ioManager);
 
         if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
@@ -1635,6 +1631,20 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null);
 
         return commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList());
+    }
+
+    static CoreOptions manifestCompactionOptions(
+            CoreOptions options, List<ManifestFileMeta> manifests, RowType partitionType) {
+        // Use a copied options with forced full compaction settings for the legacy merge path.
+        // Manifest sort has its own full/minor picking strategy and should respect its configured
+        // thresholds.
+        Options compactOptions = Options.fromMap(options.toMap());
+        if (!ManifestFileMerger.canUseManifestSort(manifests, partitionType, options)) {
+            compactOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 1);
+            compactOptions.set(
+                    CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
+        }
+        return new CoreOptions(compactOptions);
     }
 
     private boolean commitSnapshotImpl(

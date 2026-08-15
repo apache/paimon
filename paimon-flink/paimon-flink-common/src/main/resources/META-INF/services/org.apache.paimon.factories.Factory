@@ -16,6 +16,7 @@
 ### action factories
 org.apache.paimon.flink.action.CopyFilesActionFactory
 org.apache.paimon.flink.action.CompactActionFactory
+org.apache.paimon.flink.action.CompactManifestActionFactory
 org.apache.paimon.flink.action.CompactDatabaseActionFactory
 org.apache.paimon.flink.action.DropPartitionActionFactory
 org.apache.paimon.flink.action.DeleteActionFactory

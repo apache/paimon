@@ -110,7 +110,7 @@ public class ManifestFileSorter {
     }
 
     /** Result of classifying manifest files. */
-    private static class ClassifyResult {
+    static class ClassifyResult {
         final List<ManifestFileMeta> lsmFiles;
         final CompactFileIdentifierSet deleteEntries;
         /**
@@ -228,13 +228,7 @@ public class ManifestFileSorter {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         // Step 1: Check if full compaction threshold is met
-        long totalDeltaFileSize = 0;
-        for (ManifestFileMeta file : input) {
-            if (file.numDeletedFiles() > 0 || file.fileSize() < suggestedMetaSize) {
-                totalDeltaFileSize += file.fileSize();
-            }
-        }
-        if (totalDeltaFileSize < fullCompactionThreshold) {
+        if (!reachesFullCompactionThreshold(input, suggestedMetaSize, fullCompactionThreshold)) {
             return Optional.empty();
         }
         // Step 2: Prepare compaction context
@@ -490,6 +484,17 @@ public class ManifestFileSorter {
                 pickedRuns);
     }
 
+    static boolean reachesFullCompactionThreshold(
+            List<ManifestFileMeta> input, long suggestedMetaSize, long fullCompactionThreshold) {
+        long totalDeltaFileSize = 0;
+        for (ManifestFileMeta file : input) {
+            if (file.numDeletedFiles() > 0 || file.fileSize() < suggestedMetaSize) {
+                totalDeltaFileSize += file.fileSize();
+            }
+        }
+        return totalDeltaFileSize >= fullCompactionThreshold;
+    }
+
     /**
      * Classify manifest files into default-compaction group and LSM group.
      *
@@ -501,7 +506,7 @@ public class ManifestFileSorter {
      *
      * @return ClassifyResult containing lsmFiles, deleteEntries, and compactWithoutSort
      */
-    private static ClassifyResult classifyManifests(
+    static ClassifyResult classifyManifests(
             List<ManifestFileMeta> input,
             boolean fullCompaction,
             ManifestFile manifestFile,
@@ -1116,7 +1121,7 @@ public class ManifestFileSorter {
         return true;
     }
 
-    private static ManifestSortKey createSortKey(
+    static ManifestSortKey createSortKey(
             boolean dataEvolutionEnabled,
             List<ManifestFileMeta> input,
             String sortPartitionField,
