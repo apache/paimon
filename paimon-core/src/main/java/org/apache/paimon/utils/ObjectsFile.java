@@ -200,17 +200,16 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
                 }
                 return Pair.of(path.getName(), fileIO.getFileSize(path));
             } else {
-                PositionOutputStream out = fileIO.newOutputStream(path, false);
                 long pos;
-                try {
+                try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
+                    // Nested rather than a single resource list: the position has to be read
+                    // after the writer has flushed, and before the stream itself is closed.
                     try (FormatWriter writer = writerFactory.create(out, compression)) {
                         while (records.hasNext()) {
                             writer.addElement(serializer.toRow(records.next()));
                         }
                     }
                     pos = out.getPos();
-                } finally {
-                    out.close();
                 }
                 return Pair.of(path.getName(), pos);
             }
