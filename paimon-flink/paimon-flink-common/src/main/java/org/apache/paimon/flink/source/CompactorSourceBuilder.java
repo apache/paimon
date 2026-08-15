@@ -33,6 +33,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.CompactBucketsTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -67,6 +68,7 @@ public class CompactorSourceBuilder {
     private boolean isContinuous = false;
     private StreamExecutionEnvironment env;
     @Nullable private PartitionPredicate partitionPredicate = null;
+    @Nullable private Filter<Integer> bucketFilter = null;
     @Nullable private Duration partitionIdleTime = null;
 
     private CompactionBucketDistributionStrategy bucketDistributionStrategy =
@@ -99,6 +101,9 @@ public class CompactorSourceBuilder {
         ReadBuilder readBuilder = compactBucketsTable.newReadBuilder();
         if (partitionPredicate != null) {
             readBuilder.withPartitionFilter(partitionPredicate);
+        }
+        if (bucketFilter != null) {
+            readBuilder.withBucketFilter(bucketFilter);
         }
         if (CoreOptions.fromMap(table.options()).manifestDeleteFileDropStats()) {
             readBuilder = readBuilder.dropStats();
@@ -228,6 +233,11 @@ public class CompactorSourceBuilder {
     public CompactorSourceBuilder withPartitionPredicate(
             @Nullable PartitionPredicate partitionPredicate) {
         this.partitionPredicate = partitionPredicate;
+        return this;
+    }
+
+    public CompactorSourceBuilder withBucketFilter(@Nullable Filter<Integer> bucketFilter) {
+        this.bucketFilter = bucketFilter;
         return this;
     }
 

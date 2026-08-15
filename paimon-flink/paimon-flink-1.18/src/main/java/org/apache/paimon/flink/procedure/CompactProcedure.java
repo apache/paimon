@@ -139,6 +139,31 @@ public class CompactProcedure extends ProcedureBase {
             String partitionIdleTime,
             String compactStrategy)
             throws Exception {
+        return call(
+                procedureContext,
+                tableId,
+                partitions,
+                orderStrategy,
+                orderByColumns,
+                tableOptions,
+                whereSql,
+                partitionIdleTime,
+                compactStrategy,
+                null);
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String partitions,
+            String orderStrategy,
+            String orderByColumns,
+            String tableOptions,
+            String whereSql,
+            String partitionIdleTime,
+            String compactStrategy,
+            String buckets)
+            throws Exception {
         Map<String, String> catalogOptions = catalog.options();
         Map<String, String> tableConf =
                 StringUtils.isNullOrWhitespaceOnly(tableOptions)
@@ -178,6 +203,10 @@ public class CompactProcedure extends ProcedureBase {
         } else {
             throw new IllegalArgumentException(
                     "You must specify 'order strategy' and 'order by columns' both.");
+        }
+
+        if (buckets != null) {
+            action.withBucketsExpression(buckets);
         }
 
         if (!(StringUtils.isNullOrWhitespaceOnly(partitions))) {
