@@ -18,6 +18,8 @@
 
 package org.apache.paimon.operation.commit;
 
+import javax.annotation.Nullable;
+
 /** Conflict caused by a staged file referencing a row-id range absent from the latest snapshot. */
 public final class RowIdExistenceConflictException extends RuntimeException {
 
@@ -30,5 +32,26 @@ public final class RowIdExistenceConflictException extends RuntimeException {
                                 + "The referenced file may have been rewritten by a "
                                 + "concurrent compaction or removed by an overwrite.",
                         fileName, firstRowId, rowCount, bucket));
+    }
+
+    RowIdExistenceConflictException(
+            String fileName,
+            @Nullable Long deletedFirstRowId,
+            long deletedRowCount,
+            @Nullable Long currentFirstRowId,
+            long currentRowCount,
+            int bucket) {
+        super(
+                String.format(
+                        "Row ID existence conflict: DELETE for file '%s' references "
+                                + "firstRowId=%s, rowCount=%d in bucket %d, but the current file "
+                                + "has firstRowId=%s, rowCount=%d. The file may have been "
+                                + "reassigned by a concurrent commit.",
+                        fileName,
+                        deletedFirstRowId,
+                        deletedRowCount,
+                        bucket,
+                        currentFirstRowId,
+                        currentRowCount));
     }
 }

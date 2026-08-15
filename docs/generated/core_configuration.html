@@ -1048,6 +1048,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>To avoid frequent manifest merges, this parameter specifies the minimum number of ManifestFileMeta to merge.<br />Note: when 'manifest-sort.enabled' is true, this minimum-count gate is only applied to the trailing sub-segment of a section that exceeds 'manifest-sort.max-rewrite-size'. Small under-budget sections are sorted and rewritten directly, so two small manifest files may be merged into one even when their count is below this threshold and full compaction is not triggered.</td>
         </tr>
         <tr>
+            <td><h5>manifest.merge-optimize.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable block-aware ordinary manifest merging. When disabled, ordinary manifest compaction uses the legacy full-entry merger.</td>
+        </tr>
+        <tr>
             <td><h5>manifest.target-file-size</h5></td>
             <td style="word-wrap: break-word;">8 mb</td>
             <td>MemorySize</td>

@@ -57,6 +57,22 @@ public final class RawBlock {
         return block.getNumEntries();
     }
 
+    public Schema schema() {
+        return schema;
+    }
+
+    /** Returns an independently owned copy which remains valid after the reader advances. */
+    public RawBlock stableCopy() {
+        ByteBuffer source = block.getAsByteBuffer().duplicate();
+        ByteBuffer copy = ByteBuffer.allocate(source.remaining());
+        copy.put(source);
+        copy.flip();
+        DataFileStream.DataBlock copiedBlock =
+                new DataFileStream.DataBlock(copy, block.getNumEntries());
+        copiedBlock.setFlushOnWrite(block.isFlushOnWrite());
+        return new RawBlock(copiedBlock, codec, schema);
+    }
+
     public ByteBuffer decompress(ByteBuffer reuse) throws IOException {
         if (!decompressed) {
             if (codec instanceof ZstandardCodec) {
@@ -100,20 +116,16 @@ public final class RawBlock {
                 target.limit(size);
                 decompressedBuffer = target.duplicate();
             } else {
-                block.decompressUsing(codec);
-                decompressedBuffer = block.getAsByteBuffer().duplicate();
+                decompressedBuffer = codec.decompress(block.getAsByteBuffer().duplicate());
             }
             decompressed = true;
         }
         return decompressedBuffer.duplicate();
     }
 
-    /** Returns a single-block stream for appending this compressed block to an Avro writer. */
-    public <D> DataFileStream<D> asStream() throws IOException {
-        if (decompressed) {
-            throw new IllegalStateException("A decompressed Avro block cannot be copied raw.");
-        }
-        return new SingleBlockStream<D>(schema, codec, block);
+    /** Returns a single-block stream using a binary-compatible target schema. */
+    public <D> DataFileStream<D> asStream(Schema targetSchema) throws IOException {
+        return new SingleBlockStream<D>(targetSchema, codec, block);
     }
 
     private static final class SingleBlockStream<D> extends DataFileStream<D> {

@@ -203,6 +203,15 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         }
     }
 
+    /** Opens a low-allocation reader over raw Avro manifest blocks. */
+    public ManifestAvroReader scanAvroBlocks(String fileName, @Nullable Long fileSize) {
+        try {
+            return new ManifestAvroReader(fileIO.newInputStream(pathFactory.toPath(fileName)));
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read manifest file " + fileName, e);
+        }
+    }
+
     @VisibleForTesting
     public long suggestedFileSize() {
         return suggestedFileSize;

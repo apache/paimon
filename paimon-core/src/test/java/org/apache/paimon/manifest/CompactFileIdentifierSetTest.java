@@ -80,6 +80,25 @@ class CompactFileIdentifierSetTest {
     }
 
     @Test
+    void testAddAll() {
+        CompactFileIdentifierSet first = new CompactFileIdentifierSet();
+        first.add(1, new byte[] {1, 2}, 2);
+        first.add(2, new byte[] {3, 4, 5}, 3);
+
+        CompactFileIdentifierSet second = new CompactFileIdentifierSet();
+        second.add(2, new byte[] {3, 4, 5}, 3);
+        second.add(3, new byte[] {6, 7, 8, 9}, 4);
+
+        first.addAll(second);
+
+        assertThat(first.size()).isEqualTo(3);
+        assertThat(first.retainedIdentifierBytes()).isEqualTo(9);
+        assertThat(first.contains(1, new byte[] {1, 2}, 2)).isTrue();
+        assertThat(first.contains(2, new byte[] {3, 4, 5}, 3)).isTrue();
+        assertThat(first.contains(3, new byte[] {6, 7, 8, 9}, 4)).isTrue();
+    }
+
+    @Test
     void testRejectsInvalidIdentifier() {
         CompactFileIdentifierSet identifiers = new CompactFileIdentifierSet();
 

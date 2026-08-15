@@ -198,6 +198,47 @@ public class AvroFileFormatTest {
     }
 
     @Test
+    void testRawBlockCompatibilityUsesBinaryLayoutAndFieldIdentity() {
+        Schema expected =
+                SchemaBuilder.record("Expected")
+                        .fields()
+                        .requiredInt("id")
+                        .name("nested")
+                        .type(
+                                SchemaBuilder.record("ExpectedNested")
+                                        .fields()
+                                        .requiredLong("value")
+                                        .endRecord())
+                        .noDefault()
+                        .endRecord();
+        Schema renamedRecords =
+                SchemaBuilder.record("Actual")
+                        .fields()
+                        .requiredInt("id")
+                        .name("nested")
+                        .type(
+                                SchemaBuilder.record("ActualNested")
+                                        .fields()
+                                        .requiredLong("value")
+                                        .endRecord())
+                        .noDefault()
+                        .endRecord();
+        Schema renamedField =
+                SchemaBuilder.record("Actual")
+                        .fields()
+                        .requiredInt("other_id")
+                        .name("nested")
+                        .type(renamedRecords.getField("nested").schema())
+                        .noDefault()
+                        .endRecord();
+        Schema missingField = SchemaBuilder.record("Actual").fields().requiredInt("id").endRecord();
+
+        assertThat(AvroBlockReader.hasSameBinaryLayout(expected, renamedRecords)).isTrue();
+        assertThat(AvroBlockReader.hasSameBinaryLayout(expected, renamedField)).isFalse();
+        assertThat(AvroBlockReader.hasSameBinaryLayout(expected, missingField)).isFalse();
+    }
+
+    @Test
     void testRowReaderProjectsIntoReusedRow() throws IOException {
         Schema writerSchema =
                 SchemaBuilder.record("record")

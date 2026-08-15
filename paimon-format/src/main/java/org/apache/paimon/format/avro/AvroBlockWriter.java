@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 
+import org.apache.avro.Schema;
 import org.apache.avro.file.DataFileWriter;
 
 import java.io.IOException;
@@ -32,10 +33,13 @@ public final class AvroBlockWriter implements FormatWriter {
 
     private final DataFileWriter<InternalRow> writer;
     private final PositionOutputStream out;
+    private final Schema schema;
 
-    public AvroBlockWriter(DataFileWriter<InternalRow> writer, PositionOutputStream out) {
+    public AvroBlockWriter(
+            DataFileWriter<InternalRow> writer, PositionOutputStream out, Schema schema) {
         this.writer = writer;
         this.out = out;
+        this.schema = schema;
     }
 
     @Override
@@ -48,7 +52,11 @@ public final class AvroBlockWriter implements FormatWriter {
     }
 
     public void addEncodedBlock(AvroRawBlock block) throws IOException {
-        writer.appendAllFrom(block.asStream(), false);
+        if (!AvroBlockReader.hasSameBinaryLayout(schema, block.rawBlock().schema())) {
+            throw new IllegalArgumentException(
+                    "Avro block schema is not binary-compatible with the writer schema.");
+        }
+        writer.appendAllFrom(block.rawBlock().asStream(schema), false);
     }
 
     @Override

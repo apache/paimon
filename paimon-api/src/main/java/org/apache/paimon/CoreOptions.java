@@ -589,6 +589,15 @@ public class CoreOptions implements Serializable {
                                     + " skipped. Set to a larger value to allow more aggressive"
                                     + " sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.");
 
+    public static final ConfigOption<Boolean> MANIFEST_MERGE_OPTIMIZE_ENABLED =
+            key("manifest.merge-optimize.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to enable block-aware ordinary manifest merging. When"
+                                    + " disabled, ordinary manifest compaction uses the legacy"
+                                    + " full-entry merger.");
+
     public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
             key("partition.default-name")
                     .stringType()
@@ -3064,6 +3073,10 @@ public class CoreOptions implements Serializable {
 
     public long manifestSortMaxRewriteSize() {
         return options.get(MANIFEST_SORT_MAX_REWRITE_SIZE).getBytes();
+    }
+
+    public boolean manifestMergeOptimizeEnabled() {
+        return options.get(MANIFEST_MERGE_OPTIMIZE_ENABLED);
     }
 
     public String partitionDefaultName() {
