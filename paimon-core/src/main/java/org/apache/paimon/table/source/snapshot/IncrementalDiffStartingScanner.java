@@ -101,16 +101,20 @@ public class IncrementalDiffStartingScanner extends AbstractStartingScanner {
         return new IncrementalDiffStartingScanner(snapshotManager, start, end);
     }
 
-    public static IncrementalDiffStartingScanner betweenTimestamps(
+    public static StartingScanner betweenTimestamps(
             long startTimestamp, long endTimestamp, SnapshotManager snapshotManager) {
         Snapshot startSnapshot = snapshotManager.earlierOrEqualTimeMills(startTimestamp);
-        if (startSnapshot == null) {
-            startSnapshot = snapshotManager.earliestSnapshot();
-        }
-
         Snapshot endSnapshot = snapshotManager.earlierOrEqualTimeMills(endTimestamp);
         if (endSnapshot == null) {
             endSnapshot = snapshotManager.latestSnapshot();
+        }
+
+        if (startSnapshot == null) {
+            Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
+            if (earliestSnapshot.id() == Snapshot.FIRST_SNAPSHOT_ID) {
+                return new StaticFromSnapshotStartingScanner(snapshotManager, endSnapshot.id());
+            }
+            startSnapshot = earliestSnapshot;
         }
 
         return new IncrementalDiffStartingScanner(snapshotManager, startSnapshot, endSnapshot);
