@@ -20,6 +20,7 @@ import json
 import os
 import sys
 import unittest
+import uuid
 from decimal import Decimal
 
 import pandas as pd
@@ -1931,7 +1932,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         splits = table_scan.plan().splits()
         result = table_read.to_arrow(splits)
 
-        self.assertEqual(result.num_rows, 3)
+        self.assertEqual(result.num_rows, 7)
 
         # VARIANT maps to struct<value: binary NOT NULL, metadata: binary NOT NULL>
         payload_field = result.schema.field('payload')
@@ -1972,6 +1973,31 @@ class JavaPyReadWriteTest(unittest.TestCase):
         # Row 3: Carol, [1,2,3]
         carol_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(3)]).to_python()
         self.assertEqual(carol_data, [1, 2, 3])
+
+        # Row 4: Dave, DATE '2024-01-15'
+        dave_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(4)]).to_python()
+        self.assertEqual(dave_data, datetime.date(2024, 1, 15))
+
+        # Row 5: Eve, TIMESTAMP_NTZ '2024-01-15 12:30:45.123456'
+        eve_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(5)]).to_python()
+        self.assertEqual(
+            eve_data, datetime.datetime(2024, 1, 15, 12, 30, 45, 123456)
+        )
+
+        # Row 6: Frank, TIMESTAMP '2024-01-15 12:30:45.123456 UTC'
+        frank_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(6)]).to_python()
+        self.assertEqual(
+            frank_data,
+            datetime.datetime(
+                2024, 1, 15, 12, 30, 45, 123456, tzinfo=datetime.timezone.utc
+            ),
+        )
+
+        # Row 7: Grace, UUID '12345678-1234-5678-1234-567812345678'
+        grace_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(7)]).to_python()
+        self.assertEqual(
+            grace_data, uuid.UUID('12345678-1234-5678-1234-567812345678')
+        )
 
         print("test_py_read_variant_table: verified {} VARIANT rows".format(result.num_rows))
 
@@ -2029,6 +2055,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             id=2  payload=[10,20,30]
             id=3  payload="hello"
             id=4  payload=null
+            id=5  payload=DATE '2024-01-15'
+            id=6  payload=TIMESTAMP_NTZ '2024-01-15 12:30:45.123456'
+            id=7  payload=UUID '12345678-1234-5678-1234-567812345678'
         """
         variant_type = pa.struct([
             pa.field('value', pa.binary(), nullable=False),
@@ -2046,15 +2075,24 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.catalog.create_table(table_name, schema, False)
         table = self.catalog.get_table(table_name)
 
+        test_uuid = uuid.UUID('12345678-1234-5678-1234-567812345678')
         variant_col = GenericVariant.to_arrow_array([
             GenericVariant.from_python({"name": "test", "value": 42}),
             GenericVariant.from_python([10, 20, 30]),
             GenericVariant.from_python("hello"),
             None,  # SQL NULL at the column level, not a VARIANT containing JSON null
+            GenericVariant.from_python(datetime.date(2024, 1, 15)),
+            GenericVariant.from_python(
+                datetime.datetime(2024, 1, 15, 12, 30, 45, 123456)
+            ),
+            GenericVariant.from_python(test_uuid),
         ])
         data = pa.table({
-            'id': pa.array([1, 2, 3, 4], type=pa.int32()),
-            'name': pa.array(['row1', 'row2', 'row3', 'row4'], type=pa.string()),
+            'id': pa.array([1, 2, 3, 4, 5, 6, 7], type=pa.int32()),
+            'name': pa.array(
+                ['row1', 'row2', 'row3', 'row4', 'row5', 'row6', 'row7'],
+                type=pa.string()
+            ),
             'payload': variant_col,
         }, schema=pa_schema)
 
@@ -2065,7 +2103,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
         table_commit.close()
-        print("test_py_write_variant_table: wrote 4 VARIANT rows to {}".format(table_name))
+        print("test_py_write_variant_table: wrote 7 VARIANT rows to {}".format(table_name))
 
         # Also write a shredded VARIANT table (py_variant_shredded_test) for Java to read.
         # Python shreds the 'age' (BIGINT) and 'city' (VARCHAR) sub-fields of 'payload'

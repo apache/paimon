@@ -39,6 +39,8 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.GenericVariantBuilder;
+import org.apache.paimon.data.variant.GenericVariantUtil.Type;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
@@ -102,6 +104,10 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -1695,6 +1701,28 @@ public class JavaPyE2ETest {
                             3,
                             BinaryString.fromString("Carol"),
                             GenericVariant.fromJson("[1,2,3]")));
+
+            // Scalar DATE/TIMESTAMP/TIMESTAMP_NTZ/UUID values for cross-language compatibility.
+            GenericVariantBuilder b = new GenericVariantBuilder(false);
+            b.appendDate((int) LocalDate.of(2024, 1, 15).toEpochDay());
+            GenericVariant v = b.result();
+            write.write(GenericRow.of(4, BinaryString.fromString("Dave"), v));
+
+            b = new GenericVariantBuilder(false);
+            b.appendTimestampNtz(
+                    toEpochMicros(LocalDateTime.of(2024, 1, 15, 12, 30, 45, 123456000)));
+            v = b.result();
+            write.write(GenericRow.of(5, BinaryString.fromString("Eve"), v));
+
+            b = new GenericVariantBuilder(false);
+            b.appendTimestamp(toEpochMicros(Instant.parse("2024-01-15T12:30:45.123456Z")));
+            v = b.result();
+            write.write(GenericRow.of(6, BinaryString.fromString("Frank"), v));
+
+            b = new GenericVariantBuilder(false);
+            b.appendUuid(UUID.fromString("12345678-1234-5678-1234-567812345678"));
+            v = b.result();
+            write.write(GenericRow.of(7, BinaryString.fromString("Grace"), v));
             commit.commit(write.prepareCommit());
         }
 
@@ -1704,7 +1732,7 @@ public class JavaPyE2ETest {
         TableRead read = readTable.newRead();
         List<String> res =
                 getResult(read, splits, row -> internalRowToString(row, readTable.rowType()));
-        assertThat(res).hasSize(3);
+        assertThat(res).hasSize(7);
         LOG.info("testJavaWriteVariantTable: wrote and read back {} VARIANT rows", res.size());
 
         // Also write a shredded VARIANT table for Python to read (variant_shredded_test).
@@ -1775,7 +1803,7 @@ public class JavaPyE2ETest {
         TableRead read = table.newRead();
         List<String> res =
                 getResult(read, splits, row -> internalRowToString(row, table.rowType()));
-        assertThat(res).hasSize(4);
+        assertThat(res).hasSize(7);
 
         // Verify the VARIANT column is present in the schema
         assertThat(table.rowType().getFieldNames()).contains("payload");
@@ -1794,8 +1822,29 @@ public class JavaPyE2ETest {
                             assertThat(row.isNullAt(2)).isTrue();
                         } else {
                             assertThat(row.isNullAt(2)).isFalse();
-                            org.apache.paimon.data.variant.Variant v = row.getVariant(2);
+                            GenericVariant v = (GenericVariant) row.getVariant(2);
                             assertThat(v).isNotNull();
+                            if (id == 5) {
+                                // DATE '2024-01-15'
+                                assertThat(v.getType()).isEqualTo(Type.DATE);
+                                assertThat(v.getLong())
+                                        .isEqualTo(LocalDate.of(2024, 1, 15).toEpochDay());
+                            } else if (id == 6) {
+                                // TIMESTAMP_NTZ '2024-01-15 12:30:45.123456'
+                                assertThat(v.getType()).isEqualTo(Type.TIMESTAMP_NTZ);
+                                long expectedMicros =
+                                        toEpochMicros(
+                                                LocalDateTime.of(
+                                                        2024, 1, 15, 12, 30, 45, 123456000));
+                                assertThat(v.getLong()).isEqualTo(expectedMicros);
+                            } else if (id == 7) {
+                                // UUID '12345678-1234-5678-1234-567812345678'
+                                assertThat(v.getType()).isEqualTo(Type.UUID);
+                                assertThat(v.getUuid())
+                                        .isEqualTo(
+                                                UUID.fromString(
+                                                        "12345678-1234-5678-1234-567812345678"));
+                            }
                         }
                     });
         }
@@ -1841,6 +1890,15 @@ public class JavaPyE2ETest {
         LOG.info(
                 "testJavaReadVariantTable: Java read {} shredded VARIANT rows written by Python",
                 shreddedRes.size());
+    }
+
+    private static long toEpochMicros(LocalDateTime dateTime) {
+        return dateTime.toInstant(ZoneOffset.UTC).getEpochSecond() * 1_000_000L
+                + dateTime.getNano() / 1000L;
+    }
+
+    private static long toEpochMicros(Instant instant) {
+        return instant.getEpochSecond() * 1_000_000L + instant.getNano() / 1000L;
     }
 
     /** Step 1: Write 5 base files for compact conflict test. */
