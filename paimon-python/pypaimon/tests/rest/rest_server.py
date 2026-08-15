@@ -883,14 +883,19 @@ class RESTCatalogServer:
 
         if method == "POST":
             request = JSON.from_json(data, CreateBranchRequest)
-            # Mock simplification: ``from_tag`` existence is NOT validated here.
-            # The real Java REST server checks against TagManager and returns
-            # 404+TAG when the tag is missing. pypaimon's mock doesn't track
-            # tag-to-branch dependencies; a TODO for full validation lives
-            # with the Tag CRUD work in #7746.
             store = self.branch_store.setdefault(identifier.get_full_name(), set())
             if request.branch in store:
                 raise BranchAlreadyExistException(request.branch)
+
+            if request.from_tag is None:
+                snapshot = (
+                    self._get_file_table(identifier)
+                    .snapshot_manager()
+                    .get_latest_snapshot()
+                )
+                if snapshot is not None:
+                    self._write_snapshot_files(
+                        identifier, snapshot, None, request.branch)
             store.add(request.branch)
             return self._mock_response("", 200)
 

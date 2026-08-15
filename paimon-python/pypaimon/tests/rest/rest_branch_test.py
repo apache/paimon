@@ -126,7 +126,7 @@ class RESTCatalogBranchCRUDTest(RESTBaseTest):
         )
         self.assertEqual(
             self._read(branch).to_pydict(),
-            {"id": [2], "payload": [b"branch"]},
+            {"id": [1, 2], "payload": [b"main", b"branch"]},
         )
 
     def test_create_branch_duplicate_raises(self):
