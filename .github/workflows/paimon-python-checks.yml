@@ -34,7 +34,7 @@ env:
   JDK_VERSION: 8
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
   LUMINA_DATA_VERSION: 0.1.0
-  PYPAIMON_RUST_REV: 7a8512f18f47a0634ee02ae8a09f2fff76c12d37
+  PYPAIMON_RUST_REV: c7a71f4c3c9c5bf8883c1621caed09ec0ea2e49b
 
 
 concurrency:
