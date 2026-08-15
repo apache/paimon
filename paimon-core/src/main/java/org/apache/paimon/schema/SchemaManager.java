@@ -1446,6 +1446,14 @@ public class SchemaManager implements Serializable {
             throw new UnsupportedOperationException(String.format("Cannot reset %s.", key));
         }
 
+        if (DELETION_VECTORS_ENABLED.key().equals(key)) {
+            checkAlterTableOption(
+                    options,
+                    key,
+                    options.get(key),
+                    DELETION_VECTORS_ENABLED.defaultValue().toString());
+        }
+
         if (options.containsKey(PK_CLUSTERING_OVERRIDE.key())
                 && CLUSTERING_COLUMNS.key().equals(key)) {
             throw new UnsupportedOperationException(

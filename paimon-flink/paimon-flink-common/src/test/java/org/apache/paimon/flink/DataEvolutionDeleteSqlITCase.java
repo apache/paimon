@@ -134,6 +134,22 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testResetDeletionVectorsAfterDelete() throws Exception {
+        createTable();
+        sql("INSERT INTO T VALUES (1, 'one', 'A'), (2, 'two', 'A'), (3, 'three', 'A')");
+        sql("DELETE FROM T WHERE id = 2");
+
+        assertThat(deletionVectorCardinality(paimonTable("T"))).isEqualTo(1L);
+        assertThatThrownBy(() -> sql("ALTER TABLE T RESET ('deletion-vectors.enabled')"))
+                .hasRootCauseMessage(
+                        "Cannot change deletion vectors mode from true to false. If modifying table "
+                                + "deletion-vectors mode without full-compaction, this may result in data "
+                                + "duplication. If you are confident, you can set table option "
+                                + "'deletion-vectors.modifiable' = 'true' to allow deletion vectors modification.");
+        assertThat(sql("SELECT id FROM T ORDER BY id")).containsExactly(Row.of(1), Row.of(3));
+    }
+
+    @Test
     public void testDeleteWithSubquery() {
         createTable();
         sql("INSERT INTO T VALUES (1, 'one', 'A'), (2, 'two', 'A'), (3, 'three', 'A')");
