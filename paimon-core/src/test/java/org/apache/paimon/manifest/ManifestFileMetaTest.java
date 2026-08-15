@@ -1174,6 +1174,40 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         }
     }
 
+    private static class OpenTrackingFileIO extends LocalFileIO {
+
+        private final AtomicInteger openInputStreams = new AtomicInteger();
+        private final AtomicInteger maxOpenInputStreams = new AtomicInteger();
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            SeekableInputStream input = super.newInputStream(path);
+            int open = openInputStreams.incrementAndGet();
+            maxOpenInputStreams.accumulateAndGet(open, Math::max);
+            return new SeekableInputStreamWrapper(input) {
+
+                private boolean closed;
+
+                @Override
+                public void close() throws IOException {
+                    if (closed) {
+                        return;
+                    }
+                    try {
+                        super.close();
+                    } finally {
+                        closed = true;
+                        openInputStreams.decrementAndGet();
+                    }
+                }
+            };
+        }
+
+        private int maxOpenInputStreams() {
+            return maxOpenInputStreams.get();
+        }
+    }
+
     // ==================== Manifest Sort Tests ====================
 
     /**
@@ -1608,6 +1642,65 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         .isGreaterThanOrEqualTo(previousRowId);
             }
         }
+    }
+
+    @Test
+    public void testDataEvolutionManifestRunMergeUsesDefaultParallelism() throws Exception {
+        assumeTrue(Runtime.getRuntime().availableProcessors() > 1);
+        CountingReadFileIO fileIO = new CountingReadFileIO();
+        manifestFile = createManifestFile(tempDir.toString(), fileIO);
+        ManifestFileMeta first = makeManifest(makeRowIdEntry(true, "row-0", 0, 0, 5));
+        ManifestFileMeta second = makeManifest(makeRowIdEntry(true, "row-10", 0, 10, 5));
+
+        fileIO.blockManifestReads(
+                new HashSet<>(Arrays.asList(first.fileName(), second.fileName())));
+        List<ManifestFileMeta> merged;
+        try {
+            Options testOptions = new Options();
+            testOptions.set("manifest-sort.enabled", "true");
+            testOptions.set("data-evolution.enabled", "true");
+            testOptions.set("manifest.full-compaction-threshold-size", "1B");
+            merged =
+                    ManifestFileMerger.merge(
+                            Arrays.asList(first, second),
+                            manifestFile,
+                            getPartitionType(),
+                            CoreOptions.fromMap(testOptions.toMap()));
+        } finally {
+            fileIO.stopBlockingManifestReads();
+        }
+
+        assertThat(fileIO.maxConcurrentManifestReads()).isGreaterThanOrEqualTo(2);
+        assertThat(readEntries(merged).stream().map(entry -> entry.file().fileName()))
+                .containsExactly("row-0", "row-10");
+    }
+
+    @Test
+    public void testDataEvolutionManifestRunMergeRespectsFileHandleLimit() {
+        OpenTrackingFileIO fileIO = new OpenTrackingFileIO();
+        manifestFile = createManifestFile(tempDir.toString(), fileIO);
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(makeRowIdEntry(true, "row-0", 0, 0, 5)),
+                        makeManifest(makeRowIdEntry(true, "row-10", 0, 10, 5)),
+                        makeManifest(makeRowIdEntry(true, "row-20", 0, 20, 5)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+        testOptions.set("scan.manifest.parallelism", "1");
+        testOptions.set("local-sort.max-num-file-handles", "2");
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertThat(fileIO.maxOpenInputStreams()).isLessThanOrEqualTo(2);
+        assertThat(readEntries(merged).stream().map(entry -> entry.file().fileName()))
+                .containsExactly("row-0", "row-10", "row-20");
     }
 
     @Test

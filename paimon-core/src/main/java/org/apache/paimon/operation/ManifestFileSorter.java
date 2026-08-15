@@ -1155,6 +1155,7 @@ public class ManifestFileSorter {
                             sortNewFiles,
                             ctx.deleteEntries,
                             ctx.deletedRowIds,
+                            ctx.externalSortConfig.maxNumFileHandles,
                             manifestReadParallelism);
         }
         if (sorted == null) {
@@ -1195,6 +1196,7 @@ public class ManifestFileSorter {
                             ctx.partitionType,
                             manifestFile,
                             sortNewFiles,
+                            ctx.externalSortConfig.maxNumFileHandles,
                             manifestReadParallelism);
         }
         if (sorted == null) {

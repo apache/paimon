@@ -155,6 +155,7 @@ final class ManifestEntryRunMerge {
             List<ManifestFileMeta> newFilesForAbort,
             CompactFileIdentifierSet deletedIdentifiers,
             DeletedRowIdSet deletedRowIds,
+            int maxNumFileHandles,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         ManifestEntryRunMergeEntry.Filter filter =
@@ -166,6 +167,7 @@ final class ManifestEntryRunMerge {
                         partitionType,
                         manifestFile,
                         filter,
+                        maxNumFileHandles,
                         manifestReadParallelism);
         if (plan == null) {
             return null;
@@ -184,6 +186,7 @@ final class ManifestEntryRunMerge {
             RowType partitionType,
             ManifestFile manifestFile,
             List<ManifestFileMeta> newFilesForAbort,
+            int maxNumFileHandles,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         CompactFileIdentifierSet deletedIdentifiers = new CompactFileIdentifierSet();
@@ -201,6 +204,7 @@ final class ManifestEntryRunMerge {
                                 partitionType,
                                 manifestFile,
                                 filter,
+                                maxNumFileHandles,
                                 manifestReadParallelism);
             } finally {
                 deletedRowIds.releaseRangeIndex();
@@ -227,6 +231,7 @@ final class ManifestEntryRunMerge {
             RowType partitionType,
             ManifestFile manifestFile,
             ManifestEntryRunMergeEntry.Filter filter,
+            int maxNumFileHandles,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         ManifestEntryRunMergeEntry.PartitionDictionary partitions =
@@ -236,8 +241,7 @@ final class ManifestEntryRunMerge {
         long inMemoryEntries = 0;
         List<Discovery.DiscoveredManifest> discovered = new ArrayList<>(section.size());
         if (section.size() <= 1
-                || manifestReadParallelism == null
-                || manifestReadParallelism <= 1) {
+                || (manifestReadParallelism != null && manifestReadParallelism <= 1)) {
             for (ManifestFileMeta meta : section) {
                 Discovery.DiscoveredManifest manifest =
                         discoverManifestRuns(meta, manifestFile, partitionType, partitions, filter);
@@ -281,7 +285,7 @@ final class ManifestEntryRunMerge {
                 sources.addAll(manifest.runs);
                 streamCursorCount += manifest.runs.size();
             }
-            if (streamCursorCount > MAX_STREAM_CURSORS) {
+            if (streamCursorCount > Math.min(MAX_STREAM_CURSORS, maxNumFileHandles)) {
                 return null;
             }
         }
