@@ -23,7 +23,7 @@ import javax.annotation.Nullable;
 import java.util.Arrays;
 
 /** Primitive set used by RowID compaction to avoid rebuilding file identifiers. */
-final class DeletedRowIdSet {
+public final class DeletedRowIdSet {
 
     private static final long EMPTY = Long.MIN_VALUE;
 
@@ -32,7 +32,7 @@ final class DeletedRowIdSet {
     private boolean containsMinValue;
     private @Nullable long[] sortedRowIds;
 
-    void add(long value) {
+    public void add(long value) {
         if (value == EMPTY) {
             if (!containsMinValue) {
                 containsMinValue = true;
@@ -56,7 +56,7 @@ final class DeletedRowIdSet {
         sortedRowIds = null;
     }
 
-    void addAll(DeletedRowIdSet other) {
+    public void addAll(DeletedRowIdSet other) {
         if (other.containsMinValue) {
             add(EMPTY);
         }
@@ -67,7 +67,7 @@ final class DeletedRowIdSet {
         }
     }
 
-    boolean contains(long value) {
+    public boolean contains(long value) {
         if (value == EMPTY) {
             return containsMinValue;
         }
@@ -81,7 +81,7 @@ final class DeletedRowIdSet {
         return false;
     }
 
-    boolean intersects(long minInclusive, long maxInclusive) {
+    public boolean intersects(long minInclusive, long maxInclusive) {
         if (minInclusive > maxInclusive) {
             return true;
         }
@@ -93,12 +93,12 @@ final class DeletedRowIdSet {
         return position < values.length && values[position] <= maxInclusive;
     }
 
-    void prepareRangeIndex() {
+    public void prepareRangeIndex() {
         // Publish the immutable sorted snapshot before concurrent manifest planning starts.
         sortedRowIds();
     }
 
-    void releaseRangeIndex() {
+    public void releaseRangeIndex() {
         sortedRowIds = null;
     }
 

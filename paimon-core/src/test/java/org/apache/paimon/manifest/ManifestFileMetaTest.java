@@ -75,6 +75,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -1173,6 +1174,40 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         }
     }
 
+    private static class OpenTrackingFileIO extends LocalFileIO {
+
+        private final AtomicInteger openInputStreams = new AtomicInteger();
+        private final AtomicInteger maxOpenInputStreams = new AtomicInteger();
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            SeekableInputStream input = super.newInputStream(path);
+            int open = openInputStreams.incrementAndGet();
+            maxOpenInputStreams.accumulateAndGet(open, Math::max);
+            return new SeekableInputStreamWrapper(input) {
+
+                private boolean closed;
+
+                @Override
+                public void close() throws IOException {
+                    if (closed) {
+                        return;
+                    }
+                    try {
+                        super.close();
+                    } finally {
+                        closed = true;
+                        openInputStreams.decrementAndGet();
+                    }
+                }
+            };
+        }
+
+        private int maxOpenInputStreams() {
+            return maxOpenInputStreams.get();
+        }
+    }
+
     // ==================== Manifest Sort Tests ====================
 
     /**
@@ -1610,6 +1645,443 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
+    public void testDataEvolutionManifestRunMergeUsesDefaultParallelism() throws Exception {
+        assumeTrue(Runtime.getRuntime().availableProcessors() > 1);
+        CountingReadFileIO fileIO = new CountingReadFileIO();
+        manifestFile = createManifestFile(tempDir.toString(), fileIO);
+        ManifestFileMeta first = makeManifest(makeRowIdEntry(true, "row-0", 0, 0, 5));
+        ManifestFileMeta second = makeManifest(makeRowIdEntry(true, "row-10", 0, 10, 5));
+
+        fileIO.blockManifestReads(
+                new HashSet<>(Arrays.asList(first.fileName(), second.fileName())));
+        List<ManifestFileMeta> merged;
+        try {
+            Options testOptions = new Options();
+            testOptions.set("manifest-sort.enabled", "true");
+            testOptions.set("data-evolution.enabled", "true");
+            testOptions.set("manifest.full-compaction-threshold-size", "1B");
+            merged =
+                    ManifestFileMerger.merge(
+                            Arrays.asList(first, second),
+                            manifestFile,
+                            getPartitionType(),
+                            CoreOptions.fromMap(testOptions.toMap()));
+        } finally {
+            fileIO.stopBlockingManifestReads();
+        }
+
+        assertThat(fileIO.maxConcurrentManifestReads()).isGreaterThanOrEqualTo(2);
+        assertThat(readEntries(merged).stream().map(entry -> entry.file().fileName()))
+                .containsExactly("row-0", "row-10");
+    }
+
+    @Test
+    public void testDataEvolutionManifestRunMergeRespectsFileHandleLimit() {
+        OpenTrackingFileIO fileIO = new OpenTrackingFileIO();
+        manifestFile = createManifestFile(tempDir.toString(), fileIO);
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(makeRowIdEntry(true, "row-0", 0, 0, 5)),
+                        makeManifest(makeRowIdEntry(true, "row-10", 0, 10, 5)),
+                        makeManifest(makeRowIdEntry(true, "row-20", 0, 20, 5)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+        testOptions.set("scan.manifest.parallelism", "1");
+        testOptions.set("local-sort.max-num-file-handles", "2");
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertThat(fileIO.maxOpenInputStreams()).isLessThanOrEqualTo(2);
+        assertThat(readEntries(merged).stream().map(entry -> entry.file().fileName()))
+                .containsExactly("row-0", "row-10", "row-20");
+    }
+
+    @Test
+    public void testDisablingRunMergeOptimizePreservesDataEvolutionRowIdSort() {
+        assertThat(CoreOptions.fromMap(Collections.emptyMap()).manifestMergeOptimizeEnabled())
+                .isTrue();
+
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(
+                                makeRowIdEntry(true, "row-30", 0, 30, 5),
+                                makeRowIdEntry(true, "row-10", 0, 10, 5)),
+                        makeManifest(
+                                makeRowIdEntry(true, "row-20", 0, 20, 5),
+                                makeRowIdEntry(true, "row-0", 0, 0, 5)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("manifest.merge-optimize.enabled", "false");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+        CoreOptions coreOptions = CoreOptions.fromMap(testOptions.toMap());
+
+        assertThat(coreOptions.manifestMergeOptimizeEnabled()).isFalse();
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(input, manifestFile, getPartitionType(), coreOptions);
+
+        assertEquivalentEntries(input, merged);
+        assertThat(readEntries(merged).stream().map(entry -> entry.file().fileName()))
+                .containsExactly("row-0", "row-10", "row-20", "row-30");
+    }
+
+    @Test
+    public void testDataEvolutionManifestRunMergeSecondaryKeys() {
+        List<ManifestEntry> firstManifest = new ArrayList<>();
+        firstManifest.add(makeRowIdEntry(true, "range-short", 0, 100, 5, 1));
+        firstManifest.add(makeRowIdEntry(true, "sequence-newer", 0, 100, 10, 9));
+        for (int i = 19; i >= 10; i--) {
+            firstManifest.add(makeRowIdEntry(true, String.format("tie-%02d", i), 0, 100, 10, 5));
+        }
+
+        List<ManifestEntry> secondManifest = new ArrayList<>();
+        for (int i = 9; i >= 0; i--) {
+            secondManifest.add(makeRowIdEntry(true, String.format("tie-%02d", i), 0, 100, 10, 5));
+        }
+
+        List<ManifestFileMeta> input = new ArrayList<>();
+        input.add(makeManifest(firstManifest.toArray(new ManifestEntry[0])));
+        input.add(makeManifest(secondManifest.toArray(new ManifestEntry[0])));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+        testOptions.set("scan.manifest.parallelism", "2");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        List<String> expected = new ArrayList<>();
+        expected.add("range-short");
+        expected.add("sequence-newer");
+        for (int i = 0; i < 20; i++) {
+            expected.add(String.format("tie-%02d", i));
+        }
+        assertThat(readEntries(merged).stream().map(e -> e.file().fileName()))
+                .containsExactlyElementsOf(expected);
+    }
+
+    @Test
+    public void testDataEvolutionManifestRunMergeUsesExactDeleteIdentifier() {
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(
+                                makeRowIdEntry(true, "deleted", 0, 100, 5),
+                                makeRowIdEntry(true, "same-row-id-survivor", 0, 100, 5)),
+                        makeManifest(makeRowIdEntry(false, "deleted", 0, 100, 5)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+        testOptions.set("scan.manifest.parallelism", "2");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertThat(readEntries(merged).stream().map(entry -> entry.file().fileName()))
+                .containsExactly("same-row-id-survivor");
+    }
+
+    @Test
+    public void testDataEvolutionManifestRunMergeUsesRawDeleteIdentityFields() {
+        ManifestEntry deleted =
+                makeRowIdEntry(
+                        true,
+                        "same-file-name",
+                        0,
+                        100,
+                        5,
+                        0,
+                        Arrays.asList("extra-a", "extra-b"),
+                        new byte[] {1, 2},
+                        "external-a");
+        ManifestEntry survivor =
+                makeRowIdEntry(
+                        true,
+                        "same-file-name",
+                        0,
+                        100,
+                        5,
+                        0,
+                        Collections.singletonList("other-extra"),
+                        new byte[] {3, 4},
+                        "external-b");
+        ManifestEntry delete =
+                makeRowIdEntry(
+                        false,
+                        "same-file-name",
+                        0,
+                        100,
+                        5,
+                        0,
+                        Arrays.asList("extra-a", "extra-b"),
+                        new byte[] {1, 2},
+                        "external-a");
+        List<ManifestFileMeta> input =
+                Arrays.asList(makeManifest(deleted, survivor), makeManifest(delete));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertThat(readEntries(merged)).singleElement().isEqualTo(survivor);
+    }
+
+    @Test
+    public void testDataEvolutionManifestRunMergeManyPartitions() {
+        List<ManifestEntry> firstManifest = new ArrayList<>();
+        List<ManifestEntry> secondManifest = new ArrayList<>();
+        for (int partition = 39; partition >= 0; partition--) {
+            ManifestEntry entry =
+                    makeRowIdEntry(
+                            true,
+                            String.format("partition-%02d", partition),
+                            partition,
+                            partition * 10L,
+                            5);
+            (partition >= 20 ? firstManifest : secondManifest).add(entry);
+        }
+
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(firstManifest.toArray(new ManifestEntry[0])),
+                        makeManifest(secondManifest.toArray(new ManifestEntry[0])));
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertThat(readEntries(merged).stream().map(e -> e.partition().getInt(0)))
+                .containsExactlyElementsOf(
+                        IntStream.range(0, 40).boxed().collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testDataEvolutionManifestRunMergeFragmentedSmallManifests() {
+        List<ManifestEntry> firstManifest = new ArrayList<>();
+        List<ManifestEntry> secondManifest = new ArrayList<>();
+        for (long firstRowId = 199; firstRowId >= 0; firstRowId--) {
+            ManifestEntry entry =
+                    makeRowIdEntry(true, String.format("row-%03d", firstRowId), 0, firstRowId, 1);
+            (firstRowId >= 100 ? firstManifest : secondManifest).add(entry);
+        }
+
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(firstManifest.toArray(new ManifestEntry[0])),
+                        makeManifest(secondManifest.toArray(new ManifestEntry[0])));
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertThat(readEntries(merged).stream().map(entry -> entry.file().nonNullFirstRowId()))
+                .containsExactlyElementsOf(
+                        LongStream.range(0, 200).boxed().collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testDataEvolutionManifestRunMergeFallsBackForLargeFragmentedManifest() {
+        List<ManifestEntry> firstManifest = new ArrayList<>();
+        List<ManifestEntry> secondManifest = new ArrayList<>();
+        for (long firstRowId = 25_000; firstRowId >= 12_500; firstRowId--) {
+            firstManifest.add(
+                    makeRowIdEntry(true, String.format("row-%05d", firstRowId), 0, firstRowId, 1));
+        }
+        for (long firstRowId = 12_499; firstRowId >= 0; firstRowId--) {
+            secondManifest.add(
+                    makeRowIdEntry(true, String.format("row-%05d", firstRowId), 0, firstRowId, 1));
+        }
+
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(firstManifest.toArray(new ManifestEntry[0])),
+                        makeManifest(secondManifest.toArray(new ManifestEntry[0])));
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertThat(readEntries(merged).stream().map(entry -> entry.file().nonNullFirstRowId()))
+                .containsExactlyElementsOf(
+                        LongStream.rangeClosed(0, 25_000).boxed().collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testDataEvolutionMinorRunMergeFallsBackForLargeFragmentedManifest() {
+        List<ManifestEntry> fragmentedEntries = new ArrayList<>();
+        for (long firstRowId = 25_000; firstRowId >= 0; firstRowId--) {
+            fragmentedEntries.add(
+                    makeRowIdEntry(true, String.format("row-%05d", firstRowId), 0, firstRowId, 1));
+        }
+
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(fragmentedEntries.toArray(new ManifestEntry[0])),
+                        makeManifest(
+                                makeRowIdEntry(false, "row-12500", 0, 12_500, 1),
+                                makeRowIdEntry(true, "row-30000", 0, 30_000, 1)));
+
+        List<Long> expected =
+                LongStream.rangeClosed(0, 25_000).boxed().collect(Collectors.toList());
+        expected.remove(Long.valueOf(12_500L));
+        expected.add(30_000L);
+
+        List<ManifestEntry> externalResult = readEntries(mergeMinorManifestEntries(input, false));
+        List<ManifestEntry> runMergeResult = readEntries(mergeMinorManifestEntries(input, true));
+        assertThat(runMergeResult).containsExactlyElementsOf(externalResult);
+        assertThat(runMergeResult.stream().map(entry -> entry.file().nonNullFirstRowId()))
+                .containsExactlyElementsOf(expected);
+    }
+
+    @Test
+    public void testDataEvolutionManifestRunMergeLimitsReadAmplification() {
+        CountingReadFileIO fileIO = new CountingReadFileIO();
+        manifestFile = createManifestFile(tempDir.toString(), fileIO);
+
+        int runCount = 20;
+        int entriesPerRun = 600;
+        List<ManifestEntry> fragmentedEntries = new ArrayList<>();
+        for (int run = runCount - 1; run >= 0; run--) {
+            long runStart = (long) run * entriesPerRun;
+            for (int entry = 0; entry < entriesPerRun; entry++) {
+                long firstRowId = runStart + entry;
+                fragmentedEntries.add(
+                        makeRowIdEntry(
+                                true,
+                                String.format("fragmented-%05d", firstRowId),
+                                0,
+                                firstRowId,
+                                1));
+            }
+        }
+
+        ManifestFileMeta fragmented = makeManifest(fragmentedEntries.toArray(new ManifestEntry[0]));
+        ManifestFileMeta overlap =
+                makeManifest(makeRowIdEntry(true, "overlap", 0, entriesPerRun / 2L, 1));
+        fileIO.resetReadCounts();
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        Arrays.asList(fragmented, overlap),
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertThat(fileIO.readCount(fragmented.fileName())).isEqualTo(2);
+        List<Long> expectedRowIds =
+                LongStream.range(0, (long) runCount * entriesPerRun)
+                        .boxed()
+                        .collect(Collectors.toList());
+        expectedRowIds.add(entriesPerRun / 2L);
+        Collections.sort(expectedRowIds);
+        assertThat(readEntries(merged).stream().map(entry -> entry.file().nonNullFirstRowId()))
+                .containsExactlyElementsOf(expectedRowIds);
+    }
+
+    @Test
+    public void testDataEvolutionManifestRunMergePreservesBlockStats() {
+        List<ManifestEntry> spanningManifest = new ArrayList<>();
+        List<ManifestEntry> middleManifest = new ArrayList<>();
+        for (long firstRowId = 0; firstRowId < 5_000; firstRowId++) {
+            spanningManifest.add(
+                    makeRowIdEntry(
+                            true, String.format("row-%05d", firstRowId), null, firstRowId, 1));
+        }
+        for (long firstRowId = 10_000; firstRowId < 15_000; firstRowId++) {
+            spanningManifest.add(
+                    makeRowIdEntry(true, String.format("row-%05d", firstRowId), 7, firstRowId, 1));
+        }
+        for (long firstRowId = 5_000; firstRowId < 10_000; firstRowId++) {
+            middleManifest.add(
+                    makeRowIdEntry(
+                            true, String.format("row-%05d", firstRowId), null, firstRowId, 1));
+        }
+
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(spanningManifest.toArray(new ManifestEntry[0])),
+                        makeManifest(middleManifest.toArray(new ManifestEntry[0])));
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertThat(merged).hasSize(1);
+        ManifestFileMeta output = merged.get(0);
+        assertThat(output.numAddedFiles()).isEqualTo(15_000);
+        assertThat(output.numDeletedFiles()).isZero();
+        assertThat(output.minRowId()).isZero();
+        assertThat(output.maxRowId()).isEqualTo(14_999);
+        assertThat(output.partitionStats().minValues().getInt(0)).isEqualTo(7);
+        assertThat(output.partitionStats().maxValues().getInt(0)).isEqualTo(7);
+        assertThat(output.partitionStats().nullCounts().getLong(0)).isEqualTo(10_000);
+        assertThat(readEntries(merged).stream().map(entry -> entry.file().nonNullFirstRowId()))
+                .containsExactlyElementsOf(
+                        LongStream.range(0, 15_000).boxed().collect(Collectors.toList()));
+    }
+
+    @Test
     public void testDataEvolutionManifestSortUsesConfiguredPartitionFieldBeforeRowId() {
         RowType multiPartitionType = RowType.of(new IntType(), new IntType(), new IntType());
         ManifestFile multiPartManifestFile = createManifestFileForPartitionType(multiPartitionType);
@@ -1738,6 +2210,99 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                                 .map(entry -> entry.kind() + "-" + entry.file().fileName())
                                 .collect(Collectors.toList()))
                 .containsExactly("ADD-new-row20", "ADD-survivor-row30", "DELETE-old-row10");
+    }
+
+    @Test
+    public void testDataEvolutionMinorRunMergeMatchesExternalSort() {
+        ManifestEntry deleted =
+                makeRowIdEntry(
+                        true,
+                        "same-file-name",
+                        0,
+                        100,
+                        5,
+                        0,
+                        Arrays.asList("extra-a", "extra-b"),
+                        new byte[] {1, 2},
+                        "external-a");
+        ManifestEntry sameRowIdSurvivor =
+                makeRowIdEntry(
+                        true,
+                        "same-file-name",
+                        0,
+                        100,
+                        5,
+                        0,
+                        Collections.singletonList("other-extra"),
+                        new byte[] {3, 4},
+                        "external-b");
+        ManifestEntry delete =
+                makeRowIdEntry(
+                        false,
+                        "same-file-name",
+                        0,
+                        100,
+                        5,
+                        0,
+                        Arrays.asList("extra-a", "extra-b"),
+                        new byte[] {1, 2},
+                        "external-a");
+        ManifestEntry unmatchedDelete = makeRowIdEntry(false, "old-row-200", 0, 200, 5);
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(
+                                deleted,
+                                sameRowIdSurvivor,
+                                makeRowIdEntry(true, "survivor-row-300", 0, 300, 5)),
+                        makeManifest(delete, unmatchedDelete, unmatchedDelete));
+
+        List<ManifestEntry> externalResult = readEntries(mergeMinorManifestEntries(input, false));
+        List<ManifestEntry> runMergeResult = readEntries(mergeMinorManifestEntries(input, true));
+
+        assertThat(runMergeResult).containsExactlyElementsOf(externalResult);
+        assertThat(
+                        runMergeResult.stream()
+                                .map(entry -> entry.kind() + "-" + entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly(
+                        "ADD-same-file-name", "ADD-survivor-row-300", "DELETE-old-row-200");
+        assertThat(runMergeResult.get(0)).isEqualTo(sameRowIdSurvivor);
+    }
+
+    @Test
+    public void testDataEvolutionMinorRunMergeCollectsDeletesDuringDiscovery() {
+        CountingReadFileIO fileIO = new CountingReadFileIO();
+        manifestFile = createManifestFile(tempDir.toString(), fileIO);
+        ManifestFileMeta base =
+                makeManifest(
+                        makeRowIdEntry(true, "deleted-row-10", 0, 10, 5),
+                        makeRowIdEntry(true, "survivor-row-20", 0, 20, 5));
+        ManifestFileMeta delta =
+                makeManifest(
+                        makeRowIdEntry(true, "survivor-row-30", 0, 30, 5),
+                        makeRowIdEntry(false, "deleted-row-10", 0, 10, 5));
+        fileIO.resetReadCounts();
+
+        List<ManifestFileMeta> merged = mergeMinorManifestEntries(Arrays.asList(base, delta), true);
+
+        assertThat(fileIO.readCount(base.fileName())).isEqualTo(2);
+        assertThat(fileIO.readCount(delta.fileName())).isEqualTo(2);
+        assertThat(
+                        readEntries(merged).stream()
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly("survivor-row-20", "survivor-row-30");
+    }
+
+    private List<ManifestFileMeta> mergeMinorManifestEntries(
+            List<ManifestFileMeta> input, boolean runMergeOptimizeEnabled) {
+        Options options = new Options();
+        options.set("manifest-sort.enabled", "true");
+        options.set("manifest.merge-optimize.enabled", Boolean.toString(runMergeOptimizeEnabled));
+        options.set("data-evolution.enabled", "true");
+        options.set("manifest.full-compaction-threshold-size", Long.MAX_VALUE + "B");
+        return ManifestFileMerger.merge(
+                input, manifestFile, getPartitionType(), CoreOptions.fromMap(options.toMap()));
     }
 
     /**
@@ -2255,20 +2820,46 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
     /** Create a ManifestEntry with row ID metadata for data evolution manifest sort tests. */
     private ManifestEntry makeRowIdEntry(
-            boolean isAdd, String fileName, int partition, long firstRowId, long rowCount) {
+            boolean isAdd, String fileName, Integer partition, long firstRowId, long rowCount) {
         return makeRowIdEntry(isAdd, fileName, partition, firstRowId, rowCount, 0);
     }
 
     private ManifestEntry makeRowIdEntry(
             boolean isAdd,
             String fileName,
-            int partition,
+            Integer partition,
             long firstRowId,
             long rowCount,
             long sequenceNumber) {
+        return makeRowIdEntry(
+                isAdd,
+                fileName,
+                partition,
+                firstRowId,
+                rowCount,
+                sequenceNumber,
+                Collections.emptyList(),
+                null,
+                null);
+    }
+
+    private ManifestEntry makeRowIdEntry(
+            boolean isAdd,
+            String fileName,
+            Integer partition,
+            long firstRowId,
+            long rowCount,
+            long sequenceNumber,
+            List<String> extraFiles,
+            byte[] embeddedIndex,
+            String externalPath) {
         BinaryRow binaryRow = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
-        writer.writeInt(0, partition);
+        if (partition == null) {
+            writer.setNullAt(0);
+        } else {
+            writer.writeInt(0, partition);
+        }
         writer.complete();
 
         return ManifestEntry.create(
@@ -2288,13 +2879,13 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         sequenceNumber,
                         0,
                         0,
-                        Collections.emptyList(),
+                        extraFiles,
                         Timestamp.fromEpochMillis(200000),
                         0L,
-                        null,
+                        embeddedIndex,
                         FileSource.APPEND,
                         null,
-                        null,
+                        externalPath,
                         firstRowId,
                         Collections.singletonList("f0")));
     }
