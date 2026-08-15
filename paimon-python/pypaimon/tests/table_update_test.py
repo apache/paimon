@@ -278,6 +278,25 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             self._read_all(table)['city'].to_pylist(),
         )
 
+    def test_array_assignment_spans_file_groups(self):
+        table = self._create_seeded_table()
+        self._do_update(
+            table,
+            pa.Table.from_pydict({'_ROW_ID': [0], 'age': [26]}),
+            ['age'],
+        )
+
+        self._do_update_by_predicate(
+            table,
+            None,
+            {'age': pa.array([101, 102, 103, 104, 105])},
+        )
+
+        self.assertEqual(
+            [101, 102, 103, 104, 105],
+            self._read_all(table)['age'].to_pylist(),
+        )
+
     def test_update_by_predicate_no_match_is_noop(self):
         table = self._create_seeded_table()
         pb = table.new_read_builder().new_predicate_builder()

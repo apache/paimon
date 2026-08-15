@@ -237,6 +237,10 @@ class TableUpdate:
         literals or callables receiving the matched rows as an Arrow table.
         """
         has_callable = any(callable(value) for value in assignments.values())
+        has_array = any(
+            isinstance(value, (pa.Array, pa.ChunkedArray))
+            for value in assignments.values()
+        )
         read_columns = tuple(read_columns or ())
         self._validate_predicate_update(
             predicate, assignments, read_columns, has_callable
@@ -265,15 +269,28 @@ class TableUpdate:
             self.table, self.commit_user, commit_identifier,
             _precomputed_files_info=files_info,
         )
-        for split in self._predicate_update_file_groups(splits):
-            matched = table_read.to_arrow([split], parallelism=1)
-            if matched.num_rows == 0:
-                continue
-            update_table = self._build_predicate_update_table(
-                assignments,
-                matched,
-            )
-            updater.update_columns(update_table, list(assignments.keys()))
+        if has_array:
+            matched = table_read.to_arrow(splits)
+            if matched.num_rows > 0:
+                update_table = self._build_predicate_update_table(
+                    assignments,
+                    matched,
+                )
+                updater.update_columns(
+                    update_table, list(assignments.keys())
+                )
+        else:
+            for split in self._predicate_update_file_groups(splits):
+                matched = table_read.to_arrow([split], parallelism=1)
+                if matched.num_rows == 0:
+                    continue
+                update_table = self._build_predicate_update_table(
+                    assignments,
+                    matched,
+                )
+                updater.update_columns(
+                    update_table, list(assignments.keys())
+                )
         messages = updater.commit_messages
         if has_callable:
             conflict_cols = list(dict.fromkeys(

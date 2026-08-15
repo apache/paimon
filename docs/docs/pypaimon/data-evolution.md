@@ -154,8 +154,8 @@ commit.commit(messages)
 commit.close()
 ```
 
-Matching rows are read and updated one logical data-file group at a time, so
-memory is bounded by the largest group instead of the full predicate result.
+Callable and scalar assignments are processed one logical data-file group at
+a time. Arrow array assignments retain their whole-result positional semantics.
 
 ## Delete Rows
 
