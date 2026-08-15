@@ -24,6 +24,7 @@ import unittest
 import uuid
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.api.api_response import ConfigResponse, Partition
@@ -40,6 +41,9 @@ from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
 
 class RESTBaseTest(unittest.TestCase):
+    # Native planning blocks the in-process Python REST server until timeout.
+    pytestmark = pytest.mark.python_plan
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp(prefix="unittest_")
         self.warehouse = os.path.join(self.temp_dir, 'warehouse')
