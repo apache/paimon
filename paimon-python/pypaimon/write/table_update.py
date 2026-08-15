@@ -45,6 +45,7 @@ from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.file_store_commit import abort_commit_messages
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
@@ -269,28 +270,32 @@ class TableUpdate:
             self.table, self.commit_user, commit_identifier,
             _precomputed_files_info=files_info,
         )
-        if has_array:
-            matched = table_read.to_arrow(splits)
-            if matched.num_rows > 0:
-                update_table = self._build_predicate_update_table(
-                    assignments,
-                    matched,
-                )
-                updater.update_columns(
-                    update_table, list(assignments.keys())
-                )
-        else:
-            for split in self._predicate_update_file_groups(splits):
-                matched = table_read.to_arrow([split], parallelism=1)
-                if matched.num_rows == 0:
-                    continue
-                update_table = self._build_predicate_update_table(
-                    assignments,
-                    matched,
-                )
-                updater.update_columns(
-                    update_table, list(assignments.keys())
-                )
+        try:
+            if has_array:
+                matched = table_read.to_arrow(splits)
+                if matched.num_rows > 0:
+                    update_table = self._build_predicate_update_table(
+                        assignments,
+                        matched,
+                    )
+                    updater.update_columns(
+                        update_table, list(assignments.keys())
+                    )
+            else:
+                for split in self._predicate_update_file_groups(splits):
+                    matched = table_read.to_arrow([split], parallelism=1)
+                    if matched.num_rows == 0:
+                        continue
+                    update_table = self._build_predicate_update_table(
+                        assignments,
+                        matched,
+                    )
+                    updater.update_columns(
+                        update_table, list(assignments.keys())
+                    )
+        except Exception:
+            abort_commit_messages(self.table, updater.commit_messages)
+            raise
         messages = updater.commit_messages
         if has_callable:
             conflict_cols = list(dict.fromkeys(

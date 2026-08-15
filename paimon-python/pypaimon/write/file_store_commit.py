@@ -55,6 +55,38 @@ from pypaimon.write.commit_message import CommitMessage
 logger = logging.getLogger(__name__)
 
 
+def abort_commit_messages(table, commit_messages: List[CommitMessage]):
+    """Delete files created by uncommitted messages."""
+    for message in commit_messages:
+        for file in list(message.new_files) + list(message.changelog_files):
+            path = file.external_path or file.file_path
+            try:
+                if path:
+                    table.file_io.delete_quietly(str(path))
+            except Exception as error:
+                logger.warning(
+                    "Failed to clean up file %s during abort: %s",
+                    path,
+                    error,
+                )
+        for entry in message.index_adds:
+            file_name = entry.index_file.file_name
+            path = (
+                entry.index_file.external_path
+                or table.path_factory()
+                .global_index_path_factory()
+                .to_path(file_name)
+            )
+            try:
+                table.file_io.delete_quietly(path)
+            except Exception as error:
+                logger.warning(
+                    "Failed to clean up index file %s during abort: %s",
+                    file_name,
+                    error,
+                )
+
+
 class CommitResult:
     """Base class for commit results."""
 
@@ -1043,29 +1075,7 @@ class FileStoreCommit:
 
     def abort(self, commit_messages: List[CommitMessage]):
         """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
-        for message in commit_messages:
-            for file in list(message.new_files) + list(message.changelog_files):
-                try:
-                    path_to_delete = file.external_path if file.external_path else file.file_path
-                    if path_to_delete:
-                        path_str = str(path_to_delete)
-                        self.table.file_io.delete_quietly(path_str)
-                except Exception as e:
-                    path_to_delete = file.external_path if file.external_path else file.file_path
-                    logger.warning(f"Failed to clean up file {path_to_delete} during abort: {e}")
-            for entry in message.index_adds:
-                try:
-                    file_name = entry.index_file.file_name
-                    index_path = (
-                        entry.index_file.external_path
-                        or self.table.path_factory()
-                        .global_index_path_factory()
-                        .to_path(file_name)
-                    )
-                    self.table.file_io.delete_quietly(index_path)
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to clean up index file {entry.index_file.file_name} during abort: {e}")
+        abort_commit_messages(self.table, commit_messages)
 
     def close(self):
         """Close the FileStoreCommit and release resources."""

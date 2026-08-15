@@ -156,6 +156,14 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         tc.close()
         return msgs
 
+    @staticmethod
+    def _list_table_files(table):
+        return {
+            os.path.relpath(os.path.join(root, name), table.table_path)
+            for root, _dirs, files in os.walk(table.table_path)
+            for name in files
+        }
+
     def _do_delete_by_predicate(self, table, predicate):
         wb = self._make_write_builder(table)
         tu = wb.new_update()
@@ -277,6 +285,35 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             ['Updated'] * 5,
             self._read_all(table)['city'].to_pylist(),
         )
+
+    def test_callable_update_aborts_groups_after_later_failure(self):
+        table = self._create_seeded_table()
+        self._do_update(
+            table,
+            pa.Table.from_pydict({'_ROW_ID': [0], 'age': [26]}),
+            ['age'],
+        )
+        before_files = self._list_table_files(table)
+        calls = 0
+
+        def fail_second_group(rows):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("second group failed")
+            return pa.array(['Updated'] * rows.num_rows)
+
+        pb = table.new_read_builder().new_predicate_builder()
+        with self.assertRaisesRegex(RuntimeError, "second group failed"):
+            self._do_update_by_predicate(
+                table,
+                pb.greater_or_equal('age', 25),
+                {'city': fail_second_group},
+                read_columns=['age'],
+            )
+
+        self.assertEqual(2, calls)
+        self.assertEqual(before_files, self._list_table_files(table))
 
     def test_array_assignment_spans_file_groups(self):
         table = self._create_seeded_table()
@@ -1552,14 +1589,6 @@ class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestC
                 ])), self._next_commit_id())
 
         self.assertEqual(before_files, self._list_table_files(table))
-
-    @staticmethod
-    def _list_table_files(table):
-        return {
-            os.path.relpath(os.path.join(root, name), table.table_path)
-            for root, _dirs, files in os.walk(table.table_path)
-            for name in files
-        }
 
 
 class TableUpdateStreamTest(_StreamModeMixin, _TableUpdateTestBase, unittest.TestCase):
