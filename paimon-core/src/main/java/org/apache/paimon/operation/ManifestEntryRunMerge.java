@@ -176,6 +176,7 @@ final class ManifestEntryRunMerge {
                 discovered.add(manifest);
             }
         } else {
+            boolean requiresExternalSort = false;
             Function<
                             ManifestFileMeta,
                             List<
@@ -205,11 +206,15 @@ final class ManifestEntryRunMerge {
                             };
             for (Pair<Discovery.DiscoveredManifest, ManifestEntryRunMergeEntry.Filter> scan :
                     sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
-                if (scan.getLeft().requiresExternalSort) {
-                    return null;
-                }
+                requiresExternalSort |= scan.getLeft().requiresExternalSort;
                 filter.combine(scan.getRight());
                 discovered.add(scan.getLeft());
+            }
+            // Drain every task in the bounded discovery batch before falling back. Returning from
+            // the lazy iterator early would leave already submitted manifest scans running beside
+            // the external sorter and duplicate their I/O and retained memory.
+            if (requiresExternalSort) {
+                return null;
             }
         }
         for (int manifestIndex = 0; manifestIndex < section.size(); manifestIndex++) {
