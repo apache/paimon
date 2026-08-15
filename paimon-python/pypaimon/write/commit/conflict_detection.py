@@ -123,7 +123,10 @@ class RowIdColumnConflictChecker:
 
     @classmethod
     def _add_write_field_ids(cls, field_ids, file, schema_manager):
-        if file.write_cols is None:
+        write_cols = file._conflict_cols
+        if write_cols is None:
+            write_cols = file.write_cols
+        if write_cols is None:
             schema = schema_manager.get_schema(file.schema_id)
             if schema is not None:
                 for field in schema.fields:
@@ -134,7 +137,7 @@ class RowIdColumnConflictChecker:
             schema = schema_manager.get_schema(file.schema_id)
             if schema is not None:
                 name_to_id = {field.name: field.id for field in schema.fields}
-            for col_name in file.write_cols:
+            for col_name in write_cols:
                 if SpecialFields.is_system_field(col_name):
                     continue
                 fid = name_to_id.get(col_name)

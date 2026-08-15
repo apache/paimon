@@ -1359,6 +1359,59 @@ class _StreamModeMixin(StreamModeMixin):
 class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestCase):
     """All shared update tests under batch (``BatchWriteBuilder``) semantics."""
 
+    def test_callable_output_preserves_large_offset_chunks(self):
+        from pypaimon.write.table_update import TableUpdate
+
+        chunks = [
+            pa.ListArray.from_arrays(
+                pa.array([0, 1_100_000_000], type=pa.int32()),
+                pa.nulls(1_100_000_000),
+            )
+            for _ in range(2)
+        ]
+        value = pa.chunked_array(chunks)
+
+        result = TableUpdate._assignment_to_array(value, value.type, 2)
+
+        self.assertEqual(2, result.num_chunks)
+        self.assertEqual(2_200_000_000, sum(
+            len(chunk.values) for chunk in result.chunks
+        ))
+
+    def test_callable_predicate_update_conflicts_on_read_dependency(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+
+        first_wb = self._make_write_builder(table)
+        first_messages = first_wb.new_update().update_by_predicate(
+            pb.equal('id', 1),
+            {
+                'name': lambda rows: pa.array([
+                    'id-%d' % value for value in rows['id'].to_pylist()
+                ]),
+            },
+            read_columns=['id'],
+        )
+        second_wb = self._make_write_builder(table)
+        second_messages = second_wb.new_update().update_by_predicate(
+            pb.equal('id', 1),
+            {'id': lambda rows: pa.compute.utf8_length(rows['name'])},
+            read_columns=['name'],
+        )
+
+        first_commit = first_wb.new_commit()
+        first_commit.commit(first_messages)
+        first_commit.close()
+
+        second_commit = second_wb.new_commit()
+        with self.assertRaisesRegex(RuntimeError, "multiple 'MERGE INTO'"):
+            second_commit.commit(second_messages)
+        second_commit.close()
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual(1, result['id'][0].as_py())
+        self.assertEqual('id-1', result['name'][0].as_py())
+
     def test_callable_predicate_update_conflicts_with_concurrent_update(self):
         table = self._create_seeded_table()
         pb = table.new_read_builder().new_predicate_builder()

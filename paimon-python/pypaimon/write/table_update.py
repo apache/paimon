@@ -267,10 +267,17 @@ class TableUpdate:
         files_info = TableUpdateByRowId._files_info_from_splits(
             snapshot_id, splits
         )
-        return TableUpdateByRowId(
+        messages = TableUpdateByRowId(
             self.table, self.commit_user, commit_identifier,
             _precomputed_files_info=files_info,
         ).update_columns(update_table, list(assignments.keys()))
+        if has_callable:
+            conflict_cols = list(dict.fromkeys(
+                list(assignments.keys()) + list(read_columns or [])
+            ))
+            for message in messages:
+                message.conflict_cols = conflict_cols
+        return messages
 
     def _matched_update_scan_table(self):
         snapshot_manager = self.table.snapshot_manager()
@@ -369,7 +376,7 @@ class TableUpdate:
     def _assignment_to_array(
             value: Any, data_type: pa.DataType, row_count: int):
         if isinstance(value, pa.ChunkedArray):
-            array = value.combine_chunks()
+            array = value
         elif isinstance(value, pa.Array):
             array = value
         else:
@@ -383,7 +390,13 @@ class TableUpdate:
                 f"{len(array)} != {row_count}."
             )
         if array.type != data_type:
-            array = array.cast(data_type)
+            if isinstance(array, pa.ChunkedArray):
+                array = pa.chunked_array(
+                    [chunk.cast(data_type) for chunk in array.chunks],
+                    type=data_type,
+                )
+            else:
+                array = array.cast(data_type)
         return array
 
     def _delete_by_predicate(
