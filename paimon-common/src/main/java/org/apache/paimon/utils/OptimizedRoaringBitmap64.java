@@ -161,22 +161,6 @@ public class OptimizedRoaringBitmap64 {
         }
     }
 
-    /** Returns a 32-bit copy containing positions lower than {@code maxExclusive}. */
-    public RoaringBitmap32 projectToBitmap32(long maxExclusive) {
-        long maximumExclusive = (long) RoaringBitmap32.MAX_VALUE + 1;
-        Preconditions.checkArgument(
-                maxExclusive >= 0 && maxExclusive <= maximumExclusive,
-                "Invalid 32-bit projection bound: %s",
-                maxExclusive);
-        if (bitmaps.length == 0) {
-            return new RoaringBitmap32();
-        }
-
-        RoaringBitmap projected = bitmaps[0].clone();
-        projected.remove(maxExclusive, 1L << Integer.SIZE);
-        return RoaringBitmap32.fromRoaringBitmap(projected);
-    }
-
     @VisibleForTesting
     int allocatedBitmapCount() {
         return bitmaps.length;

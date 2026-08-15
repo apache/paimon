@@ -44,10 +44,6 @@ public class RoaringBitmap32 {
         this.roaringBitmap = roaringBitmap;
     }
 
-    static RoaringBitmap32 fromRoaringBitmap(RoaringBitmap roaringBitmap) {
-        return new RoaringBitmap32(roaringBitmap);
-    }
-
     /**
      * Note: the result is read only, do not call any modify operation outside.
      *

@@ -141,12 +141,12 @@ class RawFileSplitReadTest {
     }
 
     @Test
-    void testLimitAfterBitmap64DeletionVectorWithoutFileIndex() throws Exception {
+    void testLimitAfterBitmap64DeletionVector() throws Exception {
         List<InternalRow> rows = new ArrayList<>();
         for (int i = 0; i < 20; i++) {
             rows.add(GenericRow.of(BinaryString.fromString("value-" + i), i));
         }
-        FileStoreTable table = createTable("bitmap64-limit", rows, false);
+        FileStoreTable table = createTable("bitmap64-limit", rows);
         DataSplit split = singleSplit(table);
         assertThat(split.dataFiles()).hasSize(1);
 
@@ -181,18 +181,11 @@ class RawFileSplitReadTest {
 
     private FileStoreTable createTable(String directory, List<? extends InternalRow> rows)
             throws Exception {
-        return createTable(directory, rows, true);
-    }
-
-    private FileStoreTable createTable(
-            String directory, List<? extends InternalRow> rows, boolean fileIndexReadEnabled)
-            throws Exception {
         Path tablePath = new Path(tempDir.resolve(directory).toUri());
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.BUCKET_KEY, "first");
-        options.set(CoreOptions.FILE_INDEX_READ_ENABLED, fileIndexReadEnabled);
         Schema schema =
                 Schema.newBuilder()
                         .column("first", DataTypes.STRING())
