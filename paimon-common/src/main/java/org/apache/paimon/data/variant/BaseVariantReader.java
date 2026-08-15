@@ -32,13 +32,16 @@ import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VariantType;
 
@@ -503,6 +506,15 @@ public class BaseVariantReader {
                                 typedValueIdx,
                                 ((DecimalType) scalaType).getPrecision(),
                                 ((DecimalType) scalaType).getScale());
+            } else if (scalaType instanceof DateType) {
+                i = row.getInt(typedValueIdx);
+            } else if (scalaType instanceof TimestampType) {
+                i = row.getTimestamp(typedValueIdx, ((TimestampType) scalaType).getPrecision());
+            } else if (scalaType instanceof LocalZonedTimestampType) {
+                i =
+                        row.getTimestamp(
+                                typedValueIdx,
+                                ((LocalZonedTimestampType) scalaType).getPrecision());
             } else {
                 throw new UnsupportedOperationException("Unsupported scalar type: " + scalaType);
             }
