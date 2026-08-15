@@ -208,8 +208,8 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
                             writer.addElement(serializer.toRow(records.next()));
                         }
                     }
-                } finally {
                     pos = out.getPos();
+                } finally {
                     out.close();
                 }
                 return Pair.of(path.getName(), pos);
