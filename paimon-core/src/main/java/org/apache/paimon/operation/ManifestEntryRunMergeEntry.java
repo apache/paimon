@@ -50,7 +50,7 @@ final class ManifestEntryRunMergeEntry {
 
         static Key viewOf(
                 ProjectedManifestEntry entry,
-                ManifestEntryRunMerge.PartitionDictionary partitions) {
+                ManifestEntryRunMerge.SortPartitionDictionary partitions) {
             Key key = new Key();
             key.replace(entry, partitions);
             return key;
@@ -58,7 +58,7 @@ final class ManifestEntryRunMergeEntry {
 
         void replace(
                 ProjectedManifestEntry entry,
-                ManifestEntryRunMerge.PartitionDictionary partitions) {
+                ManifestEntryRunMerge.SortPartitionDictionary partitions) {
             long firstRowId = entry.file().nonNullFirstRowId();
             this.partitionId = partitions.id(entry.partitionBytes());
             this.partitionRank = partitions.rank(partitionId);
