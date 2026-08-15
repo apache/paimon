@@ -144,6 +144,9 @@ commit.commit(messages)
 commit.close()
 ```
 
+Matching rows are read and updated one logical data-file group at a time, so
+memory is bounded by the largest group instead of the full predicate result.
+
 ## Delete Rows
 
 Use `delete_by_predicate` for SQL-like `DELETE ... WHERE ...` operations.

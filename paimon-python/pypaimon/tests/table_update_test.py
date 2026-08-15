@@ -231,6 +231,38 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             result['name'].to_pylist(),
         )
 
+    def test_update_by_predicate_processes_one_file_group_at_a_time(self):
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        table = self._create_seeded_table()
+        self._do_update(
+            table,
+            pa.Table.from_pydict({'_ROW_ID': [0], 'age': [26]}),
+            ['age'],
+        )
+        splits = table.new_read_builder().new_scan().plan_for_write().splits()
+        self.assertEqual(1, len(splits))
+
+        group_sizes = []
+        original = TableUpdateByRowId.update_columns
+
+        def capture(updater, data, columns):
+            group_sizes.append(data.num_rows)
+            return original(updater, data, columns)
+
+        with mock.patch.object(TableUpdateByRowId, 'update_columns', capture):
+            self._do_update_by_predicate(table, None, {'city': 'Updated'})
+
+        self.assertEqual([2, 3], group_sizes)
+        self.assertEqual(
+            [26, 30, 35, 40, 45],
+            self._read_all(table)['age'].to_pylist(),
+        )
+        self.assertEqual(
+            ['Updated'] * 5,
+            self._read_all(table)['city'].to_pylist(),
+        )
+
     def test_update_by_predicate_no_match_is_noop(self):
         table = self._create_seeded_table()
         pb = table.new_read_builder().new_predicate_builder()
