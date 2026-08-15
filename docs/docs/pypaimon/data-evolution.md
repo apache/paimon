@@ -133,16 +133,17 @@ commit.commit(write.prepare_commit())
 write.close()
 commit.close()
 
-# UPDATE users_update SET age = 99 WHERE id IN (1, 3)
+# UPDATE users_update SET age = age + 1, name = 'Updated'
+# WHERE id IN (1, 3)
 write_builder = table.new_batch_write_builder()
 table_update = write_builder.new_update()
 predicate = table_update.new_predicate_builder().is_in('id', [1, 3])
-messages = table_update.update_by_predicate(predicate, {'age': 99})
-
-# UPDATE users_update SET age = age + 1 WHERE id IN (1, 3)
 messages = table_update.update_by_predicate(
     predicate,
-    {'age': lambda rows: pa.compute.add(rows['age'], 1)},
+    {
+        'age': lambda rows: pa.compute.add(rows['age'], 1),
+        'name': 'Updated',
+    },
 )
 
 commit = write_builder.new_commit()
