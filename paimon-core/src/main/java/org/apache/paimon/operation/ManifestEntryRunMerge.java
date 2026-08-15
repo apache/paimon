@@ -30,7 +30,6 @@ import org.apache.paimon.manifest.ManifestAvroReader.RowIterator;
 import org.apache.paimon.manifest.ManifestAvroWriter.EncodedBlockMeta;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.manifest.PartitionDictionary;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.stats.SimpleStats;
@@ -150,7 +149,8 @@ final class ManifestEntryRunMerge {
             int maxNumFileHandles,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
-        PartitionDictionary partitions = new PartitionDictionary(sortKey::comparePartitions);
+        ManifestEntryRunMergePartitionDictionary partitions =
+                new ManifestEntryRunMergePartitionDictionary(sortKey::comparePartitions);
         List<ManifestEntryRunMergePlan.Source.Spec> sources = new ArrayList<>();
         int streamCursorCount = 0;
         long inMemoryEntries = 0;
@@ -236,7 +236,7 @@ final class ManifestEntryRunMerge {
             ManifestFileMeta meta,
             ManifestFile manifestFile,
             RowType partitionType,
-            PartitionDictionary partitions,
+            ManifestEntryRunMergePartitionDictionary partitions,
             ManifestEntryRunMergeEntry.Filter filter)
             throws Exception {
         try (ManifestAvroReader reader =
@@ -253,7 +253,7 @@ final class ManifestEntryRunMerge {
             ManifestFileMeta meta,
             ManifestAvroReader reader,
             RowType partitionType,
-            PartitionDictionary partitions,
+            ManifestEntryRunMergePartitionDictionary partitions,
             ManifestEntryRunMergeEntry.Filter filter)
             throws Exception {
         SimpleStatsConverter partitionStatsConverter = new SimpleStatsConverter(partitionType);
@@ -354,7 +354,7 @@ final class ManifestEntryRunMerge {
     private static int compareDiscoveryKeys(
             ManifestEntryRunMergeEntry.Key left,
             ManifestEntryRunMergeEntry.Key right,
-            PartitionDictionary partitions) {
+            ManifestEntryRunMergePartitionDictionary partitions) {
         return compareRemainingKeys(
                 left, right, partitions.compareIds(left.partitionId, right.partitionId));
     }
@@ -443,7 +443,7 @@ final class ManifestEntryRunMerge {
                         Collections.emptyList(), Collections.emptyList(), false, true);
             }
 
-            void updatePartitionRanks(PartitionDictionary partitions) {
+            void updatePartitionRanks(ManifestEntryRunMergePartitionDictionary partitions) {
                 for (BlockInfo block : blocks) {
                     block.updatePartitionRanks(partitions);
                 }
@@ -505,7 +505,7 @@ final class ManifestEntryRunMerge {
             void collectForSort(
                     ProjectedManifestEntry entry,
                     ManifestEntryRunMergeEntry.Key key,
-                    PartitionDictionary partitions,
+                    ManifestEntryRunMergePartitionDictionary partitions,
                     ManifestEntryRunMergeEntry.Filter filter) {
                 if (!eligible) {
                     return;
@@ -608,7 +608,7 @@ final class ManifestEntryRunMerge {
                 }
             }
 
-            void updatePartitionRanks(PartitionDictionary partitions) {
+            void updatePartitionRanks(ManifestEntryRunMergePartitionDictionary partitions) {
                 checkState(firstKey != null && lastKey != null, "Manifest block has no sort keys.");
                 firstKey.partitionRank = partitions.rank(firstKey.partitionId);
                 lastKey.partitionRank = partitions.rank(lastKey.partitionId);

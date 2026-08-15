@@ -36,7 +36,6 @@ import org.apache.paimon.manifest.ManifestAvroWriter.EncodedEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.manifest.PartitionDictionary;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Pair;
@@ -54,9 +53,10 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 final class ManifestEntryRunMergePlan {
 
     final List<Source.Spec> sources;
-    final PartitionDictionary partitions;
+    final ManifestEntryRunMergePartitionDictionary partitions;
 
-    ManifestEntryRunMergePlan(List<Source.Spec> sources, PartitionDictionary partitions) {
+    ManifestEntryRunMergePlan(
+            List<Source.Spec> sources, ManifestEntryRunMergePartitionDictionary partitions) {
         this.sources = sources;
         this.partitions = partitions;
     }
@@ -271,7 +271,7 @@ final class ManifestEntryRunMergePlan {
                     ManifestFile manifestFile,
                     ManifestFileSorter.RowIdEntrySortKey sortKey,
                     ManifestEntryRunMergeEntry.Filter filter,
-                    PartitionDictionary partitions)
+                    ManifestEntryRunMergePartitionDictionary partitions)
                     throws Exception;
         }
 
@@ -312,7 +312,7 @@ final class ManifestEntryRunMergePlan {
                     ManifestFile manifestFile,
                     ManifestFileSorter.RowIdEntrySortKey sortKey,
                     ManifestEntryRunMergeEntry.Filter filter,
-                    PartitionDictionary partitions)
+                    ManifestEntryRunMergePartitionDictionary partitions)
                     throws Exception {
                 return new PrimitiveManifestRunCursor(
                         manifestFile, meta, start, end, blocks, filter, partitions);
@@ -332,7 +332,7 @@ final class ManifestEntryRunMergePlan {
                     ManifestFile manifestFile,
                     ManifestFileSorter.RowIdEntrySortKey sortKey,
                     ManifestEntryRunMergeEntry.Filter filter,
-                    PartitionDictionary partitions)
+                    ManifestEntryRunMergePartitionDictionary partitions)
                     throws Exception {
                 return new InMemoryManifestCursor(manifestFile, meta, sortKey, filter, partitions);
             }
@@ -393,7 +393,7 @@ final class ManifestEntryRunMergePlan {
         final ManifestAvroReader reader;
         final boolean encodedRecordsCompatible;
         final ManifestEntryRunMergeEntry.Filter filter;
-        final PartitionDictionary partitions;
+        final ManifestEntryRunMergePartitionDictionary partitions;
         final ManifestEntryRunMergeEntry.Key key = new ManifestEntryRunMergeEntry.Key();
         final EncodedEntry metadata = new EncodedEntry();
         final ProjectedManifestEntry projectedEntry =
@@ -422,7 +422,7 @@ final class ManifestEntryRunMergePlan {
                 long end,
                 List<ManifestEntryRunMerge.Discovery.BlockInfo> blocks,
                 ManifestEntryRunMergeEntry.Filter filter,
-                PartitionDictionary partitions)
+                ManifestEntryRunMergePartitionDictionary partitions)
                 throws Exception {
             this.reader = manifestFile.scanAvroBlocks(meta.fileName(), meta.fileSize());
             this.encodedRecordsCompatible = reader.rawBlockCopySupported();
@@ -671,7 +671,7 @@ final class ManifestEntryRunMergePlan {
                 ManifestFileMeta meta,
                 ManifestFileSorter.RowIdEntrySortKey sortKey,
                 ManifestEntryRunMergeEntry.Filter filter,
-                PartitionDictionary partitions)
+                ManifestEntryRunMergePartitionDictionary partitions)
                 throws Exception {
             long entryCount = meta.numAddedFiles() + meta.numDeletedFiles();
             this.entries = new ArrayList<>((int) entryCount);

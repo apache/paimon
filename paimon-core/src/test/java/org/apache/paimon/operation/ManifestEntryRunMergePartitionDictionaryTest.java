@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.manifest;
+package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
@@ -34,12 +34,13 @@ import java.util.concurrent.Future;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link PartitionDictionary}. */
-class PartitionDictionaryTest {
+/** Tests for {@link ManifestEntryRunMergePartitionDictionary}. */
+class ManifestEntryRunMergePartitionDictionaryTest {
 
     @Test
     void testComparatorEqualPartitionsKeepDistinctIds() {
-        PartitionDictionary dictionary = new PartitionDictionary((left, right) -> 0);
+        ManifestEntryRunMergePartitionDictionary dictionary =
+                new ManifestEntryRunMergePartitionDictionary((left, right) -> 0);
         int first = dictionary.id(partitionBytes(1));
         int second = dictionary.id(partitionBytes(2));
 
@@ -53,8 +54,8 @@ class PartitionDictionaryTest {
 
     @Test
     void testConcurrentCollectionAndRanks() throws Exception {
-        PartitionDictionary dictionary =
-                new PartitionDictionary(
+        ManifestEntryRunMergePartitionDictionary dictionary =
+                new ManifestEntryRunMergePartitionDictionary(
                         (left, right) -> Integer.compare(left.getInt(0), right.getInt(0)));
         Map<Integer, Integer> ids = new ConcurrentHashMap<>();
         ExecutorService executor = Executors.newFixedThreadPool(8);

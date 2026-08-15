@@ -23,7 +23,6 @@ import org.apache.paimon.manifest.CompactFileIdentifierSet;
 import org.apache.paimon.manifest.DeletedRowIdSet;
 import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.PartitionDictionary;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
@@ -49,13 +48,15 @@ final class ManifestEntryRunMergeEntry {
         byte[] ownedFileNameBytes;
         MemorySegment[] ownedFileNameSegments;
 
-        static Key viewOf(ProjectedManifestEntry entry, PartitionDictionary partitions) {
+        static Key viewOf(
+                ProjectedManifestEntry entry, ManifestEntryRunMergePartitionDictionary partitions) {
             Key key = new Key();
             key.replace(entry, partitions);
             return key;
         }
 
-        void replace(ProjectedManifestEntry entry, PartitionDictionary partitions) {
+        void replace(
+                ProjectedManifestEntry entry, ManifestEntryRunMergePartitionDictionary partitions) {
             long firstRowId = entry.file().nonNullFirstRowId();
             this.partitionId = partitions.id(entry.partitionBytes());
             this.partitionRank = partitions.rank(partitionId);
