@@ -61,6 +61,13 @@ class TableCommit:
         """Register a callback to be invoked after each successful commit."""
         self._commit_callbacks.append(callback)
 
+    def remove_commit_callback(self, callback: CommitCallback) -> None:
+        """Remove a previously registered commit callback."""
+        try:
+            self._commit_callbacks.remove(callback)
+        except ValueError:
+            pass
+
     def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
 
@@ -107,6 +114,10 @@ class TableCommit:
 
     def close(self):
         self.file_store_commit.close()
+        builder = getattr(self, "_stream_write_builder", None)
+        if builder is not None:
+            builder._detach_commit(self)
+            self._stream_write_builder = None
 
 
 class BatchTableCommit(TableCommit):

@@ -17,6 +17,7 @@
 ################################################################################
 
 import datetime
+import os
 import tempfile
 import unittest
 from decimal import Decimal
@@ -345,10 +346,12 @@ class DynamicBucketTest(unittest.TestCase):
             ):
                 table.new_batch_write_builder().new_write()
 
-    def test_batch_writer_abort_after_prepare_deletes_hash_index(self):
+    def test_batch_writer_abort_after_prepare_keeps_handed_off_hash_index(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'abort_prepared')
-            writer = table.new_batch_write_builder().new_write()
+            builder = table.new_batch_write_builder()
+            writer = builder.new_write()
+            committer = builder.new_commit()
             writer.write_arrow(pa.table({'id': [1], 'value': ['v-1']}))
             messages = writer.prepare_commit()
             index_path = messages[0].index_adds[0].index_file.external_path
@@ -361,7 +364,136 @@ class DynamicBucketTest(unittest.TestCase):
 
             writer.abort()
 
+            self.assertTrue(table.file_io.exists(index_path))
+            committer.abort(messages)
             self.assertFalse(table.file_io.exists(index_path))
+            committer.close()
+
+    def test_hash_index_prepare_failure_aborts_staged_data_files(self):
+        with tempfile.TemporaryDirectory() as root:
+            table = self._create_table(root, 'index_prepare_failure')
+            writer = (
+                table.new_batch_write_builder()
+                .new_write()
+                .with_dynamic_bucket_index()
+            )
+            before_files = {
+                os.path.relpath(os.path.join(path, name), table.table_path)
+                for path, _dirs, files in os.walk(table.table_path)
+                for name in files
+            }
+            writer.write_arrow(pa.table({'id': [1], 'value': ['v-1']}))
+            maintainer = writer.row_key_extractor._index_maintainer
+
+            original_write_index = maintainer._write_index
+
+            def fail_after_index_write(*args, **kwargs):
+                original_write_index(*args, **kwargs)
+                raise RuntimeError('forced HASH index failure')
+
+            with patch.object(
+                    maintainer,
+                    '_write_index',
+                    side_effect=fail_after_index_write):
+                with self.assertRaisesRegex(RuntimeError, 'forced HASH index failure'):
+                    writer.prepare_commit()
+
+            after_files = {
+                os.path.relpath(os.path.join(path, name), table.table_path)
+                for path, _dirs, files in os.walk(table.table_path)
+                for name in files
+            }
+            self.assertEqual(before_files, after_files)
+            writer.close()
+
+    def test_failed_stream_round_restores_previous_hash_index_state(self):
+        with tempfile.TemporaryDirectory() as root:
+            table = self._create_table(root, 'stream_index_prepare_failure')
+            builder = table.new_stream_write_builder()
+            writer = builder.new_write().with_dynamic_bucket_index()
+            committer = builder.new_commit()
+
+            writer.write_arrow(pa.table({'id': [1], 'value': ['v-1']}))
+            first = writer.prepare_commit(1)
+            committer.commit(first, 1)
+            maintainer = writer.row_key_extractor._index_maintainer
+            baseline = {
+                key: (set(state[0]), state[1], state[2])
+                for key, state in maintainer._states.items()
+            }
+
+            writer.write_arrow(pa.table({'id': [2], 'value': ['v-2']}))
+            original_write_index = maintainer._write_index
+
+            def fail_after_index_write(*args, **kwargs):
+                original_write_index(*args, **kwargs)
+                raise RuntimeError('forced HASH index failure')
+
+            with patch.object(
+                    maintainer,
+                    '_write_index',
+                    side_effect=fail_after_index_write):
+                with self.assertRaisesRegex(RuntimeError, 'forced HASH index failure'):
+                    writer.prepare_commit(2)
+
+            self.assertEqual(baseline, maintainer._states)
+
+            writer.write_arrow(pa.table({'id': [2], 'value': ['v-2-retry']}))
+            retried = writer.prepare_commit(3)
+            self.assertTrue(any(message.index_adds for message in retried))
+            committer.abort(retried)
+            writer.close()
+            committer.close()
+
+    def test_stream_writer_commit_before_write_links_hash_callbacks(self):
+        with tempfile.TemporaryDirectory() as root:
+            table = self._create_table(root, 'stream_commit_first')
+            builder = table.new_stream_write_builder()
+            committer = builder.new_commit()
+            writer = builder.new_write().with_dynamic_bucket_index()
+
+            writer.write_arrow(pa.table({'id': [1], 'value': ['v-1']}))
+            committer.commit(writer.prepare_commit(1), 1)
+
+            writer.write_arrow(pa.table({'id': [2], 'value': ['v-2']}))
+            second = writer.prepare_commit(2)
+            self.assertEqual(
+                table.snapshot_manager().get_latest_snapshot().id,
+                second[0].hash_index_base_snapshot,
+            )
+            committer.commit(second, 2)
+
+            self.assertEqual(
+                {'id': [1, 2], 'value': ['v-1', 'v-2']},
+                self._read_arrow(table).to_pydict(),
+            )
+            writer.close()
+            committer.close()
+
+    def test_stream_writer_supports_two_successful_commits(self):
+        with tempfile.TemporaryDirectory() as root:
+            table = self._create_table(root, 'stream_two_commits')
+            builder = table.new_stream_write_builder()
+            writer = builder.new_write().with_dynamic_bucket_index()
+            committer = builder.new_commit()
+
+            writer.write_arrow(pa.table({'id': [1], 'value': ['v-1']}))
+            committer.commit(writer.prepare_commit(1), 1)
+
+            writer.write_arrow(pa.table({'id': [2], 'value': ['v-2']}))
+            second = writer.prepare_commit(2)
+            self.assertEqual(
+                table.snapshot_manager().get_latest_snapshot().id,
+                second[0].hash_index_base_snapshot,
+            )
+            committer.commit(second, 2)
+
+            self.assertEqual(
+                {'id': [1, 2], 'value': ['v-1', 'v-2']},
+                self._read_arrow(table).to_pydict(),
+            )
+            writer.close()
+            committer.close()
 
     def test_stream_writer_releases_prepared_hash_index_ownership(self):
         with tempfile.TemporaryDirectory() as root:

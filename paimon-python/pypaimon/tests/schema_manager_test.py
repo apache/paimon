@@ -212,7 +212,7 @@ class TestBlobPartitionValidation(unittest.TestCase):
                 ):
                     manager.create_table(schema)
 
-    def test_create_table_still_rejects_primary_key_map_blob(self):
+    def test_create_table_allows_primary_key_map_blob(self):
         manager = SchemaManager(
             self.file_io,
             f"{self.temp_dir}/test_db.db/pk_map_blob",
@@ -220,8 +220,9 @@ class TestBlobPartitionValidation(unittest.TestCase):
         schema = Schema(
             fields=[
                 DataField(0, "id", AtomicType("INT", False)),
+                DataField(1, "name", AtomicType("STRING")),
                 DataField(
-                    1,
+                    2,
                     "payload",
                     MapType(
                         True,
@@ -231,17 +232,10 @@ class TestBlobPartitionValidation(unittest.TestCase):
                 ),
             ],
             primary_keys=["id"],
-            options={
-                "row-tracking.enabled": "true",
-                "data-evolution.enabled": "true",
-            },
+            options={},
         )
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "MAP<X, BLOB> type is not supported with primary key",
-        ):
-            manager.create_table(schema)
+        manager.create_table(schema)
 
 
 class TestOptionValidation(unittest.TestCase):

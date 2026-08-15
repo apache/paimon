@@ -15,15 +15,19 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Union
+from typing import Any, List, Optional, Set, Union
 
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.blob.managed_blob_reference_collector import ManagedBlobReferenceCollector
+from pypaimon.blob.primary_key_blob_externalizer import (
+    PrimaryKeyBlobExternalizer,
+    new_managed_blob_path,
+)
+from pypaimon.common.options.core_options import ChangelogProducer, CoreOptions
 from pypaimon.read.reader.deduplicate_merge_function import \
     DeduplicateMergeFunction
-from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.table.row.key_value import KeyValue
 from pypaimon.write.writer.data_writer import DataWriter
 
@@ -42,15 +46,42 @@ class KeyValueDataWriter(DataWriter):
 
     def __init__(self, table, partition, bucket, max_seq_number,
                  options=None, write_cols=None, merge_function=None,
-                 changelog_producer=ChangelogProducer.NONE):
+                 changelog_producer=ChangelogProducer.NONE,
+                 managed_blob_fields: Optional[Set[str]] = None):
         super().__init__(table, partition, bucket, max_seq_number,
                          options, write_cols, changelog_producer)
         # Defaults to deduplicate so direct callers (tests / future code
         # paths that don't go through FileStoreWrite) don't accidentally
         # skip the merge step entirely.
         self._merge_function = merge_function or DeduplicateMergeFunction()
+        self._managed_blob_fields = managed_blob_fields or set()
+        self._blob_externalizer = None
+        if self._managed_blob_fields:
+            from pypaimon.table.blob_descriptor_reader_factory import \
+                BlobDescriptorReaderFactory
+
+            def _new_pack_path():
+                return new_managed_blob_path(
+                    self.path_factory,
+                    self.partition,
+                    self.bucket,
+                    self.options,
+                )
+
+            self._blob_externalizer = PrimaryKeyBlobExternalizer(
+                self.file_io,
+                self.table.table_schema.fields,
+                self._managed_blob_fields,
+                _new_pack_path,
+                self.options.blob_target_file_size(),
+                self.options.blob_copy_buffer_size(),
+                CoreOptions.data_file_prefix(self.options),
+                BlobDescriptorReaderFactory.create(self.table),
+            )
 
     def _process_data(self, data: pa.RecordBatch) -> pa.Table:
+        if self._blob_externalizer is not None and self._blob_externalizer.enabled:
+            data = self._blob_externalizer.externalize_record_batch(data)
         # No sort here: sorting once at flush is strictly cheaper than
         # per-batch sort + a final global sort. ``pending_data`` ends
         # up as a concat of unsorted batches; ``_flush_all`` sorts it
@@ -63,12 +94,38 @@ class KeyValueDataWriter(DataWriter):
         # N writes incur 1 sort instead of N sorts.
         return pa.concat_tables([existing_data, new_data])
 
-    def prepare_commit(self) -> List[DataFileMeta]:
+    def _prepare_commit_data(self) -> Any:
         if self.pending_data is not None and self.pending_data.num_rows > 0:
             self._flush_all()
-        # ``_flush_all`` leaves ``pending_data = None``, so super's
-        # prepare_commit just returns ``committed_files``.
-        return super().prepare_commit()
+        if self._blob_externalizer is not None and self._blob_externalizer.enabled:
+            return self._blob_externalizer.stage_commit()
+        return None
+
+    def _complete_prepared_commit_extra(self, extra: Any) -> None:
+        if self._blob_externalizer is not None and self._blob_externalizer.enabled:
+            self._blob_externalizer.complete_commit(extra)
+
+    def _validate_prepared_commit_extra(self, extra: Any) -> None:
+        if self._blob_externalizer is not None and self._blob_externalizer.enabled:
+            self._blob_externalizer.validate_commit(extra)
+
+    def abort(self):
+        if self._blob_externalizer is not None and self._blob_externalizer.enabled:
+            self._blob_externalizer.abort()
+        super().abort()
+
+    def _write_managed_blob_extra_files(
+            self, data: pa.Table, file_name: str, file_path: str) -> List[str]:
+        if not self._managed_blob_fields:
+            return []
+        collector = ManagedBlobReferenceCollector(
+            self.file_io,
+            file_path,
+            self.table.table_schema.fields,
+            self._managed_blob_fields,
+        )
+        collector.collect_table(data)
+        return [collector.close()]
 
     def _check_and_roll_if_needed(self):
         # Buffer overflowed target_file_size: sort + fold + roll-write
@@ -88,18 +145,26 @@ class KeyValueDataWriter(DataWriter):
         # ``_flush_all`` so the contract holds even on the
         # close-without-prepare_commit path.
         try:
-            if self.pending_data is not None and self.pending_data.num_rows > 0:
-                self._flush_all()
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(
-                "Exception occurs when closing writer. Cleaning up.",
-                exc_info=e)
+            try:
+                if self.pending_data is not None and self.pending_data.num_rows > 0:
+                    self._flush_all()
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "Exception occurs when closing writer. Cleaning up.",
+                    exc_info=e)
+                self.abort()
+                raise e
+            finally:
+                self.pending_data = None
+            # prepare_commit drains handed-off files and marks their packs as
+            # committed. Everything still owned by the writer is unprepared and
+            # must be removed on close.
             self.abort()
-            raise e
         finally:
-            self.pending_data = None
+            if self._blob_externalizer is not None:
+                self._blob_externalizer.close()
 
     def _flush_all(self) -> None:
         """Sort + fold the entire buffer, then roll-write as files.

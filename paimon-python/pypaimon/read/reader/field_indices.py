@@ -19,13 +19,13 @@
 
 from typing import Any, Iterable, List, Optional, Sequence, Set
 
-from pypaimon.schema.data_types import DataField, VectorType
+from pypaimon.schema.data_types import DataField, VectorType, is_blob_file_field
 
 
 def blob_field_indices(fields: List[DataField]) -> Set[int]:
     return {
         i for i, f in enumerate(fields)
-        if hasattr(f.type, 'type') and f.type.type == 'BLOB'
+        if is_blob_file_field(f)
     }
 
 

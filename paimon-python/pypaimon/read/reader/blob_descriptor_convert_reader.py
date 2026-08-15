@@ -174,7 +174,10 @@ class BlobInlineConvertReader(RecordBatchReader):
             if field_name not in batch.schema.names:
                 continue
             values = [self._normalize_blob_to_bytes(v) for v in batch.column(field_name).to_pylist()]
-            blobs = [Blob.from_bytes(v, self._table.file_io) for v in values]
+            blobs = [
+                self._descriptor_field_to_blob(value, self._table.file_io)
+                for value in values
+            ]
 
             if self._blob_parallelism > 1:
                 converted_values = self._table.file_io.read_blobs_concurrent(
@@ -200,7 +203,7 @@ class BlobInlineConvertReader(RecordBatchReader):
 
             for idx, value in enumerate(values):
                 file_io = field_file_ios[idx] or self._table.file_io
-                blob = Blob.from_bytes(value, file_io)
+                blob = self._descriptor_field_to_blob(value, file_io)
                 if self._blob_parallelism > 1:
                     converted_values.append(None)
                     if blob is not None:
@@ -239,5 +242,16 @@ class BlobInlineConvertReader(RecordBatchReader):
             value = bytes(value)
         return value
 
+    @staticmethod
+    def _descriptor_field_to_blob(value, file_io):
+        value = BlobInlineConvertReader._normalize_blob_to_bytes(value)
+        if value is None:
+            return None
+        return Blob.from_descriptor_bytes(value, file_io=file_io)
+
     def close(self):
-        self._inner.close()
+        try:
+            self._inner.close()
+        finally:
+            if self._blob_view_lookup is not None:
+                self._blob_view_lookup.close()

@@ -5633,11 +5633,10 @@ class BlobConsumerTest(unittest.TestCase):
 
         self.assertGreater(len(received), 0)
 
-        # Capture data writers before close() clears them, then abort each one.
-        data_writers = list(writer.file_store_write.data_writers.values())
-        self.assertGreater(len(data_writers), 0)
-        for dw in data_writers:
-            dw.abort()
+        # Stage the whole parent/child writer tree so BLOB metadata crosses the
+        # child-to-parent boundary, then roll the transaction back.
+        prepared = writer.file_store_write.stage_commit(1)
+        prepared.abort()
 
         # Every descriptor returned to the consumer must still be readable.
         uri_reader = FileUriReader(table.file_io)
@@ -5645,6 +5644,51 @@ class BlobConsumerTest(unittest.TestCase):
             self.assertIsNotNone(desc)
             data = Blob.from_descriptor(uri_reader, desc).to_data()
             self.assertEqual(data, blob_bytes)
+
+    def test_blob_consumer_committer_abort_preserves_files(self):
+        """Committer abort must not delete blob files retained by the consumer."""
+        from pypaimon.table.row.blob import Blob
+        from pypaimon.common.uri_reader import FileUriReader
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'blob.target-file-size': '1KB',
+        })
+        self.catalog.create_table('test_db.blob_consumer_committer_abort', schema, False)
+        table = self.catalog.get_table('test_db.blob_consumer_committer_abort')
+
+        blob_bytes = b'X' * 2048
+        received = []
+
+        def my_consumer(field_name, descriptor):
+            received.append(descriptor)
+            return False
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.with_blob_consumer(my_consumer)
+        committer = write_builder.new_commit()
+
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'blob_data': [blob_bytes],
+        }, schema=pa_schema))
+        messages = writer.prepare_commit()
+        committer.abort(messages)
+        writer.close()
+        committer.close()
+
+        self.assertEqual(1, len(received))
+        uri_reader = FileUriReader(table.file_io)
+        self.assertEqual(
+            blob_bytes,
+            Blob.from_descriptor(uri_reader, received[0]).to_data(),
+        )
 
     def test_blob_consumer_after_write_raises(self):
         """Setting consumer after data has been written must raise."""

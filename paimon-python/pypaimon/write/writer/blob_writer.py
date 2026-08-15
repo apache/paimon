@@ -219,14 +219,14 @@ class BlobWriter(AppendOnlyDataWriter):
             file_path=file_path,
         ))
 
-    def prepare_commit(self):
-        """Prepare commit, preserving blob files in write/rolling order."""
+    def _prepare_commit_data(self):
+        """Stage commit, preserving blob files in write/rolling order."""
         # Close current file if open.
         if self.current_writer is not None:
             self.close_current_writer()
 
-        # Call parent to handle pending_data fallback.
-        return super().prepare_commit()
+        # Call parent to handle pending_data fallback without transferring ownership.
+        return super()._prepare_commit_data()
 
     def close(self):
         """Close current writer if open."""
@@ -248,6 +248,8 @@ class BlobWriter(AppendOnlyDataWriter):
         if self._blob_consumer is not None:
             self.pending_data = None
             self.committed_files.clear()
+            self.committed_changelog_files.clear()
+            self._active_prepared_commit = None
         else:
             super().abort()
 

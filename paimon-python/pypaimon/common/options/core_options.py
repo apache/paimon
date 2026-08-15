@@ -409,6 +409,16 @@ class CoreOptions:
         )
     )
 
+    BLOB_DESCRIPTOR_SOURCE_TABLE: ConfigOption[str] = (
+        ConfigOptions.key("blob-descriptor.source-table")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Source table whose FileIO is used to read descriptor-backed BLOB "
+            "content copied into managed BLOB storage."
+        )
+    )
+
     BLOB_VIEW_FIELD: ConfigOption[str] = (
         ConfigOptions.key("blob-view-field")
         .string_type()
@@ -1216,9 +1226,15 @@ class CoreOptions:
         value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
         return CoreOptions._parse_field_set(value)
 
+    def blob_descriptor_source_table(self, default=None):
+        return self.options.get(CoreOptions.BLOB_DESCRIPTOR_SOURCE_TABLE, default)
+
     def blob_view_fields(self, default=None):
         value = self.options.get(CoreOptions.BLOB_VIEW_FIELD, default)
         return CoreOptions._parse_field_set(value)
+
+    def blob_inline_fields(self, default=None):
+        return self.blob_descriptor_fields(default).union(self.blob_view_fields(default))
 
     def blob_field(self, default=None):
         value = self.options.get(CoreOptions.BLOB_FIELD, default)

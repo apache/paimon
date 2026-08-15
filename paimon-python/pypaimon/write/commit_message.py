@@ -36,6 +36,7 @@ class CommitMessage:
     changelog_files: List[DataFileMeta] = field(default_factory=list)
     hash_index_base_snapshot: Optional[int] = None
     total_buckets: Optional[int] = None
+    preserve_blob_files_on_abort: bool = False
 
     def is_empty(self):
         return (

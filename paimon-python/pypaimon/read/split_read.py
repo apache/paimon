@@ -18,7 +18,7 @@
 import os
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from pypaimon.common.merge_engine_dispatch import build_merge_function
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
@@ -215,6 +215,78 @@ class SplitRead(ABC):
             return pk_predicate
         else:
             return self.predicate
+
+    def _managed_blob_field_names(self) -> Set[str]:
+        from pypaimon.schema.data_types import field_names_in_blob_file
+
+        return field_names_in_blob_file(
+            self.value_fields,
+            CoreOptions.blob_inline_fields(self.table.options),
+        )
+
+    @staticmethod
+    def _blob_field_indices(field_names: Set[str], output_fields) -> Set[int]:
+        if not field_names:
+            return set()
+        name_to_idx = {field.name: idx for idx, field in enumerate(output_fields)}
+        return {
+            name_to_idx[name]
+            for name in field_names
+            if name in name_to_idx
+        }
+
+    def _wrap_managed_blob_reader(self, reader):
+        from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+        from pypaimon.read.reader.managed_blob_convert_record_reader import (
+            ManagedBlobConvertBatchReader,
+            ManagedBlobConvertRecordReader,
+        )
+
+        managed_blob_fields = self._managed_blob_field_names()
+        descriptor_fields = set()
+        view_fields = set()
+        if self.table.is_primary_key_table:
+            descriptor_fields = CoreOptions.blob_descriptor_fields(self.table.options)
+            if (CoreOptions.blob_view_resolve_enabled(self.table.options)
+                    and self.table.catalog_environment.catalog_loader is not None):
+                view_fields = CoreOptions.blob_view_fields(self.table.options)
+        blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
+        needs_payload_resolution = not blob_as_descriptor and (
+            managed_blob_fields or descriptor_fields)
+        if not needs_payload_resolution and not view_fields:
+            return reader
+
+        if isinstance(reader, RecordBatchReader):
+            return ManagedBlobConvertBatchReader(
+                reader,
+                self.table.file_io,
+                managed_blob_fields,
+                descriptor_field_names=descriptor_fields,
+                view_field_names=view_fields,
+                table=self.table,
+                blob_as_descriptor=blob_as_descriptor,
+            )
+
+        output_fields = (
+            self.outer_flat_read_type
+            if self.outer_extract_name_paths and self.outer_flat_read_type is not None
+            else self.value_fields)
+        managed_indices = self._blob_field_indices(
+            managed_blob_fields, output_fields)
+        descriptor_indices = self._blob_field_indices(
+            descriptor_fields, output_fields)
+        view_indices = self._blob_field_indices(view_fields, output_fields)
+        if not (managed_indices or descriptor_indices or view_indices):
+            return reader
+        return ManagedBlobConvertRecordReader(
+            reader,
+            self.table.file_io,
+            managed_indices,
+            descriptor_field_indices=descriptor_indices,
+            view_field_indices=view_indices,
+            table=self.table,
+            blob_as_descriptor=blob_as_descriptor,
+        )
 
     @abstractmethod
     def create_reader(self) -> RecordReader:
@@ -881,7 +953,9 @@ class RawFileSplitRead(SplitRead):
                     reader = FilterRecordBatchReader(reader, trimmed)
         if self.limit is not None:
             reader = LimitedRecordBatchReader(reader, self.limit)
-        return reader
+        # PK descriptors are row references, not positional DataEvolution BLOB
+        # files. Resolve them only after filtering, projection and limiting.
+        return self._wrap_managed_blob_reader(reader)
 
     def _all_data_fields_from(self, fields):
         if self.row_tracking_enabled:
@@ -1045,6 +1119,8 @@ class MergeFileSplitRead(SplitRead):
                             trimmed, self.outer_flat_read_type))
         if self.limit is not None:
             reader = LimitedRecordReader(reader, self.limit)
+        # Keep descriptor/view resolution above merge and all output shaping.
+        reader = self._wrap_managed_blob_reader(reader)
         return reader
 
     def _all_data_fields_from(self, fields):

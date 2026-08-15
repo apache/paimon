@@ -438,7 +438,9 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         self.catalog.create_table('default.fmt_blob_abort_cleanup', schema, False)
         table = self.catalog.get_table('default.fmt_blob_abort_cleanup')
 
-        writer = table.new_batch_write_builder().new_write()
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        committer = write_builder.new_commit()
         writer.write_arrow(pa.Table.from_pydict({
             'id': [1, 2, 3],
             'payload': [b'a', b'b', b'c'],
@@ -453,7 +455,8 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         for file_meta in all_files:
             self.assertTrue(table.file_io.exists(self._file_path(file_meta)))
 
-        writer.abort()
+        committer.abort(commit_messages)
+        committer.close()
 
         for file_meta in all_files:
             self.assertFalse(
@@ -801,7 +804,9 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         self.catalog.create_table('default.fmt_vector_abort_cleanup', schema, False)
         table = self.catalog.get_table('default.fmt_vector_abort_cleanup')
 
-        writer = table.new_batch_write_builder().new_write()
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        committer = write_builder.new_commit()
         writer.write_arrow(pa.table({
             'id': pa.array([1, 2, 3], type=pa.int64()),
             'embed': pa.FixedSizeListArray.from_arrays(
@@ -819,7 +824,8 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         for file_meta in all_files:
             self.assertTrue(table.file_io.exists(self._file_path(file_meta)))
 
-        writer.abort()
+        committer.abort(commit_messages)
+        committer.close()
 
         for file_meta in all_files:
             self.assertFalse(
@@ -842,7 +848,9 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         self.catalog.create_table('default.fmt_vector_close_failure', schema, False)
         table = self.catalog.get_table('default.fmt_vector_close_failure')
 
-        writer = table.new_batch_write_builder().new_write()
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        committer = write_builder.new_commit()
         writer.write_arrow(pa.table({
             'id': pa.array([1, 2, 3], type=pa.int64()),
             'embed': pa.FixedSizeListArray.from_arrays(
@@ -863,6 +871,13 @@ class DataEvolutionFormatsTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Close error"):
                 writer.close()
 
+        # prepare_commit transferred ownership to the commit messages, so a
+        # writer close failure must not delete those files.
+        for file_meta in all_files:
+            self.assertTrue(table.file_io.exists(self._file_path(file_meta)))
+
+        committer.abort(commit_messages)
+        committer.close()
         for file_meta in all_files:
             self.assertFalse(
                 table.file_io.exists(self._file_path(file_meta)),

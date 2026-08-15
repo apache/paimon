@@ -49,6 +49,7 @@ from pypaimon.write.row_utils import (
     value_for_arrow,
 )
 from pypaimon.write.writer.blob_writer import BlobWriter
+from pypaimon.write.writer.data_writer import DataWriterPrepareTransaction
 
 
 @dataclass(frozen=True)
@@ -760,7 +761,9 @@ class TableUpdateByRowId:
         partition_tuple = tuple(partition.values)
         new_files = []
         file_store_write = None
+        prepared_file_store = None
         blob_writers = []
+        blob_transaction = DataWriterPrepareTransaction()
         success = False
         try:
             if merged_data is not None:
@@ -769,8 +772,8 @@ class TableUpdateByRowId:
                 file_store_write.write_cols = list(merged_data.column_names)
                 for batch in merged_data.to_batches():
                     file_store_write.write(partition_tuple, 0, batch)
-                new_messages = file_store_write.prepare_commit(self.commit_identifier)
-                for msg in new_messages:
+                prepared_file_store = file_store_write.stage_commit(self.commit_identifier)
+                for msg in prepared_file_store.messages:
                     new_files.extend(msg.new_files)
 
             for column_name, values in blob_columns.items():
@@ -786,19 +789,29 @@ class TableUpdateByRowId:
                 arrow_type = original_data.schema.field(column_name).type
                 for value in values:
                     blob_writer.write_blob(value, arrow_type)
-                new_files.extend(blob_writer.prepare_commit())
+                new_files.extend(blob_transaction.stage(blob_writer).data_files)
 
+            commit_message = None
             if new_files:
                 self._assign_update_file_metadata(
                     new_files, first_row_id, column_names, blob_columns)
-                self.commit_messages.append(
-                    CommitMessage(
-                        partition=partition_tuple,
-                        bucket=0,
-                        new_files=new_files,
-                        check_from_snapshot=self.snapshot_id,
-                    )
+                commit_message = CommitMessage(
+                    partition=partition_tuple,
+                    bucket=0,
+                    new_files=new_files,
+                    check_from_snapshot=self.snapshot_id,
                 )
+
+            # No fallible work follows these acknowledgements. Ownership moves
+            # from every staged writer to the single update commit message.
+            if prepared_file_store is not None:
+                prepared_file_store.validate()
+            blob_transaction.validate()
+            if prepared_file_store is not None:
+                prepared_file_store.complete()
+            blob_transaction.complete()
+            if commit_message is not None:
+                self.commit_messages.append(commit_message)
             success = True
         finally:
             if success:
@@ -807,6 +820,9 @@ class TableUpdateByRowId:
                 for blob_writer in blob_writers:
                     blob_writer.close()
             else:
+                if prepared_file_store is not None:
+                    prepared_file_store.abort()
+                blob_transaction.abort()
                 if file_store_write is not None:
                     file_store_write.abort()
                 for blob_writer in blob_writers:
