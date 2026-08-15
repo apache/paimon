@@ -91,23 +91,12 @@ public class InternalRowUtils {
                     return false;
                 }
                 MapType mapType = (MapType) dataType;
-                GenericMap map1;
-                GenericMap map2;
-                if (data1 instanceof GenericMap) {
-                    map1 = (GenericMap) data1;
-                    map2 = (GenericMap) data2;
-                } else {
-                    map1 =
-                            copyToGenericMap(
-                                    (InternalMap) data1,
-                                    mapType.getKeyType(),
-                                    mapType.getValueType());
-                    map2 =
-                            copyToGenericMap(
-                                    (InternalMap) data2,
-                                    mapType.getKeyType(),
-                                    mapType.getValueType());
-                }
+                // Decide per operand. One MapType is represented by GenericMap, BinaryMap or
+                // ColumnarMap interchangeably -- which is why the conversion below exists at all --
+                // so gating data2's cast on data1's concrete class threw ClassCastException
+                // whenever the two sides happened to use different representations.
+                GenericMap map1 = toGenericMap((InternalMap) data1, mapType);
+                GenericMap map2 = toGenericMap((InternalMap) data2, mapType);
                 InternalArray keyArray1 = map1.keyArray();
                 InternalArray keyArray2 = map2.keyArray();
                 InternalArray valueArray1 = map1.valueArray();
@@ -282,6 +271,12 @@ public class InternalRowUtils {
         }
 
         return copyToGenericMap(map, keyType, valueType);
+    }
+
+    private static GenericMap toGenericMap(InternalMap map, MapType mapType) {
+        return map instanceof GenericMap
+                ? (GenericMap) map
+                : copyToGenericMap(map, mapType.getKeyType(), mapType.getValueType());
     }
 
     private static GenericMap copyToGenericMap(
