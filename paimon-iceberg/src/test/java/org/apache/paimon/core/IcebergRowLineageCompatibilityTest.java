@@ -46,11 +46,17 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
+import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.ManifestFile;
+import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableMetadataParser;
+import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -420,6 +426,111 @@ public class IcebergRowLineageCompatibilityTest {
         assertThat(checkedAtLeastOneSurvivor)
                 .as("expected bucket 1's file to survive the manifest rewrite")
                 .isTrue();
+    }
+
+    @Test
+    public void testGaReaderSeesAssignedManifests() throws Exception {
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        HadoopCatalog icebergCatalog = new HadoopCatalog(new Configuration(), tempDir.toString());
+        Table icebergTable = icebergCatalog.loadTable(TableIdentifier.of("mydb.db", "t"));
+        assertThat(icebergTable.currentSnapshot().firstRowId()).isEqualTo(0L);
+        for (ManifestFile manifest :
+                icebergTable.currentSnapshot().dataManifests(icebergTable.io())) {
+            assertThat(manifest.firstRowId()).isNotNull();
+        }
+    }
+
+    @Test
+    public void testLayer1TableUpgradesOnNextCommit() throws Exception {
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // simulate a Layer-1-written manifest list: strip the assigned first_row_id
+        IcebergPathFactory paths = new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, paths);
+        String listName =
+                new Path(readIcebergMetadata(table, 1).currentSnapshot().manifestList()).getName();
+        List<IcebergManifestFileMeta> stripped = new ArrayList<>();
+        for (IcebergManifestFileMeta meta : manifestList.read(listName)) {
+            stripped.add(
+                    new IcebergManifestFileMeta(
+                            meta.manifestPath(),
+                            meta.manifestLength(),
+                            meta.partitionSpecId(),
+                            meta.content(),
+                            meta.sequenceNumber(),
+                            meta.minSequenceNumber(),
+                            meta.addedSnapshotId(),
+                            meta.addedFilesCount(),
+                            meta.existingFilesCount(),
+                            meta.deletedFilesCount(),
+                            meta.addedRowsCount(),
+                            meta.existingRowsCount(),
+                            meta.deletedRowsCount(),
+                            meta.partitions(),
+                            null));
+        }
+        // overwrite the manifest list in place with unassigned metas
+        LocalFileIO.create().deleteQuietly(paths.toManifestListPath(listName));
+        // writeWithoutRolling creates a new file; rename it over the original
+        String rewritten = manifestList.writeWithoutRolling(stripped);
+        LocalFileIO.create()
+                .rename(paths.toManifestListPath(rewritten), paths.toManifestListPath(listName));
+        assertThat(manifestList.read(listName).get(0).firstRowId()).isNull();
+
+        // next commit re-lists carried-over manifests: unassigned metas get assigned now
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        for (IcebergManifestFileMeta meta :
+                manifestList.read(
+                        new Path(readIcebergMetadata(table, 2).currentSnapshot().manifestList())
+                                .getName())) {
+            if (meta.content() == IcebergManifestFileMeta.Content.DATA) {
+                assertThat(meta.firstRowId()).isNotNull();
+            }
+        }
+    }
+
+    @Test
+    public void testRowTrackingTableUsesSyntheticIds() throws Exception {
+        Map<String, String> options = formatVersionOptions(3);
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        FileStoreTable table = createPaimonTable(defaultRowType(), options, "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // documented independence: assignment behaves exactly as for any other table
+        IcebergMetadata metadata = readIcebergMetadata(table, 1);
+        assertThat(metadata.nextRowId()).isEqualTo(2L);
+        assertThat(effectiveFileFirstRowIds(table, 1).values()).containsExactly(0L);
     }
 
     // ------------------------------------------------------------------------

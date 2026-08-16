@@ -43,6 +43,7 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.CatalogProperties;
+import org.apache.iceberg.ManifestFile;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
@@ -1348,6 +1349,15 @@ public class IcebergRestMetadataCommitterTest {
         // Known Layer 1 limitation (documented in the spec): the server-side next-row-id
         // watermark restarts on recreation and stays behind the local metadata; commits
         // must keep succeeding regardless (validation is first-row-id >= next-row-id).
+
+        // reader-visible lineage from the REST catalog matches the file-based mirror:
+        // snapshot first-row-id and manifest assignments come from local metadata, never
+        // from the server's table-level watermark
+        Table reloaded = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
+        assertThat(reloaded.currentSnapshot().firstRowId()).isNotNull();
+        for (ManifestFile manifest : reloaded.currentSnapshot().dataManifests(reloaded.io())) {
+            assertThat(manifest.firstRowId()).isNotNull();
+        }
     }
 
     private static class TestRecord {
