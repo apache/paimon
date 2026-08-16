@@ -1431,8 +1431,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             commitKind == Snapshot.CommitKind.COMPACT
                                     ? IcebergSnapshotSummary.REPLACE.operation()
                                     : IcebergSnapshotSummary.OVERWRITE.operation();
+                    List<IcebergManifestEntry> sourceEntries =
+                            materializeFirstRowIds(fileMeta, entries);
                     List<IcebergManifestEntry> newEntries = new ArrayList<>();
-                    for (IcebergManifestEntry entry : entries) {
+                    for (IcebergManifestEntry entry : sourceEntries) {
                         if (entry.isLive()) {
                             boolean removed = removedFiles.containsKey(entry.file().filePath());
                             newEntries.add(
@@ -1494,10 +1496,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         Function<IcebergManifestFileMeta, List<IcebergManifestEntry>> processor =
                 meta -> {
+                    List<IcebergManifestEntry> sourceEntries =
+                            materializeFirstRowIds(
+                                    meta,
+                                    IcebergManifestFile.create(table, pathFactory)
+                                            .read(new Path(meta.manifestPath()).getName()));
                     List<IcebergManifestEntry> entries = new ArrayList<>();
-                    for (IcebergManifestEntry entry :
-                            IcebergManifestFile.create(table, pathFactory)
-                                    .read(new Path(meta.manifestPath()).getName())) {
+                    for (IcebergManifestEntry entry : sourceEntries) {
                         // a deletion made by this commit is recorded against the current
                         // snapshot but keeps the file sequence number of the older snapshot
                         // that added the file, so it has to be recognised by snapshot id
@@ -2048,6 +2053,33 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 watermark += meta.addedRowsCount();
             } else {
                 result.add(meta);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Iceberg v3 requires the inherited first_row_id to be written into file metadata when entries
+     * are copied into a rewritten manifest. Computes each entry's effective id in base manifest
+     * order (explicit field 142, or inherited from the manifest's first_row_id) and returns entries
+     * with the id materialized. No-op for delete manifests and for base manifests without an
+     * assigned first_row_id (v2 metadata, or v3 metadata written before manifest-level assignment
+     * existed — those stay in the spec's upgraded-table state).
+     */
+    private static List<IcebergManifestEntry> materializeFirstRowIds(
+            IcebergManifestFileMeta baseMeta, List<IcebergManifestEntry> entries) {
+        if (baseMeta.content() != IcebergManifestFileMeta.Content.DATA
+                || baseMeta.firstRowId() == null) {
+            return entries;
+        }
+        List<IcebergManifestEntry> result = new ArrayList<>();
+        long watermark = baseMeta.firstRowId();
+        for (IcebergManifestEntry entry : entries) {
+            if (entry.file().firstRowId() == null) {
+                result.add(entry.withFile(entry.file().withFirstRowId(watermark)));
+                watermark += entry.file().recordCount();
+            } else {
+                result.add(entry);
             }
         }
         return result;

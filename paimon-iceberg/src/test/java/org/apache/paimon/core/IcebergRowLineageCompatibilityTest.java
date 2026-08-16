@@ -21,6 +21,7 @@ package org.apache.paimon.core;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
@@ -37,10 +38,12 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
 import org.apache.iceberg.TableMetadata;
@@ -357,6 +360,68 @@ public class IcebergRowLineageCompatibilityTest {
         }
     }
 
+    @Test
+    public void testFirstRowIdStableAcrossManifestRewrite() throws Exception {
+        // A single-bucket table always rewrites its one-and-only file whole, so no entry ever
+        // survives a rewrite unchanged (the same-path invariant this test targets never fires).
+        // Use two buckets instead, and only touch one of them: the other bucket's file must
+        // then be carried, byte-for-byte unchanged, as an EXISTING entry into the manifest that
+        // gets rewritten because its sibling entry was removed.
+        RowType rowType = defaultRowType();
+        Map<String, String> customOptions = formatVersionOptions(3);
+        customOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        customOptions.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "true");
+        FileStoreTable table = createPkPaimonTable(rowType, customOptions);
+
+        int keyBucket0 = findKeyForBucket(table, 0);
+        int keyBucket1 = findKeyForBucket(table, 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(keyBucket0, 10));
+        write.write(GenericRow.of(keyBucket1, 20));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        write.compact(BinaryRow.EMPTY_ROW, 1, true);
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        // an append bundled with a full compaction is committed as two separate physical
+        // snapshots (append, then compact), so the Iceberg metadata id to inspect is whatever
+        // snapshot id is actually latest now, not the external commit identifier used above
+        Map<String, Long> idsBefore =
+                effectiveFileFirstRowIds(table, table.snapshotManager().latestSnapshotId());
+        assertThat(idsBefore).isNotEmpty();
+
+        // delete the bucket-0 key and compact only bucket 0: bucket 1's file is left entirely
+        // untouched, so the shared manifest is rewritten (bucket 0's entry removed) while
+        // bucket 1's entry must survive, under the same file path, as a materialized EXISTING
+        // entry
+        write.write(GenericRow.ofKind(RowKind.DELETE, keyBucket0, 10));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+        write.close();
+        commit.close();
+
+        Map<String, Long> idsAfter =
+                effectiveFileFirstRowIds(table, table.snapshotManager().latestSnapshotId());
+        assertThat(idsAfter).isNotEmpty();
+        boolean checkedAtLeastOneSurvivor = false;
+        for (Map.Entry<String, Long> e : idsAfter.entrySet()) {
+            Long before = idsBefore.get(e.getKey());
+            if (before != null) {
+                checkedAtLeastOneSurvivor = true;
+                // a file carried across the rewrite keeps its effective first row id
+                assertThat(e.getValue()).as("file %s", e.getKey()).isEqualTo(before);
+            }
+        }
+        assertThat(checkedAtLeastOneSurvivor)
+                .as("expected bucket 1's file to survive the manifest rewrite")
+                .isTrue();
+    }
+
     // ------------------------------------------------------------------------
     //  helpers
     // ------------------------------------------------------------------------
@@ -478,6 +543,78 @@ public class IcebergRowLineageCompatibilityTest {
             paimonCatalog.createTable(paimonIdentifier, schema, false);
             return (FileStoreTable) paimonCatalog.getTable(paimonIdentifier);
         }
+    }
+
+    private FileStoreTable createPkPaimonTable(RowType rowType, Map<String, String> customOptions)
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path path = new Path(tempDir.toString());
+        Options options = new Options(customOptions);
+        // two fixed buckets so a manifest rewrite can leave one bucket's file untouched
+        // (see testFirstRowIdStableAcrossManifestRewrite)
+        options.set(CoreOptions.BUCKET, 2);
+        options.set(
+                IcebergOptions.METADATA_ICEBERG_STORAGE, IcebergOptions.StorageType.TABLE_LOCATION);
+        options.set(CoreOptions.FILE_FORMAT, "avro");
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.<String>emptyList(),
+                        Collections.singletonList("k"),
+                        options.toMap(),
+                        "");
+        try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, path)) {
+            paimonCatalog.createDatabase("mydb2", false);
+            Identifier id = Identifier.create("mydb2", "t");
+            paimonCatalog.createTable(id, schema, false);
+            return (FileStoreTable) paimonCatalog.getTable(id);
+        }
+    }
+
+    /** Finds the smallest positive key whose fixed-bucket hash lands in {@code targetBucket}. */
+    private int findKeyForBucket(FileStoreTable table, int targetBucket) {
+        FixedBucketRowKeyExtractor extractor = new FixedBucketRowKeyExtractor(table.schema());
+        for (int k = 1; k < 10_000; k++) {
+            extractor.setRecord(GenericRow.of(k, 0));
+            if (extractor.bucket() == targetBucket) {
+                return k;
+            }
+        }
+        throw new IllegalStateException("No key found for bucket " + targetBucket);
+    }
+
+    /** Effective per-file first row id: explicit field 142, or inherited per the spec rules. */
+    private Map<String, Long> effectiveFileFirstRowIds(FileStoreTable table, long snapshotId)
+            throws Exception {
+        IcebergPathFactory paths = new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, paths);
+        IcebergManifestFile manifestFile = IcebergManifestFile.create(table, paths);
+        Map<String, Long> result = new HashMap<>();
+        for (IcebergManifestFileMeta meta :
+                manifestList.read(
+                        new Path(
+                                        readIcebergMetadata(table, snapshotId)
+                                                .currentSnapshot()
+                                                .manifestList())
+                                .getName())) {
+            if (meta.content() != IcebergManifestFileMeta.Content.DATA) {
+                continue;
+            }
+            long watermark = meta.firstRowId() == null ? -1 : meta.firstRowId();
+            for (IcebergManifestEntry entry : manifestFile.read(meta)) {
+                long effective;
+                if (entry.file().firstRowId() != null) {
+                    effective = entry.file().firstRowId();
+                } else {
+                    effective = watermark;
+                    watermark += entry.file().recordCount();
+                }
+                if (entry.isLive()) {
+                    result.put(entry.file().filePath(), effective);
+                }
+            }
+        }
+        return result;
     }
 
     private Path metadataPath(FileStoreTable table, long snapshotId) {
