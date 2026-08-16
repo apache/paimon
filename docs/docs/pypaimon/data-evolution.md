@@ -97,11 +97,9 @@ table_commit.close()
 
 You can use `update_by_predicate` for SQL-like `UPDATE ... SET ... WHERE ...`
 operations. Assignments may be literals or callables. Callables require explicit
-`read_columns` and run once per matched logical file group, so they may be
-invoked zero, one, or multiple times. They must be deterministic, side-effect-free,
-and row-local, and return one Arrow value per input row. Callable inputs are read
-from the same pinned snapshot used to plan the update. Precomputed Arrow array
-assignments cannot be mixed with callables.
+`read_columns` and may run in multiple bounded batches. They must be deterministic,
+side-effect-free, and row-local, and return one Arrow value per input row. Inputs
+are read from the same pinned snapshot used to plan the update.
 When global indexes are available, `update_by_predicate` discovers matching
 `_ROW_ID` values with `scalar-index.search-mode=full` on the configured
 point-in-time scan snapshot or, if none is configured, the latest snapshot.
