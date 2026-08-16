@@ -46,6 +46,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.DataEvolutionFileReader;
 import org.apache.paimon.reader.EmptyFileRecordReader;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
@@ -128,6 +129,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     protected RowType readRowType;
     @Nullable private List<Predicate> filters;
+    @Nullable private ReadBatchSizer readBatchSizer;
 
     public DataEvolutionSplitRead(
             FileIO fileIO,
@@ -174,6 +176,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             // reconfigured after it created readers, see AppendTableRead#innerWithFilter
             singleFileReaderMappings.clear();
         }
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withReadBatchSizer(ReadBatchSizer sizer) {
+        this.readBatchSizer = sizer;
         return this;
     }
 
@@ -598,7 +606,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
 
         FormatReaderContext formatReaderContext =
-                new FormatReaderContext(fileIO, readTarget.path, readTarget.fileSize, selection);
+                new FormatReaderContext(
+                        fileIO, readTarget.path, readTarget.fileSize, selection, readBatchSizer);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         readRowType,

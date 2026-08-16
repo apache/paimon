@@ -16,31 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.reader.ReadBatchSizer;
-import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.TableSchema;
 
-import javax.annotation.Nullable;
+import org.junit.jupiter.api.Test;
 
-/** The context for creating orc {@link RecordReader}. */
-public class OrcFormatReaderContext extends FormatReaderContext {
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
-    private final int poolSize;
+/** Tests for {@link LookupCompactDiffRead}. */
+class LookupCompactDiffReadTest {
 
-    public OrcFormatReaderContext(
-            FileIO fileIO,
-            Path filePath,
-            long fileSize,
-            int poolSize,
-            @Nullable ReadBatchSizer readBatchSizer) {
-        super(fileIO, filePath, fileSize, null, readBatchSizer);
-        this.poolSize = poolSize;
-    }
+    @Test
+    void testReadBatchSizerPropagatesToMergeRead() {
+        MergeFileSplitRead mergeRead = mock(MergeFileSplitRead.class);
+        LookupCompactDiffRead read = new LookupCompactDiffRead(mergeRead, mock(TableSchema.class));
+        ReadBatchSizer sizer = new ReadBatchSizer();
 
-    public int poolSize() {
-        return poolSize;
+        read.withReadBatchSizer(sizer);
+
+        verify(mergeRead, times(2)).withReadBatchSizer(sizer);
     }
 }

@@ -227,7 +227,8 @@ class MosaicReaderWriterTest {
         LocalFileIO fileIO = new LocalFileIO();
         RecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
         assertThat(batch).isNotNull();
@@ -368,7 +369,8 @@ class MosaicReaderWriterTest {
         LocalFileIO fileIO = new LocalFileIO();
         RecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         InternalRowSerializer serializer = new InternalRowSerializer(readType);
         List<InternalRow> result = new ArrayList<>();

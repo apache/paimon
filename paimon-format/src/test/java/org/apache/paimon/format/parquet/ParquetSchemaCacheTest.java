@@ -175,7 +175,8 @@ public class ParquetSchemaCacheTest {
         LocalFileIO fileIO = new LocalFileIO();
         RecordReader<InternalRow> reader =
                 factory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
         reader.forEachRemaining(row -> {});
     }
 
@@ -183,7 +184,8 @@ public class ParquetSchemaCacheTest {
         LocalFileIO fileIO = new LocalFileIO();
         RecordReader<InternalRow> reader =
                 factory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
         AtomicInteger cnt = new AtomicInteger(0);
         reader.forEachRemaining(row -> cnt.incrementAndGet());
         return cnt.get();

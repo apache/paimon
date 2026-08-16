@@ -51,20 +51,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         """
         Create splits for data evolution tables.
         """
-        def sort_key(manifest_entry: ManifestEntry) -> tuple:
-            first_row_id = (
-                manifest_entry.file.first_row_id
-                if manifest_entry.file.first_row_id is not None
-                else float('-inf')
-            )
-            is_blob = 1 if DataFileMeta.is_blob_file(manifest_entry.file.file_name) else 0
-            max_seq = manifest_entry.file.max_sequence_number
-            return first_row_id, is_blob, -max_seq
-
-        sorted_entries = sorted(file_entries, key=sort_key)
-
         partitioned_files = defaultdict(list)
-        for entry in sorted_entries:
+        for entry in file_entries:
             partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
         slice_row_ranges = None  # Row ID ranges for slice-based filtering
@@ -79,11 +67,11 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             return max(sum(f.file_size for f in file_list), self.open_file_cost)
 
         splits = []
-        for key, sorted_entries_list in partitioned_files.items():
-            if not sorted_entries_list:
+        for key, entries_list in partitioned_files.items():
+            if not entries_list:
                 continue
 
-            data_files: List[DataFileMeta] = [e.file for e in sorted_entries_list]
+            data_files: List[DataFileMeta] = [e.file for e in entries_list]
 
             # Split files by firstRowId for data evolution
             split_by_row_id = self._split_by_row_id(data_files)
@@ -109,7 +97,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             ]
 
             splits += self._build_split_from_pack_for_data_evolution(
-                flatten_packed_files, packed_files, sorted_entries_list
+                flatten_packed_files, packed_files, entries_list
             )
 
         # merge slice_row_ranges and self.row_ranges
@@ -298,8 +286,14 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                         filtered_blob_entries.append(entry)
                         break
             
-            # Combine filtered non-blob and blob files
-            filtered_entries = filtered_non_blob_entries + filtered_blob_entries
+            kept_entries = {
+                id(entry)
+                for entry in filtered_non_blob_entries + filtered_blob_entries
+            }
+            filtered_entries = [
+                entry for entry in file_entries
+                if id(entry) in kept_entries
+            ]
             
             if filtered_entries:
                 filtered_partitioned_files[key] = filtered_entries

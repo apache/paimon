@@ -30,6 +30,7 @@ import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.LimitRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.IncrementalChangelogReadProvider;
@@ -68,6 +69,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     private IOManager ioManager = null;
     @Nullable private TopN topN = null;
     @Nullable private Integer limit = null;
+    @Nullable private ReadBatchSizer readBatchSizer;
 
     public KeyValueTableRead(
             Supplier<MergeFileSplitRead> mergeReadSupplier,
@@ -111,6 +113,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
             read = read.withTopN(topN);
         }
         read.withFilter(predicate).withIOManager(ioManager);
+        if (readBatchSizer != null) {
+            read.withReadBatchSizer(readBatchSizer);
+        }
     }
 
     @Override
@@ -198,6 +203,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         if (executeFilter) {
             read.executeFilter();
         }
+        if (readBatchSizer != null) {
+            read.withReadBatchSizer(readBatchSizer);
+        }
         return read;
     }
 
@@ -205,6 +213,13 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     public TableRead withIOManager(IOManager ioManager) {
         initialized().forEach(r -> r.withIOManager(ioManager));
         this.ioManager = ioManager;
+        return this;
+    }
+
+    @Override
+    public InnerTableRead withReadBatchSizer(ReadBatchSizer sizer) {
+        initialized().forEach(r -> r.withReadBatchSizer(sizer));
+        this.readBatchSizer = sizer;
         return this;
     }
 

@@ -34,8 +34,26 @@ from pypaimon.write.file_store_commit import (
     ManifestMergeResult,
     RetryResult,
     RewriteResult,
+    _abort_commit_messages,
     _try_replace_manifest_files,
 )
+
+
+class TestAbortCommitMessages(unittest.TestCase):
+
+    def test_index_path_failure_does_not_escape_abort(self):
+        table = Mock()
+        table.path_factory.side_effect = RuntimeError("path lookup failed")
+        index_file = Mock(file_name="index-file", external_path=None)
+        message = Mock(
+            new_files=[],
+            changelog_files=[],
+            index_adds=[Mock(index_file=index_file)],
+        )
+
+        with self.assertLogs(
+                'pypaimon.write.file_store_commit', level='WARNING'):
+            _abort_commit_messages(table, [message])
 
 
 @patch('pypaimon.write.file_store_commit.ManifestFileManager')

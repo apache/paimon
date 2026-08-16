@@ -29,6 +29,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -133,12 +134,46 @@ class RawFileSplitReadTest {
         }
     }
 
+    @Test
+    void testTableReadSharesBatchSizer() throws Exception {
+        FileStoreTable table = createTable("dynamic-batch-size", 20);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+        sizer.setBatchSize(5);
+        InnerTableRead read = table.newRead().withReadBatchSizer(sizer);
+
+        try (RecordReader<InternalRow> reader = read.createReader(singleSplit(table))) {
+            assertThat(readBatchSize(reader)).isEqualTo(5);
+
+            sizer.setBatchSize(2);
+            assertThat(readBatchSize(reader)).isEqualTo(2);
+
+            sizer.setBatchSize(8);
+            assertThat(readBatchSize(reader)).isEqualTo(8);
+        }
+    }
+
+    private static int readBatchSize(RecordReader<InternalRow> reader) throws Exception {
+        RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+        assertThat(batch).isNotNull();
+        int count = 0;
+        while (batch.next() != null) {
+            count++;
+        }
+        batch.releaseBatch();
+        return count;
+    }
+
     private FileStoreTable createTable(String directory) throws Exception {
+        return createTable(directory, 1);
+    }
+
+    private FileStoreTable createTable(String directory, int rowCount) throws Exception {
         Path tablePath = new Path(tempDir.resolve(directory).toUri());
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.BUCKET_KEY, "first");
+        options.set(CoreOptions.READ_BATCH_SIZE, 8);
         Schema schema =
                 Schema.newBuilder()
                         .column("first", DataTypes.STRING())
@@ -153,7 +188,9 @@ class RawFileSplitReadTest {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
-            write.write(GenericRow.of(BinaryString.fromString("value"), 42));
+            for (int i = 0; i < rowCount; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("value"), i + 42));
+            }
             commit.commit(write.prepareCommit());
         }
         return table;

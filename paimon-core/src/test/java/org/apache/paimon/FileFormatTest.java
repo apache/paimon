@@ -77,7 +77,9 @@ public class FileFormatTest {
                                 new FormatReaderContext(
                                         LocalFileIO.create(),
                                         path,
-                                        LocalFileIO.create().getFileSize(path)));
+                                        LocalFileIO.create().getFileSize(path),
+                                        null,
+                                        null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(
                 rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(1))));

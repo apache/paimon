@@ -30,17 +30,22 @@ from pypaimon.common.options.core_options import (
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex import Range
+from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.read.scanner.data_evolution_split_generator import (
+    DataEvolutionSplitGenerator,
+)
 from pypaimon.read.split import DataSplit
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.file_store_commit import _abort_commit_messages
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
@@ -225,40 +230,117 @@ class TableUpdate:
             predicate: Optional[Predicate],
             assignments: Mapping[str, Any],
             commit_identifier: int,
+            read_columns: Optional[Sequence[str]] = None,
     ) -> List[CommitMessage]:
         """Shared implementation for SQL-like ``UPDATE ... WHERE ...``.
 
-        ``predicate`` identifies the target rows. ``assignments`` maps target
-        column names to literal values. The method reads matching ``_ROW_ID``
-        values, builds an Arrow update table, then delegates to the existing
-        row-id update path.
+        ``predicate`` identifies the target rows. Assignment values may be
+        literals or callables receiving one matched logical file group as an
+        Arrow table.
         """
-        self._validate_predicate_update(assignments)
+        has_callable = any(callable(value) for value in assignments.values())
+        has_array = any(
+            isinstance(value, (pa.Array, pa.ChunkedArray))
+            for value in assignments.values()
+        )
+        read_columns = tuple(read_columns or ())
+        self._validate_predicate_update(
+            assignments, read_columns, has_callable, has_array
+        )
 
         scan_table = self._matched_update_scan_table()
         read_builder = scan_table.new_read_builder()
         if predicate is not None:
             read_builder.with_filter(predicate)
-            read_builder.with_projection(
-                list(scan_table.field_names) + [SpecialFields.ROW_ID.name]
-            )
+        if has_callable:
+            projection = list(dict.fromkeys(read_columns))
+            projection.append(SpecialFields.ROW_ID.name)
+            read_builder.with_projection(projection)
         else:
             read_builder.with_projection([SpecialFields.ROW_ID.name])
 
-        scan = read_builder.new_scan()
-        splits = scan.plan_for_write().splits()
-        matched = read_builder.new_read().to_arrow(splits)
-        if matched.num_rows == 0:
-            return []
-
-        update_table = self._build_predicate_update_table(
-            matched[SpecialFields.ROW_ID.name],
-            assignments,
-            matched.num_rows,
+        plan = read_builder.new_scan().plan_for_write()
+        splits = plan.splits()
+        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        files_info = TableUpdateByRowId._files_info_from_splits(
+            snapshot_id, splits
         )
-        return TableUpdateByRowId(
+        table_read = read_builder.new_read()
+        updater = TableUpdateByRowId(
             self.table, self.commit_user, commit_identifier,
-        ).update_columns(update_table, list(assignments.keys()))
+            _precomputed_files_info=files_info,
+        )
+        try:
+            if has_array:
+                matched = table_read.to_arrow(splits)
+                if matched.num_rows > 0:
+                    update_table = self._build_predicate_update_table(
+                        assignments,
+                        matched,
+                    )
+                    updater.update_columns(
+                        update_table, list(assignments.keys())
+                    )
+            else:
+                for split in self._predicate_update_file_groups(splits):
+                    matched = table_read.to_arrow([split], parallelism=1)
+                    if matched.num_rows == 0:
+                        continue
+                    update_table = self._build_predicate_update_table(
+                        assignments,
+                        matched,
+                    )
+                    updater.update_columns(
+                        update_table, list(assignments.keys())
+                    )
+        except Exception:
+            _abort_commit_messages(self.table, updater.commit_messages)
+            raise
+        return updater.commit_messages
+
+    @staticmethod
+    def _predicate_update_file_groups(splits):
+        for split in splits:
+            data_split = (
+                split.data_split()
+                if isinstance(split, IndexedSplit) else split
+            )
+            deletion_files = data_split.data_deletion_files
+            deletion_by_name = (
+                {
+                    file.file_name: deletion
+                    for file, deletion in zip(
+                        data_split.files, deletion_files
+                    )
+                }
+                if deletion_files is not None else None
+            )
+            groups = DataEvolutionSplitGenerator._split_by_row_id(
+                data_split.files
+            )
+            for files in groups:
+                group = DataSplit(
+                    files=files,
+                    partition=data_split.partition,
+                    bucket=data_split.bucket,
+                    raw_convertible=len(files) == 1,
+                    data_deletion_files=(
+                        [deletion_by_name[file.file_name] for file in files]
+                        if deletion_by_name is not None else None
+                    ),
+                    snapshot_id=data_split.snapshot_id,
+                )
+                if isinstance(split, IndexedSplit):
+                    group_ranges = Range.sort_and_merge_overlap(
+                        [file.row_id_range() for file in files], True, True
+                    )
+                    row_ranges = Range.and_(
+                        split.row_ranges(), group_ranges
+                    )
+                    if not row_ranges:
+                        continue
+                    group = IndexedSplit(group, row_ranges)
+                yield group
 
     def _matched_update_scan_table(self):
         snapshot_manager = self.table.snapshot_manager()
@@ -287,7 +369,13 @@ class TableUpdate:
 
         return self.table.copy(dynamic_options)
 
-    def _validate_predicate_update(self, assignments: Mapping[str, Any]):
+    def _validate_predicate_update(
+            self,
+            assignments: Mapping[str, Any],
+            read_columns: Optional[Sequence[str]],
+            has_callable: bool,
+            has_array: bool,
+    ):
         if not self.table.options.data_evolution_enabled():
             raise ValueError(
                 "update_by_predicate requires "
@@ -300,6 +388,25 @@ class TableUpdate:
             )
         if not assignments:
             raise ValueError("assignments must not be empty.")
+        if read_columns and not has_callable:
+            raise ValueError(
+                "read_columns requires a callable assignment."
+            )
+        if has_callable:
+            if has_array:
+                raise ValueError(
+                    "Callable assignments cannot be combined with Arrow "
+                    "array assignments."
+                )
+            if not read_columns:
+                raise ValueError(
+                    "Callable assignments require read_columns."
+                )
+            for col in read_columns:
+                if col not in self.table.field_names:
+                    raise ValueError(
+                        f"Read column {col} is not in table schema."
+                    )
 
         partition_keys = set(self.table.partition_keys)
         for col in assignments:
@@ -313,19 +420,27 @@ class TableUpdate:
 
     def _build_predicate_update_table(
             self,
-            row_ids,
             assignments: Mapping[str, Any],
-            row_count: int,
+            matched: pa.Table,
     ) -> pa.Table:
         table_schema = PyarrowFieldParser.from_paimon_schema(
             self.table.table_schema.fields
         )
-        arrays = [row_ids]
+        arrays = [matched[SpecialFields.ROW_ID.name]]
         fields = [pa.field(SpecialFields.ROW_ID.name, pa.int64())]
         for col, value in assignments.items():
+            if callable(value):
+                value = value(matched)
+                if not isinstance(value, (pa.Array, pa.ChunkedArray)):
+                    raise ValueError(
+                        f"Callable assignment for {col} must return a "
+                        "pyarrow.Array or pyarrow.ChunkedArray."
+                    )
             target_field = table_schema.field(col)
             arrays.append(
-                self._assignment_to_array(value, target_field.type, row_count)
+                self._assignment_to_array(
+                    value, target_field.type, matched.num_rows
+                )
             )
             fields.append(target_field)
         return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
@@ -334,7 +449,7 @@ class TableUpdate:
     def _assignment_to_array(
             value: Any, data_type: pa.DataType, row_count: int):
         if isinstance(value, pa.ChunkedArray):
-            array = value.combine_chunks()
+            array = value
         elif isinstance(value, pa.Array):
             array = value
         else:
@@ -348,7 +463,13 @@ class TableUpdate:
                 f"{len(array)} != {row_count}."
             )
         if array.type != data_type:
-            array = array.cast(data_type)
+            if isinstance(array, pa.ChunkedArray):
+                array = pa.chunked_array(
+                    [chunk.cast(data_type) for chunk in array.chunks],
+                    type=data_type,
+                )
+            else:
+                array = array.cast(data_type)
         return array
 
     def _delete_by_predicate(
@@ -523,10 +644,14 @@ class BatchTableUpdate(TableUpdate):
             self,
             predicate: Optional[Predicate],
             assignments: Mapping[str, Any],
+            read_columns: Optional[Sequence[str]] = None,
     ) -> List[CommitMessage]:
-        """Update rows matching ``predicate`` with literal assignments."""
+        """Update rows using literal or Arrow callable assignments."""
         return self._update_by_predicate(
-            predicate, assignments, BATCH_COMMIT_IDENTIFIER
+            predicate,
+            assignments,
+            BATCH_COMMIT_IDENTIFIER,
+            read_columns,
         )
 
     def delete_by_predicate(
@@ -598,11 +723,12 @@ class StreamTableUpdate(TableUpdate):
             predicate: Optional[Predicate],
             assignments: Mapping[str, Any],
             commit_identifier: int,
+            read_columns: Optional[Sequence[str]] = None,
     ) -> List[CommitMessage]:
-        """Update rows matching ``predicate`` with literal assignments,
+        """Update rows using literal or Arrow callable assignments,
         tagging the produced commit messages with ``commit_identifier``."""
         return self._update_by_predicate(
-            predicate, assignments, commit_identifier
+            predicate, assignments, commit_identifier, read_columns
         )
 
     def delete_by_predicate(
