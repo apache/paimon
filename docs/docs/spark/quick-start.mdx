@@ -375,12 +375,28 @@ All Spark's data types are available in package `org.apache.spark.sql.types`.
       <td>true</td>
     </tr>
     <tr>
+      <td><code>GeometryType (Spark 4.1)</code></td>
+      <td><code>GeometryType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>GeographyType (Spark 4.1)</code></td>
+      <td><code>GeographyType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
       <td><code>VariantType(Spark4.0+)</code></td>
       <td><code>VariantType</code></td>
       <td>true</td>
     </tr>
     </tbody>
 </table>
+
+:::warning
+
+Native `GeometryType` and `GeographyType` conversion is supported only in Spark 4.1 and only for CRSs recognized by Spark. Spark 4.1 supports only the `spherical` geography edge algorithm, so Paimon geography types using `vincenty`, `thomas`, `andoyer`, or `karney` cannot be converted. Spark 3.x and Spark 4.0 reject Paimon geospatial columns instead of exposing them as `BinaryType`, which would lose the CRS or edge algorithm. Paimon does not support Spark geospatial types with mixed SRIDs.
+
+:::
 
 :::warning
 

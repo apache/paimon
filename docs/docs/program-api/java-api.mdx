@@ -459,6 +459,24 @@ public class StreamWriteTable {
 | map          | org.apache.paimon.data.InternalMap   |
 | InternalRow  | org.apache.paimon.data.InternalRow   |
 
+### Geospatial Types
+
+Use the public type factories to declare geospatial columns:
+
+```java
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.EdgeAlgorithm;
+
+DataType defaultGeometry = DataTypes.GEOMETRY();
+DataType projectedGeometry = DataTypes.GEOMETRY("EPSG:3857");
+DataType defaultGeography = DataTypes.GEOGRAPHY();
+DataType karneyGeography =
+        DataTypes.GEOGRAPHY("OGC:CRS84", EdgeAlgorithm.KARNEY);
+```
+
+`GEOMETRY` and `GEOGRAPHY` values are represented as OGC Well-Known Binary (WKB) byte arrays in Paimon's internal row API. The default CRS is `OGC:CRS84`, and the default geography edge interpolation algorithm is `EdgeAlgorithm.SPHERICAL`.
+
 ## Predicate Types
 
 | SQL Predicate | Paimon Predicate                                            | 
