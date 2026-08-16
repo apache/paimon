@@ -25,6 +25,7 @@ from unittest import mock
 import pyarrow as pa
 import pytest
 
+from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
@@ -54,7 +55,8 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         raise NotImplementedError
 
     def _apply_update_by_predicate(
-            self, table_update, predicate, assignments, cid):
+            self, table_update, predicate, assignments, cid,
+            read_columns=None):
         raise NotImplementedError
 
     def _apply_delete_by_predicate(self, table_update, predicate, cid):
@@ -138,7 +140,8 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         tc.close()
         return msgs
 
-    def _do_update_by_predicate(self, table, predicate, assignments):
+    def _do_update_by_predicate(
+            self, table, predicate, assignments, read_columns=None):
         wb = self._make_write_builder(table)
         tu = wb.new_update()
         cid = self._next_commit_id()
@@ -147,6 +150,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             predicate,
             assignments,
             cid,
+            read_columns,
         )
         tc = wb.new_commit()
         self._apply_commit(tc, msgs, cid)
@@ -304,6 +308,29 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self.assertEqual(2, calls)
         self.assertEqual(before_files, self._list_table_files(table))
 
+    def test_callable_update_aborts_groups_after_later_failure(self):
+        table = self._create_seeded_table()
+        before_files = self._list_table_files(table)
+        calls = 0
+
+        def fail_second_group(rows):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("second callback failed")
+            return pa.compute.add(rows['age'], 1)
+
+        with self.assertRaisesRegex(RuntimeError, "second callback failed"):
+            self._do_update_by_predicate(
+                table,
+                None,
+                {'age': fail_second_group},
+                read_columns=['age'],
+            )
+
+        self.assertEqual(2, calls)
+        self.assertEqual(before_files, self._list_table_files(table))
+
     def test_array_assignment_spans_file_groups(self):
         table = self._create_seeded_table()
         self._do_update(
@@ -336,6 +363,30 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self.assertEqual(
             [25, 30, 35, 40, 45],
             self._read_all(table)['age'].to_pylist(),
+        )
+
+    def test_literal_predicate_update_projects_only_row_id(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        projections = []
+        with_projection = ReadBuilder.with_projection
+
+        def capture_projection(builder, projection):
+            projections.append(projection)
+            return with_projection(builder, projection)
+
+        with mock.patch.object(
+                ReadBuilder, 'with_projection', capture_projection):
+            self._do_update_by_predicate(
+                table,
+                pb.greater_or_equal('age', 35),
+                {'city': 'Updated'},
+            )
+
+        self.assertEqual([['_ROW_ID']], projections)
+        self.assertEqual(
+            ['NYC', 'LA', 'Updated', 'Updated', 'Updated'],
+            self._read_all(table)['city'].to_pylist(),
         )
 
     def test_update_by_predicate_accepts_array_chunked_and_scalar_values(self):
@@ -375,12 +426,43 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             rows,
         )
 
+    def test_update_by_predicate_accepts_callable_assignments(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+
+        def increment_age(rows):
+            self.assertEqual(
+                ['age', 'city', '_ROW_ID'], rows.column_names
+            )
+            return pa.compute.add(rows['age'], 1)
+
+        self._do_update_by_predicate(
+            table,
+            pb.greater_or_equal('age', 35),
+            {
+                'age': increment_age,
+                'city': lambda rows: pa.compute.utf8_upper(rows['city']),
+            },
+            read_columns=['age', 'city'],
+        )
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([25, 30, 36, 41, 46], result['age'].to_pylist())
+        self.assertEqual(
+            ['NYC', 'LA', 'CHICAGO', 'HOUSTON', 'PHOENIX'],
+            result['city'].to_pylist(),
+        )
+
     def test_update_by_predicate_updates_all_rows_when_predicate_is_none(self):
         table = self._create_seeded_table()
         self._do_update_by_predicate(
             table,
             None,
-            {'age': pa.scalar(7, type=pa.int64()), 'city': None},
+            {
+                'age': pa.scalar(7, type=pa.int64()),
+                'city': None,
+                'name': 'UPDATED',
+            },
         )
 
         result = self._read_all(table)
@@ -388,9 +470,104 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self.assertEqual([None, None, None, None, None],
                          result['city'].to_pylist())
         self.assertEqual(
-            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            ['UPDATED'] * 5,
             result['name'].to_pylist(),
         )
+
+    def test_update_by_predicate_streams_callable_by_file_group(self):
+        table = self._create_seeded_table()
+        group_sizes = []
+
+        def increment_age(rows):
+            group_sizes.append(rows.num_rows)
+            return pa.compute.add(rows['age'], 1)
+
+        self._do_update_by_predicate(
+            table,
+            None,
+            {'age': increment_age},
+            read_columns=['age'],
+        )
+
+        self.assertEqual([2, 3], group_sizes)
+        self.assertEqual(
+            [26, 31, 36, 41, 46],
+            self._read_all(table)['age'].to_pylist(),
+        )
+
+    def test_update_by_predicate_requires_callable_read_columns(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        with self.assertRaisesRegex(
+                ValueError, "Callable assignments require read_columns"):
+            self._do_update_by_predicate(
+                table,
+                pb.equal('id', 1),
+                {'age': lambda rows: rows['age']},
+            )
+
+    def test_update_by_predicate_rejects_unused_read_columns(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        with self.assertRaisesRegex(
+                ValueError, "read_columns requires a callable assignment"):
+            self._do_update_by_predicate(
+                table,
+                pb.equal('id', 1),
+                {'age': 26},
+                read_columns=['age'],
+            )
+
+    def test_update_by_predicate_rejects_callable_with_array_assignment(self):
+        table = self._create_seeded_table()
+        with self.assertRaisesRegex(
+                ValueError, "cannot be combined with Arrow array"):
+            self._do_update_by_predicate(
+                table,
+                None,
+                {
+                    'age': lambda rows: rows['age'],
+                    'city': pa.array(['A', 'B', 'C', 'D', 'E']),
+                },
+                read_columns=['age'],
+            )
+
+    def test_no_match_does_not_invoke_callable(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+
+        def unexpected(_rows):
+            self.fail("Callable should not run without matched rows.")
+
+        messages = self._do_update_by_predicate(
+            table,
+            pb.greater_than('age', 100),
+            {'age': unexpected},
+            read_columns=['age'],
+        )
+
+        self.assertEqual([], messages)
+
+    def test_callable_assignment_rejects_python_list(self):
+        table_schema = pa.schema([
+            ('id', pa.int32()),
+            ('values', pa.list_(pa.int32())),
+        ])
+        table = self._create_table(pa_schema=table_schema)
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'values': [[0], [0]],
+        }, schema=table_schema))
+        pb = table.new_read_builder().new_predicate_builder()
+
+        with self.assertRaisesRegex(
+                ValueError, "must return a pyarrow.Array"):
+            self._do_update_by_predicate(
+                table,
+                pb.greater_or_equal('id', 1),
+                {'values': lambda _rows: [1, 2]},
+                read_columns=['id'],
+            )
 
     def test_update_by_predicate_rejects_assignment_array_length_mismatch(self):
         table = self._create_seeded_table()
@@ -1354,8 +1531,11 @@ class _BatchModeMixin(BatchModeMixin):
         return table_update.update_by_arrow_with_row_id(data)
 
     def _apply_update_by_predicate(
-            self, table_update, predicate, assignments, cid):
-        return table_update.update_by_predicate(predicate, assignments)
+            self, table_update, predicate, assignments, cid,
+            read_columns=None):
+        return table_update.update_by_predicate(
+            predicate, assignments, read_columns
+        )
 
     def _apply_delete_by_predicate(self, table_update, predicate, cid):
         return table_update.delete_by_predicate(predicate)
@@ -1369,11 +1549,13 @@ class _StreamModeMixin(StreamModeMixin):
         return table_update.update_by_arrow_with_row_id(data, cid)
 
     def _apply_update_by_predicate(
-            self, table_update, predicate, assignments, cid):
+            self, table_update, predicate, assignments, cid,
+            read_columns=None):
         return table_update.update_by_predicate(
             predicate,
             assignments,
             cid,
+            read_columns,
         )
 
     def _apply_delete_by_predicate(self, table_update, predicate, cid):
@@ -1389,6 +1571,97 @@ class _StreamModeMixin(StreamModeMixin):
 
 class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestCase):
     """All shared update tests under batch (``BatchWriteBuilder``) semantics."""
+
+    def test_callable_output_preserves_large_offset_chunks(self):
+        from pypaimon.write.table_update import TableUpdate
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        chunks = [
+            pa.ListArray.from_arrays(
+                pa.array([0, 1_100_000_000], type=pa.int32()),
+                pa.nulls(1_100_000_000),
+            )
+            for _ in range(2)
+        ]
+        value = pa.chunked_array(chunks)
+
+        result = TableUpdate._assignment_to_array(value, value.type, 2)
+
+        self.assertEqual(2, result.num_chunks)
+        self.assertEqual(2_200_000_000, sum(
+            len(chunk.values) for chunk in result.chunks
+        ))
+
+        updater = TableUpdateByRowId.__new__(TableUpdateByRowId)
+        updater.table = mock.Mock(field_names=['payload'])
+        updater.commit_messages = []
+        updates = pa.Table.from_arrays(
+            [pa.array([1, 0], type=pa.int64()), result],
+            names=['_ROW_ID', 'payload'],
+        )
+        with mock.patch.object(
+                updater, '_calculate_first_row_id',
+                side_effect=lambda data: data) as calculate:
+            with mock.patch.object(updater, '_write_by_first_row_id'):
+                updater.update_columns(updates, ['payload'])
+
+        routed = calculate.call_args[0][0]
+        self.assertEqual([1, 0], routed['_ROW_ID'].to_pylist())
+        self.assertEqual(2, routed['payload'].num_chunks)
+
+    def test_callable_predicate_update_allows_concurrent_read_column_update(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        wb = self._make_write_builder(table)
+        messages = wb.new_update().update_by_predicate(
+            pb.equal('id', 1),
+            {
+                'name': lambda rows: pa.array([
+                    'age-%d' % value for value in rows['age'].to_pylist()
+                ]),
+            },
+            read_columns=['age'],
+        )
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': pa.array([0], type=pa.int64()),
+            'age': pa.array([100], type=pa.int32()),
+        }), ['age'])
+
+        commit = wb.new_commit()
+        commit.commit(messages)
+        commit.close()
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual(100, result['age'][0].as_py())
+        self.assertEqual('age-25', result['name'][0].as_py())
+
+    def test_callable_predicate_update_conflicts_with_concurrent_update(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        wb = self._make_write_builder(table)
+        update = wb.new_update()
+
+        def increment_age(rows):
+            self.assertEqual([25], rows['age'].to_pylist())
+            self._do_update(table, pa.Table.from_pydict({
+                '_ROW_ID': pa.array([0], type=pa.int64()),
+                'age': pa.array([100], type=pa.int32()),
+            }), ['age'])
+            return pa.compute.add(rows['age'], 1)
+
+        messages = update.update_by_predicate(
+            pb.equal('id', 1),
+            {'age': increment_age},
+            read_columns=['age'],
+        )
+        commit = wb.new_commit()
+        with self.assertRaisesRegex(RuntimeError, "multiple 'MERGE INTO'"):
+            commit.commit(messages)
+        commit.close()
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([100, 30, 35, 40, 45], result['age'].to_pylist())
 
     def test_update_by_row_id_aborts_files_after_prepare_commit_failure(self):
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
