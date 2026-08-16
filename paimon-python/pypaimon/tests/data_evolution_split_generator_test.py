@@ -127,7 +127,7 @@ class SplitOrderTest(unittest.TestCase):
     _Table.options = _Options()
 
     @staticmethod
-    def _entry(name, sequence):
+    def _entry(name, sequence, first_row_id=0, external_path=None):
         empty_row = GenericRow([], [])
         empty_stats = SimpleStats(empty_row, empty_row, [])
         file = DataFileMeta.create(
@@ -143,7 +143,8 @@ class SplitOrderTest(unittest.TestCase):
             schema_id=0,
             level=0,
             extra_files=[],
-            first_row_id=0,
+            external_path=external_path,
+            first_row_id=first_row_id,
         )
         return ManifestEntry(
             kind=0,
@@ -190,6 +191,36 @@ class SplitOrderTest(unittest.TestCase):
                 self.assertEqual(
                     expected,
                     [file.file_name for file in splits[0].files],
+                )
+
+    def test_slice_and_shard_distinguish_same_external_file_name(self):
+        entries = [
+            self._entry(
+                'same.parquet', 1, first_row_id=0,
+                external_path='s3://bucket-a/data/same.parquet',
+            ),
+            self._entry(
+                'same.parquet', 2, first_row_id=10,
+                external_path='s3://bucket-b/data/same.parquet',
+            ),
+        ]
+        expected = ['s3://bucket-a/data/same.parquet']
+
+        generators = [
+            DataEvolutionSplitGenerator(
+                self._Table(), target_split_size=1024, open_file_cost=0
+            ).with_slice(0, 10),
+            DataEvolutionSplitGenerator(
+                self._Table(), target_split_size=1024, open_file_cost=0
+            ).with_shard(0, 2),
+        ]
+        for generator in generators:
+            with self.subTest(generator=type(generator).__name__):
+                splits = generator.create_splits(entries)
+                self.assertEqual(
+                    expected,
+                    [file.external_path for split in splits
+                     for file in split.files],
                 )
 
 

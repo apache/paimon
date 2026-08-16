@@ -286,13 +286,13 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                         filtered_blob_entries.append(entry)
                         break
             
-            kept_files = {
-                entry.file.file_name
+            kept_entries = {
+                id(entry)
                 for entry in filtered_non_blob_entries + filtered_blob_entries
             }
             filtered_entries = [
                 entry for entry in file_entries
-                if entry.file.file_name in kept_files
+                if id(entry) in kept_entries
             ]
             
             if filtered_entries:
