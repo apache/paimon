@@ -62,6 +62,7 @@ import org.apache.iceberg.data.IcebergGenerics;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.io.CloseableIterable;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -502,6 +503,7 @@ public class IcebergRowLineageCompatibilityTest {
 
     @Test
     public void testGaReaderSeesAssignedManifests() throws Exception {
+        assumeGaRowLineageReader();
         FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
         String commitUser = UUID.randomUUID().toString();
         TableWriteImpl<?> write =
@@ -519,7 +521,7 @@ public class IcebergRowLineageCompatibilityTest {
         assertThat(icebergTable.currentSnapshot().firstRowId()).isEqualTo(0L);
         for (ManifestFile manifest :
                 icebergTable.currentSnapshot().dataManifests(icebergTable.io())) {
-            assertThat(manifest.firstRowId()).isNotNull();
+            assertThat(manifestFirstRowId(manifest)).isNotNull();
         }
     }
 
@@ -722,6 +724,7 @@ public class IcebergRowLineageCompatibilityTest {
 
     @Test
     public void testGaReaderResolvesPerFileRowLineage() throws Exception {
+        assumeGaRowLineageReader();
         // standard two-commit 2+1-row setup (matches testNextRowIdAdvancesAcrossCommits):
         // commit 1's file gets effective first-row-id 0, commit 2's file gets 2
         FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
@@ -774,7 +777,7 @@ public class IcebergRowLineageCompatibilityTest {
             try (ManifestReader<DataFile> reader =
                     ManifestFiles.read(manifest, icebergTable.io(), icebergTable.specs())) {
                 for (DataFile file : reader) {
-                    resolvedFirstRowIds.add(file.firstRowId());
+                    resolvedFirstRowIds.add(dataFileFirstRowId(file));
                 }
             }
         }
@@ -1074,5 +1077,43 @@ public class IcebergRowLineageCompatibilityTest {
 
     private String readMetadataJson(FileStoreTable table, long snapshotId) throws Exception {
         return LocalFileIO.create().readFileUtf8(metadataPath(table, snapshotId));
+    }
+
+    /**
+     * Iceberg exposes per-manifest / per-file {@code firstRowId()} only from the GA row-lineage
+     * line (1.10+). The module compiles against 1.8.1 by default, so GA reader assertions look the
+     * method up reflectively and the tests skip when the API is absent (run with -Piceberg-ga).
+     */
+    private static final boolean GA_ROW_LINEAGE_READER = detectGaRowLineageReader();
+
+    private static boolean detectGaRowLineageReader() {
+        try {
+            ManifestFile.class.getMethod("firstRowId");
+            return true;
+        } catch (NoSuchMethodException e) {
+            return false;
+        }
+    }
+
+    private static void assumeGaRowLineageReader() {
+        Assumptions.assumeTrue(
+                GA_ROW_LINEAGE_READER,
+                "Iceberg on the test classpath predates GA row lineage; run with -Piceberg-ga");
+    }
+
+    private static Long manifestFirstRowId(ManifestFile manifest) {
+        try {
+            return (Long) ManifestFile.class.getMethod("firstRowId").invoke(manifest);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static Long dataFileFirstRowId(DataFile file) {
+        try {
+            return (Long) DataFile.class.getMethod("firstRowId").invoke(file);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

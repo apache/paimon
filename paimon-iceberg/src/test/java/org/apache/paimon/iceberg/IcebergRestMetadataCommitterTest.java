@@ -1379,13 +1379,16 @@ public class IcebergRestMetadataCommitterTest {
 
         Table reloaded = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
         assertThat(reloaded.currentSnapshot().firstRowId()).isEqualTo(localSnapshot.firstRowId());
-        List<Long> restDataManifestFirstRowIds = new ArrayList<>();
-        for (ManifestFile manifest : reloaded.currentSnapshot().dataManifests(reloaded.io())) {
-            assertThat(manifest.firstRowId()).isNotNull();
-            restDataManifestFirstRowIds.add(manifest.firstRowId());
+        // manifest-level first_row_id is only exposed by the GA (1.10+) reader API
+        if (GA_ROW_LINEAGE_READER) {
+            List<Long> restDataManifestFirstRowIds = new ArrayList<>();
+            for (ManifestFile manifest : reloaded.currentSnapshot().dataManifests(reloaded.io())) {
+                assertThat(manifestFirstRowId(manifest)).isNotNull();
+                restDataManifestFirstRowIds.add(manifestFirstRowId(manifest));
+            }
+            assertThat(restDataManifestFirstRowIds)
+                    .containsExactlyInAnyOrderElementsOf(localDataManifestFirstRowIds);
         }
-        assertThat(restDataManifestFirstRowIds)
-                .containsExactlyInAnyOrderElementsOf(localDataManifestFirstRowIds);
     }
 
     private static class TestRecord {
@@ -1468,5 +1471,25 @@ public class IcebergRestMetadataCommitterTest {
         int i = random.nextInt(3);
         String[] formats = new String[] {"orc", "parquet", "avro"};
         return formats[i];
+    }
+
+    /** See IcebergRowLineageCompatibilityTest: GA reader API (1.10+) looked up reflectively. */
+    private static final boolean GA_ROW_LINEAGE_READER = detectGaRowLineageReader();
+
+    private static boolean detectGaRowLineageReader() {
+        try {
+            ManifestFile.class.getMethod("firstRowId");
+            return true;
+        } catch (NoSuchMethodException e) {
+            return false;
+        }
+    }
+
+    private static Long manifestFirstRowId(ManifestFile manifest) {
+        try {
+            return (Long) ManifestFile.class.getMethod("firstRowId").invoke(manifest);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }
