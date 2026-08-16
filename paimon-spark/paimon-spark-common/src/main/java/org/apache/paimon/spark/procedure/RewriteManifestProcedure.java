@@ -21,11 +21,11 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestAvroWriter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestEntrySortKey;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFile.ManifestEntryWriter;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestFileMetaSerializer;
 import org.apache.paimon.manifest.ManifestList;
@@ -316,9 +316,8 @@ public class RewriteManifestProcedure extends BaseProcedure {
                                             Path manifestPath = pathFactory.newManifestFile();
                                             ManifestFile manifestFile =
                                                     t.store().manifestFileFactory().create();
-                                            ManifestEntryWriter writer =
-                                                    manifestFile.createManifestEntryWriter(
-                                                            manifestPath);
+                                            ManifestAvroWriter writer =
+                                                    manifestFile.createAvroWriter(manifestPath);
                                             ManifestEntrySerializer entrySer =
                                                     new ManifestEntrySerializer();
 
@@ -379,13 +378,13 @@ public class RewriteManifestProcedure extends BaseProcedure {
                                                 writer.close();
                                             }
 
-                                            if (writer.recordCount() == 0) {
-                                                // nothing survived — delete the empty file and
-                                                // emit nothing
-                                                manifestFile.delete(writer.path().getName());
+                                            List<ManifestFileMeta> results = writer.result();
+                                            if (results.isEmpty()) {
+                                                // nothing survived — clean up and emit nothing
+                                                writer.abort();
                                                 return Collections.<byte[]>emptyList().iterator();
                                             }
-                                            ManifestFileMeta newMeta = writer.result();
+                                            ManifestFileMeta newMeta = results.get(0);
                                             ManifestFileMetaSerializer ser =
                                                     new ManifestFileMetaSerializer();
                                             return Collections.singletonList(
