@@ -27,6 +27,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.iceberg.IcebergPathFactory;
+import org.apache.paimon.iceberg.manifest.IcebergManifestEntry;
+import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
@@ -272,6 +274,34 @@ public class IcebergRowLineageCompatibilityTest {
         // the v3 reader resolves the absent column to null for every meta
         for (IcebergManifestFileMeta meta : newReader.read(listName)) {
             assertThat(meta.firstRowId()).isNull();
+        }
+    }
+
+    @Test
+    public void testManifestEntriesCarryFirstRowIdColumn() throws Exception {
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        IcebergPathFactory paths = new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, paths);
+        IcebergManifestFile manifestFile = IcebergManifestFile.create(table, paths);
+        List<IcebergManifestFileMeta> metas =
+                manifestList.read(
+                        new Path(readIcebergMetadata(table, 1).currentSnapshot().manifestList())
+                                .getName());
+        for (IcebergManifestFileMeta meta : metas) {
+            for (IcebergManifestEntry entry : manifestFile.read(meta)) {
+                // ADDED entries are unassigned by definition; the column must round-trip as null
+                assertThat(entry.file().firstRowId()).isNull();
+            }
         }
     }
 
