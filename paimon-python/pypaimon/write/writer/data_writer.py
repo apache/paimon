@@ -160,12 +160,8 @@ class DataWriter(ABC):
     def _delete_committed_files(self, file_metas: List[DataFileMeta]):
         for file_meta in file_metas:
             try:
-                path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
-                if path_to_delete:
-                    path_str = str(path_to_delete)
-                    self.file_io.delete_quietly(path_str)
-                for extra_file in file_meta.extra_files:
-                    self.file_io.delete_quietly(self._aligned_extra_file_path(file_meta, extra_file))
+                for path in file_meta.collect_files():
+                    self.file_io.delete_quietly(path)
             except Exception as e:
                 import logging
                 logger = logging.getLogger(__name__)
@@ -412,15 +408,6 @@ class DataWriter(ABC):
             field_map = {field.name: field for field in self.table.table_schema.fields}
             return [field_map[name] for name in self.write_cols if name in field_map]
         return PyarrowFieldParser.to_paimon_schema(data.schema)
-
-    @staticmethod
-    def _aligned_extra_file_path(file_meta: DataFileMeta, extra_file: str) -> str:
-        if "://" in extra_file or extra_file.startswith("/"):
-            return extra_file
-        file_path = file_meta.external_path if file_meta.external_path else file_meta.file_path
-        if not file_path or "/" not in file_path:
-            return extra_file
-        return f"{file_path.rsplit('/', 1)[0]}/{extra_file}"
 
     @staticmethod
     def _find_optimal_split_point(data: pa.RecordBatch, target_size: int) -> int:

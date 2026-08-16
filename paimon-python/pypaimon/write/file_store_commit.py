@@ -51,7 +51,6 @@ from pypaimon.write.commit.overwrite_changes_provider import OverwriteChangesPro
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.writer.data_writer import DataWriter
 
 logger = logging.getLogger(__name__)
 
@@ -60,23 +59,17 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
     """Delete files created by messages known to be uncommitted."""
     for message in commit_messages:
         for file in list(message.new_files) + list(message.changelog_files):
-            path = None
             try:
-                path = file.external_path or file.file_path
-                if path:
-                    table.file_io.delete_quietly(str(path))
+                paths = file.collect_files()
             except Exception as error:
                 logger.warning(
-                    "Failed to clean up file %s during abort: %s",
-                    path,
+                    "Failed to collect files for %s during abort: %s",
+                    file.file_name,
                     error,
                 )
-            for extra_file in file.extra_files or []:
-                path = extra_file
+                continue
+            for path in paths:
                 try:
-                    path = DataWriter._aligned_extra_file_path(
-                        file, extra_file
-                    )
                     table.file_io.delete_quietly(path)
                 except Exception as error:
                     logger.warning(

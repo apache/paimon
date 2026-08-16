@@ -18,7 +18,7 @@
 import unittest
 import uuid
 from datetime import datetime
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import call, MagicMock, Mock, patch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
@@ -40,6 +40,39 @@ from pypaimon.write.file_store_commit import (
 
 
 class TestAbortCommitMessages(unittest.TestCase):
+
+    def test_deletes_aligned_extra_files(self):
+        table = Mock()
+        file_meta = DataFileMeta(
+            file_name="data.parquet",
+            file_size=1,
+            row_count=1,
+            min_key=None,
+            max_key=None,
+            key_stats=None,
+            value_stats=None,
+            min_sequence_number=0,
+            max_sequence_number=0,
+            schema_id=0,
+            level=0,
+            extra_files=["data.parquet.row"],
+            file_path="/table/bucket-0/data.parquet",
+        )
+        message = Mock(
+            new_files=[file_meta],
+            changelog_files=[],
+            index_adds=[],
+        )
+
+        _abort_commit_messages(table, [message])
+
+        self.assertEqual(
+            [
+                call("/table/bucket-0/data.parquet"),
+                call("/table/bucket-0/data.parquet.row"),
+            ],
+            table.file_io.delete_quietly.call_args_list,
+        )
 
     def test_index_path_failure_does_not_escape_abort(self):
         table = Mock()
