@@ -40,6 +40,7 @@ import org.apache.iceberg.SnapshotRef;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableMetadataParser;
+import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
@@ -230,6 +231,9 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     private TableMetadata.Builder updatesForCorrectBase(
             TableMetadata base, TableMetadata newMetadata, boolean isNewTable) {
         TableMetadata.Builder updateBuilder = TableMetadata.buildFrom(base);
+        if (newMetadata.formatVersion() > base.formatVersion()) {
+            updateBuilder.upgradeFormatVersion(newMetadata.formatVersion());
+        }
 
         int schemaId = icebergTable.schema().schemaId();
         if (isNewTable) {
@@ -366,13 +370,13 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         try {
             // Path-based catalogs (e.g. Hadoop) derive and assign the table location themselves
             // and reject a custom one, so first try letting the catalog assign it.
-            return newTableBuilder(schema, spec).create();
+            return newTableBuilder(schema, spec, newMetadata.formatVersion()).create();
         } catch (RuntimeException e) {
             // Some Iceberg REST catalogs (notably AWS Glue) do not auto-assign a table location
             // and reject creation without one. Retry with the location Paimon writes its metadata
             // to, normalised to the s3:// scheme such catalogs require.
             try {
-                return newTableBuilder(schema, spec)
+                return newTableBuilder(schema, spec, newMetadata.formatVersion())
                         .withLocation(toRestLocation(newMetadata.location()))
                         .create();
             } catch (RuntimeException retryError) {
@@ -382,8 +386,13 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         }
     }
 
-    private Catalog.TableBuilder newTableBuilder(Schema schema, @Nullable PartitionSpec spec) {
-        Catalog.TableBuilder builder = restCatalog.buildTable(icebergTableIdentifier, schema);
+    private Catalog.TableBuilder newTableBuilder(
+            Schema schema, @Nullable PartitionSpec spec, int formatVersion) {
+        Catalog.TableBuilder builder =
+                restCatalog
+                        .buildTable(icebergTableIdentifier, schema)
+                        .withProperty(
+                                TableProperties.FORMAT_VERSION, String.valueOf(formatVersion));
         return spec == null ? builder : builder.withPartitionSpec(spec);
     }
 

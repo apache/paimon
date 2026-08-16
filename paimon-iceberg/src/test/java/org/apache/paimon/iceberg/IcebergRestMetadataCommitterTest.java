@@ -46,6 +46,7 @@ import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
+import org.apache.iceberg.TableUtil;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.data.IcebergGenerics;
@@ -1221,6 +1222,132 @@ public class IcebergRestMetadataCommitterTest {
         assertThat(IcebergRestMetadataCommitter.toRestLocation("file:///tmp/db/t"))
                 .isEqualTo("file:///tmp/db/t");
         assertThat(IcebergRestMetadataCommitter.toRestLocation(null)).isNull();
+    }
+
+    @Test
+    public void testFormatVersion3TableRegistersV3() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        -1,
+                        "avro",
+                        customOptions);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(true, 2));
+        write.close();
+        commit.close();
+
+        Table icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
+        assertThat(TableUtil.formatVersion(icebergTable)).isEqualTo(3);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)", "Record(3, 30)");
+    }
+
+    @Test
+    public void testUpgradeFormatVersionOnRestTable() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        -1,
+                        "avro",
+                        new HashMap<>());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        Table icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
+        assertThat(TableUtil.formatVersion(icebergTable)).isEqualTo(2);
+
+        // upgrade paimon side to format-version 3
+        Map<String, String> upgrade = new HashMap<>();
+        upgrade.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        table = table.copy(upgrade);
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(true, 2));
+        write.close();
+        commit.close();
+
+        icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
+        assertThat(TableUtil.formatVersion(icebergTable)).isEqualTo(3);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)", "Record(3, 30)");
+    }
+
+    @Test
+    public void testRecreateWithNonZeroLineageWatermark() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        -1,
+                        "avro",
+                        customOptions);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(true, 2));
+        // local lineage watermark is now 3
+
+        // simulate external table loss: the committer must recreate the server table
+        // while the locally emitted snapshot carries a nonzero first-row-id
+        restCatalog.dropTable(TableIdentifier.of("mydb", "t"), false);
+
+        write.write(GenericRow.of(4, 40));
+        commit.commit(3, write.prepareCommit(true, 3));
+        write.close();
+        commit.close();
+
+        Table icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
+        assertThat(TableUtil.formatVersion(icebergTable)).isEqualTo(3);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, 10)", "Record(2, 20)", "Record(3, 30)", "Record(4, 40)");
+        // Known Layer 1 limitation (documented in the spec): the server-side next-row-id
+        // watermark restarts on recreation and stays behind the local metadata; commits
+        // must keep succeeding regardless (validation is first-row-id >= next-row-id).
     }
 
     private static class TestRecord {
