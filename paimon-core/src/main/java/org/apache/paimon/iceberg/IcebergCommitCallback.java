@@ -1575,9 +1575,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     private void expireManifestList(String toExpire, String next) {
-        Set<IcebergManifestFileMeta> metaInUse = new HashSet<>(manifestList.read(next));
+        // compare by physical path: a carried-over manifest may be re-listed with different
+        // list-level fields (e.g. an assigned first_row_id) while sharing the same file
+        Set<String> pathsInUse = new HashSet<>();
+        for (IcebergManifestFileMeta meta : manifestList.read(next)) {
+            pathsInUse.add(meta.manifestPath());
+        }
         for (IcebergManifestFileMeta meta : manifestList.read(toExpire)) {
-            if (metaInUse.contains(meta)) {
+            if (pathsInUse.contains(meta.manifestPath())) {
                 continue;
             }
             table.fileIO().deleteQuietly(new Path(meta.manifestPath()));

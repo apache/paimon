@@ -350,6 +350,67 @@ public class IcebergRowLineageCompatibilityTest {
     }
 
     @Test
+    public void testExpireKeepsManifestSharedAcrossRowIdAssignment() throws Exception {
+        // A manifest written before manifest-level lineage is re-listed with an assigned
+        // first_row_id but the same physical path. Expiring the pre-assignment manifest list
+        // must not delete the shared file, so liveness is decided by path, not value equality.
+        Map<String, String> options = formatVersionOptions(3);
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "2");
+        FileStoreTable table = createPaimonTable(defaultRowType(), options, "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        IcebergPathFactory paths = new IcebergPathFactory(new Path(table.location(), "metadata"));
+        String listName =
+                new Path(readIcebergMetadata(table, 1).currentSnapshot().manifestList()).getName();
+
+        // strip column 520 from snapshot 1's manifest list to simulate a pre-assignment writer
+        FileStoreTable v2SchemaView =
+                table.copy(Collections.singletonMap(IcebergOptions.FORMAT_VERSION.key(), "2"));
+        IcebergManifestList oldWriter = IcebergManifestList.create(v2SchemaView, paths);
+        IcebergManifestList reader = IcebergManifestList.create(table, paths);
+        String rewritten = oldWriter.writeWithoutRolling(reader.read(listName));
+        LocalFileIO.create().deleteQuietly(paths.toManifestListPath(listName));
+        LocalFileIO.create()
+                .rename(paths.toManifestListPath(rewritten), paths.toManifestListPath(listName));
+        List<String> sharedManifestPaths = new ArrayList<>();
+        for (IcebergManifestFileMeta meta : reader.read(listName)) {
+            sharedManifestPaths.add(meta.manifestPath());
+        }
+        assertThat(sharedManifestPaths).isNotEmpty();
+
+        // commit 2 carries the manifest over, assigning first_row_id at the same path;
+        // commit 3 expires snapshot 1's manifest list against snapshot 2's
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.write(GenericRow.of(3, 30));
+        commit.commit(3, write.prepareCommit(false, 3));
+        write.close();
+        commit.close();
+
+        IcebergMetadata metadata = readIcebergMetadata(table, 3);
+        assertThat(metadata.snapshots()).hasSize(2);
+        for (String manifestPath : sharedManifestPaths) {
+            assertThat(LocalFileIO.create().exists(new Path(manifestPath))).isTrue();
+        }
+        // every retained snapshot must stay readable end to end
+        IcebergManifestFile manifestFile = IcebergManifestFile.create(table, paths);
+        for (IcebergSnapshot snapshot : metadata.snapshots()) {
+            for (IcebergManifestFileMeta meta :
+                    reader.read(new Path(snapshot.manifestList()).getName())) {
+                assertThat(manifestFile.read(meta)).isNotEmpty();
+            }
+        }
+    }
+
+    @Test
     public void testManifestEntriesCarryFirstRowIdColumn() throws Exception {
         FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
         String commitUser = UUID.randomUUID().toString();
