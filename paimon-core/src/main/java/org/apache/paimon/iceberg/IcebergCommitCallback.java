@@ -941,6 +941,16 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             return;
         }
 
+        if (formatVersion == IcebergMetadata.FORMAT_VERSION_V3
+                && baseMetadata.nextRowId() == null) {
+            // v3 base metadata written before Paimon emitted row lineage; recreate to self-heal
+            createMetadataWithoutBase(
+                    snapshot.id(),
+                    baseMetadata.tableUuid(),
+                    Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()));
+            return;
+        }
+
         // decide the schema story before any manifest is written
         SchemaCache schemaCache = new SchemaCache();
         int schemaId = (int) schemaCache.getLatestSchemaId();
@@ -1124,6 +1134,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
         // a schema-pointer rollback (validated above): only the current pointer moves
 
+        RowLineage rowLineage =
+                computeRowLineage(
+                        baseMetadata.nextRowId() == null ? 0L : baseMetadata.nextRowId(),
+                        metrics.addedRecords);
+
         List<IcebergSnapshot> snapshots = new ArrayList<>(baseMetadata.snapshots());
         snapshots.add(
                 new IcebergSnapshot(
@@ -1136,8 +1151,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
                         // the snapshot's own schema, for time travel
                         snapshotSchemaId,
-                        null,
-                        null));
+                        rowLineage.firstRowId,
+                        rowLineage.addedRows));
 
         // all snapshots in this list, except the last one, need to expire
         List<IcebergSnapshot> toExpireExceptLast = new ArrayList<>();
@@ -1182,7 +1197,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         baseMetadata.lastPartitionId(),
                         snapshots,
                         (int) snapshotId,
-                        null,
+                        rowLineage.nextRowId,
                         refs);
 
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);

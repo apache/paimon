@@ -107,6 +107,106 @@ public class IcebergRowLineageCompatibilityTest {
         assertThat(metadata.currentSnapshot().addedRows()).isNull();
     }
 
+    @Test
+    public void testNextRowIdAdvancesAcrossCommits() throws Exception {
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        IcebergMetadata metadata = readIcebergMetadata(table, 2);
+        assertThat(metadata.nextRowId()).isEqualTo(3L);
+        IcebergSnapshot snapshot = metadata.currentSnapshot();
+        assertThat(snapshot.firstRowId()).isEqualTo(2L);
+        assertThat(snapshot.addedRows()).isEqualTo(1L);
+
+        TableMetadata parsed = TableMetadataParser.fromJson(readMetadataJson(table, 2));
+        assertThat(parsed.formatVersion()).isEqualTo(3);
+    }
+
+    @Test
+    public void testRegenerateWhenBaseHasNoNextRowId() throws Exception {
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // Strip next-row-id from the committed metadata, simulating a v3 file written by
+        // Paimon before this fix.
+        IcebergMetadata base = readIcebergMetadata(table, 1);
+        IcebergMetadata stripped =
+                new IcebergMetadata(
+                        base.formatVersion(),
+                        base.tableUuid(),
+                        base.location(),
+                        base.lastSequenceNumber(),
+                        base.lastColumnId(),
+                        base.schemas(),
+                        base.currentSchemaId(),
+                        base.partitionSpecs(),
+                        base.lastPartitionId(),
+                        base.snapshots(),
+                        base.currentSnapshotId(),
+                        null,
+                        base.refs());
+        LocalFileIO.create().overwriteFileUtf8(metadataPath(table, 1), stripped.toJson());
+        assertThat(readIcebergMetadata(table, 1).nextRowId()).isNull();
+
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        // metadata must be regenerated from scratch with valid lineage fields
+        IcebergMetadata regenerated = readIcebergMetadata(table, 2);
+        assertThat(regenerated.nextRowId()).isEqualTo(3L);
+        assertThat(regenerated.snapshots()).hasSize(1);
+        assertThat(regenerated.currentSnapshot().firstRowId()).isEqualTo(0L);
+        assertThat(regenerated.currentSnapshot().addedRows()).isEqualTo(3L);
+    }
+
+    @Test
+    public void testTagPreservesNextRowId() throws Exception {
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        table.createTag("t1", 1);
+
+        IcebergMetadata metadata = readIcebergMetadata(table, 2);
+        assertThat(metadata.refs()).containsKey("t1");
+        assertThat(metadata.nextRowId()).isEqualTo(3L);
+    }
+
     // ------------------------------------------------------------------------
     //  helpers
     // ------------------------------------------------------------------------
