@@ -29,7 +29,7 @@ applies the conversion leniently.
 import pyarrow as pa
 
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataTypeParser,
-                                        GeographyType, GeometryType, MapType, MultisetType,
+                                        MapType, MultisetType,
                                         PyarrowFieldParser, RowType,
                                         VectorType)
 
@@ -58,8 +58,6 @@ ROW = "ROW"
 VECTOR = "VECTOR"
 VARIANT = "VARIANT"
 BLOB = "BLOB"
-GEOMETRY = "GEOMETRY"
-GEOGRAPHY = "GEOGRAPHY"
 
 # ---- Families ----------------------------------------------------------------
 
@@ -94,10 +92,6 @@ def _root(data_type) -> str:
         return MULTISET
     if isinstance(data_type, VectorType):
         return VECTOR
-    if isinstance(data_type, GeometryType):
-        return GEOMETRY
-    if isinstance(data_type, GeographyType):
-        return GEOGRAPHY
     if isinstance(data_type, AtomicType):
         t = data_type.type.upper()
         if t.startswith("DECIMAL") or t.startswith("NUMERIC") or t.startswith("DEC"):
@@ -131,7 +125,7 @@ def _build_rules():
     implicit = {}
     explicit = {}
     # Identity cast for every root.
-    for root in (PREDEFINED | CONSTRUCTED | {VARIANT, BLOB, GEOMETRY, GEOGRAPHY}):
+    for root in (PREDEFINED | CONSTRUCTED | {VARIANT, BLOB}):
         implicit[root] = {root}
         explicit[root] = set()
 
@@ -174,8 +168,6 @@ def supports_cast(source_type, target_type, allow_explicit: bool = True) -> bool
     if source_type.nullable and not target_type.nullable and not allow_explicit:
         return False
     if source_root == target_root:
-        if source_root in {GEOMETRY, GEOGRAPHY}:
-            return _equals_ignore_nullable(source_type, target_type)
         if source_root in CONSTRUCTED:
             # A constructed type is only castable to an (ignoring outer
             # nullability) identical constructed type. Reshaping is done
@@ -224,8 +216,6 @@ def can_execute_cast(source_type, target_type) -> bool:
     # Same root: identity, or a same-shape constructed type whose value is
     # rebuilt by the read path's field-id alignment rather than a value cast.
     if source_root == target_root:
-        if source_root in {GEOMETRY, GEOGRAPHY}:
-            return _equals_ignore_nullable(source_type, target_type)
         return True
     # Constructed -> character string is rendered by the read path's custom
     # ``_constructed_to_string_array`` (see DataFileBatchReader), not a cast.

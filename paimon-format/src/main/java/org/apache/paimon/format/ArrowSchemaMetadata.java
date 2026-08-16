@@ -539,8 +539,10 @@ class ArrowSchemaMetadata {
             this.metadata = metadata;
         }
 
-        private ArrowField withMetadata(Map<String, String> metadata) {
-            return new ArrowField(name, nullable, type, children, metadata);
+        private ArrowField withMetadata(Map<String, String> additionalMetadata) {
+            Map<String, String> mergedMetadata = new LinkedHashMap<>(metadata);
+            mergedMetadata.putAll(additionalMetadata);
+            return new ArrowField(name, nullable, type, children, mergedMetadata);
         }
     }
 

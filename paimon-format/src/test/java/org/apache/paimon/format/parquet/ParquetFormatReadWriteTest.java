@@ -103,6 +103,16 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
             Assertions.assertThat(geometries.getBinary(0)).isEqualTo(pointWkb);
             Assertions.assertThat(geometries.isNullAt(1)).isTrue();
         }
+
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(
+                        fileIO, file, fileIO.getFileSize(file), new Options())) {
+            Map<String, ColumnChunkMetaData> columns = new HashMap<>();
+            for (ColumnChunkMetaData column : reader.getFooter().getBlocks().get(0).getColumns()) {
+                columns.put(column.getPath().toDotString(), column);
+            }
+            Assertions.assertThat(columns.get("geom").getGeospatialStatistics()).isNotNull();
+        }
     }
 
     @Test

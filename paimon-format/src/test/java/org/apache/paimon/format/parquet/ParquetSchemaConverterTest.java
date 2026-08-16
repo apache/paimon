@@ -25,6 +25,7 @@ import org.apache.paimon.types.EdgeAlgorithm;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.parquet.schema.ColumnOrder;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
@@ -162,6 +163,10 @@ public class ParquetSchemaConverterTest {
         Type geography = messageType.getType("geog");
 
         Assertions.assertThat(geometry.asPrimitiveType().getPrimitiveTypeName()).isEqualTo(BINARY);
+        Assertions.assertThat(geometry.asPrimitiveType().columnOrder().getColumnOrderName())
+                .isEqualTo(ColumnOrder.ColumnOrderName.UNDEFINED);
+        Assertions.assertThat(geography.asPrimitiveType().columnOrder().getColumnOrderName())
+                .isEqualTo(ColumnOrder.ColumnOrderName.UNDEFINED);
         Assertions.assertThat(geometry.getLogicalTypeAnnotation())
                 .isInstanceOf(LogicalTypeAnnotation.GeometryLogicalTypeAnnotation.class);
         Assertions.assertThat(

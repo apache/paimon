@@ -203,6 +203,10 @@ public class IcebergDataField {
                 return String.format("geometry(%s)", ((GeometryType) dataType).getCrs());
             case GEOGRAPHY:
                 GeographyType geographyType = (GeographyType) dataType;
+                Preconditions.checkArgument(
+                        !geographyType.getCrs().contains(","),
+                        "Geography CRS '%s' cannot contain ',' in Iceberg metadata.",
+                        geographyType.getCrs());
                 return String.format(
                         "geography(%s, %s)", geographyType.getCrs(), geographyType.getAlgorithm());
             case ARRAY:

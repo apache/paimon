@@ -497,6 +497,7 @@ public class SchemaValidation {
                     "Geometry and geography columns do not support '%s'='%s' because the bundled Iceberg REST client cannot parse Iceberg v3 geospatial types.",
                     IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
                     IcebergOptions.StorageType.REST_CATALOG);
+            validateIcebergGeographyCrs(rowType);
         }
 
         Set<String> geospatialFields =
@@ -884,6 +885,30 @@ public class SchemaValidation {
             return containsType(((VectorType) dataType).getElementType(), predicate);
         }
         return false;
+    }
+
+    private static void validateIcebergGeographyCrs(DataType dataType) {
+        if (dataType.is(DataTypeRoot.GEOGRAPHY)) {
+            String crs = ((GeographyType) dataType).getCrs();
+            checkArgument(
+                    !crs.contains(","),
+                    "Geography CRS '%s' cannot contain ',' when Iceberg metadata is enabled.",
+                    crs);
+        } else if (dataType instanceof RowType) {
+            for (DataField field : ((RowType) dataType).getFields()) {
+                validateIcebergGeographyCrs(field.type());
+            }
+        } else if (dataType instanceof ArrayType) {
+            validateIcebergGeographyCrs(((ArrayType) dataType).getElementType());
+        } else if (dataType instanceof MultisetType) {
+            validateIcebergGeographyCrs(((MultisetType) dataType).getElementType());
+        } else if (dataType instanceof MapType) {
+            MapType mapType = (MapType) dataType;
+            validateIcebergGeographyCrs(mapType.getKeyType());
+            validateIcebergGeographyCrs(mapType.getValueType());
+        } else if (dataType instanceof VectorType) {
+            validateIcebergGeographyCrs(((VectorType) dataType).getElementType());
+        }
     }
 
     private static void validateMapSharedShreddingFileFormats(CoreOptions options) {

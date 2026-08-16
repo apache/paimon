@@ -1706,6 +1706,25 @@ class SchemaValidationTest {
                                                 icebergRestOptions)))
                 .hasMessageContaining("do not support 'metadata.iceberg.storage'='rest-catalog'")
                 .hasMessageContaining("REST client");
+
+        List<DataField> customCrsFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "geographies",
+                                DataTypes.ARRAY(DataTypes.GEOGRAPHY("custom, definition"))));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                customCrsFields,
+                                                emptyList(),
+                                                emptyList(),
+                                                icebergV2Options)))
+                .hasMessageContaining("Geography CRS")
+                .hasMessageContaining("custom, definition")
+                .hasMessageContaining("Iceberg metadata");
     }
 
     @Test

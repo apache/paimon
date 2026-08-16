@@ -122,7 +122,15 @@ public class ArrowSchemaMetadataCompatibilityTest {
                                                 2,
                                                 "geog",
                                                 DataTypes.GEOGRAPHY(
-                                                        "EPSG:4326", EdgeAlgorithm.KARNEY)))));
+                                                        "EPSG:4326", EdgeAlgorithm.KARNEY)))),
+                        DataTypes.FIELD(
+                                3, "geometries", DataTypes.ARRAY(DataTypes.GEOMETRY("EPSG:32632"))),
+                        DataTypes.FIELD(
+                                4,
+                                "geo_map",
+                                DataTypes.MAP(
+                                        DataTypes.GEOGRAPHY("EPSG:4326", EdgeAlgorithm.THOMAS),
+                                        DataTypes.GEOMETRY("EPSG:3857"))));
 
         byte[] schemaBytes =
                 FormatMetadataUtils.buildArrowSchemaMetadata(
@@ -141,6 +149,25 @@ public class ArrowSchemaMetadataCompatibilityTest {
                 .containsEntry("ARROW:extension:name", "geoarrow.wkb")
                 .containsEntry(
                         "ARROW:extension:metadata", "{\"edges\":\"karney\",\"crs\":\"EPSG:4326\"}");
+
+        Field arrayElement = schema.findField("geometries").getChildren().get(0);
+        assertThat(arrayElement.getMetadata())
+                .containsKey(FormatMetadataUtils.PARQUET_FIELD_ID_KEY)
+                .containsEntry("ARROW:extension:name", "geoarrow.wkb")
+                .containsEntry("ARROW:extension:metadata", "{\"crs\":\"EPSG:32632\"}");
+
+        Field mapEntry = schema.findField("geo_map").getChildren().get(0);
+        Field mapKey = mapEntry.getChildren().get(0);
+        assertThat(mapKey.getMetadata())
+                .containsKey(FormatMetadataUtils.PARQUET_FIELD_ID_KEY)
+                .containsEntry("ARROW:extension:name", "geoarrow.wkb")
+                .containsEntry(
+                        "ARROW:extension:metadata", "{\"edges\":\"thomas\",\"crs\":\"EPSG:4326\"}");
+        Field mapValue = mapEntry.getChildren().get(1);
+        assertThat(mapValue.getMetadata())
+                .containsKey(FormatMetadataUtils.PARQUET_FIELD_ID_KEY)
+                .containsEntry("ARROW:extension:name", "geoarrow.wkb")
+                .containsEntry("ARROW:extension:metadata", "{\"crs\":\"EPSG:3857\"}");
     }
 
     private static RowType rowType() {

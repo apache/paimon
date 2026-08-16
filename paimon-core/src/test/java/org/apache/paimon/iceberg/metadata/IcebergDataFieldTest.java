@@ -190,6 +190,17 @@ class IcebergDataFieldTest {
                         new IcebergDataField(8, "geom", false, "geometry(custom, definition)", null)
                                 .dataType())
                 .isEqualTo(new GeometryType("custom, definition"));
+
+        assertThatThrownBy(
+                        () ->
+                                new IcebergDataField(
+                                        new DataField(
+                                                9,
+                                                "geog",
+                                                new GeographyType("custom, definition"))))
+                .hasMessageContaining("Geography CRS")
+                .hasMessageContaining("custom, definition")
+                .hasMessageContaining("Iceberg metadata");
     }
 
     @Test

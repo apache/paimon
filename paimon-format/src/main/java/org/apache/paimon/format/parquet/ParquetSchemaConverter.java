@@ -38,6 +38,7 @@ import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.parquet.column.schema.EdgeInterpolationAlgorithm;
+import org.apache.parquet.schema.ColumnOrder;
 import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
@@ -135,6 +136,7 @@ public class ParquetSchemaConverter {
             case GEOMETRY:
                 return Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition)
                         .as(LogicalTypeAnnotation.geometryType(((GeometryType) type).getCrs()))
+                        .columnOrder(ColumnOrder.undefined())
                         .named(name)
                         .withId(fieldId);
             case GEOGRAPHY:
@@ -145,6 +147,7 @@ public class ParquetSchemaConverter {
                                         geographyType.getCrs(),
                                         EdgeInterpolationAlgorithm.valueOf(
                                                 geographyType.getAlgorithm().name())))
+                        .columnOrder(ColumnOrder.undefined())
                         .named(name)
                         .withId(fieldId);
             case DECIMAL:
