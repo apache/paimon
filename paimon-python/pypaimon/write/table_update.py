@@ -39,6 +39,7 @@ from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.read.scanner.data_evolution_split_generator import (
     DataEvolutionSplitGenerator,
 )
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
@@ -295,6 +296,11 @@ class TableUpdate:
     @staticmethod
     def _predicate_update_file_groups(splits):
         for split in splits:
+            auth_split = (
+                split if isinstance(split, QueryAuthSplit) else None
+            )
+            if auth_split is not None:
+                split = auth_split.split
             data_split = (
                 split.data_split()
                 if isinstance(split, IndexedSplit) else split
@@ -334,6 +340,8 @@ class TableUpdate:
                     if not row_ranges:
                         continue
                     group = IndexedSplit(group, row_ranges)
+                if auth_split is not None:
+                    group = QueryAuthSplit(group, auth_split.auth_result)
                 yield group
 
     def _matched_update_scan_table(self):
