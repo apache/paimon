@@ -25,6 +25,7 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import javax.annotation.Nullable;
@@ -63,6 +64,7 @@ public class IcebergMetadata {
     private static final String FIELD_SNAPSHOTS = "snapshots";
     private static final String FIELD_CURRENT_SNAPSHOT_ID = "current-snapshot-id";
     private static final String FIELD_PROPERTIES = "properties";
+    private static final String FIELD_NEXT_ROW_ID = "next-row-id";
     private static final String FIELD_REFS = "refs";
 
     @JsonProperty(FIELD_FORMAT_VERSION)
@@ -110,6 +112,11 @@ public class IcebergMetadata {
     @JsonProperty(FIELD_CURRENT_SNAPSHOT_ID)
     private final long currentSnapshotId;
 
+    @JsonProperty(FIELD_NEXT_ROW_ID)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    private final Long nextRowId;
+
     @JsonProperty(FIELD_PROPERTIES)
     @Nullable
     private final Map<String, String> properties;
@@ -130,6 +137,7 @@ public class IcebergMetadata {
             int lastPartitionId,
             List<IcebergSnapshot> snapshots,
             long currentSnapshotId,
+            @Nullable Long nextRowId,
             @Nullable Map<String, IcebergRef> refs) {
         this(
                 formatVersion,
@@ -147,6 +155,7 @@ public class IcebergMetadata {
                 IcebergSortOrder.ORDER_ID,
                 snapshots,
                 currentSnapshotId,
+                nextRowId,
                 new HashMap<>(),
                 refs);
     }
@@ -168,6 +177,7 @@ public class IcebergMetadata {
             @JsonProperty(FIELD_DEFAULT_SORT_ORDER_ID) int defaultSortOrderId,
             @JsonProperty(FIELD_SNAPSHOTS) List<IcebergSnapshot> snapshots,
             @JsonProperty(FIELD_CURRENT_SNAPSHOT_ID) long currentSnapshotId,
+            @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId,
             @JsonProperty(FIELD_PROPERTIES) @Nullable Map<String, String> properties,
             @JsonProperty(FIELD_REFS) @Nullable Map<String, IcebergRef> refs) {
         this.formatVersion = formatVersion;
@@ -185,6 +195,7 @@ public class IcebergMetadata {
         this.defaultSortOrderId = defaultSortOrderId;
         this.snapshots = snapshots;
         this.currentSnapshotId = currentSnapshotId;
+        this.nextRowId = nextRowId;
         this.properties = properties;
         this.refs = refs;
     }
@@ -264,6 +275,12 @@ public class IcebergMetadata {
         return currentSnapshotId;
     }
 
+    @JsonGetter(FIELD_NEXT_ROW_ID)
+    @Nullable
+    public Long nextRowId() {
+        return nextRowId;
+    }
+
     @JsonGetter(FIELD_PROPERTIES)
     public Map<String, String> properties() {
         return properties == null ? new HashMap<>() : properties;
@@ -319,6 +336,7 @@ public class IcebergMetadata {
                 defaultSortOrderId,
                 snapshots,
                 currentSnapshotId,
+                nextRowId,
                 properties,
                 refs);
     }
@@ -348,6 +366,7 @@ public class IcebergMetadata {
                 && defaultSortOrderId == that.defaultSortOrderId
                 && Objects.equals(snapshots, that.snapshots)
                 && currentSnapshotId == that.currentSnapshotId
+                && Objects.equals(nextRowId, that.nextRowId)
                 && Objects.equals(properties, that.properties)
                 && Objects.equals(refs, that.refs);
     }
