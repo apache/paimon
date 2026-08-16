@@ -960,13 +960,15 @@ Row kind values:
 | `datetime.datetime` | `pyarrow.timestamp(unit, tz='UTC')`    | `TIMESTAMP_LTZ(p)` — same unit/p mapping as above                             |
 | `datetime.date`     | `pyarrow.date32()`                     | `DATE`                            |
 | `datetime.time`     | `pyarrow.time32('ms')`                 | `TIME(p)`                         |
-| WKB `bytes`         | `pyarrow.binary()`                     | `GEOMETRY(crs)`, `GEOGRAPHY(crs, algorithm)` |
+| WKB `bytes`         | GeoArrow WKB extension or `pyarrow.large_binary()` | `GEOMETRY(crs)`, `GEOGRAPHY(crs, algorithm)` |
 
-For geospatial fields, PyPaimon stores OGC Well-Known Binary (WKB) in Arrow binary arrays and preserves the logical
-type in the field's `paimon.type` metadata. This metadata is also retained for fields nested in arrays, maps, and rows.
-Use `GeometryType` or `GeographyType` in the Paimon table schema; an unannotated Arrow binary field is inferred as
-`BYTES`. PyArrow does not currently expose the native Parquet `GEOMETRY` and `GEOGRAPHY` logical annotations required
-by Paimon and Iceberg v3, so PyPaimon can represent and read these fields but rejects table writes containing them.
+For geospatial fields, PyPaimon follows PyIceberg and uses the standard GeoArrow WKB extension type when the optional
+`geoarrow-pyarrow` package is installed (`pip install pypaimon[geoarrow]`). The extension metadata preserves the CRS
+and edge-interpolation algorithm, including for fields nested in arrays, maps, and rows. Without GeoArrow, PyPaimon
+falls back to `pyarrow.large_binary()` and relies on the Paimon table schema for the logical type; an unannotated Arrow
+binary field is inferred as `BYTES` or `BLOB`. PyArrow does not currently expose the native Parquet `GEOMETRY` and
+`GEOGRAPHY` logical annotations required by Paimon and Iceberg v3, so PyPaimon can represent and read these fields but
+rejects table writes containing them.
 Geospatial tables require Parquet, and non-spherical geography algorithms may not be supported by every query engine.
 
 ### Complex Types

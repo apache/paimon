@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import re
 import threading
 from abc import ABC, abstractmethod
@@ -808,11 +809,65 @@ class PyarrowFieldParser:
     def _field_metadata(data_type: DataType,
                         description: Optional[str] = None) -> Dict[bytes, bytes]:
         metadata = {}
-        if isinstance(data_type, (GeometryType, GeographyType)):
-            metadata[b'paimon.type'] = str(data_type).encode('utf-8')
         if description:
             metadata[b'description'] = description.encode('utf-8')
         return metadata
+
+    @staticmethod
+    def _geospatial_to_pyarrow(data_type: DataType) -> pyarrow.DataType:
+        try:
+            import geoarrow.pyarrow as geoarrow
+        except ImportError:
+            return pyarrow.large_binary()
+
+        wkb_type = geoarrow.wkb().with_crs(data_type.crs)
+        if isinstance(data_type, GeographyType):
+            try:
+                edge_type = getattr(geoarrow.EdgeType, data_type.algorithm.name)
+            except AttributeError as exc:
+                raise ValueError(
+                    "GeoArrow does not support edge interpolation algorithm: {}"
+                    .format(data_type.algorithm)) from exc
+            wkb_type = wkb_type.with_edge_type(edge_type)
+        return wkb_type
+
+    @staticmethod
+    def _geoarrow_to_geospatial(pa_type: pyarrow.ExtensionType,
+                                nullable: bool) -> DataType:
+        storage_type = pa_type.storage_type
+        if not (types.is_binary(storage_type)
+                or types.is_large_binary(storage_type)):
+            raise ValueError(
+                "GeoArrow WKB requires a binary Arrow storage type: {}"
+                .format(pa_type))
+
+        try:
+            metadata = json.loads(
+                pa_type.__arrow_ext_serialize__().decode('utf-8'))
+        except (AttributeError, UnicodeDecodeError, ValueError) as exc:
+            raise ValueError(
+                "Invalid GeoArrow WKB extension metadata: {}".format(pa_type)
+            ) from exc
+        if not isinstance(metadata, dict):
+            raise ValueError(
+                "Invalid GeoArrow WKB extension metadata: {}".format(metadata))
+
+        crs = metadata.get('crs')
+        if isinstance(crs, dict):
+            crs_id = crs.get('id')
+            if (isinstance(crs_id, dict)
+                    and crs_id.get('authority') is not None
+                    and crs_id.get('code') is not None):
+                crs = '{}:{}'.format(crs_id['authority'], crs_id['code'])
+        if not isinstance(crs, str) or not crs:
+            raise ValueError(
+                "GeoArrow WKB extension metadata must contain an identifiable CRS: {}"
+                .format(metadata))
+
+        edges = metadata.get('edges', 'planar')
+        if str(edges).lower() == 'planar':
+            return GeometryType(crs, nullable)
+        return GeographyType(crs, EdgeAlgorithm.from_name(str(edges)), nullable)
 
     @staticmethod
     def _from_paimon_named_type(name: str, data_type: DataType,
@@ -827,7 +882,7 @@ class PyarrowFieldParser:
     def from_paimon_type(data_type: DataType) -> pyarrow.DataType:
         # Based on Paimon DataTypes Doc: https://paimon.apache.org/docs/master/concepts/data-types/
         if isinstance(data_type, (GeometryType, GeographyType)):
-            return pyarrow.binary()
+            return PyarrowFieldParser._geospatial_to_pyarrow(data_type)
         if isinstance(data_type, AtomicType):
             type_name = data_type.type.upper()
             if type_name == 'TINYINT':
@@ -927,6 +982,10 @@ class PyarrowFieldParser:
         # Based on Arrow DataTypes Doc: https://arrow.apache.org/docs/python/api/datatypes.html
         # All safe mappings are already implemented, adding new mappings requires rigorous evaluation
         # to avoid potential data loss
+        if (isinstance(pa_type, pyarrow.ExtensionType)
+                and pa_type.extension_name == 'geoarrow.wkb'):
+            return PyarrowFieldParser._geoarrow_to_geospatial(pa_type, nullable)
+
         type_name = None
         if types.is_int8(pa_type):
             type_name = 'TINYINT'
@@ -1006,22 +1065,8 @@ class PyarrowFieldParser:
 
     @staticmethod
     def _to_paimon_field_type(pa_field: pyarrow.Field) -> DataType:
-        if pa_field.metadata and b'paimon.type' in pa_field.metadata:
-            data_type = DataTypeParser.parse_atomic_type_sql_string(
-                pa_field.metadata[b'paimon.type'].decode('utf-8'))
-            if not isinstance(data_type, (GeometryType, GeographyType)):
-                raise ValueError(
-                    "Arrow field metadata 'paimon.type' is reserved for "
-                    "geospatial types: {}".format(pa_field))
-            if not types.is_binary(pa_field.type):
-                raise ValueError(
-                    "Geospatial field metadata requires a binary Arrow type: {}"
-                    .format(pa_field))
-            data_type.nullable = pa_field.nullable
-            return data_type
-        else:
-            return PyarrowFieldParser.to_paimon_type(
-                pa_field.type, pa_field.nullable)
+        return PyarrowFieldParser.to_paimon_type(
+            pa_field.type, pa_field.nullable)
 
     @staticmethod
     def to_paimon_schema(pa_schema: pyarrow.Schema) -> List[DataField]:

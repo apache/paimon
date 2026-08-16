@@ -51,12 +51,8 @@ import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.FieldType;
 
-import java.util.Collections;
-
 /** Utils for conversion between Paimon {@link DataType} and Arrow {@link FieldType}. */
 public class ArrowFieldTypeConversion {
-
-    public static final String PAIMON_TYPE = "paimon.type";
 
     public static final ArrowFieldTypeVisitor ARROW_FIELD_TYPE_VISITOR =
             new ArrowFieldTypeVisitor();
@@ -93,20 +89,12 @@ public class ArrowFieldTypeConversion {
 
         @Override
         public FieldType visit(GeometryType geometryType) {
-            return geospatialFieldType(geometryType);
+            throw new UnsupportedOperationException("Unsupported primitive type: " + geometryType);
         }
 
         @Override
         public FieldType visit(GeographyType geographyType) {
-            return geospatialFieldType(geographyType);
-        }
-
-        private FieldType geospatialFieldType(DataType dataType) {
-            return new FieldType(
-                    dataType.isNullable(),
-                    Types.MinorType.VARBINARY.getType(),
-                    null,
-                    Collections.singletonMap(PAIMON_TYPE, dataType.asSQLString()));
+            throw new UnsupportedOperationException("Unsupported primitive type: " + geographyType);
         }
 
         @Override

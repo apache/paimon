@@ -161,8 +161,17 @@ public class FormatMetadataUtilsTest {
 
         Map<String, Map<String, String>> metadata =
                 FormatMetadataUtils.readFieldMetadata(schemaBytes);
-        assertThat(metadata.get("geom")).containsEntry("paimon.type", "GEOMETRY(OGC:CRS84)");
+        assertThat(metadata.get("geom"))
+                .containsEntry("ARROW:extension:name", "geoarrow.wkb")
+                .containsEntry("ARROW:extension:metadata", "{\"crs\":\"OGC:CRS84\"}")
+                .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "0")
+                .doesNotContainKey("paimon.type");
         assertThat(metadata.get("geog"))
-                .containsEntry("paimon.type", "GEOGRAPHY(OGC:CRS84, spherical)");
+                .containsEntry("ARROW:extension:name", "geoarrow.wkb")
+                .containsEntry(
+                        "ARROW:extension:metadata",
+                        "{\"edges\":\"spherical\",\"crs\":\"OGC:CRS84\"}")
+                .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "1")
+                .doesNotContainKey("paimon.type");
     }
 }

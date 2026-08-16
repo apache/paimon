@@ -21,8 +21,10 @@ package org.apache.paimon.arrow;
 import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.EdgeAlgorithm;
 import org.apache.paimon.types.RowType;
 
+import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
@@ -30,6 +32,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -104,6 +107,40 @@ public class ArrowSchemaMetadataCompatibilityTest {
         assertThat(metadata.get("tags"))
                 .containsEntry(ArrowUtils.PARQUET_FIELD_ID, "1")
                 .containsAllEntriesOf(tagsMetadata);
+    }
+
+    @Test
+    public void testGeoArrowMetadataCanBeReadByArrowJava() {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "geom", DataTypes.GEOMETRY("EPSG:3857")),
+                        DataTypes.FIELD(
+                                1,
+                                "nested",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(
+                                                2,
+                                                "geog",
+                                                DataTypes.GEOGRAPHY(
+                                                        "EPSG:4326", EdgeAlgorithm.KARNEY)))));
+
+        byte[] schemaBytes =
+                FormatMetadataUtils.buildArrowSchemaMetadata(
+                        rowType, Collections.emptyMap(), FormatMetadataUtils.PARQUET_FIELD_ID_KEY);
+        Schema schema = Schema.deserializeMessage(ByteBuffer.wrap(schemaBytes));
+
+        Field geometry = schema.findField("geom");
+        assertThat(geometry.getType()).isEqualTo(ArrowType.Binary.INSTANCE);
+        assertThat(geometry.getMetadata())
+                .containsEntry("ARROW:extension:name", "geoarrow.wkb")
+                .containsEntry("ARROW:extension:metadata", "{\"crs\":\"EPSG:3857\"}");
+
+        Field geography = schema.findField("nested").getChildren().get(0);
+        assertThat(geography.getType()).isEqualTo(ArrowType.Binary.INSTANCE);
+        assertThat(geography.getMetadata())
+                .containsEntry("ARROW:extension:name", "geoarrow.wkb")
+                .containsEntry(
+                        "ARROW:extension:metadata", "{\"edges\":\"karney\",\"crs\":\"EPSG:4326\"}");
     }
 
     private static RowType rowType() {

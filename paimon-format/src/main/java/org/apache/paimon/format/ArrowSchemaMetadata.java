@@ -48,6 +48,7 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import com.google.flatbuffers.FlatBufferBuilder;
 
@@ -69,11 +70,15 @@ import java.util.stream.Collectors;
  * FlatBuffers layout, enum values, and defaults are adapted from Apache Arrow Java / Arrow format
  * generated classes. This class implements only the subset needed by Paimon field metadata so that
  * {@code paimon-format} can stay compatible with {@code ARROW:schema} without depending on the
- * Arrow runtime.
+ * Arrow runtime. Geospatial types are the exception to the direct {@code ArrowUtils} mapping: this
+ * metadata-only encoder writes the standard GeoArrow WKB extension metadata, while the Java Arrow
+ * API rejects geospatial conversion until it can expose the extension type itself.
  */
 class ArrowSchemaMetadata {
 
-    private static final String PAIMON_TYPE = "paimon.type";
+    private static final String ARROW_EXTENSION_NAME = "ARROW:extension:name";
+    private static final String ARROW_EXTENSION_METADATA = "ARROW:extension:metadata";
+    private static final String GEOARROW_WKB_EXTENSION_NAME = "geoarrow.wkb";
 
     private static final String LIST_DATA_VECTOR_NAME = "$data$";
     private static final String MAP_DATA_VECTOR_NAME = "entries";
@@ -402,7 +407,7 @@ class ArrowSchemaMetadata {
         ArrowTypeInfo type = dataType.accept(ArrowFieldTypeVisitor.INSTANCE);
         Map<String, String> metadata = new LinkedHashMap<>(fieldIdMetadata(fieldId, fieldIdKey));
         if (dataType instanceof GeometryType || dataType instanceof GeographyType) {
-            metadata.put(PAIMON_TYPE, dataType.asSQLString());
+            metadata.putAll(geospatialMetadata(dataType));
         }
         List<ArrowField> children = Collections.emptyList();
         if (dataType instanceof ArrayType || dataType instanceof VectorType) {
@@ -452,6 +457,22 @@ class ArrowSchemaMetadata {
             children = rowChildren;
         }
         return new ArrowField(fieldName, dataType.isNullable(), type, children, metadata);
+    }
+
+    private static Map<String, String> geospatialMetadata(DataType dataType) {
+        Map<String, String> extensionMetadata = new LinkedHashMap<>();
+        if (dataType instanceof GeographyType) {
+            GeographyType geographyType = (GeographyType) dataType;
+            extensionMetadata.put("edges", geographyType.getAlgorithm().toString());
+            extensionMetadata.put("crs", geographyType.getCrs());
+        } else {
+            extensionMetadata.put("crs", ((GeometryType) dataType).getCrs());
+        }
+
+        Map<String, String> metadata = new LinkedHashMap<>();
+        metadata.put(ARROW_EXTENSION_NAME, GEOARROW_WKB_EXTENSION_NAME);
+        metadata.put(ARROW_EXTENSION_METADATA, JsonSerdeUtil.toFlatJson(extensionMetadata));
+        return metadata;
     }
 
     private static ArrowField toArrowMapEntryField(

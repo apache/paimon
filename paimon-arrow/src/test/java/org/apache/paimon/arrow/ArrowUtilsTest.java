@@ -126,21 +126,21 @@ public class ArrowUtilsTest {
     }
 
     @Test
-    public void testGeospatialTypeMetadata() {
-        Field geometry = ArrowUtils.toArrowField("geom", 7, DataTypes.GEOMETRY(), 0);
-        Assertions.assertThat(geometry.getType()).isEqualTo(ArrowType.Binary.INSTANCE);
-        Assertions.assertThat(geometry.getMetadata())
-                .containsEntry(ArrowUtils.PARQUET_FIELD_ID, "7")
-                .containsEntry(ArrowFieldTypeConversion.PAIMON_TYPE, "GEOMETRY(OGC:CRS84)");
+    public void testGeospatialTypesUnsupported() {
+        Assertions.assertThatThrownBy(
+                        () -> ArrowUtils.toArrowField("geom", 7, DataTypes.GEOMETRY(), 0))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Unsupported primitive type: GEOMETRY(OGC:CRS84)");
 
-        Field geography =
-                ArrowUtils.toArrowField("geographies", 8, DataTypes.ARRAY(DataTypes.GEOGRAPHY()), 0)
-                        .getChildren()
-                        .get(0);
-        Assertions.assertThat(geography.getType()).isEqualTo(ArrowType.Binary.INSTANCE);
-        Assertions.assertThat(geography.getMetadata())
-                .containsEntry(
-                        ArrowFieldTypeConversion.PAIMON_TYPE, "GEOGRAPHY(OGC:CRS84, spherical)");
+        Assertions.assertThatThrownBy(
+                        () ->
+                                ArrowUtils.toArrowField(
+                                        "geographies",
+                                        8,
+                                        DataTypes.ARRAY(DataTypes.GEOGRAPHY()),
+                                        0))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Unsupported primitive type: GEOGRAPHY(OGC:CRS84, spherical)");
     }
 
     @Test
