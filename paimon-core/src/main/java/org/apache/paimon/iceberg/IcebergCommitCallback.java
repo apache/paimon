@@ -538,6 +538,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 computeSnapshotSummary(
                         IcebergSnapshotSummary.APPEND.operation(), paimonSnapshot, metrics);
 
+        RowLineage rowLineage = computeRowLineage(0L, metrics.addedRecords);
         IcebergSnapshot snapshot =
                 new IcebergSnapshot(
                         snapshotId,
@@ -548,8 +549,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         snapshotSummary,
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
                         snapshotSchemaId,
-                        null,
-                        null);
+                        rowLineage.firstRowId,
+                        rowLineage.addedRows);
 
         // Tags can only be included in Iceberg if they point to an Iceberg snapshot that
         // exists. Otherwise, an Iceberg client fails to parse the metadata and all reads fail.
@@ -592,7 +593,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                         IcebergPartitionField.FIRST_FIELD_ID - 1),
                         Collections.singletonList(snapshot),
                         (int) snapshotId,
-                        null,
+                        rowLineage.nextRowId,
                         refs);
 
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);
@@ -1957,6 +1958,28 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             return false;
         }
         return true;
+    }
+
+    /**
+     * Row-lineage bookkeeping for a new snapshot, mandatory in Iceberg format version 3: the
+     * snapshot's first-row-id starts at the base metadata's next-row-id watermark and the table's
+     * next-row-id advances by the snapshot's added records. For format version 2 all fields stay
+     * null so nothing is written.
+     */
+    private RowLineage computeRowLineage(long baseNextRowId, long addedRecords) {
+        RowLineage lineage = new RowLineage();
+        if (formatVersion >= IcebergMetadata.FORMAT_VERSION_V3) {
+            lineage.firstRowId = baseNextRowId;
+            lineage.addedRows = addedRecords;
+            lineage.nextRowId = baseNextRowId + addedRecords;
+        }
+        return lineage;
+    }
+
+    private static class RowLineage {
+        @Nullable private Long firstRowId;
+        @Nullable private Long addedRows;
+        @Nullable private Long nextRowId;
     }
 
     private class SchemaCache {
