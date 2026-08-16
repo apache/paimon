@@ -332,13 +332,13 @@ All available procedures are listed below.
       <td>remove_orphan_files</td>
       <td>
          -- Use named argument<br/>
-         CALL [catalog.]sys.remove_orphan_files(`table` => 'identifier', older_than => 'olderThan', dry_run => 'dryRun', mode => 'mode') <br/><br/>
+         CALL [catalog.]sys.remove_orphan_files(`table` => 'identifier', older_than => 'olderThan', dry_run => 'dryRun', mode => 'mode', table_batch_size => 'tableBatchSize') <br/><br/>
          -- Use indexed argument<br/>
          CALL [catalog.]sys.remove_orphan_files('identifier')<br/>
          CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan')<br/>
          CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun')<br/>
          CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun','parallelism')<br/>
-         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun','parallelism','mode')
+         CALL [catalog.]sys.remove_orphan_files('identifier', 'olderThan', 'dryRun','parallelism','mode','tableBatchSize')
       </td>
       <td>
          To remove the orphan data files and metadata files. Arguments:
@@ -349,12 +349,14 @@ All available procedures are listed below.
             <li>dryRun: when true, view only orphan files, don't actually remove files. Default is false.</li>
             <li>parallelism: The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.</li>
             <li>mode: The mode of remove orphan clean procedure (local or distributed) . By default is distributed.</li>
+            <li>tableBatchSize: The maximum number of tables cleaned by each distributed Flink job. Default is 10.</li>
       </td>
       <td>CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.*', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5')<br/><br/>
-          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5', mode => 'local')
+          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5', mode => 'local')<br/><br/>
+          CALL sys.remove_orphan_files(`table` => 'default.*', older_than => '2023-10-31 12:00:00', table_batch_size => 5)
       </td>
    </tr>
    <tr>

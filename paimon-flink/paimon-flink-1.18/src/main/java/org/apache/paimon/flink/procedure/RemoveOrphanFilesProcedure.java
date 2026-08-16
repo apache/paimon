@@ -80,6 +80,18 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
             Integer parallelism,
             String mode)
             throws Exception {
+        return call(procedureContext, tableId, olderThan, dryRun, parallelism, mode, null);
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String olderThan,
+            boolean dryRun,
+            Integer parallelism,
+            String mode,
+            Integer tableBatchSize)
+            throws Exception {
         Identifier identifier = Identifier.fromString(tableId);
         String databaseName = identifier.getDatabaseName();
         String tableName = identifier.getObjectName();
@@ -99,7 +111,8 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
                                     dryRun,
                                     parallelism,
                                     databaseName,
-                                    tableName);
+                                    tableName,
+                                    tableBatchSize);
                     break;
                 case "LOCAL":
                     cleanOrphanFilesResult =

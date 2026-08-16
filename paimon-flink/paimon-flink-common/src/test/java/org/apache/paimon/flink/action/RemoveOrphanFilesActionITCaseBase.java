@@ -241,6 +241,17 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(executeSQL(withDryRun));
         assertThat(actualDryRunDeleteFile).containsOnly(Row.of("4"));
 
+        String withBatchSize =
+                String.format(
+                        isNamedArgument
+                                ? "CALL sys.remove_orphan_files(`table` => '%s.%s', older_than => '%s', dry_run => true, table_batch_size => 1)"
+                                : "CALL sys.remove_orphan_files('%s.%s', '%s', true, 5, 'distributed', 1)",
+                        database,
+                        "*",
+                        olderThan);
+        ImmutableList<Row> actualBatchDeleteFile = ImmutableList.copyOf(executeSQL(withBatchSize));
+        assertThat(actualBatchDeleteFile).containsOnly(Row.of("4"));
+
         String withOlderThan =
                 String.format(
                         isNamedArgument
@@ -250,7 +261,6 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                         "*",
                         olderThan);
         ImmutableList<Row> actualDeleteFile = ImmutableList.copyOf(executeSQL(withOlderThan));
-
         assertThat(actualDeleteFile).containsOnly(Row.of("4"));
     }
 
