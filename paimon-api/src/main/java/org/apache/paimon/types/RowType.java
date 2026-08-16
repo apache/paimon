@@ -418,12 +418,16 @@ public final class RowType extends DataType {
      */
     public List<String> leafPaths(RowType fullType) {
         List<String> result = new ArrayList<>();
-        collectLeafPaths(getFields(), fullType, "", result);
+        collectLeafPaths(getFields(), fullType, fullType, "", result);
         return result;
     }
 
     private static void collectLeafPaths(
-            List<DataField> writeFields, RowType fullType, String prefix, List<String> out) {
+            List<DataField> writeFields,
+            RowType fullType,
+            RowType topLevelFullType,
+            String prefix,
+            List<String> out) {
         for (DataField writeField : writeFields) {
             String path = prefix.isEmpty() ? writeField.name() : prefix + "." + writeField.name();
             // A field absent from the reference type (e.g. the _ROW_ID / _SEQUENCE_NUMBER special
@@ -467,24 +471,48 @@ public final class RowType extends DataType {
                 collectLeafPaths(
                         ((RowType) writeField.type()).getFields(),
                         (RowType) fullField.type(),
+                        topLevelFullType,
                         path,
                         out);
             } else {
+                // A dotted leaf path is only unambiguous if it cannot also be read as a literal
+                // top-level field name: projectByPaths prefers an exact top-level name match, so
+                // a schema that has both a nested leaf "a.b" and a literal top-level field named
+                // "a.b" cannot be told apart once flattened into this same string. Reject such a
+                // write up front rather than silently reconstructing the wrong field on read.
+                if (!prefix.isEmpty() && topLevelFullType.containsField(path)) {
+                    throw new UnsupportedOperationException(
+                            "Sub-field-level data evolution cannot write the nested sub-field '"
+                                    + path
+                                    + "' because a top-level field named '"
+                                    + path
+                                    + "' already exists in the table, making the encoded write "
+                                    + "path ambiguous. Rename one of the two fields.");
+                }
                 out.add(path);
             }
         }
     }
 
-    /** Whether {@code part} contains every (recursively nested) field of {@code full}. */
+    /**
+     * Whether {@code part} contains every (recursively nested) field of {@code full} in the same
+     * physical order. Order matters here: {@code part} describes the physical layout a file was
+     * actually written with, and a caller that finds this returns {@code true} collapses the leaf
+     * path to the bare top-level field name, relying on {@code full}'s declared order to describe
+     * that physical layout on read.
+     */
     private static boolean coversFully(RowType part, RowType full) {
         if (part.getFieldCount() != full.getFieldCount()) {
             return false;
         }
-        for (DataField fullField : full.getFields()) {
-            if (!part.containsField(fullField.id())) {
+        List<DataField> partFields = part.getFields();
+        List<DataField> fullFields = full.getFields();
+        for (int i = 0; i < fullFields.size(); i++) {
+            DataField partField = partFields.get(i);
+            DataField fullField = fullFields.get(i);
+            if (partField.id() != fullField.id()) {
                 return false;
             }
-            DataField partField = part.getField(fullField.id());
             if (partField.type() instanceof RowType && fullField.type() instanceof RowType) {
                 if (!coversFully((RowType) partField.type(), (RowType) fullField.type())) {
                     return false;

@@ -74,6 +74,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -344,6 +345,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
      * Also sets {@link #writePaths}.
      */
     private List<String> buildExplicitProject() {
+        checkNoDuplicateSetTargets();
         Map<String, String> changes = parseCommaSeparatedKeyValues(matchedUpdateSet);
 
         // group by top-level column, preserving first-seen order
@@ -482,6 +484,33 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
             segs.remove(0);
         }
         return segs;
+    }
+
+    /**
+     * {@link org.apache.paimon.utils.ParameterUtils#parseCommaSeparatedKeyValues} collapses {@link
+     * #matchedUpdateSet} into a {@code Map}, so a duplicate SET target (e.g. {@code "nest.a = x,
+     * nest.a = y"}) silently loses the earlier entry with no error. Detect duplicates here, before
+     * that collapse, comparing paths normalized via {@link #parseTargetPath} so a qualified ({@code
+     * T.nest.a}) and unqualified ({@code nest.a}) form of the same target are treated as the same
+     * duplicate.
+     */
+    private void checkNoDuplicateSetTargets() {
+        if (matchedUpdateSet == null || matchedUpdateSet.trim().isEmpty()) {
+            return;
+        }
+        Set<String> seen = new HashSet<>();
+        for (String raw : matchedUpdateSet.split(",")) {
+            String[] kv = raw.split("=", 2);
+            if (kv.length != 2) {
+                // malformed entry: let parseCommaSeparatedKeyValues raise the standard error
+                continue;
+            }
+            String canonicalKey = String.join(".", parseTargetPath(kv[0].trim()));
+            if (!seen.add(canonicalKey)) {
+                throw new RuntimeException(
+                        "Duplicate SET target '" + kv[0].trim() + "' in matched-upsert action.");
+            }
+        }
     }
 
     public DataStream<Tuple2<Long, RowData>> shuffleByFirstRowId(
@@ -760,15 +789,26 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
 
     /**
      * Whether {@code source} fully covers the target struct {@code target} for a whole-column
-     * assignment: every target sub-field must exist in {@code source} (by name) with a compatible
-     * cast. A source missing a target sub-field (a narrower struct) is rejected.
+     * assignment: every target sub-field must be present in {@code source} at the same position
+     * (same name, same physical order) with a compatible cast. The write is positional (the source
+     * struct is written through as-is, not projected by name), so a source struct that is merely
+     * name-compatible but has a different field order or extra fields would silently store values
+     * under the wrong field; both are rejected here rather than accepted and mis-written. A source
+     * missing a target sub-field (a narrower struct) is also rejected.
      */
     private boolean isFullyCompatibleStruct(RowType source, RowType target) {
-        for (DataField targetField : target.getFields()) {
-            if (!source.containsField(targetField.name())) {
+        List<DataField> sourceFields = source.getFields();
+        List<DataField> targetFields = target.getFields();
+        if (sourceFields.size() != targetFields.size()) {
+            return false;
+        }
+        for (int i = 0; i < targetFields.size(); i++) {
+            DataField sourceField = sourceFields.get(i);
+            DataField targetField = targetFields.get(i);
+            if (!sourceField.name().equals(targetField.name())) {
                 return false;
             }
-            DataType sourceSubType = source.getField(targetField.name()).type();
+            DataType sourceSubType = sourceField.type();
             DataType targetSubType = targetField.type();
             if (sourceSubType instanceof RowType && targetSubType instanceof RowType) {
                 if (!isFullyCompatibleStruct((RowType) sourceSubType, (RowType) targetSubType)) {

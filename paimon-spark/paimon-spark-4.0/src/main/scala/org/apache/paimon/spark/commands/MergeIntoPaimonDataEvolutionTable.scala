@@ -47,7 +47,7 @@ import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.EliminateSubqueryAliases
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, CreateNamedStruct, EqualTo, Expression, ExprId, GetStructField, Literal, Or, PythonUDF, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, CreateNamedStruct, EqualTo, Expression, ExprId, GetStructField, If, IsNull, Literal, Or, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -590,17 +590,30 @@ case class MergeIntoPaimonDataEvolutionTable(
                   if (perAction.isEmpty || perAction.exists(_.isEmpty)) {
                     None
                   } else {
-                    val union = perAction.flatten.flatten.map(_._1).distinct
+                    val actionOrderedUnion = perAction.flatten.flatten.map(_._1).distinct
                     // The reader composes a split struct only one level deep, so only prune when
                     // every change addresses a direct sub-field of the top-level struct (depth 1).
                     // A deeper change (e.g. nest.inner.x) would split an inner struct across files,
                     // which the read path does not support, so fall back to a whole-column write.
                     // Prune only when the changed direct sub-fields are a strict subset of all of
                     // them (otherwise the whole column is rewritten anyway).
-                    val allDepthOne = union.forall(_.size == 1)
-                    if (union.isEmpty || !allDepthOne || union.size >= st.fields.length) {
+                    val allDepthOne = actionOrderedUnion.forall(_.size == 1)
+                    if (
+                      actionOrderedUnion.isEmpty || !allDepthOne ||
+                      actionOrderedUnion.size >= st.fields.length
+                    ) {
                       None
                     } else {
+                      // actionOrderedUnion reflects the order the SET clauses were written in,
+                      // which need not match st's field declaration order. buildPrunedStruct /
+                      // prunedStructType always lay the physical output struct out in st's
+                      // declaration order (they use the path set only as a filter, not an
+                      // ordering), so canonicalize here once and reuse this exact order for
+                      // writePaths below - otherwise the persisted writeType/writeCols order can
+                      // disagree with the physical column order and a reader would decode values
+                      // under the wrong field names.
+                      val fieldOrder = st.fieldNames.zipWithIndex.toMap
+                      val union = actionOrderedUnion.sortBy(p => fieldOrder(p.head))
                       Some(attr.exprId -> (union, prunedStructType(st, union)))
                     }
                   }
@@ -665,17 +678,29 @@ case class MergeIntoPaimonDataEvolutionTable(
             Literal(null, attr.dataType)
           } else {
             prunedByExprId.get(attr.exprId) match {
-              case Some((paths, _)) =>
+              case Some((paths, prunedType)) =>
                 val st = attr.dataType.asInstanceOf[StructType]
                 val actionMap =
                   changedLeaves(assignmentValue(action, attr), st, attr)
                     .getOrElse(Seq.empty)
                     .toMap
-                buildPrunedStruct(
+                val built = buildPrunedStruct(
                   st,
                   Nil,
                   paths,
                   p => actionMap.getOrElse(p, passthroughExpr(attr, st, p)))
+                if (actionMap.isEmpty) {
+                  // This action's assignment doesn't touch any leaf of this column (e.g. a
+                  // different WHEN MATCHED clause set it, or the rebuild was a no-op), so this is
+                  // a pure passthrough of attr - same guard as copyOutput below, a NULL source
+                  // struct must stay NULL rather than becoming a non-null struct of null leaves.
+                  If(IsNull(attr), Literal(null, prunedType), built)
+                } else {
+                  // At least one leaf was explicitly set by this action: the struct must
+                  // materialize even if attr was NULL (e.g. `SET nest.a = 5` on a previously NULL
+                  // nest), or the explicit assignment would be silently discarded.
+                  built
+                }
               case None => assignmentValue(action, attr)
             }
           }
@@ -700,9 +725,11 @@ case class MergeIntoPaimonDataEvolutionTable(
             Literal(null, attr.dataType)
           } else {
             prunedByExprId.get(attr.exprId) match {
-              case Some((paths, _)) =>
+              case Some((paths, prunedType)) =>
                 val st = attr.dataType.asInstanceOf[StructType]
-                buildPrunedStruct(st, Nil, paths, p => passthroughExpr(attr, st, p))
+                val built = buildPrunedStruct(st, Nil, paths, p => passthroughExpr(attr, st, p))
+                // Same NULL guard as updateOutput: a copied-through NULL struct must stay NULL.
+                If(IsNull(attr), Literal(null, prunedType), built)
               case None => attr
             }
           }
