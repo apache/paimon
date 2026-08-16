@@ -18,7 +18,11 @@
 import random
 import unittest
 
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.scanner.data_evolution_split_generator import DataEvolutionSplitGenerator
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
 
 
@@ -110,6 +114,114 @@ class SplitByRowIdEquivalenceTest(unittest.TestCase):
             self.assertEqual(
                 _grouping(DataEvolutionSplitGenerator._split_by_row_id(files)),
                 _grouping(_reference_split(files)))
+
+
+class SplitOrderTest(unittest.TestCase):
+    class _Options:
+        options = {}
+
+    class _Table:
+        table_path = '/table'
+        options = None
+
+    _Table.options = _Options()
+
+    @staticmethod
+    def _entry(name, sequence, first_row_id=0, external_path=None):
+        empty_row = GenericRow([], [])
+        empty_stats = SimpleStats(empty_row, empty_row, [])
+        file = DataFileMeta.create(
+            file_name=name,
+            file_size=1,
+            row_count=10,
+            min_key=empty_row,
+            max_key=empty_row,
+            key_stats=empty_stats,
+            value_stats=empty_stats,
+            min_sequence_number=sequence,
+            max_sequence_number=sequence,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            external_path=external_path,
+            first_row_id=first_row_id,
+        )
+        return ManifestEntry(
+            kind=0,
+            partition=empty_row,
+            bucket=0,
+            total_buckets=1,
+            file=file,
+        )
+
+    def test_preserves_manifest_order_within_row_id_group(self):
+        entries = [
+            self._entry('a.parquet', 1),
+            self._entry('b.parquet', 3),
+            self._entry('c.parquet', 2),
+        ]
+        splits = DataEvolutionSplitGenerator(
+            self._Table(), target_split_size=1024, open_file_cost=0
+        ).create_splits(entries)
+
+        self.assertEqual(
+            ['a.parquet', 'b.parquet', 'c.parquet'],
+            [file.file_name for file in splits[0].files],
+        )
+
+    def test_slice_and_shard_preserve_blob_manifest_order(self):
+        entries = [
+            self._entry('a.blob', 1),
+            self._entry('b.parquet', 2),
+            self._entry('c.blob', 3),
+        ]
+        expected = ['a.blob', 'b.parquet', 'c.blob']
+
+        generators = [
+            DataEvolutionSplitGenerator(
+                self._Table(), target_split_size=1024, open_file_cost=0
+            ).with_slice(0, 5),
+            DataEvolutionSplitGenerator(
+                self._Table(), target_split_size=1024, open_file_cost=0
+            ).with_shard(0, 2),
+        ]
+        for generator in generators:
+            with self.subTest(generator=type(generator).__name__):
+                splits = generator.create_splits(entries)
+                self.assertEqual(
+                    expected,
+                    [file.file_name for file in splits[0].files],
+                )
+
+    def test_slice_and_shard_distinguish_same_external_file_name(self):
+        entries = [
+            self._entry(
+                'same.parquet', 1, first_row_id=0,
+                external_path='s3://bucket-a/data/same.parquet',
+            ),
+            self._entry(
+                'same.parquet', 2, first_row_id=10,
+                external_path='s3://bucket-b/data/same.parquet',
+            ),
+        ]
+        expected = ['s3://bucket-a/data/same.parquet']
+
+        generators = [
+            DataEvolutionSplitGenerator(
+                self._Table(), target_split_size=1024, open_file_cost=0
+            ).with_slice(0, 10),
+            DataEvolutionSplitGenerator(
+                self._Table(), target_split_size=1024, open_file_cost=0
+            ).with_shard(0, 2),
+        ]
+        for generator in generators:
+            with self.subTest(generator=type(generator).__name__):
+                splits = generator.create_splits(entries)
+                self.assertEqual(
+                    expected,
+                    [file.external_path for split in splits
+                     for file in split.files],
+                )
 
 
 if __name__ == "__main__":
