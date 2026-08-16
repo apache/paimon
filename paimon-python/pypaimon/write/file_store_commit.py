@@ -55,8 +55,8 @@ from pypaimon.write.commit_message import CommitMessage
 logger = logging.getLogger(__name__)
 
 
-def abort_commit_messages(table, commit_messages: List[CommitMessage]):
-    """Delete files created by uncommitted messages."""
+def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
+    """Delete files created by messages known to be uncommitted."""
     for message in commit_messages:
         for file in list(message.new_files) + list(message.changelog_files):
             path = file.external_path or file.file_path
@@ -1073,7 +1073,7 @@ class FileStoreCommit:
 
     def abort(self, commit_messages: List[CommitMessage]):
         """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
-        abort_commit_messages(self.table, commit_messages)
+        _abort_commit_messages(self.table, commit_messages)
 
     def close(self):
         """Close the FileStoreCommit and release resources."""

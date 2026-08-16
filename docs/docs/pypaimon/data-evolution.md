@@ -144,9 +144,6 @@ commit.commit(messages)
 commit.close()
 ```
 
-Scalar assignments are processed one logical data-file group at a time. Arrow
-array assignments retain their whole-result positional semantics.
-
 ## Delete Rows
 
 Use `delete_by_predicate` for SQL-like `DELETE ... WHERE ...` operations.

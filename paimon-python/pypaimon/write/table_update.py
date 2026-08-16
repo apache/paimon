@@ -45,7 +45,7 @@ from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_commit import abort_commit_messages
+from pypaimon.write.file_store_commit import _abort_commit_messages
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
@@ -288,7 +288,7 @@ class TableUpdate:
                         update_table, list(assignments.keys())
                     )
         except Exception:
-            abort_commit_messages(self.table, updater.commit_messages)
+            _abort_commit_messages(self.table, updater.commit_messages)
             raise
         return updater.commit_messages
 
