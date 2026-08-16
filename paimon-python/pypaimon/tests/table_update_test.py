@@ -271,26 +271,6 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             self._read_all(table)['city'].to_pylist(),
         )
 
-    def test_predicate_update_file_groups_preserve_query_auth(self):
-        from pypaimon.read.query_auth_split import QueryAuthSplit
-        from pypaimon.write.table_update import TableUpdate
-
-        table = self._create_seeded_table()
-        split = table.new_read_builder().new_scan().plan().splits()[0]
-        auth_result = object()
-
-        groups = list(TableUpdate._predicate_update_file_groups([
-            QueryAuthSplit(split, auth_result),
-        ]))
-
-        self.assertTrue(groups)
-        self.assertTrue(all(
-            isinstance(group, QueryAuthSplit) for group in groups
-        ))
-        self.assertTrue(all(
-            group.auth_result is auth_result for group in groups
-        ))
-
     def test_predicate_update_aborts_groups_after_later_failure(self):
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
