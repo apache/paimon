@@ -485,20 +485,25 @@ public class SchemaValidation {
                 "Geometry and geography columns require '%s' to be parquet, but was '%s'.",
                 CoreOptions.CHANGELOG_FILE_FORMAT.key(),
                 options.changelogFileFormat());
-        IcebergOptions.StorageType icebergStorage =
-                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
-        if (icebergStorage != IcebergOptions.StorageType.DISABLED) {
-            checkArgument(
-                    options.toConfiguration().get(IcebergOptions.FORMAT_VERSION) == 3,
-                    "Geometry and geography columns require '%s'='3' when Iceberg metadata is enabled.",
-                    IcebergOptions.FORMAT_VERSION.key());
-            checkArgument(
-                    icebergStorage != IcebergOptions.StorageType.REST_CATALOG,
-                    "Geometry and geography columns do not support '%s'='%s' because the bundled Iceberg REST client cannot parse Iceberg v3 geospatial types.",
-                    IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
-                    IcebergOptions.StorageType.REST_CATALOG);
-            validateIcebergGeographyCrs(rowType);
-        }
+        validateIcebergGeospatialTypes(rowType, options);
+
+        List<String> geospatialClusteringColumns =
+                schema.fields().stream()
+                        .filter(field -> options.clusteringColumns().contains(field.name()))
+                        .filter(
+                                field ->
+                                        containsType(
+                                                field.type(),
+                                                type ->
+                                                        type.isAnyOf(
+                                                                DataTypeRoot.GEOMETRY,
+                                                                DataTypeRoot.GEOGRAPHY)))
+                        .map(DataField::name)
+                        .collect(Collectors.toList());
+        checkArgument(
+                geospatialClusteringColumns.isEmpty(),
+                "Geometry and geography columns cannot be clustering columns: %s.",
+                geospatialClusteringColumns);
 
         Set<String> geospatialFields =
                 schema.fields().stream()
@@ -522,6 +527,32 @@ public class SchemaValidation {
                 geospatialSequenceFields.isEmpty(),
                 "Geometry and geography columns cannot be sequence fields: %s.",
                 geospatialSequenceFields);
+    }
+
+    /** Validate geospatial types in a schema that will be published as Iceberg metadata. */
+    public static void validateIcebergGeospatialTypes(DataType dataType, CoreOptions options) {
+        boolean hasGeospatial =
+                containsType(
+                        dataType,
+                        type -> type.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY));
+        if (!hasGeospatial) {
+            return;
+        }
+
+        IcebergOptions.StorageType icebergStorage =
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+        if (icebergStorage != IcebergOptions.StorageType.DISABLED) {
+            checkArgument(
+                    options.toConfiguration().get(IcebergOptions.FORMAT_VERSION) == 3,
+                    "Geometry and geography columns require '%s'='3' when Iceberg metadata is enabled.",
+                    IcebergOptions.FORMAT_VERSION.key());
+            checkArgument(
+                    icebergStorage != IcebergOptions.StorageType.REST_CATALOG,
+                    "Geometry and geography columns do not support '%s'='%s' because the bundled Iceberg REST client cannot parse Iceberg v3 geospatial types.",
+                    IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                    IcebergOptions.StorageType.REST_CATALOG);
+            validateIcebergGeographyCrs(dataType);
+        }
     }
 
     private static void validateStartupMode(CoreOptions options) {

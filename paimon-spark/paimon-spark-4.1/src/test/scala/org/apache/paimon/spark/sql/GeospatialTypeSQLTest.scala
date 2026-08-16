@@ -21,10 +21,24 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.{DataTypes, EdgeAlgorithm}
 
-import org.apache.spark.sql.Row
+import org.apache.spark.SparkConf
+import org.apache.spark.sql.{AnalysisException, Row}
 
 /** Tests Spark 4.1 SQL interoperability with Paimon geospatial columns. */
 class GeospatialTypeSQLTest extends PaimonSparkTestBase {
+
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.sql.geospatial.enabled", "true")
+  }
+
+  test("Spark SQL requires geospatial support to be enabled") {
+    withSparkSQLConf("spark.sql.geospatial.enabled" -> "false") {
+      val error = intercept[AnalysisException] {
+        sql("CREATE TABLE geospatial_disabled (geom GEOMETRY(4326)) USING paimon")
+      }
+      assert(error.getMessage.contains("GEOSPATIAL_DISABLED"))
+    }
+  }
 
   test("Spark SQL reads and writes native geospatial values") {
     withTable("t") {

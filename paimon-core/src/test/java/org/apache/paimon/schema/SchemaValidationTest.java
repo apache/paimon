@@ -1776,6 +1776,38 @@ class SchemaValidationTest {
                                                 singletonList("id"),
                                                 sequenceOptions)))
                 .hasMessage("Geometry and geography columns cannot be sequence fields: [geog].");
+
+        Map<String, String> clusteringOptions = new HashMap<>();
+        clusteringOptions.put(CoreOptions.CLUSTERING_COLUMNS.key(), "geom");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                clusteringOptions)))
+                .hasMessage("Geometry and geography columns cannot be clustering columns: [geom].");
+
+        List<DataField> nestedFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "nested",
+                                DataTypes.ROW(DataTypes.FIELD(2, "geog", DataTypes.GEOGRAPHY()))));
+        Map<String, String> nestedClusteringOptions = new HashMap<>();
+        nestedClusteringOptions.put(CoreOptions.CLUSTERING_COLUMNS.key(), "nested");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                nestedFields,
+                                                emptyList(),
+                                                emptyList(),
+                                                nestedClusteringOptions)))
+                .hasMessage(
+                        "Geometry and geography columns cannot be clustering columns: [nested].");
     }
 
     private TableSchema geospatialSchema(

@@ -182,4 +182,28 @@ public class ParquetSchemaConverterTest {
                 .isEqualTo("KARNEY");
         assertThat(expected).isEqualTo(convertToPaimonRowType(messageType));
     }
+
+    @Test
+    public void testGeographyLogicalTypeDefaults() {
+        MessageType messageType =
+                new MessageType(
+                        "geography-defaults",
+                        Types.primitive(BINARY, Type.Repetition.OPTIONAL)
+                                .as(LogicalTypeAnnotation.geographyType())
+                                .named("default_geography")
+                                .withId(0),
+                        Types.primitive(BINARY, Type.Repetition.OPTIONAL)
+                                .as(LogicalTypeAnnotation.geographyType("EPSG:4326", null))
+                                .named("default_algorithm")
+                                .withId(1));
+
+        RowType expected =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "default_geography", DataTypes.GEOGRAPHY()),
+                                new DataField(
+                                        1, "default_algorithm", DataTypes.GEOGRAPHY("EPSG:4326"))));
+
+        assertThat(expected).isEqualTo(convertToPaimonRowType(messageType));
+    }
 }

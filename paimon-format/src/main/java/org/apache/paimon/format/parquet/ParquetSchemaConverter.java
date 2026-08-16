@@ -369,10 +369,11 @@ public class ParquetSchemaConverter {
                             instanceof LogicalTypeAnnotation.GeographyLogicalTypeAnnotation) {
                         LogicalTypeAnnotation.GeographyLogicalTypeAnnotation geography =
                                 (LogicalTypeAnnotation.GeographyLogicalTypeAnnotation) logicalType;
-                        paimonDataType =
-                                DataTypes.GEOGRAPHY(
-                                        geography.getCrs(),
-                                        EdgeAlgorithm.valueOf(geography.getAlgorithm().name()));
+                        EdgeAlgorithm algorithm =
+                                geography.getAlgorithm() == null
+                                        ? null
+                                        : EdgeAlgorithm.valueOf(geography.getAlgorithm().name());
+                        paimonDataType = DataTypes.GEOGRAPHY(geography.getCrs(), algorithm);
                     } else {
                         paimonDataType = DataTypes.BYTES();
                     }

@@ -155,7 +155,7 @@ Limitations:
 
 1. [Parquet does not support nullable map keys](https://github.com/apache/parquet-format/blob/master/LogicalTypes#maps).
 2. Parquet TIMESTAMP type with precision 9 will use INT96, but this int96 is a time zone converted value and requires additional adjustments.
-3. Tables containing `GEOMETRY` or `GEOGRAPHY` columns must use Parquet for `file.format`, every entry in `file.format-per-level`, and `changelog-file.format` when configured.
+3. Tables containing `GEOMETRY` or `GEOGRAPHY` columns must use Parquet for `file.format`, every entry in `file.format.per.level`, and `changelog-file.format` when configured.
 
 ## AVRO
 
